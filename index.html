@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GutsAI & MyFundedPerps Live Terminal</title>
+    <title>Alu Signal Z & MyFundedPerps Live Terminal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -29,8 +29,8 @@
                 <i class="fa-solid fa-chart-line text-sm"></i>
             </div>
             <div>
-                <h1 class="font-bold text-xs text-white">GutsAI <span class="text-accentblue">Terminal</span></h1>
-                <p class="text-[9px] text-gray-400">Public Live Terminal</p>
+                <h1 class="font-bold text-xs text-white">Alu <span class="text-accentblue">Signal Z</span></h1>
+                <p class="text-[9px] text-gray-400">Multi-Asset Live Stream</p>
             </div>
         </div>
         <div class="flex items-center gap-2">
@@ -47,30 +47,39 @@
                 <span id="selectedPairBadge" class="text-[10px] font-mono text-accentblue font-bold">binance|BTCUSDT</span>
             </div>
 
-            <!-- Dropdown Pilihan Market -->
+            <!-- Dropdown Multi-Asset Lengkap -->
             <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2.5 rounded-lg focus:outline-none">
-                <option value="binance|BTCUSDT">BTC/USDT (Binance)</option>
-                <option value="veranta|XAUUSD">XAU/USD (Gold / Veranta)</option>
-                <option value="binance|ETHUSDT">ETH/USDT (Binance)</option>
-                <option value="binance|SOLUSDT">SOL/USDT (Binance)</option>
+                <optgroup label="Crypto">
+                    <option value="binance|BTCUSDT">BTC/USDT (Binance)</option>
+                    <option value="binance|ETHUSDT">ETH/USDT (Binance)</option>
+                    <option value="binance|SOLUSDT">SOL/USDT (Binance)</option>
+                </optgroup>
+                <optgroup label="Currency / Forex & Gold">
+                    <option value="veranta|XAUUSD">XAU/USD (Gold - Veranta)</option>
+                    <option value="veranta|EURUSD">EUR/USD (Forex - Veranta)</option>
+                    <option value="veranta|USDJPY">USD/JPY (Forex - Veranta)</option>
+                </optgroup>
+                <optgroup label="Commodities & Indices">
+                    <option value="hyperliquid|xyz:BRENTOIL">Brent Oil (Hyperliquid)</option>
+                    <option value="ostium|DJI">Dow Jones / DJI (Ostium)</option>
+                    <option value="hyperliquid|xyz:SP500">S&P 500 (Hyperliquid)</option>
+                </optgroup>
+                <optgroup label="Stocks / Saham">
+                    <option value="hyperliquid|xyz:AAPL">Apple / AAPL (Hyperliquid)</option>
+                    <option value="binance|NVDAUSDT">NVIDIA / NVDA (Binance)</option>
+                    <option value="binance|TSLAUSDT">Tesla / TSLA (Binance)</option>
+                </optgroup>
             </select>
 
-            <!-- Multi-Timeframe Selector -->
-            <div class="grid grid-cols-2 gap-2">
-                <div>
-                    <label class="text-[9px] font-bold text-gray-400 block mb-1">TF ANALISIS (HTF)</label>
-                    <select id="htfSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                        <option value="H4">H4 (Major Structure)</option>
-                        <option value="H1">H1 (Intraday Bias)</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="text-[9px] font-bold text-gray-400 block mb-1">TF EKSEKUSI (LTF)</label>
-                    <select id="ltfSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                        <option value="M5">M5 (Scalp Entry)</option>
-                        <option value="M1">M1 (Micro Sweep)</option>
-                    </select>
-                </div>
+            <!-- Pilihan Gaya Trading -->
+            <div>
+                <label class="text-[9px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
+                <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2.5 rounded-lg focus:outline-none">
+                    <option value="Scalping (M1 & M15)">Scalping (M1 & M15)</option>
+                    <option value="Day Trading (M3 & M30)">Day Trading (M3 & M30)</option>
+                    <option value="Intraday (M5 & H1)">Intraday (M5 & H1)</option>
+                    <option value="Swing Trading (M15 & H4/Daily)">Swing Trading (M15 & H4/Daily)</option>
+                </select>
             </div>
 
             <button onclick="generateAISignal()" id="signalBtn" class="w-full bg-gradient-to-r from-accentblue to-indigo-600 hover:from-blue-600 text-white font-bold py-3 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-accentblue/20 transition active:scale-98 mt-1">
@@ -85,11 +94,11 @@
                 <span id="signalBadge" class="px-3 py-1 rounded-md text-xs font-extrabold tracking-wider bg-gray-800 text-gray-400 border border-gray-700">STANDBY</span>
             </div>
             <div id="signalReason" class="bg-darkbg border border-panelborder rounded-lg p-3 text-xs text-gray-300 min-h-[140px] max-h-[200px] overflow-y-auto leading-relaxed whitespace-pre-wrap">
-                Pilih pair di daftar live stream bawah, lalu klik Generate AI Signal.
+                Pilih pair di bawah, tentukan gaya trading, lalu klik Generate AI Signal.
             </div>
         </div>
 
-        <!-- BAGIAN PALING BAWAH: Live Market Ticker (WebSocket Streaming Resmi) -->
+        <!-- BAGIAN PALING BAWAH: Live Market Ticker -->
         <div class="bg-cardbg rounded-xl border border-panelborder p-3 mt-2 shadow-md">
             <div class="flex justify-between items-center pb-2 mb-2 border-b border-panelborder">
                 <span class="text-[10px] font-bold text-gray-400 flex items-center gap-1">
@@ -101,57 +110,78 @@
             <!-- List Ticker Vertikal Real-Time -->
             <div id="tickerListContainer" class="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
                 
-                <!-- BTC Item -->
+                <!-- BTC -->
                 <div onclick="selectTicker('binance|BTCUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder p-2 rounded-lg flex items-center justify-between cursor-pointer transition">
                     <div class="flex items-center gap-2">
                         <div class="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center text-[10px] font-bold">₿</div>
                         <div>
-                            <div class="flex items-center gap-1.5">
-                                <span class="font-bold text-xs text-white">BTCUSDT</span>
-                                <span class="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 rounded">10x</span>
-                            </div>
-                            <span class="text-[9px] text-gray-400">Binance</span>
+                            <div class="flex items-center gap-1.5"><span class="font-bold text-xs text-white">BTCUSDT</span><span class="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 rounded">10x</span></div>
+                            <span class="text-[9px] text-gray-400">Binance (Crypto)</span>
                         </div>
                     </div>
                     <div class="text-right font-mono">
                         <div id="price-BTCUSDT" class="text-xs font-bold text-white">--.--</div>
-                        <div id="time-BTCUSDT" class="text-[8px] text-gray-500">Waiting stream...</div>
+                        <div id="time-BTCUSDT" class="text-[8px] text-gray-500">Connecting...</div>
                     </div>
                 </div>
 
-                <!-- XAU (Gold) Item -->
+                <!-- XAUUSD (Gold) -->
                 <div onclick="selectTicker('veranta|XAUUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder p-2 rounded-lg flex items-center justify-between cursor-pointer transition">
                     <div class="flex items-center gap-2">
                         <div class="w-6 h-6 rounded-full bg-yellow-500/20 text-yellow-400 flex items-center justify-center text-[10px] font-bold">🪙</div>
                         <div>
-                            <div class="flex items-center gap-1.5">
-                                <span class="font-bold text-xs text-white">XAUUSD</span>
-                                <span class="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 rounded">10x</span>
-                            </div>
-                            <span class="text-[9px] text-gray-400">Veranta FX</span>
+                            <div class="flex items-center gap-1.5"><span class="font-bold text-xs text-white">XAUUSD</span><span class="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 rounded">10x</span></div>
+                            <span class="text-[9px] text-gray-400">Veranta (Gold)</span>
                         </div>
                     </div>
                     <div class="text-right font-mono">
                         <div id="price-XAUUSD" class="text-xs font-bold text-white">--.--</div>
-                        <div id="time-XAUUSD" class="text-[8px] text-gray-500">Waiting stream...</div>
+                        <div id="time-XAUUSD" class="text-[8px] text-gray-500">Connecting...</div>
                     </div>
                 </div>
 
-                <!-- ETH Item -->
-                <div onclick="selectTicker('binance|ETHUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder p-2 rounded-lg flex items-center justify-between cursor-pointer transition">
+                <!-- EURUSD (Forex) -->
+                <div onclick="selectTicker('veranta|EURUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder p-2 rounded-lg flex items-center justify-between cursor-pointer transition">
                     <div class="flex items-center gap-2">
-                        <div class="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-[10px] font-bold">Ξ</div>
+                        <div class="w-6 h-6 rounded-full bg-green-500/20 text-green-400 flex items-center justify-center text-[10px] font-bold">€</div>
                         <div>
-                            <div class="flex items-center gap-1.5">
-                                <span class="font-bold text-xs text-white">ETHUSDT</span>
-                                <span class="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 rounded">8x</span>
-                            </div>
-                            <span class="text-[9px] text-gray-400">Binance</span>
+                            <div class="flex items-center gap-1.5"><span class="font-bold text-xs text-white">EURUSD</span><span class="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 rounded">50x</span></div>
+                            <span class="text-[9px] text-gray-400">Veranta (Forex)</span>
                         </div>
                     </div>
                     <div class="text-right font-mono">
-                        <div id="price-ETHUSDT" class="text-xs font-bold text-white">--.--</div>
-                        <div id="time-ETHUSDT" class="text-[8px] text-gray-500">Waiting stream...</div>
+                        <div id="price-EURUSD" class="text-xs font-bold text-white">--.--</div>
+                        <div id="time-EURUSD" class="text-[8px] text-gray-500">Connecting...</div>
+                    </div>
+                </div>
+
+                <!-- DJI (Indices) -->
+                <div onclick="selectTicker('ostium|DJI')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder p-2 rounded-lg flex items-center justify-between cursor-pointer transition">
+                    <div class="flex items-center gap-2">
+                        <div class="w-6 h-6 rounded-full bg-purple-500/20 text-purple-400 flex items-center justify-center text-[10px] font-bold">📈</div>
+                        <div>
+                            <div class="flex items-center gap-1.5"><span class="font-bold text-xs text-white">DJI</span><span class="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 rounded">12x</span></div>
+                            <span class="text-[9px] text-gray-400">Ostium (Indice)</span>
+                        </div>
+                    </div>
+                    <div class="text-right font-mono">
+                        <div id="price-DJI" class="text-xs font-bold text-white">--.--</div>
+                        <div id="time-DJI" class="text-[8px] text-gray-500">Connecting...</div>
+                    </div>
+                </div>
+
+                <!-- AAPL (Stock) -->
+                <div onclick="selectTicker('hyperliquid|xyz:AAPL')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder p-2 rounded-lg flex items-center justify-between cursor-pointer transition">
+                    <div class="flex items-center gap-2">
+                        <div class="w-6 h-6 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center text-[10px] font-bold">🍎</div>
+                        <div>
+                            <div class="flex items-center gap-1.5"><span class="font-bold text-xs text-white">xyz:AAPL</span><span class="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 rounded">5x</span></div>
+                            <span class="text-[9px] text-gray-400">Hyperliquid (Stock)</span>
+                        </div>
+                    </div>
+                    <div class="text-right font-mono">
+                        <div id="price-xyz:AAPL" class="text-xs font-bold text-white">--.--</div>
+                        <div id="time-xyz:AAPL" class="text-[8px] text-gray-500">Connecting...</div>
                     </div>
                 </div>
 
@@ -175,7 +205,7 @@
         }
 
         // =======================================================
-        // INTEGRASI WEBSOCKET RESMI MYFUNDEDPERPETUALS
+        // WEBSOCKET MULTI-ASSET STREAM
         // =======================================================
         let ws;
         let pingInterval;
@@ -191,19 +221,17 @@
                     wsStatus.textContent = 'WS: CONNECTED';
                     wsStatus.className = 'text-[9px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40';
 
-                    // Payload Subscribe Sesuai Format Resmi
                     const subFrame = {
                         op: "sub",
                         id: 1,
                         channel: "ticks",
                         payload: {
-                            symbols: ["BTCUSDT", "XAUUSD", "ETHUSDT", "SOLUSDT"],
-                            providers: ["binance", "veranta"]
+                            symbols: ["BTCUSDT", "XAUUSD", "EURUSD", "DJI", "xyz:AAPL"],
+                            providers: ["binance", "veranta", "ostium", "hyperliquid"]
                         }
                     };
                     ws.send(JSON.stringify(subFrame));
 
-                    // Heartbeat Ping Setiap 25 Detik
                     clearInterval(pingInterval);
                     pingInterval = setInterval(() => {
                         if (ws.readyState === WebSocket.OPEN) {
@@ -218,9 +246,9 @@
                         if (frame.op === "events" && Array.isArray(frame.events)) {
                             frame.events.forEach(ev => {
                                 if (ev.symbol && ev.price) {
-                                    const symbolClean = ev.symbol;
-                                    const priceEl = document.getElementById(`price-${symbolClean}`);
-                                    const timeEl = document.getElementById(`time-${symbolClean}`);
+                                    const symbolKey = ev.symbol;
+                                    const priceEl = document.getElementById(`price-${symbolKey}`);
+                                    const timeEl = document.getElementById(`time-${symbolKey}`);
 
                                     if (priceEl) {
                                         const numPrice = parseFloat(ev.price);
@@ -256,12 +284,11 @@
         }
 
         // ==========================================
-        // INTEGRASI GUTSAI VIA BACKEND SERVERLESS PROXY
+        // AI SIGNAL GENERATOR VIA BACKEND PROXY
         // ==========================================
         async function generateAISignal() {
             const marketId = document.getElementById('marketSelect').value;
-            const htf = document.getElementById('htfSelect').value;
-            const ltf = document.getElementById('ltfSelect').value;
+            const tradingStyle = document.getElementById('tradingStyleSelect').value;
             
             const reasonEl = document.getElementById('signalReason');
             const badge = document.getElementById('signalBadge');
@@ -269,15 +296,14 @@
 
             btn.disabled = true;
             btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> MENGEVALUASI...`;
-            reasonEl.textContent = `Menganalisis data pasar ${marketId} (${htf} & ${ltf})...`;
+            reasonEl.textContent = `Menganalisis ${marketId} (${tradingStyle})...`;
             badge.textContent = 'ANALYZING';
 
             try {
-                // Memanggil endpoint backend internal /api/generate
                 const response = await fetch('/api/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ marketId, htf, ltf })
+                    body: JSON.stringify({ marketId, tradingStyle })
                 });
 
                 const data = await response.json();
