@@ -40,49 +40,30 @@
 
     <div id="toast" class="hidden fixed top-3 left-1/2 -translate-x-1/2 z-50 px-3 py-2 rounded-lg text-[10px] font-bold font-mono shadow-xl border"></div>
 
-    <!-- ================= HALAMAN LOGIN / REGISTER (APPWRITE AUTH) ================= -->
+    <!-- ================= HALAMAN LOGIN (EMAIL ONLY) ================= -->
     <div id="authScreen" class="fixed inset-0 z-50 bg-darkbg/95 backdrop-blur-md flex flex-col items-center justify-center p-4">
-        <div class="bg-cardbg border border-panelborder rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl">
+        <div class="bg-cardbg border border-panelborder rounded-2xl p-6 max-w-sm w-full space-y-5 shadow-2xl">
             <div class="text-center space-y-1">
                 <div class="bg-accentblue w-12 h-12 rounded-xl flex items-center justify-center text-white mx-auto text-xl shadow-lg shadow-accentblue/30">
                     <i class="fa-solid fa-chart-line"></i>
                 </div>
                 <h1 class="text-xl font-extrabold text-white pt-2 tracking-tight">Welcome, Alu Signal Z</h1>
-                <p class="text-[11px] text-gray-400">Silakan login atau daftar untuk mulai trading</p>
+                <p class="text-[11px] text-gray-400">Masukkan email Anda untuk mengakses terminal</p>
             </div>
 
-            <!-- Tab Selector -->
-            <div class="flex border-b border-panelborder text-xs font-bold text-gray-400">
-                <button id="tabLoginBtn" onclick="switchAuthTab('login')" class="flex-1 py-2 border-b-2 border-accentblue text-white">LOGIN</button>
-                <button id="tabRegBtn" onclick="switchAuthTab('register')" class="flex-1 py-2 border-b-2 border-transparent">DAFTAR (TRIAL)</button>
-            </div>
-
-            <form id="authForm" onsubmit="handleAuth(event)" class="space-y-3">
+            <!-- FORM 1 KOLOM EMAIL SAJA -->
+            <form id="authForm" onsubmit="handleEmailLogin(event)" class="space-y-4 pt-2">
                 <div>
-                    <label class="text-[10px] font-bold text-gray-400 block mb-1">EMAIL</label>
-                    <input type="email" id="authEmail" required class="w-full bg-darkbg border border-panelborder rounded-lg p-2.5 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="nama@email.com">
-                </div>
-                <div>
-                    <label class="text-[10px] font-bold text-gray-400 block mb-1">PASSWORD</label>
-                    <input type="password" id="authPassword" required minlength="8" class="w-full bg-darkbg border border-panelborder rounded-lg p-2.5 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="••••••••">
+                    <label class="text-[10px] font-bold text-gray-400 block mb-1 tracking-wider">EMAIL ACCESSS</label>
+                    <input type="email" id="authEmail" required class="w-full bg-darkbg border border-panelborder rounded-xl p-3 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="nama@email.com">
                 </div>
 
-                <div id="trialOptionContainer" class="hidden">
-                    <label class="text-[10px] font-bold text-gray-400 block mb-1">PILIH MASA TRIAL GRATIS</label>
-                    <select id="authTrialDays" class="w-full bg-darkbg border border-panelborder rounded-lg p-2.5 text-xs font-bold text-white focus:outline-none">
-                        <option value="1">1 Hari Trial</option>
-                        <option value="3" selected>3 Hari Trial (Rekomendasi)</option>
-                        <option value="5">5 Hari Trial</option>
-                        <option value="7">7 Hari Trial</option>
-                    </select>
-                </div>
-
-                <button type="submit" id="authSubmitBtn" class="w-full bg-accentblue hover:bg-blue-600 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-lg shadow-accentblue/20">
-                    MASUK KE TERMINAL
+                <button type="submit" id="authSubmitBtn" class="w-full bg-accentblue hover:bg-blue-600 text-white font-bold py-3 rounded-xl text-xs transition shadow-lg shadow-accentblue/20 flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-right-to-bracket"></i> MASUK KE TERMINAL
                 </button>
             </form>
 
-            <!-- FOOTER INFO ADMIN DI HALAMAN LOGIN -->
+            <!-- FOOTER INFO ADMIN -->
             <div class="pt-4 border-t border-panelborder/60 text-center space-y-1.5">
                 <p class="text-[10px] text-gray-400 font-medium">Bantuan & Informasi Admin:</p>
                 <a href="https://wa.me/6285817038501?text=Halo%20Admin%20Alu%20Signal%20Z,%20saya%20ingin%20bertanya%20mengenai%20akses/langganan" target="_blank" class="inline-flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-full text-xs font-bold font-mono transition">
@@ -92,7 +73,7 @@
         </div>
     </div>
 
-    <!-- ================= KONTEN UTAMA APLIKASI (DI-HIDE SEBELUM LOGIN) ================= -->
+    <!-- ================= KONTEN UTAMA APLIKASI ================= -->
     <div id="mainApp" class="hidden flex-col justify-between min-h-screen">
 
         <!-- Header Navbar -->
@@ -116,7 +97,7 @@
 
         <main class="max-w-md mx-auto w-full flex-1 flex flex-col gap-2 pt-2">
 
-            <!-- PANEL DASHBOARD ADMIN (STATISTIK KLIEN) -->
+            <!-- PANEL DASHBOARD ADMIN -->
             <div id="adminPanel" class="hidden bg-cardbg rounded-xl border border-purple-500/40 p-3 space-y-2 shadow-lg">
                 <div class="flex justify-between items-center border-b border-panelborder pb-1.5">
                     <span class="text-[10px] font-bold text-purple-400 flex items-center gap-1">
@@ -181,7 +162,7 @@
                     </optgroup>
                 </select>
 
-                <!-- Kalibrasi ke harga broker MT -->
+                <!-- Kalibrasi -->
                 <div class="flex items-center gap-1.5">
                     <input id="calibInput" type="number" step="any" inputmode="decimal" placeholder="Harga Bid di MT (opsional)"
                            class="flex-1 min-w-0 bg-darkbg border border-panelborder text-[10px] font-mono text-white px-2 py-1.5 rounded-lg focus:outline-none">
@@ -207,7 +188,6 @@
 
             <!-- KARTU SIGNAL -->
             <div id="signalContainer" class="bg-cardbg rounded-xl border border-panelborder p-3 shadow-md space-y-3">
-
                 <div class="flex items-center justify-between border-b border-panelborder pb-2">
                     <span id="cardMarketTitle" class="text-xs font-bold text-white">SELECT PAIR SPOT</span>
                     <span id="cardLivePriceTop" class="text-xs font-mono font-bold text-accentblue">--.--</span>
@@ -218,7 +198,6 @@
                 </div>
 
                 <div id="activeSignalCard" class="hidden space-y-3">
-
                     <div class="bg-darkbg/80 border border-panelborder rounded-xl p-3 text-center space-y-1">
                         <div class="flex justify-center">
                             <span id="signalBadgeBtn" class="bg-sky-500 text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg flex items-center gap-1">
@@ -236,7 +215,6 @@
                         </div>
                     </div>
 
-                    <!-- Kotak SL & TP -->
                     <div class="grid grid-cols-4 gap-1.5">
                         <div id="boxSL" class="lvl-box bg-darkbg/70 border border-red-500/30 rounded-lg p-2 text-center">
                             <span id="chkSL" class="hit-badge bg-red-400"><i class="fa-solid fa-xmark"></i></span>
@@ -264,7 +242,6 @@
                         </div>
                     </div>
 
-                    <!-- Live Price Map -->
                     <div class="bg-darkbg/80 border border-panelborder rounded-xl p-2.5 space-y-2">
                         <div class="flex justify-between items-center">
                             <p id="lblPriceMap" class="text-[9px] font-bold text-gray-400 tracking-wider">LIVE PRICE MAP</p>
@@ -343,7 +320,6 @@
 
         </main>
 
-        <!-- FOOTER INFO ADMIN -->
         <footer class="max-w-md mx-auto w-full pt-4 pb-2 border-t border-panelborder/60 text-center space-y-1">
             <p class="text-[10px] text-gray-400">Punya pertanyaan atau ingin perpanjang langganan?</p>
             <a href="https://wa.me/6285817038501?text=Halo%20Admin%20Alu%20Signal%20Z,%20saya%20ingin%20berlangganan" target="_blank" class="inline-flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full text-xs font-bold font-mono transition">
@@ -352,107 +328,112 @@
         </footer>
     </div>
 
-    <!-- ======================= SCRIPT ENGINE & APPWRITE ======================= -->
+    <!-- ======================= SCRIPT LOGIKA EMAIL LOGIN & ENGINE ======================= -->
     <script>
-    // ======================= APPWRITE AUTH & MEMBERSHIP =======================
-    const { Client, Account, Databases, ID } = Appwrite;
+    // ======================= APPWRITE SINGLE-INPUT EMAIL LOGIN =======================
+    const { Client, Databases, Query, ID } = Appwrite;
 
     const client = new Client()
         .setEndpoint('https://cloud.appwrite.io/v1') 
-        .setProject('YOUR_PROJECT_ID'); // Ganti dengan Project ID Appwrite Anda
+        .setProject('6aeb434e0015862d54ea'); // ID Proyek Appwrite Anda
 
-    const account = new Account(client);
     const databases = new Databases(client);
 
-    const DATABASE_ID = 'alu_db';     // ID Database Appwrite Anda
-    const COLLECTION_ID = 'profiles'; // ID Collection Appwrite Anda
+    const DATABASE_ID = 'alu_db';     
+    const COLLECTION_ID = 'profiles'; 
+    const ADMIN_EMAIL = 'admin@alusignal.com'; // Email yang ditunjuk sebagai Admin
 
-    let currentAuthMode = 'login';
     let currentUserProfile = null;
 
-    function switchAuthTab(mode) {
-        currentAuthMode = mode;
-        const isLogin = mode === 'login';
-        document.getElementById('tabLoginBtn').className = `flex-1 py-2 border-b-2 ${isLogin ? 'border-accentblue text-white' : 'border-transparent text-gray-400'}`;
-        document.getElementById('tabRegBtn').className = `flex-1 py-2 border-b-2 ${!isLogin ? 'border-accentblue text-white' : 'border-transparent text-gray-400'}`;
-        document.getElementById('trialOptionContainer').classList.toggle('hidden', isLogin);
-        document.getElementById('authSubmitBtn').textContent = isLogin ? 'MASUK KE TERMINAL' : 'DAFTAR & MULAI TRIAL';
-    }
-
-    async function handleAuth(e) {
+    async function handleEmailLogin(e) {
         e.preventDefault();
-        const email = document.getElementById('authEmail').value;
-        const password = document.getElementById('authPassword').value;
+        const email = document.getElementById('authEmail').value.trim().toLowerCase();
+
+        if (!email) return alert('Silakan masukkan email Anda.');
 
         try {
-            if (currentAuthMode === 'register') {
-                const trialDays = parseInt(document.getElementById('authTrialDays').value);
-                const trialEndsAt = new Date();
-                trialEndsAt.setDate(trialEndsAt.getDate() + trialDays);
+            // 1. Cek apakah ini Email Admin
+            if (email === ADMIN_EMAIL) {
+                currentUserProfile = { email: ADMIN_EMAIL, role: 'admin', status: 'lifetime' };
+                localStorage.setItem('alu_user_email', email);
+                openTerminalApp(true);
+                return;
+            }
 
-                const user = await account.create(ID.unique(), email, password);
-                await account.createEmailPasswordSession(email, password);
+            // 2. Cari data email di Database Appwrite
+            const res = await databases.listDocuments(
+                DATABASE_ID,
+                COLLECTION_ID,
+                [Query.equal('email', email)]
+            );
 
-                await databases.createDocument(
+            let profile = res.documents[0];
+
+            // 3. Jika belum terdaftar, otomatis daftarkan Klien Baru (Trial 3 Hari)
+            if (!profile) {
+                const trialEnds = new Date();
+                trialEnds.setDate(trialEnds.getDate() + 3);
+
+                profile = await databases.createDocument(
                     DATABASE_ID,
                     COLLECTION_ID,
-                    user.$id,
+                    ID.unique(),
                     {
                         email: email,
                         role: 'client',
                         status: 'trial',
-                        trial_ends_at: trialEndsAt.toISOString()
+                        trial_ends_at: trialEnds.toISOString()
                     }
                 );
-
-                alert(`Pendaftaran berhasil! Akun Anda aktif dengan masa Trial ${trialDays} Hari.`);
-                checkUserSession();
-            } else {
-                await account.createEmailPasswordSession(email, password);
-                checkUserSession();
+                alert(`Email terdaftar! Anda mendapatkan Akses Trial Gratis 3 Hari.`);
             }
-        } catch (error) {
-            alert('Gagal: ' + error.message);
-        }
-    }
 
-    async function checkUserSession() {
-        try {
-            const user = await account.get();
-            const profile = await databases.getDocument(DATABASE_ID, COLLECTION_ID, user.$id);
-            currentUserProfile = profile;
-
+            // 4. Validasi Status Klien (Trial / Langganan)
             const now = new Date();
-            const isTrial = profile.status === 'trial' && new Date(profile.trial_ends_at) > now;
+            const isTrialValid = profile.status === 'trial' && new Date(profile.trial_ends_at) > now;
             const isSubscribed = profile.status === 'monthly' || profile.status === 'lifetime';
 
-            if (!isTrial && !isSubscribed && profile.role !== 'admin') {
-                alert('Masa Trial / Akses Langganan Anda Telah Habis. Silakan hubungi Admin via WhatsApp untuk perpanjang akses.');
-                await account.deleteSession('current');
-                location.reload();
+            if (!isTrialValid && !isSubscribed && profile.role !== 'admin') {
+                alert('Masa Trial atau Langganan untuk email ini telah habis. Silakan hubungi Admin WhatsApp.');
                 return;
             }
 
-            document.getElementById('authScreen').classList.add('hidden');
-            const mainApp = document.getElementById('mainApp');
-            if (mainApp) {
-                mainApp.classList.remove('hidden');
-                mainApp.classList.add('flex');
-            }
+            // Simpan sesi login lokal & buka aplikasi
+            currentUserProfile = profile;
+            localStorage.setItem('alu_user_email', email);
+            openTerminalApp(profile.role === 'admin');
 
-            if (profile.role === 'admin') {
-                document.getElementById('adminPanelBtn')?.classList.remove('hidden');
-                loadAdminStats();
-            }
         } catch (error) {
-            document.getElementById('authScreen').classList.remove('hidden');
-            const mainApp = document.getElementById('mainApp');
-            if (mainApp) mainApp.classList.add('hidden');
+            alert('Terjadi kesalahan: ' + error.message);
         }
     }
 
-    async function logout() {
-        try { await account.deleteSession('current'); } catch (e) {}
+    function openTerminalApp(isAdmin = false) {
+        document.getElementById('authScreen').classList.add('hidden');
+        const mainApp = document.getElementById('mainApp');
+        if (mainApp) {
+            mainApp.classList.remove('hidden');
+            mainApp.classList.add('flex');
+        }
+
+        if (isAdmin) {
+            document.getElementById('adminPanelBtn')?.classList.remove('hidden');
+            loadAdminStats();
+        }
+    }
+
+    async function checkSavedSession() {
+        const savedEmail = localStorage.getItem('alu_user_email');
+        if (savedEmail) {
+            document.getElementById('authEmail').value = savedEmail;
+            // Verifikasi otomatis sesi tersimpan
+            const fakeEvent = { preventDefault: () => {} };
+            await handleEmailLogin(fakeEvent);
+        }
+    }
+
+    function logout() {
+        localStorage.removeItem('alu_user_email');
         window.location.reload();
     }
 
@@ -1646,7 +1627,7 @@
 
     const originalOnload = window.onload;
     window.onload = async () => {
-      await checkUserSession();
+      await checkSavedSession();
       buildTicker();
       updateCalibInfo();
       renderHistory();
