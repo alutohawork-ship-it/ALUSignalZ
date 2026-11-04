@@ -309,7 +309,9 @@
     // ======================= KONFIGURASI =======================
     const WS_URL    = 'wss://api-stream.myfundedperpetuals.com/v1/market-data';
     const REST_BASE = 'https://api.myfundedperpetuals.com';
+    const HL_WS     = 'wss://api.hyperliquid.xyz/ws';
     const STALE_MS  = 20000;
+    const HL_FRESH_MS = 3000;
     const HISTORY_MS = 10 * 60 * 1000;
     const WINDOW_MS  = 5 * 60 * 1000;
     const MIN_WINDOW_MS = 30 * 1000;
@@ -319,10 +321,11 @@
     const BE_CLOSE_PNL = 'last_tp';
 
     const PERP = ['mid', 'last', 'mark'], FX = ['mid', 'last', 'mark'], SPOT = ['last', 'mid', 'mark'];
+    // MT menampilkan harga Bid. Ganti ke 'mid' jika ingin harga tengah.
     const PRICE_SIDE = 'bid';
 
-    // fb = sumber cadangan jika WebSocket tidak mengirim harga
-    //   hl    : coin di Hyperliquid REST (allMids)
+    // fb = sumber cadangan / feed langsung
+    //   hl    : coin Hyperliquid (WS bbo langsung + REST allMids)
     //   bn    : symbol Binance REST
     //   yf    : symbol Yahoo (via /api/quote)
     //   cross : [A, B] -> harga = A × B (sintetis)
@@ -346,7 +349,6 @@
                         fb: { hl: ['xyz:BRENTOIL'], yf: 'BZ=F' } },
       'xyz:SP500':    { provider: 'hyperliquid', coins: ['xyz:SP500', 'xyz:US500'], match: ['SP500', 'SPX', 'US500'], kinds: PERP, decimals: 2, pip: 0.1,
                         fb: { hl: ['xyz:SP500', 'xyz:US500'], yf: 'ES=F' } },
-      // Nasdaq 100 di Hyperliquid (dex xyz) bernama XYZ100
       'xyz:NAS100':   { provider: 'hyperliquid', coins: ['xyz:XYZ100', 'xyz:NAS100', 'xyz:NDX', 'xyz:US100'], match: ['XYZ100', 'NAS100', 'NDX', 'US100', 'USTEC'], kinds: PERP, decimals: 2, pip: 1,
                         fb: { hl: ['xyz:XYZ100', 'xyz:NAS100', 'xyz:NDX'], yf: 'NQ=F' } },
       'xyz:AAPL':     { provider: 'hyperliquid', coins: ['xyz:AAPL'], match: ['AAPL'], kinds: PERP, decimals: 2, pip: 0.01, fb: { hl: ['xyz:AAPL'], yf: 'AAPL' } },
@@ -492,7 +494,7 @@
       while (arr.length && t - arr[0].t > HISTORY_MS) arr.shift();
     }
 
-    const SRC_LABEL = { ws: 'WS', rest: 'REST', cross: 'X', yahoo: 'YF' };
+    const SRC_LABEL = { hl: 'HL', ws: 'WS', rest: 'REST', cross: 'X', yahoo: 'YF' };
 
     function updatePrice(key, price, ev) {
       const prev = prices[key]?.price;
@@ -522,7 +524,7 @@
     }
 
     function markUnavailable(key) {
-      if (prices[key] && !isStale(key)) return; // fallback masih jalan
+      if (prices[key] && !isStale(key)) return;
       const el = document.getElementById(`price-${key}`);
       if (el) { el.textContent = 'N/A'; setColor(el, 'text-red-600'); }
     }
@@ -541,7 +543,6 @@
       finally { clearTimeout(tm); }
     }
 
-    // prio kecil = lebih diutamakan (cross/hl=0, binance=1, yahoo=2)
     function feedFallback(key, raw, via, symbol, prio) {
       if (!(raw > 0) || !needFallback(key)) return;
       const s = fbState[key], now = Date.now();
@@ -551,7 +552,6 @@
       updatePrice(key, raw + (offsets[key] || 0), { provider: via, symbol, kind: 'fallback', time: now, via });
     }
 
-    // Pair sintetis, contoh GBPJPY = GBPUSD × USDJPY
     function updateCrosses(changedKey) {
       for (const [k, m] of Object.entries(MARKETS)) {
         const cr = m.fb?.cross;
@@ -611,7 +611,7 @@
       const list = Object.entries(MARKETS).filter(([k, m]) => {
         if (!m.fb?.yf || !needFallback(k)) return false;
         const s = fbState[k];
-        return !(s && s.prio < 2 && now - s.t < 10000); // sumber lebih baik masih aktif
+        return !(s && s.prio < 2 && now - s.t < 10000);
       });
       if (!list.length) return;
       pxBusy = true;
@@ -624,7 +624,7 @@
         for (const [k, m] of list) {
           const q = j[m.fb.yf];
           if (!q || !(q.p > 0)) continue;
-          if (q.t && now - q.t > 30 * 60 * 1000) continue; // market tutup -> biarkan MARKET IDLE
+          if (q.t && now - q.t > 30 * 60 * 1000) continue;
           feedFallback(k, q.p, 'yahoo', m.fb.yf, 2);
         }
       } catch {} finally { pxBusy = false; }
@@ -632,6 +632,82 @@
 
     setInterval(() => { pollHL(); pollBinance(); }, 2000);
     setInterval(pollProxy, 4000);
+
+    // ======================= HYPERLIQUID DIRECT WS (XAUUSD realtime) =======================
+    const lastHL = {}, hlResolved = {};
+    let hlWs = null, hlRetry = 0, hlTimer = null, hlPing = null, hlLastMsg = 0;
+
+    function hlTargets() {
+      const map = new Map();
+      for (const [key, m] of Object.entries(MARKETS)) (m.fb?.hl || []).forEach(c => map.set(c, key));
+      return map;
+    }
+
+    function hlIngest(key, raw, coin) {
+      if (!(raw > 0)) return;
+      if (hlResolved[key] && hlResolved[key] !== coin) return;
+      hlResolved[key] = coin;
+      const now = Date.now();
+      lastHL[key] = now; lastWs[key] = now; delete fbState[key];
+      rawPrices[key] = raw;
+      updatePrice(key, raw + (offsets[key] || 0), { provider: 'hyperliquid', symbol: coin, kind: PRICE_SIDE, time: now, via: 'hl' });
+    }
+
+    function connectHL() {
+      clearTimeout(hlTimer);
+      const targets = hlTargets();
+      if (!targets.size) return;
+      const sock = new WebSocket(HL_WS);
+      hlWs = sock;
+      hlLastMsg = Date.now();
+
+      sock.onopen = () => {
+        if (sock !== hlWs) return;
+        hlRetry = 0;
+        const dexes = new Set();
+        for (const coin of targets.keys()) {
+          sock.send(JSON.stringify({ method: 'subscribe', subscription: { type: 'bbo', coin } }));
+          dexes.add(coin.includes(':') ? coin.split(':')[0] : '');
+        }
+        dexes.forEach(dex => sock.send(JSON.stringify({
+          method: 'subscribe', subscription: dex ? { type: 'allMids', dex } : { type: 'allMids' },
+        })));
+        clearInterval(hlPing);
+        hlPing = setInterval(() => {
+          if (Date.now() - hlLastMsg > 60000) return sock.close();
+          if (sock.readyState === WebSocket.OPEN) sock.send('{"method":"ping"}');
+        }, 25000);
+      };
+
+      sock.onmessage = e => {
+        hlLastMsg = Date.now();
+        let msg; try { msg = JSON.parse(e.data); } catch { return; }
+
+        if (msg.channel === 'bbo') {
+          const d = msg.data, key = targets.get(d?.coin);
+          if (!key) return;
+          const [b, a] = d.bbo || [];
+          const bid = +b?.px, ask = +a?.px;
+          const raw = PRICE_SIDE === 'bid' && bid > 0 ? bid : (bid > 0 && ask > 0 ? (bid + ask) / 2 : (bid || ask));
+          hlIngest(key, raw, d.coin);
+        } else if (msg.channel === 'allMids') {
+          const mids = new Map(Object.entries(msg.data?.mids || {}).map(([s, p]) => [norm(s), +p]));
+          const now = Date.now();
+          for (const [coin, key] of targets) {
+            const p = mids.get(norm(coin));
+            if (p == null || now - (lastHL[key] || 0) < 1500) continue;
+            hlIngest(key, p, coin);
+          }
+        }
+      };
+
+      sock.onerror = () => {};
+      sock.onclose = () => {
+        if (sock !== hlWs) return;
+        clearInterval(hlPing);
+        hlTimer = setTimeout(connectHL, Math.min(15000, 1000 * 2 ** hlRetry++));
+      };
+    }
 
     // ======================= TRADES =======================
     function loadTrades() {
@@ -901,21 +977,38 @@
     const ctx = cv.getContext('2d');
     const FONT = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
+    // Level diurutkan dari harga tertinggi (atas) ke terendah (bawah)
+    // SELL: SL -> ENTRY -> TP1 -> TP2 -> TP3   |   BUY: TP3 -> TP2 -> TP1 -> ENTRY -> SL
     function levelList(t) {
-      const hits = t.hits || {};
-      const list = [
-        { k: 'tp3', name: 'TP3', price: t.tp3, color: '#38bdf8', hit: !!hits.tp3 },
-        { k: 'tp2', name: 'TP2', price: t.tp2, color: '#34d399', hit: !!hits.tp2 },
-        { k: 'tp1', name: 'TP1', price: t.tp1, color: '#34d399', hit: !!hits.tp1 },
-        { k: 'sl',  name: 'SL',  price: t.sl,  color: '#ff3b69', hit: t.result === 'SL', faded: !!hits.tp1 },
-      ];
+      const hits = t.hits || {}, L = [];
+      const add = (k, name, price, color, extra = {}) => { if (Number.isFinite(price)) L.push({ k, name, price, color, ...extra }); };
+      add('tp3', 'TP3', t.tp3, '#38bdf8', { hit: !!hits.tp3 });
+      add('tp2', 'TP2', t.tp2, '#34d399', { hit: !!hits.tp2 });
+      add('tp1', 'TP1', t.tp1, '#34d399', { hit: !!hits.tp1 });
       if (t.emin != null && t.emax != null && t.emin !== t.emax) {
-        list.push({ k: 'entry_max', name: 'ENTRY', price: Math.max(t.emin, t.emax), color: '#facc15', hit: t.result === 'BE' });
-        list.push({ k: 'entry_min', name: 'ENTRY', price: Math.min(t.emin, t.emax), color: '#facc15', hit: t.result === 'BE' });
-      } else if (t.entry != null) {
-        list.push({ k: 'entry', name: hits.tp1 ? 'ENTRY (BE)' : 'ENTRY', price: t.entry, color: '#facc15', hit: t.result === 'BE' });
+        add('entry_hi', 'ENT', Math.max(t.emin, t.emax), '#facc15', { hit: t.result === 'BE' });
+        add('entry_lo', 'ENT', Math.min(t.emin, t.emax), '#facc15', { hit: t.result === 'BE' });
+      } else {
+        add('entry', hits.tp1 ? 'BE' : 'ENT', t.entry, '#facc15', { hit: t.result === 'BE' });
       }
-      return list.filter(l => Number.isFinite(l.price));
+      add('sl', 'SL', t.sl, '#ff3b69', { hit: t.result === 'SL', faded: !!hits.tp1 });
+      return L.sort((a, b) => b.price - a.price);
+    }
+
+    // Susun label kanan: urutan tetap, jarak minimal, tidak keluar area chart
+    function layoutLabels(items, top, bottom, gap = 14) {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].y < top) items[i].y = top;
+        if (i && items[i].y - items[i - 1].y < gap) items[i].y = items[i - 1].y + gap;
+      }
+      const n = items.length;
+      if (n && items[n - 1].y > bottom) {
+        items[n - 1].y = bottom;
+        for (let i = n - 2; i >= 0; i--) {
+          if (items[i + 1].y - items[i].y < gap) items[i].y = items[i + 1].y - gap;
+        }
+      }
+      return items;
     }
 
     const lineRgb = (t, p) => (!t.dir || !t.entry) ? RGB.blue : (!t.triggered ? RGB.blue : (p - t.entry) * t.dir >= 0 ? RGB.green : RGB.red);
@@ -935,9 +1028,9 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, W, H);
 
-      const padL = 6, padR = 74, padT = 12, padB = 18;
+      const padL = 6, padR = 86, padT = 14, padB = 18;
       const plotW = W - padL - padR, plotH = H - padT - padB;
-      const GAP = Math.max(40, plotW * 0.18);
+      const GAP = Math.max(40, plotW * 0.18);          // ruang kosong agar line tidak mepet label
       const lineW = plotW - GAP;
       const nowX = padL + lineW;
 
@@ -957,45 +1050,58 @@
       const vals = vis.map(p => p.p).concat(lv.map(l => l.price));
       if (!vals.length) return;
       let min = Math.min(...vals), max = Math.max(...vals);
-      const pad = (max - min) * 0.1 || Math.abs(max) * 0.0005 || 1;
+      const pad = (max - min) * 0.08 || Math.abs(max) * 0.0005 || 1;
       min -= pad; max += pad;
       const X = tt => padL + (tt - t0) / win * lineW;
-      const Y = p => padT + (max - p) / (max - min) * plotH;
+      const Y = p => padT + (max - p) / (max - min) * plotH;   // harga tinggi = atas
 
+      // Grid
       ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 1;
       for (let i = 0; i <= 4; i++) {
         const gy = padT + plotH * i / 4;
         ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(padL + plotW, gy); ctx.stroke();
       }
 
+      // Area risiko (Entry -> SL) & area profit (Entry -> TP terjauh)
+      if (t.dir && t.entry != null) {
+        const farTp = [t.tp3, t.tp2, t.tp1].find(v => Number.isFinite(v));
+        const band = (a, b, color) => {
+          const y1 = Y(Math.max(a, b)), y2 = Y(Math.min(a, b));
+          ctx.fillStyle = color; ctx.fillRect(padL, y1, plotW, y2 - y1);
+        };
+        if (Number.isFinite(t.sl)) band(t.entry, t.sl, t.hits?.tp1 ? 'rgba(255,59,105,0.03)' : 'rgba(255,59,105,0.07)');
+        if (farTp != null) band(t.entry, farTp, 'rgba(0,192,118,0.06)');
+      }
+
+      // Entry zone
       if (t.emin != null && t.emax != null && t.emin !== t.emax) {
         const yTop = Y(Math.max(t.emin, t.emax)), yBot = Y(Math.min(t.emin, t.emax));
-        ctx.fillStyle = 'rgba(250, 204, 21, 0.12)';
+        ctx.fillStyle = 'rgba(250, 204, 21, 0.14)';
         ctx.fillRect(padL, yTop, plotW, yBot - yTop);
       }
 
-      ctx.font = `700 8px ${FONT}`;
+      // Garis level horizontal
       lv.forEach(l => {
         const ly = Y(l.price);
         ctx.strokeStyle = l.color; ctx.globalAlpha = l.faded ? 0.3 : l.hit ? 1 : 0.75; ctx.lineWidth = l.hit ? 1.6 : 1;
         ctx.setLineDash(l.hit ? [] : [5, 4]);
         ctx.beginPath(); ctx.moveTo(padL, ly); ctx.lineTo(padL + plotW, ly); ctx.stroke();
         ctx.setLineDash([]);
-        ctx.fillStyle = l.color; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
-        const mark = l.hit ? (l.k === 'sl' ? ' ✗' : l.k.startsWith('tp') ? ' ✓' : ' •') : '';
-        ctx.fillText(l.name + mark, padL + 3, ly - 2);
         ctx.globalAlpha = 1;
       });
 
+      // Marker waktu signal
       if (t.createdAt >= t0) {
         const sx = X(t.createdAt);
         ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.setLineDash([2, 3]);
         ctx.beginPath(); ctx.moveTo(sx, padT); ctx.lineTo(sx, padT + plotH); ctx.stroke();
         ctx.setLineDash([]);
+        ctx.font = `700 8px ${FONT}`;
         ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
         ctx.fillText('SIGNAL', sx, padT + plotH - 2);
       }
 
+      // Line harga live
       if (last) {
         const c = lineRgb(t, last.p);
         const ey = Y(animP);
@@ -1011,7 +1117,7 @@
         ctx.strokeStyle = `rgb(${c})`; ctx.lineWidth = 1.7; ctx.lineJoin = 'round'; ctx.stroke();
         ctx.lineTo(nowX, padT + plotH); ctx.lineTo(X(vis[0].t), padT + plotH); ctx.closePath();
         const g = ctx.createLinearGradient(0, padT, 0, padT + plotH);
-        g.addColorStop(0, `rgba(${c},0.22)`); g.addColorStop(1, `rgba(${c},0)`);
+        g.addColorStop(0, `rgba(${c},0.20)`); g.addColorStop(1, `rgba(${c},0)`);
         ctx.fillStyle = g; ctx.fill();
 
         (t.markers || []).forEach(m => {
@@ -1035,25 +1141,47 @@
         ctx.fillText('Menunggu harga live...', padL + plotW / 2, padT + plotH / 2);
       }
 
-      ctx.font = `700 8.5px ${FONT}`;
-      const labels = lv.map(l => ({ ...l, y: Y(l.price) })).sort((a, b) => a.y - b.y);
-      for (let i = 1; i < labels.length; i++) {
-        if (labels[i].y - labels[i - 1].y < 14) labels[i].y = labels[i - 1].y + 14;
+      // Badge arah posisi (kiri atas)
+      if (t.dir) {
+        const sell = t.dir < 0;
+        const txt = sell ? '▼ SELL' : '▲ BUY';
+        ctx.font = `800 8px ${FONT}`;
+        const tw = ctx.measureText(txt).width + 10;
+        ctx.fillStyle = sell ? 'rgba(255,59,105,0.85)' : 'rgba(14,165,233,0.85)';
+        ctx.fillRect(padL + 2, 2, tw, 11);
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText(txt, padL + 7, 8);
       }
+
+      // Label level di kanan: urut atas -> bawah, tidak bertumpuk
+      ctx.font = `700 8px ${FONT}`;
       const lx = padL + plotW + 3, lw = padR - 5;
+      const labels = layoutLabels(
+        lv.map(l => ({ ...l, y: Y(l.price) })).sort((a, b) => a.y - b.y),
+        padT + 7, padT + plotH - 7
+      );
       labels.forEach(l => {
+        const ly = Y(l.price);
+        if (Math.abs(l.y - ly) > 1) {
+          ctx.strokeStyle = l.color; ctx.globalAlpha = 0.5; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(lx - 3, ly); ctx.lineTo(lx, l.y); ctx.stroke();
+        }
         ctx.globalAlpha = l.faded ? 0.4 : 1;
         ctx.fillStyle = l.color; ctx.fillRect(lx, l.y - 7, lw, 14);
-        ctx.fillStyle = '#0b0e14'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(fmt(key, l.price), lx + lw / 2, l.y + 0.5);
+        ctx.fillStyle = '#0b0e14'; ctx.textBaseline = 'middle';
+        const mark = l.hit ? (l.k === 'sl' ? '✗' : l.k.startsWith('tp') ? '✓' : '•') : '';
+        ctx.textAlign = 'left';  ctx.fillText(`${l.name}${mark}`, lx + 3, l.y + 0.5);
+        ctx.textAlign = 'right'; ctx.fillText(fmt(key, l.price), lx + lw - 3, l.y + 0.5);
         ctx.globalAlpha = 1;
       });
 
+      // Bubble harga live (paling depan)
       if (last) {
-        const ly = Math.min(Math.max(Y(animP), padT + 6), padT + plotH - 6);
+        const ly = Math.min(Math.max(Y(animP), padT + 7), padT + plotH - 7);
         ctx.fillStyle = '#ffffff'; ctx.fillRect(lx, ly - 7, lw, 14);
-        ctx.fillStyle = '#0b0e14'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(fmt(key, last.p), lx + lw / 2, ly + 0.5);
+        ctx.fillStyle = '#0b0e14'; ctx.textBaseline = 'middle';
+        ctx.textAlign = 'left';  ctx.fillText('NOW', lx + 3, ly + 0.5);
+        ctx.textAlign = 'right'; ctx.fillText(fmt(key, last.p), lx + lw - 3, ly + 0.5);
       }
 
       const statusTxt = t.status === 'CLOSED' ? 'CLOSED' : isStale(key) ? 'MARKET IDLE' : (t.dir && !t.triggered ? 'WAITING' : 'NOW');
@@ -1070,7 +1198,7 @@
       drawChart();
     }
 
-    // ======================= STREAM / WEBSOCKET =======================
+    // ======================= STREAM / WEBSOCKET (RELAY) =======================
     async function fetchMarkets() {
       const res = await fetchT(`${REST_BASE}/v1/markets`, {}, 6000);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1078,7 +1206,6 @@
       return Array.isArray(j) ? j : (j.markets ?? j.data ?? j.items ?? []);
     }
 
-    // Cari symbol yang benar: provider sendiri dulu, lalu provider lain
     async function resolveCoins() {
       try {
         const list = await fetchMarkets();
@@ -1203,7 +1330,7 @@
       m.coins.forEach(coin => subscribe(ws, 'ticks', { symbols: [coin], providers: [m.provider] }, { key, coin }));
     }
 
-    // Watchdog: pakai waktu tick WS terakhir (bukan fallback)
+    // Watchdog
     const lastResub = {};
     setInterval(() => {
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -1241,6 +1368,8 @@
 
       const key = lookupKey(ev);
       if (!key) return;
+      // Feed langsung Hyperliquid aktif -> abaikan relay (lebih lambat)
+      if (Date.now() - (lastHL[key] || 0) < HL_FRESH_MS) return;
 
       if (!resolved[key]) {
         resolved[key] = ev.symbol;
@@ -1253,18 +1382,19 @@
                 : (bid > 0 && ask > 0 ? (bid + ask) / 2 : parseFloat(ev.price));
       if (!(raw > 0)) return;
 
+      // Prioritas kind: tick lain langsung diterima jika kind utama diam > 1.5 detik
       const m = MARKETS[key];
       const idx = m.kinds.indexOf(ev.kind);
       const rank = idx < 0 ? 99 : idx;
       const now = Date.now(), ts = Number(ev.time) || 0;
       const ks = kindState[key];
-      if (ks && now - ks.ts < STALE_MS) {
+      if (ks && now - ks.ts < 1500) {
         if (rank > ks.rank) return;
         if (rank === ks.rank && ts && ks.evTime && ts < ks.evTime) return;
       }
       kindState[key] = { rank, ts: now, evTime: ts };
 
-      lastWs[key] = now;          // WS aktif -> fallback otomatis berhenti
+      lastWs[key] = now;
       delete fbState[key];
       rawPrices[key] = raw;
       updatePrice(key, raw + (offsets[key] || 0), { ...ev, via: 'ws' });
@@ -1276,6 +1406,11 @@
         const old = ws;
         connect();
         try { old?.close(); } catch {}
+      }
+      if (!hlWs || hlWs.readyState >= WebSocket.CLOSING || Date.now() - hlLastMsg > 15000) {
+        const oldHl = hlWs;
+        connectHL();
+        try { oldHl?.close(); } catch {}
       }
     });
 
@@ -1335,9 +1470,8 @@
         if (valid) {
           t.no = nextNo();
           trades.push(t);
-          saveTrades();
           activeId = t.id; transientView = null;
-          evaluateTrade(t, currentPrice); // langsung aktif jika harga sudah di zona
+          evaluateTrade(t, prices[symbolKey]?.price ?? currentPrice); // langsung aktif jika harga sudah di zona
           saveTrades();
         } else {
           activeId = null; transientView = t;
@@ -1360,8 +1494,9 @@
       renderHistory();
       if (trades.length) viewTrade(trades[trades.length - 1].id, false);
       requestAnimationFrame(chartLoop);
+      connectHL();          // feed langsung Hyperliquid (XAUUSD realtime)
       await resolveCoins();
-      connect();
+      connect();            // relay untuk pair lain
     };
     </script>
 </body>
