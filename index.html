@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GutsAI & MyFundedPerps Terminal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        darkbg: '#0b0e14', cardbg: '#151924', panelborder: '#232936',
+                        accentblue: '#2962ff', accentgreen: '#00c076', accentred: '#ff3b69'
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-darkbg text-gray-200 font-sans min-h-screen flex flex-col justify-between p-3">
+
+    <!-- Header Navbar -->
+    <header class="flex items-center justify-between pb-3 border-b border-panelborder max-w-md mx-auto w-full">
+        <div class="flex items-center gap-2">
+            <div class="bg-accentblue w-8 h-8 rounded-lg flex items-center justify-center text-white">
+                <i class="fa-solid fa-chart-line text-sm"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-xs text-white">GutsAI <span class="text-accentblue">Terminal</span></h1>
+                <p class="text-[9px] text-gray-400">Official WebSocket Stream</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <span id="wsStatus" class="text-[9px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">WS: OFF</span>
+            <button onclick="toggleModal('configModal')" class="text-xs bg-panelborder hover:bg-gray-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1">
+                <i class="fa-solid fa-key text-yellow-400"></i> Key
+            </button>
+        </div>
+    </header>
+
+    <!-- BAGIAN TENGAH: AI Signal Generator -->
+    <main class="max-w-md mx-auto w-full flex-1 flex flex-col gap-3 pt-3">
+        
+        <div class="bg-cardbg rounded-xl border border-panelborder p-3 space-y-2.5 shadow-md">
+            <div class="flex justify-between items-center">
+                <label class="text-[10px] font-bold text-gray-400">TARGET ASET AKTIF</label>
+                <span id="selectedPairBadge" class="text-[10px] font-mono text-accentblue font-bold">binance|BTCUSDT</span>
+            </div>
+
+            <!-- Dropdown Pilihan Market -->
+            <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2.5 rounded-lg focus:outline-none">
+                <option value="binance|BTCUSDT">BTC/USDT (Binance)</option>
+                <option value="veranta|XAUUSD">XAU/USD (Gold / Veranta)</option>
+                <option value="binance|ETHUSDT">ETH/USDT (Binance)</option>
+                <option value="binance|SOLUSDT">SOL/USDT (Binance)</option>
+            </select>
+
+            <!-- Multi-Timeframe -->
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <label class="text-[9px] font-bold text-gray-400 block mb-1">TF ANALISIS (HTF)</label>
+                    <select id="htfSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
+                        <option value="H4">H4 (Major Structure)</option>
+                        <option value="H1">H1 (Intraday Bias)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-[9px] font-bold text-gray-400 block mb-1">TF EKSEKUSI (LTF)</label>
+                    <select id="ltfSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
+                        <option value="M5">M5 (Scalp Entry)</option>
+                        <option value="M1">M1 (Micro Sweep)</option>
+                    </select>
+                </div>
+            </div>
+
+            <button onclick="generateAISignal()" id="signalBtn" class="w-full bg-gradient-to-r from-accentblue to-indigo-600 hover:from-blue-600 text-white font-bold py-3 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-accentblue/20 transition active:scale-98 mt-1">
+                <i class="fa-solid fa-wand-magic-sparkles"></i> GENERATE AI SIGNAL
+            </button>
+        </div>
+
+        <!-- Output Sinyal AI -->
+        <div class="bg-cardbg rounded-xl border border-panelborder p-4 shadow-md">
+            <div class="flex items-center justify-between pb-3 mb-3 border-b border-panelborder">
+                <span class="text-xs font-bold text-gray-300">AI SIGNAL RESULT</span>
+                <span id="signalBadge" class="px-3 py-1 rounded-md text-xs font-extrabold tracking-wider bg-gray-800 text-gray-400 border border-gray-700">STANDBY</span>
+            </div>
+            <div id="signalReason" class="bg-darkbg border border-panelborder rounded-lg p-3 text-xs text-gray-300 min-h-[140px] max-h-[200px] overflow-y-auto leading-relaxed whitespace-pre-wrap">
+                Pilih pair di daftar live stream bawah, lalu klik Generate AI Signal.
+            </div>
+        </div>
+
+        <!-- BAGIAN PALING BAWAH: Live Market Ticker (WebSocket Streaming) -->
+        <div class="bg-cardbg rounded-xl border border-panelborder p-3 mt-2 shadow-md">
+            <div class="flex justify-between items-center pb-2 mb-2 border-b border-panelborder">
+                <span class="text-[10px] font-bold text-gray-400 flex items-center gap-1">
+                    <i class="fa-solid fa-tower-broadcast text-accentblue"></i> LIVE STREAM (MYFUNDEDPERPS)
+                </span>
+                <span id="livePulse" class="text-[9px] text-emerald-400 font-mono animate-pulse">● Live Stream</span>
+            </div>
+
+            <!-- List Ticker Vertikal Real-Time -->
+            <div id="tickerListContainer" class="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
+                
+                <!-- BTC Item -->
+                <div onclick="selectTicker('binance|BTCUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder p-2 rounded-lg flex items-center justify-between cursor-pointer transition">
+                    <div class="flex items-center gap-2">
+                        <div class="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center text-[10px] font-bold">₿</div>
+                        <div>
+                            <div class="flex items-center gap-1.5">
+                                <span class="font-bold text-xs text-white">BTCUSDT</span>
+                                <span class="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 rounded">10x</span>
+                            </div>
+                            <span class="text-[9px] text-gray-400">Binance</span>
+                        </div>
+                    </div>
+                    <div class="text-right font-mono">
+                        <div id="price-BTCUSDT" class="text-xs font-bold text-white">--.--</div>
+                        <div id="time-BTCUSDT" class="text-[8px] text-gray-500">Waiting stream...</div>
+                    </div>
+                </div>
+
+                <!-- XAU (Gold) Item -->
+                <div onclick="selectTicker('veranta|XAUUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder p-2 rounded-lg flex items-center justify-between cursor-pointer transition">
+                    <div class="flex items-center gap-2">
+                        <div class="w-6 h-6 rounded-full bg-yellow-500/20 text-yellow-400 flex items-center justify-center text-[10px] font-bold">🪙</div>
+                        <div>
+                            <div class="flex items-center gap-1.5">
+                                <span class="font-bold text-xs text-white">XAUUSD</span>
+                                <span class="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 rounded">10x</span>
+                            </div>
+                            <span class="text-[9px] text-gray-400">Veranta FX</span>
+                        </div>
+                    </div>
+                    <div class="text-right font-mono">
+                        <div id="price-XAUUSD" class="text-xs font-bold text-white">--.--</div>
+                        <div id="time-XAUUSD" class="text-[8px] text-gray-500">Waiting stream...</div>
+                    </div>
+                </div>
+
+                <!-- ETH Item -->
+                <div onclick="selectTicker('binance|ETHUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder p-2 rounded-lg flex items-center justify-between cursor-pointer transition">
+                    <div class="flex items-center gap-2">
+                        <div class="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-[10px] font-bold">Ξ</div>
+                        <div>
+                            <div class="flex items-center gap-1.5">
+                                <span class="font-bold text-xs text-white">ETHUSDT</span>
+                                <span class="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 rounded">8x</span>
+                            </div>
+                            <span class="text-[9px] text-gray-400">Binance</span>
+                        </div>
+                    </div>
+                    <div class="text-right font-mono">
+                        <div id="price-ETHUSDT" class="text-xs font-bold text-white">--.--</div>
+                        <div id="time-ETHUSDT" class="text-[8px] text-gray-500">Waiting stream...</div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Modal API Key -->
+    <div id="configModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-cardbg border border-panelborder rounded-2xl p-5 max-w-sm w-full shadow-2xl relative">
+            <button onclick="toggleModal('configModal')" class="absolute top-4 right-4 text-gray-400 hover:text-white">
+                <i class="fa-solid fa-xmark text-lg"></i>
+            </button>
+            <h3 class="font-bold text-white text-sm mb-1">Pengaturan API Key</h3>
+            <p class="text-[10px] text-gray-400 mb-3">Masukkan GutsAI API Key Anda</p>
+            <div class="space-y-3">
+                <input type="password" id="gutsKeyInput" placeholder="sk-gutsai-..." class="w-full bg-darkbg border border-panelborder p-2.5 rounded-lg text-xs text-white font-mono focus:outline-none focus:border-accentblue">
+                <button onclick="saveConfig()" class="w-full bg-accentblue hover:bg-blue-600 text-white font-bold py-2.5 rounded-xl text-xs transition">Simpan API Key</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Script WebSocket & AI Engine -->
+    <script>
+        const gutsKeyInput = document.getElementById('gutsKeyInput');
+        if(localStorage.getItem('guts_key')) gutsKeyInput.value = localStorage.getItem('guts_key');
+
+        function toggleModal(id) { document.getElementById(id).classList.toggle('hidden'); }
+        function saveConfig() {
+            localStorage.setItem('guts_key', gutsKeyInput.value.trim());
+            toggleModal('configModal');
+            alert('API Key tersimpan!');
+        }
+
+        function syncSelectedMarket() {
+            const val = document.getElementById('marketSelect').value;
+            document.getElementById('selectedPairBadge').textContent = val;
+        }
+
+        function selectTicker(marketId) {
+            const selectEl = document.getElementById('marketSelect');
+            selectEl.value = marketId;
+            syncSelectedMarket();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // =======================================================
+        // INTEGRASI WEBSOCKET RESMI MYFUNDEDPERPETUALS
+        // =======================================================
+        let ws;
+        let pingInterval;
+
+        function connectWebSocket() {
+            const wsStatus = document.getElementById('wsStatus');
+            const wsUrl = 'wss://api-stream.myfundedperpetuals.com/v1/market-data';
+
+            try {
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => {
+                    wsStatus.textContent = 'WS: CONNECTED';
+                    wsStatus.className = 'text-[9px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40';
+
+                    // Payload Subscribe Sesuai Format Resmi Dokumen
+                    const subFrame = {
+                        op: "sub",
+                        id: 1,
+                        channel: "ticks",
+                        payload: {
+                            symbols: ["BTCUSDT", "XAUUSD", "ETHUSDT", "SOLUSDT"],
+                            providers: ["binance", "veranta"]
+                        }
+                    };
+                    ws.send(JSON.stringify(subFrame));
+
+                    // Heartbeat Ping Setiap 25 Detik
+                    clearInterval(pingInterval);
+                    pingInterval = setInterval(() => {
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ op: "req", id: 99, method: "ping" }));
+                        }
+                    }, 25000);
+                };
+
+                ws.onmessage = (event) => {
+                    try {
+                        const frame = JSON.parse(event.data);
+
+                        if (frame.op === "events" && Array.isArray(frame.events)) {
+                            frame.events.forEach(ev => {
+                                if (ev.symbol && ev.price) {
+                                    const symbolClean = ev.symbol;
+                                    const priceEl = document.getElementById(`price-${symbolClean}`);
+                                    const timeEl = document.getElementById(`time-${symbolClean}`);
+
+                                    if (priceEl) {
+                                        const numPrice = parseFloat(ev.price);
+                                        priceEl.textContent = numPrice.toLocaleString('en-US', { minimumFractionDigits: 2 });
+                                    }
+                                    if (timeEl && ev.time) {
+                                        const t = new Date(ev.time);
+                                        timeEl.textContent = t.toLocaleTimeString();
+                                    }
+                                }
+                            });
+                        }
+                    } catch (err) {
+                        console.error("Frame Parse Error:", err);
+                    }
+                };
+
+                ws.onerror = (err) => {
+                    console.error("WS Error:", err);
+                    wsStatus.textContent = 'WS: ERROR';
+                };
+
+                ws.onclose = () => {
+                    wsStatus.textContent = 'WS: DISCONNECTED';
+                    wsStatus.className = 'text-[9px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40';
+                    clearInterval(pingInterval);
+                    setTimeout(connectWebSocket, 5000);
+                };
+
+            } catch (e) {
+                console.error("WS Exception:", e);
+            }
+        }
+
+        // ==========================================
+        // INTEGRASI GUTSAI ENGINE
+        // ==========================================
+        async function generateAISignal() {
+            const gutsKey = gutsKeyInput.value.trim();
+            const marketId = document.getElementById('marketSelect').value;
+            const htf = document.getElementById('htfSelect').value;
+            const ltf = document.getElementById('ltfSelect').value;
+            
+            const reasonEl = document.getElementById('signalReason');
+            const badge = document.getElementById('signalBadge');
+            const btn = document.getElementById('signalBtn');
+
+            if (!gutsKey) {
+                toggleModal('configModal');
+                alert("Masukkan API Key GutsAI terlebih dahulu!");
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> MENGEVALUASI...`;
+            reasonEl.textContent = `Menganalisis data pasar ${marketId} (${htf} & ${ltf})...`;
+            badge.textContent = 'ANALYZING';
+
+            try {
+                const systemPrompt = `Anda adalah AI Prop Firm Trading Agent MyFundedPerps. 
+Target Market: ${marketId}
+Timeframe HTF: ${htf} | LTF: ${ltf}
+Berikan analisis teknikal terstruktur dalam bahasa Indonesia:
+- SIGNAL: [BUY / SELL / HOLD]
+- ENTRY: [Harga entry]
+- SL: [Stop Loss]
+- TP: [Take Profit]
+- REASON: [Alasan konfluensi]`;
+
+                const targetApi = 'https://api.gutsai.id/v1/chat/completions';
+                const proxiedApi = `https://corsproxy.io/?url=${encodeURIComponent(targetApi)}`;
+
+                const response = await fetch(proxiedApi, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${gutsKey}`
+                    },
+                    body: JSON.stringify({
+                        model: 'guts-default',
+                        messages: [
+                            { role: 'system', content: systemPrompt },
+                            { role: 'user', content: `Analisis sinyal live untuk ${marketId}.` }
+                        ],
+                        temperature: 0.2
+                    })
+                });
+
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error?.message || `HTTP Error ${response.status}`);
+
+                const outputText = data.choices[0].message.content;
+                reasonEl.textContent = outputText;
+
+                const upper = outputText.toUpperCase();
+                if (upper.includes('BUY')) {
+                    badge.textContent = 'BUY SIGNAL';
+                    badge.className = 'px-3 py-1 rounded-md text-xs font-extrabold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40';
+                } else if (upper.includes('SELL')) {
+                    badge.textContent = 'SELL SIGNAL';
+                    badge.className = 'px-3 py-1 rounded-md text-xs font-extrabold bg-red-500/20 text-red-400 border border-red-500/40';
+                } else {
+                    badge.textContent = 'HOLD';
+                    badge.className = 'px-3 py-1 rounded-md text-xs font-extrabold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40';
+                }
+
+            } catch (error) {
+                reasonEl.textContent = `❌ Gagal mengambil sinyal:\n${error.message}`;
+                badge.textContent = 'ERROR';
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> GENERATE AI SIGNAL`;
+            }
+        }
+
+        window.onload = () => {
+            connectWebSocket();
+        };
+    </script>
+</body>
+</html>
