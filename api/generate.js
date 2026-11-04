@@ -23,25 +23,25 @@ const SPEC = {
   DAX:    { pip: 1, dec: 2, yf: '^GDAXI' },
 };
 
-// MULTI-TIMEFRAME BERDASARKAN GAYA TRADING:
-// Scalping: M15 (HTF) + M3 (MTF) + M1 (LTF)
-// Day Trade: M30 (HTF) + M15 (MTF) + M3 (LTF)
-// Intraday: H4 (HTF) + H1 (MTF) + M5 (LTF)
-// Swing: Daily (HTF) + H4 (MTF) + M15 (LTF)
+// htf / mtf / ltf : 3 timeframe per gaya
+// bufL / bufM     : buffer SL = max(bufL x range LTF, bufM x range MTF)
+// minR / maxR     : jarak SL min/maks (x range LTF / MTF)
+// confirm         : true = intraday/swing (tunggu konfirmasi), false = scalp/day (reaksi zona)
+// maxPull         : jarak maksimal POI dari harga (x range MTF)
 const STYLES = {
-  scalp: { ltf: '1m',  mtf: '3m',  htf: '15m', slMin: 1.5, slMax: 3.2, rr: [1.0, 1.8, 3.0], confirm: false, maxPull: 3 },
-  day:   { ltf: '3m',  mtf: '15m', htf: '30m', slMin: 1.8, slMax: 3.8, rr: [1.0, 2.0, 3.2], confirm: false, maxPull: 3.5 },
-  intra: { ltf: '5m',  mtf: '1h',  htf: '4h',  slMin: 2.2, slMax: 4.5, rr: [1.2, 2.2, 3.5], confirm: true,  maxPull: 5 },
-  swing: { ltf: '15m', mtf: '4h',  htf: '1d',  slMin: 3.0, slMax: 6.0, rr: [1.5, 2.8, 4.5], confirm: true,  maxPull: 6 },
+  scalp: { htf: '15m', mtf: '3m',  ltf: '1m',  confirm: false, bufL: 1.2, bufM: 0.5, minR: 2.5, maxR: 2.2, maxPull: 3, rr: [1.0, 1.8, 3.0], maxTp: 5 },
+  day:   { htf: '30m', mtf: '15m', ltf: '5m',  confirm: false, bufL: 1.0, bufM: 0.5, minR: 2.5, maxR: 2.5, maxPull: 3, rr: [1.0, 2.0, 3.2], maxTp: 6 },
+  intra: { htf: '4h',  mtf: '1h',  ltf: '5m',  confirm: true,  bufL: 0.8, bufM: 0.5, minR: 2.0, maxR: 3.0, maxPull: 4, rr: [1.2, 2.2, 3.5], maxTp: 7 },
+  swing: { htf: '1d',  mtf: '4h',  ltf: '15m', confirm: true,  bufL: 0.8, bufM: 0.6, minR: 2.0, maxR: 3.5, maxPull: 4, rr: [1.5, 2.8, 4.5], maxTp: 8 },
 };
-
 const pickStyle = s => /scalp/i.test(s) ? 'scalp' : /day/i.test(s) ? 'day' : /swing/i.test(s) ? 'swing' : 'intra';
-const TF_LABEL = { '1m': 'M1', '3m': 'M3', '5m': 'M5', '15m': 'M15', '30m': 'M30', '1h': 'H1', '4h': 'H4', '1d': 'Daily' };
+
+const TF_LABEL = { '1m': 'M1', '3m': 'M3', '5m': 'M5', '15m': 'M15', '30m': 'M30', '1h': 'H1', '4h': 'H4', '1d': 'D1' };
 const TF_MS = { '1m': 6e4, '3m': 18e4, '5m': 3e5, '15m': 9e5, '30m': 18e5, '1h': 36e5, '4h': 144e5, '1d': 864e5 };
 const YF_TF = {
   '1m': { i: '1m', r: '5d' }, '3m': { i: '1m', r: '5d', agg: 3 }, '5m': { i: '5m', r: '5d' },
-  '15m': { i: '15m', r: '1mo' }, '30m': { i: '30m', r: '1mo' }, '1h': { i: '60m', r: '3mo' }, 
-  '4h': { i: '60m', r: '6mo', agg: 4 }, '1d': { i: '1d', r: '1y' },
+  '15m': { i: '15m', r: '1mo' }, '30m': { i: '30m', r: '1mo' }, '1h': { i: '60m', r: '3mo' },
+  '4h': { i: '60m', r: '6mo', agg: 4 }, '1d': { i: '1d', r: '2y' },
 };
 
 // ======================= DATA CANDLE =======================
@@ -75,14 +75,13 @@ async function fromHL(coin, tf) {
 }
 
 async function fromBinance(sym, tf) {
-  const binanceTf = tf === '1d' ? '1d' : tf;
-  const j = await fetchJSON(`https://data-api.binance.vision/api/v3/klines?symbol=${sym}&interval=${binanceTf}&limit=300`);
+  const j = await fetchJSON(`https://data-api.binance.vision/api/v3/klines?symbol=${sym}&interval=${tf}&limit=300`);
   return j.map(k => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] }));
 }
 
 async function fromYahoo(sym, tf) {
-  const conf = YF_TF[tf] || { i: '1d', r: '1y' };
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=${conf.i}&range=${conf.r}&includePrePost=true`;
+  const { i, r, agg } = YF_TF[tf];
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=${i}&range=${r}&includePrePost=true`;
   const j = await fetchJSON(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
   const res = j?.chart?.result?.[0], ts = res?.timestamp || [], q = res?.indicators?.quote?.[0] || {};
   let c = [];
@@ -90,7 +89,7 @@ async function fromYahoo(sym, tf) {
     const o = q.open?.[k], h = q.high?.[k], l = q.low?.[k], cl = q.close?.[k];
     if ([o, h, l, cl].every(Number.isFinite)) c.push({ t: t * 1000, o, h, l, c: cl, v: q.volume?.[k] || 0 });
   });
-  if (conf.agg) c = aggregate(c, TF_MS[tf]);
+  if (agg) c = aggregate(c, TF_MS[tf]);
   return c.slice(-300);
 }
 
@@ -105,7 +104,7 @@ async function getCandles(spec, tf) {
   for (const [src, fn] of tries) {
     try {
       const c = await fn();
-      if (c.length < 40) continue;
+      if (c.length < 60) continue;
       const stale = Date.now() - c[c.length - 1].t > staleLimit(tf);
       if (!stale) return { src, c, stale };
       fallback ??= { src, c, stale };
@@ -115,10 +114,12 @@ async function getCandles(spec, tf) {
   throw new Error(`Data candle ${TF_LABEL[tf]} tidak tersedia`);
 }
 
-// ======================= PRICE ACTION & SMC TOOLS =======================
+// ======================= PRICE ACTION TOOLS =======================
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+// Rata-rata range candle: hanya untuk skala buffer/SL/zona, bukan sinyal
 const avgRange = (c, n = 20) => { const s = c.slice(-n); return s.reduce((a, k) => a + (k.h - k.l), 0) / (s.length || 1); };
 
+// Swing high/low (fractal)
 function swings(c, k) {
   const s = [];
   for (let i = k; i < c.length - k; i++) {
@@ -133,6 +134,7 @@ function swings(c, k) {
   return s;
 }
 
+// Market structure: BOS / CHoCH, trend, HH/HL
 function structure(c, k) {
   const sw = swings(c, k), events = [];
   let trend = 0, lastH = null, lastL = null, si = 0;
@@ -140,20 +142,31 @@ function structure(c, k) {
     while (si < sw.length && sw[si].i + k <= i) { const s = { ...sw[si++] }; s.type === 'H' ? lastH = s : lastL = s; }
     if (lastH && !lastH.broken && c[i].c > lastH.p) {
       lastH.broken = true;
-      events.push({ i, dir: 1, type: trend === -1 ? 'CHoCH' : 'BOS', level: lastH.p, prot: lastL?.p });
+      events.push({ i, dir: 1, type: trend === -1 ? 'CHoCH' : 'BOS', level: lastH.p });
       trend = 1;
     }
     if (lastL && !lastL.broken && c[i].c < lastL.p) {
       lastL.broken = true;
-      events.push({ i, dir: -1, type: trend === 1 ? 'CHoCH' : 'BOS', level: lastL.p, prot: lastH?.p });
+      events.push({ i, dir: -1, type: trend === 1 ? 'CHoCH' : 'BOS', level: lastL.p });
       trend = -1;
     }
   }
-  const hs = sw.filter(s => s.type === 'H'), ls = sw.filter(s => s.type === 'L');
-  const seq = hs.length > 1 && ls.length > 1 ? { hh: hs.at(-1).p > hs.at(-2).p, hl: ls.at(-1).p > ls.at(-2).p } : null;
-  return { trend, events, last: events.at(-1), swings: sw, seq };
+  return { trend, events, last: events.at(-1), swings: sw };
 }
 
+// Leg terakhir (swing low ke high atau sebaliknya) untuk menghitung retrace
+function legOf(sw) {
+  const lh = sw.filter(s => s.type === 'H').at(-1), ll = sw.filter(s => s.type === 'L').at(-1);
+  if (!lh || !ll) return null;
+  return { up: lh.i > ll.i, hi: lh.p, lo: ll.p, range: Math.max(lh.p - ll.p, 1e-9) };
+}
+// Kedalaman pullback 0..1 terhadap leg searah dir (null jika leg tidak searah)
+function depth(leg, dir, p) {
+  if (!leg || leg.up !== (dir > 0)) return null;
+  return dir > 0 ? (leg.hi - p) / leg.range : (p - leg.lo) / leg.range;
+}
+
+// Liquidity pool: swing yang belum diambil + equal highs/lows
 function liquidity(c, sw, tol) {
   const n = c.length;
   const untaken = s => { for (let j = s.i + 1; j < n; j++) if (s.type === 'H' ? c[j].h > s.p : c[j].l < s.p) return false; return true; };
@@ -162,11 +175,12 @@ function liquidity(c, sw, tol) {
   return pools;
 }
 
-function findSweep(c, sw, tol, recent = 8) {
+// Sweep: wick menembus swing lalu close kembali
+function findSweep(c, sw, tol, recent = 6) {
   const n = c.length;
   let best = null;
   for (let i = n - 1; i >= Math.max(1, n - recent); i--) {
-    const prior = sw.filter(s => s.i < i - 1 && s.i >= i - 80);
+    const prior = sw.filter(s => s.i < i - 1 && s.i >= i - 60);
     for (const s of prior) {
       const bull = s.type === 'L' && c[i].l < s.p && c[i].c > s.p;
       const bear = s.type === 'H' && c[i].h > s.p && c[i].c < s.p;
@@ -180,12 +194,12 @@ function findSweep(c, sw, tol, recent = 8) {
   return null;
 }
 
-// Supply, Demand & Order Blocks (SMC)
+// Supply & Demand: base -> candle impuls, belum disentuh ulang lebih dari sekali
 function sndZones(c, R, look = 120) {
   const out = [], n = c.length;
   for (let i = Math.max(3, n - look); i < n - 1; i++) {
     const k = c[i], rng = k.h - k.l, body = Math.abs(k.c - k.o);
-    if (rng < 1.4 * R || body < 0.55 * rng) continue;
+    if (rng < 1.5 * R || body < 0.6 * rng) continue;
     const dir = Math.sign(k.c - k.o);
     let j = i - 1; const base = [c[j]];
     while (base.length < 3 && j - 1 >= 0 && (c[j - 1].h - c[j - 1].l) < 0.8 * R) { j--; base.push(c[j]); }
@@ -199,20 +213,21 @@ function sndZones(c, R, look = 120) {
       if (inZ && !inside) touches++;
       inside = inZ;
     }
-    if (broken || touches > 2) continue;
+    if (broken || touches > 1) continue;
     out.push({ kind: dir > 0 ? 'Demand' : 'Supply', dir, lo, hi, i, touches });
   }
   return out;
 }
 
-function fvgs(c, R, lookback = 70) {
+// Fair Value Gap yang belum terisi
+function fvgs(c, R, lookback = 60) {
   const out = [];
   for (let i = Math.max(2, c.length - lookback); i < c.length; i++) {
     if (c[i].l > c[i - 2].h) out.push({ kind: 'FVG', dir: 1, lo: c[i - 2].h, hi: c[i].l, i });
     if (c[i].h < c[i - 2].l) out.push({ kind: 'FVG', dir: -1, lo: c[i].h, hi: c[i - 2].l, i });
   }
   return out.filter(g => {
-    if (g.hi - g.lo < 0.12 * R) return false;
+    if (g.hi - g.lo < 0.15 * R) return false;
     for (let j = g.i + 1; j < c.length; j++) {
       if (g.dir > 0 && c[j].l <= g.lo) return false;
       if (g.dir < 0 && c[j].h >= g.hi) return false;
@@ -221,9 +236,10 @@ function fvgs(c, R, lookback = 70) {
   });
 }
 
+// Order Block: candle berlawanan terakhir sebelum BOS
 function orderBlock(c, ev) {
   if (!ev) return null;
-  for (let j = ev.i - 1; j >= Math.max(0, ev.i - 20); j--) {
+  for (let j = ev.i - 1; j >= Math.max(0, ev.i - 15); j--) {
     const k = c[j];
     if (ev.dir > 0 ? k.c < k.o : k.c > k.o) {
       for (let m = j + 1; m < c.length; m++) {
@@ -236,6 +252,20 @@ function orderBlock(c, ev) {
   return null;
 }
 
+// Support & Resistance: cluster swing (min 2 sentuhan)
+function snrLevels(points, tol) {
+  const s = [...points].sort((a, b) => a.p - b.p), out = [];
+  let g = [];
+  const flush = () => {
+    if (g.length >= 2) out.push({ p: g.reduce((a, x) => a + x.p, 0) / g.length, n: g.length });
+    g = [];
+  };
+  for (const x of s) { if (g.length && x.p - g[0].p > tol) flush(); g.push(x); }
+  flush();
+  return out;
+}
+
+// Konfirmasi candle (hanya candle yang sudah close)
 function candleSignal(c, R) {
   const n = c.length;
   for (const i of [n - 2, n - 3]) {
@@ -243,184 +273,279 @@ function candleSignal(c, R) {
     const k = c[i], p = c[i - 1], rng = k.h - k.l, body = Math.abs(k.c - k.o);
     if (rng <= 0) continue;
     const up = k.h - Math.max(k.o, k.c), dn = Math.min(k.o, k.c) - k.l;
-    if (k.c > k.o && p.c < p.o && k.c > p.o && k.o <= p.c && body >= 0.5 * R) return { dir: 1, name: 'bullish engulfing', i };
-    if (k.c < k.o && p.c > p.o && k.c < p.o && k.o >= p.c && body >= 0.5 * R) return { dir: -1, name: 'bearish engulfing', i };
-    if (dn >= 1.8 * body && dn >= 0.5 * rng && rng >= 0.7 * R) return { dir: 1, name: 'pin bar rejection', i };
-    if (up >= 1.8 * body && up >= 0.5 * rng && rng >= 0.7 * R) return { dir: -1, name: 'pin bar rejection', i };
+    if (k.c > k.o && p.c < p.o && k.c > p.o && k.o <= p.c && body >= 0.6 * R) return { dir: 1, name: 'bullish engulfing', i };
+    if (k.c < k.o && p.c > p.o && k.c < p.o && k.o >= p.c && body >= 0.6 * R) return { dir: -1, name: 'bearish engulfing', i };
+    if (dn >= 2 * body && dn >= 0.6 * rng && rng >= 0.8 * R) return { dir: 1, name: 'pin bar rejection', i };
+    if (up >= 2 * body && up >= 0.6 * rng && rng >= 0.8 * R) return { dir: -1, name: 'pin bar rejection', i };
   }
   return null;
 }
 
+// Displacement: candle body besar
 function momentum(c, R) {
-  const n = c.length, last5 = c.slice(n - 6, n - 1);
-  const bull = last5.filter(k => k.c > k.o).length, bear = last5.filter(k => k.c < k.o).length;
-  let run = 0, rd = 0;
-  for (let i = n - 2; i >= 1; i--) {
-    const d = Math.sign(c[i].c - c[i - 1].c);
-    if (!d) break;
-    if (!rd) rd = d;
-    if (d !== rd) break;
-    run++;
-  }
   let disp = null;
-  for (let i = n - 2; i >= n - 4; i--) {
-    const k = c[i], body = Math.abs(k.c - k.o);
-    if (body >= 1.4 * R) { disp = { dir: Math.sign(k.c - k.o), i }; break; }
+  for (let i = c.length - 2; i >= c.length - 4 && i >= 0; i--) {
+    const k = c[i], rng = k.h - k.l, body = Math.abs(k.c - k.o);
+    if (body >= 1.5 * R && body >= 0.65 * rng) { disp = { dir: Math.sign(k.c - k.o), i }; break; }
   }
-  return { dir: bull >= 4 ? 1 : bear >= 4 ? -1 : 0, run, rd, disp };
+  return { disp };
 }
 
-// ======================= ENGINE ANALISIS MULTI-TIMEFRAME =======================
-function analyzeMultiTF(L, M, H, price, st, spec) {
-  const nL = L.length, ltfL = TF_LABEL[st.ltf], mtfL = TF_LABEL[st.mtf], htfL = TF_LABEL[st.htf];
-  const RL = avgRange(L.slice(0, -1)), RM = avgRange(M.slice(0, -1)), RH = avgRange(H.slice(0, -1));
-
-  const sL = structure(L, 2), sM = structure(M, 2), sH = structure(H, 3);
-  const tolL = 0.25 * RL, tolM = 0.3 * RM, tolH = 0.35 * RH;
-
-  const sweepL = findSweep(L, sL.swings, tolL);
-  const sweepM = findSweep(M, sM.swings, tolM, 5);
-  const sweepH = findSweep(H, sH.swings, tolH, 3);
-
-  const lastEv = (s, d) => [...s.events].reverse().find(e => e.dir === d);
+// Ringkasan satu timeframe
+function frame(c, k, tf) {
+  const lbl = TF_LABEL[tf];
+  const R = avgRange(c.slice(0, -1));
+  const s = structure(c, k);
+  const tol = 0.25 * R;
+  const lastEv = d => [...s.events].reverse().find(e => e.dir === d);
   const zones = [
-    ...sndZones(L, RL),
-    ...sndZones(M, RM, 80).map(z => ({ ...z, mtf: true })),
-    ...sndZones(H, RH, 60).map(z => ({ ...z, htf: true })),
-    ...fvgs(L, RL),
-    ...fvgs(M, RM, 50).map(g => ({ ...g, mtf: true })),
-    orderBlock(L, lastEv(sL, 1)), orderBlock(L, lastEv(sL, -1)),
-    orderBlock(M, lastEv(sM, 1)), orderBlock(M, lastEv(sM, -1)),
+    ...sndZones(c, R), ...fvgs(c, R),
+    orderBlock(c, lastEv(1)), orderBlock(c, lastEv(-1)),
   ].filter(Boolean);
+  // Kontinuasi: level BOS terakhir menjadi zona retest (S/R flip)
+  if (s.last && c.length - 1 - s.last.i <= 40) {
+    zones.push({ kind: 'BOS retest', dir: s.last.dir, lo: s.last.level - 0.25 * R, hi: s.last.level + 0.25 * R, i: s.last.i, touches: 0 });
+  }
+  return {
+    tf: lbl, c, R, s, trend: s.trend, last: s.last,
+    pools: liquidity(c, s.swings, tol).map(p => ({ ...p, tf: lbl })),
+    sweep: findSweep(c, s.swings, tol, 6),
+    zones: zones.map(z => ({ ...z, tf: lbl })),
+    levels: snrLevels(s.swings.filter(x => c.length - 1 - x.i <= 120), 0.3 * R).map(l => ({ ...l, tf: lbl, R })),
+    leg: legOf(s.swings),
+    cs: candleSignal(c, R),
+    mo: momentum(c, R),
+  };
+}
 
-  // Kontinuitas (BOS retest / S&P flip)
-  if (sM.last && nL - 1 - sM.last.i <= 50) {
-    zones.push({ kind: 'BOS continuity retest', dir: sM.last.dir, lo: sM.last.level - 0.3 * RM, hi: sM.last.level + 0.3 * RM, mtf: true });
+// Jarak harga ke zona (0 = di dalam zona, Infinity = zona di sisi yang salah)
+const zdist = (z, dir, p) => dir > 0
+  ? (z.hi < p ? p - z.hi : z.lo > p ? Infinity : 0)
+  : (z.lo > p ? z.lo - p : z.hi < p ? Infinity : 0);
+
+// Trigger di LTF: sweep, rejection, CHoCH/BOS, atau displacement searah dir
+function trigger(F, dir) {
+  const L = F.L, n = L.c.length;
+  if (L.sweep?.dir === dir && n - 1 - L.sweep.i <= 3)
+    return { kind: 'sweep', name: `sweep ${dir > 0 ? 'SSL' : 'BSL'} ${L.tf}` };
+  if (L.cs?.dir === dir) return { kind: 'rejection', name: `${L.cs.name} ${L.tf}` };
+  if (L.last?.dir === dir && n - 1 - L.last.i <= 4)
+    return { kind: L.last.type === 'CHoCH' ? 'choch' : 'bos', name: `${L.last.type} ${L.tf}` };
+  if (L.mo.disp?.dir === dir && n - 1 - L.mo.disp.i <= 3)
+    return { kind: 'disp', name: `displacement ${L.tf}` };
+  return null;
+}
+
+// ======================= ENGINE SINYAL (SELALU BUY / SELL) =======================
+function analyze(F, price, st, spec) {
+  const { H, M, L } = F;
+  const RL = L.R, RM = M.R, nL = L.c.length;
+  const KIND_W = { Demand: 1.2, Supply: 1.2, OB: 1.0, 'BOS retest': 1.0, FVG: 0.8, 'S/R': 0.8 };
+
+  // 1) BIAS: HTF memimpin. LTF hanya boleh membalik arah jika ada reversal valid
+  let dir = H.trend || M.trend || L.trend || (L.last?.dir ?? 1);
+  let counter = false;
+  const ltfDir = L.last?.dir || 0;
+  if (ltfDir && ltfDir !== dir) {
+    const choch = L.last.type === 'CHoCH' && nL - 1 - L.last.i <= 10;
+    const swept = [H, M, L].some(f => f.sweep?.dir === ltfDir);
+    const inZone = [H, M].some(f => f.zones.some(z => z.dir === ltfDir && zdist(z, ltfDir, price) === 0));
+    if (choch && swept && inZone) { dir = ltfDir; counter = true; }
   }
 
-  const cs = candleSignal(L, RL);
-  const mo = momentum(L, RL);
+  const trig = trigger(F, dir);
+  const dM = depth(M.leg, dir, price);
+  const depthOK = dM != null && dM >= 0.3 && dM <= 0.9;
 
-  // Dealing range MTF/HTF
-  const hsw = sM.swings, lh = hsw.filter(s => s.type === 'H').at(-1), ll = hsw.filter(s => s.type === 'L').at(-1);
-  const startI = lh && ll ? Math.min(lh.i, ll.i) : Math.max(0, M.length - 60);
-  const seg = M.slice(startI);
-  const dHi = Math.max(...seg.map(k => k.h)), dLo = Math.min(...seg.map(k => k.l));
-  const pos = dHi > dLo ? clamp((price - dLo) / (dHi - dLo), 0, 1) : 0.5;
-
-  const sc = { 1: 0, [-1]: 0 }, why = { 1: [], [-1]: [] };
-  const add = (d, w, t) => { if (!d) return; sc[d] += w; why[d].push(t); };
-  const bw = d => d > 0 ? 'bullish' : 'bearish';
-
-  // 1. Struktur Multi-Timeframe
-  if (sH.trend) add(sH.trend, 2.5, `${htfL} ${bw(sH.trend)} structure`);
-  if (sM.trend) add(sM.trend, 2.0, `${mtfL} ${bw(sM.trend)} structure (${sM.last?.type || 'trend'})`);
-  if (sL.last && nL - 1 - sL.last.i <= 30) {
-    add(sL.last.dir, sL.last.type === 'CHoCH' ? 2.0 : 1.5, `${ltfL} ${sL.last.type}`);
-  }
-
-  // 2. Likuiditas & Sweep
-  if (sweepL) add(sweepL.dir, sweepL.eq ? 2.0 : 1.5, `LTF sweep liquidity (${sweepL.eq ? 'EQ' : 'Swing'})`);
-  if (sweepM) add(sweepM.dir, 2.0, `MTF sweep liquidity (${mtfL})`);
-  if (sweepH) add(sweepH.dir, 2.5, `HTF major sweep (${htfL})`);
-
-  // 3. POI (Supply/Demand, FVG, OB, Kontinuitas)
-  const zDist = (z, d) => d > 0 ? (price < z.lo ? Infinity : Math.max(0, price - z.hi)) : (price > z.hi ? Infinity : Math.max(0, z.lo - price));
-  const zW = z => z.htf ? 2.5 : z.mtf ? 2.0 : z.kind === 'FVG' ? 1.2 : 1.5;
-  for (const d of [1, -1]) {
-    const at = zones.filter(z => z.dir === d && zDist(z, d) <= 0.6 * RL).sort((a, b) => zW(b) - zW(a))[0];
-    if (at) {
-      const zName = `${at.htf ? htfL : at.mtf ? mtfL : ltfL} ${at.kind}`;
-      add(d, zW(at), `reaksi di zona ${zName}`);
+  // 2) POI: zona terbaik searah dir dari HTF / MTF / LTF
+  const pois = [];
+  for (const [tw, f] of [[3, H], [2, M], [1, L]]) {
+    for (const z of f.zones) {
+      if (z.dir !== dir) continue;
+      const d = zdist(z, dir, price);
+      if (!Number.isFinite(d) || d > st.maxPull * RM) continue;
+      const fresh = z.touches === 0 ? 0.3 : 0;
+      const w = tw * (KIND_W[z.kind] ?? 1) + fresh;
+      pois.push({ lo: z.lo, hi: z.hi, kind: z.kind, name: `${z.tf} ${z.kind}${fresh ? ' fresh' : ''}`, dist: d, w, score: w - d / RM * 0.4 });
+    }
+    for (const lv of f.levels) {
+      const z = { lo: lv.p - 0.2 * f.R, hi: lv.p + 0.2 * f.R };
+      const d = zdist(z, dir, price);
+      if (!Number.isFinite(d) || d > st.maxPull * RM) continue;
+      const w = tw * 0.8;
+      pois.push({ ...z, kind: 'S/R', name: `${f.tf} S/R ${lv.n}x`, dist: d, w, score: w - d / RM * 0.4 });
     }
   }
+  pois.sort((a, b) => b.score - a.score);
+  const poi = pois[0] || null;
+  const inPoi = !!poi && poi.dist === 0;
+  const scalp = !st.confirm;
+  const contTrig = !!trig && (trig.kind === 'bos' || trig.kind === 'disp');
+  const mAligned = M.trend === dir || M.last?.dir === dir;
 
-  // 4. Discount / Premium Array
-  if (pos < 0.5) add(1, pos < 0.3 ? 1.5 : 0.8, `discount array zone (${mtfL})`);
-  else add(-1, pos > 0.7 ? 1.5 : 0.8, `premium array zone (${mtfL})`);
-
-  // 5. Candlestick & Momentum Rejection/Continuity
-  if (cs) add(cs.dir, 1.2, `${ltfL} ${cs.name}`);
-  if (mo.disp) add(mo.disp.dir, 1.5, `${ltfL} displacement impulse`);
-
-  let dir = sc[1] > sc[-1] ? 1 : -1;
-  if (Math.abs(sc[1] - sc[-1]) < 1) dir = sM.trend || sH.trend || 1;
-
-  const win = sc[dir], edge = win - sc[-dir];
-  const strong = win >= 5 && edge >= 2.0;
-  const conf = clamp(Math.round(45 + edge * 4 + win * 2), 35, 96);
-
-  // Penentuan POI Pullback / Kontinuitas untuk limit order / zona entry ideal
-  const pullPoi = zones
-    .filter(z => z.dir === dir && zDist(z, dir) > 0.2 * RL && zDist(z, dir) <= st.maxPull * RL)
-    .sort((a, b) => zDist(a, dir) - zDist(b, dir))[0];
+  // 3) MODE ENTRY
+  let mode;
+  if (inPoi && trig) mode = 'REACTION';
+  else if (inPoi) mode = scalp ? 'REACTION' : 'CONFIRM';
+  else if (contTrig && mAligned && (!poi || poi.dist > 0.5 * RL)) mode = 'CONTINUATION';
+  else if (poi) mode = 'PULLBACK';
+  else mode = scalp ? 'REACTION_LIMIT' : 'CONFIRM';
+  const market = mode === 'REACTION' || mode === 'CONTINUATION';
 
   const swingPoi = () => {
-    const sw = sM.swings
-      .filter(s => s.type === (dir > 0 ? 'L' : 'H') && (dir > 0 ? s.p < price : s.p > price))
+    const sw = L.s.swings
+      .filter(s => s.type === (dir > 0 ? 'L' : 'H') && nL - 1 - s.i <= 60 && (dir > 0 ? s.p < price - 0.2 * RL : s.p > price + 0.2 * RL))
       .sort((a, b) => Math.abs(price - a.p) - Math.abs(price - b.p))[0];
-    if (sw) return { kind: dir > 0 ? 'MTF swing low' : 'MTF swing high', dir, lo: dir > 0 ? sw.p - 0.2 * RM : sw.p, hi: dir > 0 ? sw.p + 0.2 * RM : sw.p + 0.2 * RM };
+    if (sw) return { lo: sw.p - 0.25 * RL, hi: sw.p + 0.25 * RL, name: `${L.tf} swing ${dir > 0 ? 'low' : 'high'}` };
     const e = price - dir * 0.8 * RL;
-    return { kind: 'structural poi', dir, lo: e - 0.3 * RL, hi: e + 0.3 * RL };
+    return { lo: e - 0.25 * RL, hi: e + 0.25 * RL, name: 'zona reaksi' };
   };
+  const P = poi || (market ? null : swingPoi());
 
-  const POI = pullPoi || swingPoi();
-  const needConfirm = st.confirm && (!strong || !sweepM);
-  const mode = needConfirm ? 'CONFIRM' : (pullPoi ? 'PULLBACK' : 'REACTION');
+  // 4) ZONA ENTRY (limit tidak pernah menempel harga sekarang)
+  let zLo, zHi;
+  if (market) {
+    zLo = dir > 0 ? price - 0.15 * RL : price - 0.05 * RL;
+    zHi = dir > 0 ? price + 0.05 * RL : price + 0.15 * RL;
+  } else {
+    const h = Math.max(0.25 * RL, Math.min(P.hi - P.lo, RM));
+    if (dir > 0) { zHi = Math.min(P.hi, price - 0.1 * RL); zLo = zHi - h; }
+    else { zLo = Math.max(P.lo, price + 0.1 * RL); zHi = zLo + h; }
+  }
+  const entry = (zLo + zHi) / 2;
 
-  // ======================= PERHITUNGAN STRUKTURAL SL & TP (ANTI-SAPUAN) =======================
-  const buildPlan = (mode, P) => {
-    let zLo, zHi;
-    const mid = (P.lo + P.hi) / 2;
-    if (dir > 0) { zHi = Math.min(price, P.hi); zLo = Math.min(mid, zHi - 0.4 * RL); }
-    else         { zLo = Math.max(price, P.lo); zHi = Math.max(mid, zLo + 0.4 * RL); }
-    
-    if (zHi - zLo < 1.5 * spec.pip) { const m = (zHi + zLo) / 2; zLo = m - spec.pip; zHi = m + spec.pip; }
-    const entry = (zLo + zHi) / 2;
+  // 5) SL STRUKTURAL + BUFFER
+  const buf = Math.max(st.bufL * RL, st.bufM * RM);
+  const sideOk = p => dir > 0 ? p < zLo : p > zHi;
+  const cands = [];
+  if (P) cands.push(dir > 0 ? P.lo : P.hi);                       // ujung jauh POI
+  if (L.sweep?.dir === dir) cands.push(dir > 0 ? L.c[L.sweep.i].l : L.c[L.sweep.i].h); // wick sweep
+  const near = [
+    ...L.s.swings.filter(s => nL - 1 - s.i <= 40),
+    ...M.s.swings.filter(s => M.c.length - 1 - s.i <= 30),
+  ].filter(s => s.type === (dir > 0 ? 'L' : 'H') && sideOk(s.p));
+  if (near.length) cands.push(dir > 0 ? Math.max(...near.map(s => s.p)) : Math.min(...near.map(s => s.p)));
+  if (!cands.length) cands.push(entry - dir * st.minR * RL);
 
-    // SL Struktural berbasis swing point / struktur MTF/HTF terdekat (Buffer aman dari sapuan wick XAUUSD)
-    const swCandidates = [
-      ...sM.swings.filter(s => s.type === (dir > 0 ? 'L' : 'H')).map(s => s.p),
-      ...sH.swings.filter(s => s.type === (dir > 0 ? 'L' : 'H')).map(s => s.p),
-    ].filter(p => (dir > 0 ? p < zLo : p > zHi));
+  const protective = dir > 0 ? Math.min(...cands) : Math.max(...cands);  // paling aman, SL paling jauh
+  const nearest = dir > 0 ? Math.max(...cands) : Math.min(...cands);     // paling dekat
+  const minRk = Math.max(st.minR * RL, 2 * spec.pip);
+  const maxRk = Math.max(st.maxR * RM, minRk);
+  const distTo = inv => dir * (entry - inv) + buf;                        // jarak entry -> SL
+  let inv = protective;
+  if (distTo(inv) > maxRk) inv = nearest;
+  let Rk = distTo(inv);
+  let capped = false;
+  if (Rk > maxRk) { Rk = maxRk; capped = true; }
+  if (Rk < minRk) Rk = minRk;
+  const sl = entry - dir * Rk;
 
-    let structuralSL = swCandidates.length ? (dir > 0 ? Math.min(...swCandidates) : Math.max(...swCandidates)) : (entry - dir * st.slMin * RL);
-    // Tambahkan buffer aman proporsional agar tidak gampang tersapu noise/sweep di XAUUSD
-    const safetyBuffer = Math.max(st.slMin * RL, 1.8 * spec.pip);
-    if (dir > 0) structuralSL = Math.min(structuralSL, zLo - safetyBuffer);
-    else structuralSL = Math.max(structuralSL, zHi + safetyBuffer);
+  // 6) TP DARI LIKUIDITAS & ZONA LAWAN
+  const xR = p => dir * (p - entry) / Rk;
+  const liq = [H, M, L].flatMap(f => f.pools
+    .filter(p => p.type === (dir > 0 ? 'H' : 'L'))
+    .map(p => ({ p: p.p, name: `${p.eq ? (dir > 0 ? 'EQH' : 'EQL') : (dir > 0 ? 'BSL' : 'SSL')} ${f.tf}` })));
+  const opp = [H, M, L].flatMap(f => f.zones
+    .filter(z => z.dir === -dir)
+    .map(z => ({ p: dir > 0 ? z.lo : z.hi, name: `${z.tf} ${z.kind}`, opp: true })));
+  const targets = [...liq, ...opp].map(t => ({ ...t, r: xR(t.p) })).filter(t => t.r > 0.6).sort((a, b) => a.r - b.r);
+  const front = t => t.p - dir * 0.1 * RL;
+  const pick = (lo, hi) => targets.find(t => t.r >= lo && t.r <= hi);
+  const rr = st.rr;
 
-    const riskDist = Math.max(Math.abs(entry - structuralSL), st.slMin * RL);
-    const sl = entry - dir * riskDist;
+  const t1 = pick(0.9, 2.2);
+  let tp1 = t1 ? front(t1) : entry + dir * rr[0] * Rk;
+  const oppN = targets.find(t => t.opp);
+  if (oppN && oppN.r >= 0.6 && oppN.r < xR(tp1)) tp1 = front(oppN); // hit & run: TP1 sebelum zona lawan
+  const r1 = xR(tp1);
+  const t2 = pick(r1 + 0.5, st.maxTp);
+  const tp2 = t2 ? front(t2) : entry + dir * Math.max(rr[1], r1 + 0.7) * Rk;
+  const r2 = xR(tp2);
+  const t3 = pick(r2 + 0.5, st.maxTp);
+  const tp3 = t3 ? front(t3) : entry + dir * Math.max(rr[2], r2 + 1) * Rk;
 
-    // TP berbasis Risk-to-Reward (RR) dan Liquidity Pools / S&R berikutnya
-    const tp1 = entry + dir * riskDist * st.rr[0];
-    const tp2 = entry + dir * riskDist * st.rr[1];
-    const tp3 = entry + dir * riskDist * st.rr[2];
+  // 7) WHY & CONFIDENCE
+  const why = [];
+  if (H.trend) why.push(`${H.tf} ${H.trend > 0 ? 'bullish' : 'bearish'}`);
+  if (M.trend && M.trend !== H.trend) why.push(`${M.tf} ${M.trend > 0 ? 'bullish' : 'bearish'}`);
+  if (depthOK) why.push(`pullback ${Math.round(dM * 100)}% ${M.tf}`);
+  if (poi) why.push(poi.name);
+  if (trig) why.push(trig.name);
+  if (counter) why.push(`reversal ${L.tf} CHoCH`);
 
-    return { mode, poi: P, zLo, zHi, entry, sl, Rk: riskDist, tp1, tp2, tp3, tpNames: ['liquidity target 1', 'structural array 2', 'major HTF pool'] };
+  const conf = clamp(Math.round(
+    40 + 6 * (H.trend === dir) + 6 * (M.trend === dir) + 4 * (L.trend === dir)
+    + (trig ? 8 : 0) + (inPoi ? 6 : 0) + (poi ? (poi.w >= 3 ? 5 : poi.w >= 2 ? 3 : 0) : 0)
+    + (depthOK ? 5 : 0) - (counter ? 8 : 0) - (capped ? 3 : 0)
+  ), 30, 95);
+
+  return {
+    dir, signal: dir > 0 ? 'BUY' : 'SELL', mode, counter, capped, conf, why,
+    poi, trig, dM, zLo, zHi, entry, sl, Rk,
+    tp1, tp2, tp3, tpNames: [t1?.name, t2?.name, t3?.name],
+    H, M, L,
   };
-
-  const plan = buildPlan(mode, POI);
-  return { RL, pos, sc, why, dir, conf, ltfL, mtfL, htfL, strong, signal: dir > 0 ? 'BUY' : 'SELL', ...plan };
 }
 
-// ======================= TEMPLATE ALASAN =======================
+// ======================= REASON =======================
 const MODE_LABEL = {
-  id: { REACTION: 'REAKSI ZONA', PULLBACK: 'PULLBACK STRUCTURAL', CONFIRM: 'TUNGGU KONFIRMASI LTF' },
-  en: { REACTION: 'ZONE REACTION', PULLBACK: 'STRUCTURAL PULLBACK', CONFIRM: 'WAIT LTF CONFIRMATION' },
+  id: { REACTION: 'REAKSI ZONA', REACTION_LIMIT: 'LIMIT REAKSI', CONTINUATION: 'KONTINUASI', PULLBACK: 'PULLBACK LIMIT', CONFIRM: 'TUNGGU KONFIRMASI' },
+  en: { REACTION: 'ZONE REACTION', REACTION_LIMIT: 'REACTION LIMIT', CONTINUATION: 'CONTINUATION', PULLBACK: 'PULLBACK LIMIT', CONFIRM: 'WAIT CONFIRMATION' },
+};
+const PLAN = {
+  id: {
+    REACTION: 'Harga di zona dengan trigger, entry sekarang. Setelah TP1 kena, geser SL ke BE.',
+    CONTINUATION: 'Kontinuasi setelah BOS/displacement searah HTF. Hit & run di TP1, lalu BE.',
+    PULLBACK: 'Pasang limit di POI, konfirmasi rejection saat harga mengisi zona.',
+    REACTION_LIMIT: 'Limit di swing terdekat, ambil reaksi cepat ke TP1.',
+    CONFIRM: 'Tunggu harga masuk zona lalu rejection atau CHoCH LTF, baru entry.',
+  },
+  en: {
+    REACTION: 'Price in zone with trigger, enter now. Move SL to BE after TP1.',
+    CONTINUATION: 'Continuation after BOS/displacement with HTF. Hit & run at TP1, then BE.',
+    PULLBACK: 'Limit at POI, confirm rejection when price fills the zone.',
+    REACTION_LIMIT: 'Limit at nearest swing, take quick reaction to TP1.',
+    CONFIRM: 'Wait for price into zone plus LTF rejection or CHoCH, then enter.',
+  },
 };
 
 function templateReason(a, lang) {
-  const id = lang !== 'en';
-  const f = (a.why[a.dir].length ? a.why[a.dir] : [`${a.htfL} trend alignment`]).slice(0, 3).join(' · ');
-  const poi = a.poi?.kind || 'zona POI';
-  return id 
-    ? `${f}. Setup ${a.mode} di ${poi} dengan struktur ${a.mtfL}/${a.htfL}, manajemen risiko SL struktural terkalibrasi aman.`
-    : `${f}. Setup ${a.mode} at ${poi} with ${a.mtfL}/${a.htfL} structure, risk-managed structural SL.`;
+  const en = lang === 'en';
+  const why = a.why.length ? a.why : [`${a.H.tf} ${a.dir > 0 ? 'bullish' : 'bearish'} bias`];
+  return `${why.slice(0, 4).join(' · ')}. ${PLAN[en ? 'en' : 'id'][a.mode]}`;
 }
 
-// ======================= HANDLER UTAMA =======================
+async function aiReason(a, ctx, lang, apiKey) {
+  if (!apiKey) return null;
+  const facts = {
+    market: ctx.key, style: ctx.style, signal: a.signal, mode: a.mode, counter_trend_reversal: a.counter,
+    timeframes: [a.H.tf, a.M.tf, a.L.tf], trends: { htf: a.H.trend, mtf: a.M.trend, ltf: a.L.trend },
+    pullback_depth_mtf_pct: a.dM != null ? Math.round(a.dM * 100) : null,
+    poi: a.poi?.name || null, trigger: a.trig?.name || null, confluence: a.why,
+    entry_zone: [ctx.f(a.zLo), ctx.f(a.zHi)], sl: ctx.f(a.sl), tp_targets: a.tpNames,
+  };
+  const sys = `You are a senior pure price-action trader (SMC, market structure, liquidity, supply & demand, S/R, multi-timeframe). Write ONE trade reason, max 2 short sentences (max 200 characters), in ${lang === 'en' ? 'English' : 'Bahasa Indonesia'}. Use ONLY the given facts. Never mention indicators. Never invent prices. Never say HOLD, no trade, or avoid. Mention the HTF bias, the key confluence, and the execution plan that matches the mode. Plain text, no markdown.`;
+  const ctrl = new AbortController();
+  const tm = setTimeout(() => ctrl.abort(), 9000);
+  try {
+    const r = await fetch('https://api.gutsai.id/v1/chat/completions', {
+      method: 'POST', signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: process.env.GUTSAI_MODEL || 'claude-opus-5.5',
+        temperature: 0.2, max_tokens: 160,
+        messages: [{ role: 'system', content: sys }, { role: 'user', content: JSON.stringify(facts) }],
+      }),
+    });
+    const j = await r.json();
+    if (!r.ok) return null;
+    const txt = String(j?.choices?.[0]?.message?.content || '').replace(/[`*#"]/g, '').replace(/\s+/g, ' ').trim();
+    if (!txt || /\bhold\b/i.test(txt)) return null;
+    return txt.slice(0, 260);
+  } catch { return null; } finally { clearTimeout(tm); }
+}
+
+// ======================= HANDLER =======================
 const reply = (res, payload, analysis = {}) =>
   res.status(200).json({ choices: [{ message: { role: 'assistant', content: JSON.stringify(payload) } }], analysis });
 
@@ -439,33 +564,33 @@ export default async function handler(req, res) {
   const f = p => Number(p).toFixed(spec.dec);
 
   try {
+    // 1. Candle 3 timeframe (paralel)
     let Ld, Md, Hd;
     try {
-      [Ld, Md, Hd] = await Promise.all([
-        getCandles(spec, st.ltf),
-        getCandles(spec, st.mtf),
-        getCandles(spec, st.htf)
-      ]);
+      [Ld, Md, Hd] = await Promise.all([getCandles(spec, st.ltf), getCandles(spec, st.mtf), getCandles(spec, st.htf)]);
     } catch (e) {
-      return res.status(503).json({ error: id ? `Data candle multi-timeframe belum lengkap (${e.message}).` : `Multi-TF candle data incomplete (${e.message}).` });
+      return res.status(503).json({ error: id ? `Data candle belum tersedia (${e.message}). Silakan generate ulang.` : `Candle data unavailable (${e.message}). Please regenerate.` });
+    }
+    if (Ld.stale) {
+      return res.status(503).json({ error: id ? 'Market sedang tutup / feed candle tidak aktif. Generate saat sesi buka.' : 'Market closed / candle feed inactive. Generate during open session.' });
     }
 
+    // 2. Samakan basis tiap TF ke harga live (ikut kalibrasi MT)
     const rebase = c => {
       const shift = price - c[c.length - 1].c;
-      if (Math.abs(shift) / price > 0.08) throw new Error('out of sync');
+      if (Math.abs(shift) / price > 0.05) throw new Error('out of sync');
       return c.map(k => ({ ...k, o: k.o + shift, h: k.h + shift, l: k.l + shift, c: k.c + shift }));
     };
-
     let L, M, H;
-    try {
-      L = rebase(Ld.c); M = rebase(Md.c); H = rebase(Hd.c);
-    } catch {
-      return res.status(503).json({ error: id ? 'Sinkronisasi harga live gagal.' : 'Live price sync failed.' });
-    }
+    try { L = rebase(Ld.c); M = rebase(Md.c); H = rebase(Hd.c); }
+    catch { return res.status(503).json({ error: id ? 'Sumber data tidak sinkron dengan harga live. Generate ulang.' : 'Data source out of sync. Please regenerate.' }); }
 
-    const a = analyzeMultiTF(L, M, H, price, st, spec);
-    const text = templateReason(a, lang);
+    // 3. Analisis multi-timeframe
+    const F = { L: frame(L, 2, st.ltf), M: frame(M, 2, st.mtf), H: frame(H, 3, st.htf) };
+    const a = analyze(F, price, st, spec);
+    const text = (await aiReason(a, { key, style: tradingStyle, f }, lang, process.env.GUTSAI_API_KEY)) || templateReason(a, lang);
 
+    // 4. Output
     const pips = (p, neg) => `${neg ? '-' : '+'}${(Math.abs(p - a.entry) / spec.pip).toFixed(1)} pips`;
     const rr2 = (Math.abs(a.tp2 - a.entry) / a.Rk).toFixed(1);
     const label = MODE_LABEL[id ? 'id' : 'en'][a.mode];
@@ -480,8 +605,9 @@ export default async function handler(req, res) {
       mode: a.mode, confidence: a.conf,
       reason: `[${label} · ${a.conf}% · RR 1:${rr2}] ${text}`,
     }, {
-      source: `${Ld.src} ${a.ltfL} / ${Md.src} ${a.mtfL} / ${Hd.src} ${a.htfL}`,
-      score: a.sc, confidence: a.conf, factors: a.why, strong: a.strong,
+      source: `${Ld.src} ${F.L.tf} / ${Md.src} ${F.M.tf} / ${Hd.src} ${F.H.tf}`,
+      confidence: a.conf, counter: a.counter, capped: a.capped,
+      trends: { htf: F.H.trend, mtf: F.M.trend, ltf: F.L.trend },
     });
   } catch (error) {
     return res.status(500).json({ error: error.message });
