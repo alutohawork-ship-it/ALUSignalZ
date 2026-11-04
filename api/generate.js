@@ -29,7 +29,7 @@ Evaluasi kondisi teknikal sesuai gaya trading tersebut dan berikan output terstr
                 'Authorization': `Bearer ${gutsKey}`
             },
             body: JSON.stringify({
-                model: 'guts-default', // Sesuaikan dengan model GutsAI Anda jika berbeda
+                model: 'claude-opus-5.5',
                 messages: [
                     { role: 'system', content: systemPrompt },
                     { role: 'user', content: `Analisis sinyal live untuk ${marketId} dengan gaya ${tradingStyle}.` }
