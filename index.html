@@ -44,14 +44,14 @@
         <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
             <div class="flex justify-between items-center">
                 <label class="text-[9px] font-bold text-gray-400">TARGET ASET AKTIF</label>
-                <span id="selectedPairBadge" class="text-[9px] font-mono text-accentblue font-bold">veranta|XAU-USD</span>
+                <span id="selectedPairBadge" class="text-[9px] font-mono text-accentblue font-bold">veranta|XAUUSD</span>
             </div>
 
             <!-- Dropdown Multi-Asset Lengkap -->
             <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
                 <optgroup label="Gold, Silver & Commodities">
-                    <option value="veranta|XAU-USD">XAU-USD / Gold (Veranta)</option>
-                    <option value="veranta|XAG-USD">XAG-USD / Silver (Veranta)</option>
+                    <option value="veranta|XAUUSD">XAU/USD / Gold (Veranta)</option>
+                    <option value="veranta|XAGUSD">XAG/USD / Silver (Veranta)</option>
                     <option value="veranta|EURUSD">EUR/USD (Veranta)</option>
                     <option value="veranta|USDJPY">USD/JPY (Veranta)</option>
                 </optgroup>
@@ -187,17 +187,16 @@
                 <span id="livePulse" class="text-[8px] text-emerald-400 font-mono animate-pulse">● Live Stream</span>
             </div>
 
-            <!-- List Ticker Lengkap Semua Pair -->
             <div id="tickerListContainer" class="space-y-1 max-h-[190px] overflow-y-auto pr-1">
                 
-                <!-- Gold & Silver (Veranta Provider) -->
-                <div onclick="selectTicker('veranta|XAU-USD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">XAU-USD <span class="text-[7px] text-yellow-400">Gold</span></span>
-                    <span id="price-XAU-USD" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                <!-- Gold & Silver -->
+                <div onclick="selectTicker('veranta|XAUUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">XAUUSD <span class="text-[7px] text-yellow-400">Gold</span></span>
+                    <span id="price-XAUUSD" class="text-[10px] font-mono font-bold text-white">--.--</span>
                 </div>
-                <div onclick="selectTicker('veranta|XAG-USD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">XAG-USD <span class="text-[7px] text-yellow-400">Silver</span></span>
-                    <span id="price-XAG-USD" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                <div onclick="selectTicker('veranta|XAGUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">XAGUSD <span class="text-[7px] text-yellow-400">Silver</span></span>
+                    <span id="price-XAGUSD" class="text-[10px] font-mono font-bold text-white">--.--</span>
                 </div>
 
                 <!-- Forex -->
@@ -237,24 +236,6 @@
                     <span class="font-bold text-[10px] text-white">DJI <span class="text-[7px] text-purple-400">Ostium</span></span>
                     <span id="price-DJI" class="text-[10px] font-mono font-bold text-white">--.--</span>
                 </div>
-                <div onclick="selectTicker('hyperliquid|xyz:SP500')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">xyz:SP500 <span class="text-[7px] text-purple-400">Hyperliquid</span></span>
-                    <span id="price-xyz:SP500" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-
-                <!-- Stocks -->
-                <div onclick="selectTicker('hyperliquid|xyz:AAPL')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">xyz:AAPL <span class="text-[7px] text-red-400">Hyperliquid</span></span>
-                    <span id="price-xyz:AAPL" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-                <div onclick="selectTicker('binance|NVDAUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">NVDAUSDT <span class="text-[7px] text-red-400">Binance</span></span>
-                    <span id="price-NVDAUSDT" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-                <div onclick="selectTicker('binance|TSLAUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">TSLAUSDT <span class="text-[7px] text-red-400">Binance</span></span>
-                    <span id="price-TSLAUSDT" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
 
             </div>
         </div>
@@ -276,7 +257,7 @@
         }
 
         // =======================================================
-        // WEBSOCKET MULTI-ASSET STREAM (MENGGUNAKAN STANDAR API RESMI)
+        // WEBSOCKET MULTI-ASSET STREAM (MENGIRIM KEDUA VARIAN SYMBOL)
         // =======================================================
         let ws;
         let pingInterval;
@@ -292,12 +273,13 @@
                     wsStatus.textContent = 'WS: CONNECTED';
                     wsStatus.className = 'text-[8px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40';
 
+                    // Mengirimkan XAUUSD, XAU-USD, XAU, XAGUSD, XAG-USD untuk menangkap varian penamaan
                     const subFrame = {
                         op: "sub",
                         id: 1,
                         channel: "ticks",
                         payload: {
-                            symbols: ["XAU-USD", "XAG-USD", "EURUSD", "USDJPY", "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "xyz:BRENTOIL", "DJI", "xyz:SP500", "xyz:AAPL", "NVDAUSDT", "TSLAUSDT"],
+                            symbols: ["XAUUSD", "XAU-USD", "XAU", "XAGUSD", "XAG-USD", "EURUSD", "USDJPY", "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "xyz:BRENTOIL", "DJI"],
                             providers: ["veranta", "binance", "ostium", "hyperliquid"]
                         }
                     };
@@ -317,11 +299,20 @@
                         if (frame.op === "events" && Array.isArray(frame.events)) {
                             frame.events.forEach(ev => {
                                 if (ev.symbol && ev.price) {
-                                    const symbolKey = ev.symbol;
-                                    const priceEl = document.getElementById(`price-${symbolKey}`);
-                                    if (priceEl) {
-                                        const numPrice = parseFloat(ev.price);
-                                        priceEl.textContent = numPrice.toLocaleString('en-US', { minimumFractionDigits: 2 });
+                                    const numPrice = parseFloat(ev.price).toLocaleString('en-US', { minimumFractionDigits: 2 });
+                                    
+                                    // Update jika symbol cocok dengan ID persis
+                                    let priceEl = document.getElementById(`price-${ev.symbol}`);
+                                    if (priceEl) priceEl.textContent = numPrice;
+
+                                    // Pemetaan fleksibel untuk Gold/Silver jika server mengembalikan nama berbeda
+                                    if (ev.symbol === "XAUUSD" || ev.symbol === "XAU-USD" || ev.symbol === "XAU") {
+                                        const goldEl = document.getElementById('price-XAUUSD');
+                                        if (goldEl) goldEl.textContent = numPrice;
+                                    }
+                                    if (ev.symbol === "XAGUSD" || ev.symbol === "XAG-USD" || ev.symbol === "XAG") {
+                                        const silverEl = document.getElementById('price-XAGUSD');
+                                        if (silverEl) silverEl.textContent = numPrice;
                                     }
                                 }
                             });
