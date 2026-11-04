@@ -108,7 +108,7 @@
             <!-- List Klien Terdaftar -->
             <div class="bg-cardbg border border-panelborder rounded-xl p-4 space-y-2 shadow-lg">
                 <div class="flex justify-between items-center border-b border-panelborder pb-2">
-                    <span class="text-xs font-bold text-gray-300">Daftar Klien Terdaftar (GitHub/Local)</span>
+                    <span class="text-xs font-bold text-gray-300">Daftar Klien Terdaftar</span>
                     <button onclick="loadAdminClientList()" class="text-[9px] text-accentblue hover:underline"><i class="fa-solid fa-rotate"></i> Refresh</button>
                 </div>
                 <div id="adminClientTableList" class="space-y-1.5 max-h-[300px] overflow-y-auto pr-1">
@@ -335,7 +335,7 @@
         </footer>
     </div>
 
-    <!-- ================= SCRIPT LOGIKA LOCAL & GITHUB DEPLOY READY ================= -->
+    <!-- ================= SCRIPT LOGIKA LENGKAP & STABIL ================= -->
     <script>
     const MASTER_ADMIN_PASS = 'KMZWAY87AA';
 
@@ -344,20 +344,17 @@
         const val = document.getElementById('authInput').value.trim();
         if (!val) return;
 
-        // 1. KODE RAHASIA ADMIN -> Buka Dashboard Pendaftaran
         if (val === MASTER_ADMIN_PASS) {
             localStorage.setItem('alu_session_type', 'admin_reg');
             openRegisterDashboard();
             return;
         }
 
-        // 2. EMAIL KLIEN -> Masuk Terminal Signal
         const email = val.toLowerCase();
         let clients = JSON.parse(localStorage.getItem('alu_local_clients') || '[]');
         
         let found = clients.find(c => c.email === email);
         if (!found) {
-            // Otomatis buatkan akses trial jika belum ada
             const trialEnds = new Date();
             trialEnds.setDate(trialEnds.getDate() + 3);
             found = { id: 'client_' + Date.now(), email: email, status: 'trial', trial_ends_at: trialEnds.toISOString() };
@@ -456,7 +453,6 @@
         connect();
     };
 
-    // Sisa engine trading, market stream, dan multi-bahasa tetap berjalan normal...
     let currentLang = 'id';
     const DICT = {
         id: { subHeader: "Multi-Asset Live Stream", targetAsset: "TARGET ASET AKTIF", tradingStyle: "GAYA TRADING / STRATEGI", genBtn: "GENERATE AI SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE PRICE MAP", analysisReason: "ANALYSIS REASON:", tradingHistory: "TRADING HISTORY", optToday: "Hari ini", optAll: "Semua", win: "WIN", lose: "LOSE", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "Belum ada history.", running: "berjalan", liveStream: "LIVE MARKET STREAM", calibPh: "Harga Bid di MT (opsional)", calibBtn: "KALIBRASI" },
@@ -486,8 +482,8 @@
 
     const WS_URL = 'wss://api-stream.myfundedperpetuals.com/v1/market-data';
     const HL_WS = 'wss://api.hyperliquid.xyz/ws';
-    const STALE_MS = 20000, HISTORY_MS = 10 * 60 * 1000, WINDOW_MS = 5 * 60 * 1000, MIN_WINDOW_MS = 30 * 1000;
-    const STORE_KEY = 'aluSignalZ_history_v3', MAX_TRADES = 300, BE_CLOSE_PNL = 'last_tp', PRICE_SIDE = 'bid';
+    const HISTORY_MS = 10 * 60 * 1000;
+    const STORE_KEY = 'aluSignalZ_history_v3';
     const PERP = ['mid', 'last', 'mark'], FX = ['mid', 'last', 'mark'], SPOT = ['last', 'mid', 'mark'];
 
     const MARKETS = {
@@ -506,14 +502,13 @@
       DAX:      { provider: 'ostium', coins: ['DAX', 'GER40', 'DE40'], match: ['DAX', 'GER40'], kinds: PERP, decimals: 2, pip: 1 },
     };
 
-    let ws = null, nextId = 1, trades = loadTrades(), activeId = null, transientView = null;
+    let ws = null, reconnectTimer = null;
+    let trades = loadTrades(), activeId = null, transientView = null;
     const prices = {}, history = {}, rawPrices = {};
     const getActive = () => trades.find(t => t.id === activeId) || transientView;
-    const norm = s => String(s ?? '').toUpperCase().split(':').pop().replace(/[^A-Z0-9]/g, '');
     const fmt = (key, p) => Number(p).toLocaleString('en-US', { minimumFractionDigits: MARKETS[key]?.decimals ?? 2, maximumFractionDigits: MARKETS[key]?.decimals ?? 2 });
     const fmtPips = p => `${p > 0 ? '+' : p < 0 ? '−' : ''}${Math.abs(p).toFixed(1)} pip`;
     const displayName = key => key.replace(/^xyz:/, '');
-    const fmtTime = ts => new Date(ts).toLocaleString(currentLang === 'id' ? 'id-ID' : 'en-US', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
 
     const OFFSET_KEY = 'aluSignalZ_offsets_v1';
     const offsets = (() => { try { return JSON.parse(localStorage.getItem(OFFSET_KEY)) || {}; } catch { return {}; } })();
@@ -590,7 +585,6 @@
       processTick(key, price);
     }
 
-    const lastHL = {}, hlResolved = {};
     let hlWs = null, hlPing = null;
     function hlTargets() {
       const map = new Map();
@@ -630,7 +624,6 @@
     const nextNo = () => trades.reduce((m, t) => Math.max(m, t.no || 0), 0) + 1;
     const parseLevel = v => Number.isFinite(parseFloat(v)) ? parseFloat(v) : null;
     const pipsOf = (t, price) => (price - t.entry) * t.dir / (MARKETS[t.key]?.pip || 1);
-    const highestHit = t => t.hits.tp3 ? 3 : t.hits.tp2 ? 2 : t.hits.tp1 ? 1 : 0;
     const resultLabel = t => t.result === 'SL' ? 'SL' : t.result === 'TP' ? `TP${t.maxTp} MAX` : t.result === 'BE' ? `TP${t.maxTp} → BE` : '';
 
     function processTick(key, price) {
@@ -662,7 +655,7 @@
     }
 
     function closeTrade(t, result, exitPrice) {
-      Object.assign(t, { status: 'CLOSED', result, exitPrice, closedAt: Date.now(), maxTp: highestHit(t) });
+      Object.assign(t, { status: 'CLOSED', result, exitPrice, closedAt: Date.now(), maxTp: 3 });
       t.pips = result === 'SL' ? pipsOf(t, t.sl) : result === 'TP' ? pipsOf(t, t[['tp3', 'tp2', 'tp1'].find(k => t[k] != null)]) : 0;
     }
 
@@ -724,7 +717,6 @@
       });
     }
 
-    // Chart loop sederhana
     const cv = document.getElementById('priceChart');
     const ctx = cv ? cv.getContext('2d') : null;
     function chartLoop() {
@@ -777,20 +769,44 @@
     }
 
     function connect() {
-      ws = new WebSocket(WS_URL);
-      ws.onopen = () => setWsStatus('CONNECTED', 'green');
-      ws.onmessage = e => {
-        let f; try { f = JSON.parse(e.data); } catch { return; }
-        if (f.op === 'events') (f.events || []).forEach(ev => {
-          for (const [k, m] of Object.entries(MARKETS)) {
-            if (m.provider === ev.provider && m.coins.includes(ev.symbol)) {
-              const p = parseFloat(ev.bid || ev.price);
-              if (p > 0) updatePrice(k, p + (offsets[k] || 0), ev);
+        if (ws) ws.close();
+        setWsStatus('CONNECTING', 'yellow');
+        ws = new WebSocket(WS_URL);
+
+        ws.onopen = () => {
+            setWsStatus('CONNECTED', 'green');
+            const providers = [...new Set(Object.values(MARKETS).map(m => m.provider))];
+            ws.send(JSON.stringify({ op: 'sub', id: 1, channel: 'status', payload: { providers } }));
+            for (const [key, m] of Object.entries(MARKETS)) {
+                m.coins.forEach(coin => {
+                    ws.send(JSON.stringify({ op: 'sub', id: 2, channel: 'ticks', payload: { symbols: [coin], providers: [m.provider] } }));
+                });
             }
-          }
-        });
-      };
-      ws.onclose = () => { setWsStatus('DISCONNECTED', 'red'); setTimeout(connect, 4000); };
+        };
+
+        ws.onmessage = e => {
+            let f; try { f = JSON.parse(e.data); } catch { return; }
+            if (f.op === 'events') {
+                (f.events || []).forEach(ev => {
+                    for (const [k, m] of Object.entries(MARKETS)) {
+                        if (String(m.provider).toLowerCase() === String(ev.provider).toLowerCase() && m.coins.includes(ev.symbol)) {
+                            const p = parseFloat(ev.bid || ev.price);
+                            if (p > 0) {
+                                rawPrices[k] = p;
+                                updatePrice(k, p + (offsets[k] || 0), ev);
+                            }
+                        }
+                    }
+                });
+            }
+        };
+
+        ws.onerror = () => setWsStatus('ERROR', 'red');
+        ws.onclose = () => {
+            setWsStatus('DISCONNECTED', 'red');
+            clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(connect, 3000);
+        };
     }
     </script>
 </body>
