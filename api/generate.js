@@ -1,7 +1,7 @@
 // ============================================================
 // api/generate.js
 // Signal engine: Scalping / Day Trade / Intraday / Swing
-// Multi-timeframe (Entry + Bias + HTF) + SMC + Teknikal
+// Menerima data OHLC dari frontend (WebSocket stream)
 // ============================================================
 
 // ===================== PRESETS =====================
@@ -12,9 +12,9 @@ const STYLE_PRESETS = {
     tf_bias:  "5m",
     tf_htf:   "15m",
     tf_minutes: 3,
-    max_hold_bars: 10,             // 10 × 3m = 30 menit
+    max_hold_bars: 10,
     killzone: true,
-    killzone_tight: true,          // hanya London + NY AM
+    killzone_tight: true,
     tech_weight: 0.30,
     min_total: 60,
     exit_mode: "single",
@@ -31,14 +31,13 @@ const STYLE_PRESETS = {
       min_smc_score: 60,
     },
   },
-
   daytrade: {
     label: "Day Trade (hold 1-2 jam)",
     tf_entry: "5m",
     tf_bias:  "30m",
     tf_htf:   "1h",
     tf_minutes: 5,
-    max_hold_bars: 24,             // 24 × 5m = 2 jam
+    max_hold_bars: 24,
     killzone: true,
     killzone_tight: false,
     tech_weight: 0.40,
@@ -56,14 +55,13 @@ const STYLE_PRESETS = {
       ob_lookback: 25, fvg_lookback: 20, min_smc_score: 50,
     },
   },
-
   intraday: {
     label: "Intraday (hold 3-6 jam)",
     tf_entry: "5m",
     tf_bias:  "1h",
     tf_htf:   "4h",
     tf_minutes: 5,
-    max_hold_bars: 60,             // 60 × 5m = 5 jam
+    max_hold_bars: 60,
     killzone: true,
     killzone_tight: false,
     tech_weight: 0.45,
@@ -81,14 +79,13 @@ const STYLE_PRESETS = {
       ob_lookback: 30, fvg_lookback: 25, min_smc_score: 55,
     },
   },
-
   swing: {
     label: "Swing (hold 2-5 hari)",
     tf_entry: "15m",
     tf_bias:  "4h",
     tf_htf:   "1d",
     tf_minutes: 15,
-    max_hold_bars: 288,            // 3 hari
+    max_hold_bars: 288,
     killzone: false,
     killzone_tight: false,
     tech_weight: 0.50,
@@ -187,18 +184,11 @@ function adxSimple(candles, period = 14) {
   return { adx: adxVal, pdi: pdi.at(-1), ndi: ndi.at(-1) };
 }
 
-// ===================== KILLZONE (UTC) =====================
-const KZ = {
-  asia:   [0, 3],
-  london: [7, 10],
-  ny_am:  [12, 15],
-  ny_pm:  [16, 19],
-};
+// ===================== KILLZONE =====================
+const KZ = { asia: [0, 3], london: [7, 10], ny_am: [12, 15], ny_pm: [16, 19] };
 
 function inKillzone(nowUtcHour, tight = false) {
-  const windows = tight
-    ? [KZ.london, KZ.ny_am]
-    : [KZ.london, KZ.ny_am, KZ.ny_pm, KZ.asia];
+  const windows = tight ? [KZ.london, KZ.ny_am] : [KZ.london, KZ.ny_am, KZ.ny_pm, KZ.asia];
   return windows.some(([a, b]) => nowUtcHour >= a && nowUtcHour < b);
 }
 
@@ -247,10 +237,8 @@ function findLiquiditySweep(candles, swings, lookback = 10, dir = "bullish") {
     : swings.filter(s => s.type === "H").at(-1);
   if (!ref) return null;
   for (const c of recent) {
-    if (dir === "bullish" && c.low < ref.price && c.close > ref.price)
-      return { level: ref.price, candle: c, dir };
-    if (dir === "bearish" && c.high > ref.price && c.close < ref.price)
-      return { level: ref.price, candle: c, dir };
+    if (dir === "bullish" && c.low < ref.price && c.close > ref.price) return { level: ref.price, candle: c, dir };
+    if (dir === "bearish" && c.high > ref.price && c.close < ref.price) return { level: ref.price, candle: c, dir };
   }
   return null;
 }
@@ -273,18 +261,14 @@ function findFVG(candles, lookback = 15, dir = "bullish") {
   const slice = candles.slice(-lookback);
   for (let i = 2; i < slice.length; i++) {
     const a = slice[i - 2], c = slice[i];
-    if (dir === "bullish" && c.low > a.high)
-      return { top: c.low, bottom: a.high, idx: i - 1, dir };
-    if (dir === "bearish" && c.high < a.low)
-      return { top: a.low, bottom: c.high, idx: i - 1, dir };
+    if (dir === "bullish" && c.low > a.high) return { top: c.low, bottom: a.high, idx: i - 1, dir };
+    if (dir === "bearish" && c.high < a.low) return { top: a.low, bottom: c.high, idx: i - 1, dir };
   }
   return null;
 }
 
 function detectDisplacement(candles, atrArr, mult = 0.8) {
-  const last = candles.at(-1);
-  const prev = candles.at(-2);
-  const a = atrArr.at(-1) || 0;
+  const last = candles.at(-1), prev = candles.at(-2), a = atrArr.at(-1) || 0;
   if (!last || !prev || !a) return null;
   const body = Math.abs(last.close - last.open);
   if (body < a * mult) return null;
@@ -296,8 +280,7 @@ function premiumDiscount(candles, swings) {
   const lastH = swings.filter(s => s.type === "H").at(-1);
   const lastL = swings.filter(s => s.type === "L").at(-1);
   if (!lastH || !lastL) return null;
-  const hi = lastH.price, lo = lastL.price;
-  const eq = (hi + lo) / 2;
+  const hi = lastH.price, lo = lastL.price, eq = (hi + lo) / 2;
   const price = candles.at(-1).close;
   return { hi, lo, eq, zone: price < eq ? "discount" : "premium", price };
 }
@@ -307,10 +290,8 @@ function scoreBiasTF(candles, cfg) {
   if (!candles || candles.length < 60) return { dir: "neutral", score: 0, bull: 0, bear: 0 };
   const closes = candles.map(c => c.close);
   const e20 = ema(closes, 20), e50 = ema(closes, 50);
-  const i = closes.length - 1;
-  const price = closes[i];
-  const ema20 = e20[i], ema50 = e50[i];
-  const ema50Prev = e50[i - 5] ?? ema50;
+  const i = closes.length - 1, price = closes[i];
+  const ema20 = e20[i], ema50 = e50[i], ema50Prev = e50[i - 5] ?? ema50;
 
   let bull = 0, bear = 0;
   if (price > ema50) bull += 2; else bear += 2;
@@ -319,8 +300,8 @@ function scoreBiasTF(candles, cfg) {
 
   const swings = findSwings(candles, cfg.swing_len);
   const { bos, choch } = findBOS_CHoCH(candles, swings, cfg.structure_lookback);
-  if (bos?.dir === "bullish")   bull += 2;
-  if (bos?.dir === "bearish")   bear += 2;
+  if (bos?.dir === "bullish") bull += 2;
+  if (bos?.dir === "bearish") bear += 2;
   if (choch?.dir === "bullish") bull += 1;
   if (choch?.dir === "bearish") bear += 1;
 
@@ -344,21 +325,16 @@ function scoreSMC(candles, dir, cfg, atrArr) {
 
   const ob = findOrderBlock(candles, cfg.ob_lookback, dir);
   const price = candles.at(-1).close;
-  if (ob && price <= ob.top && price >= ob.bottom) {
-    score += 15; reasons.push("Retest Order Block");
-  }
+  if (ob && price <= ob.top && price >= ob.bottom) { score += 15; reasons.push("Retest Order Block"); }
 
   const fvg = findFVG(candles, cfg.fvg_lookback, dir);
-  if (fvg && price <= fvg.top && price >= fvg.bottom) {
-    score += 10; reasons.push("FVG fill");
-  }
+  if (fvg && price <= fvg.top && price >= fvg.bottom) { score += 10; reasons.push("FVG fill"); }
 
   const disp = detectDisplacement(candles, atrArr, cfg.displacement_atr);
   if (disp && disp.dir === dir) { score += 15; reasons.push("Displacement"); }
 
   const pd = premiumDiscount(candles, swings);
-  if (pd && ((dir === "bullish" && pd.zone === "discount") ||
-             (dir === "bearish" && pd.zone === "premium"))) {
+  if (pd && ((dir === "bullish" && pd.zone === "discount") || (dir === "bearish" && pd.zone === "premium"))) {
     score += 10; reasons.push(`Zona ${pd.zone}`);
   }
 
@@ -371,201 +347,102 @@ function scoreTech(candles, dir, cfg) {
   const closes = candles.map(c => c.close);
   const i = closes.length - 1;
 
-  const e20 = ema(closes, 20), e50 = ema(closes, 50);
-  const price = closes[i];
+  const e20 = ema(closes, 20), e50 = ema(closes, 50), price = closes[i];
 
-  if (dir === "bullish" && price > e20[i] && e20[i] > e50[i]) {
-    score += 20; reasons.push("EMA stack bullish");
-  }
-  if (dir === "bearish" && price < e20[i] && e20[i] < e50[i]) {
-    score += 20; reasons.push("EMA stack bearish");
-  }
+  if (dir === "bullish" && price > e20[i] && e20[i] > e50[i]) { score += 20; reasons.push("EMA stack bullish"); }
+  if (dir === "bearish" && price < e20[i] && e20[i] < e50[i]) { score += 20; reasons.push("EMA stack bearish"); }
 
   const { adx, pdi, ndi } = adxSimple(candles, 14);
   if (adx >= cfg.adx_min) {
     score += 15;
-    if ((dir === "bullish" && pdi > ndi) || (dir === "bearish" && ndi > pdi))
-      reasons.push(`ADX ${adx.toFixed(1)} trend`);
+    if ((dir === "bullish" && pdi > ndi) || (dir === "bearish" && ndi > pdi)) reasons.push(`ADX ${adx.toFixed(1)} trend`);
     else score -= 5;
   }
 
-  const rsiArr = rsiSeries(closes, 14);
-  const r = rsiArr[i];
+  const rsiArr = rsiSeries(closes, 14), r = rsiArr[i];
   if (dir === "bullish" && r > 40 && r < 70) { score += 15; reasons.push(`RSI ${r.toFixed(1)}`); }
   if (dir === "bearish" && r < 60 && r > 30) { score += 15; reasons.push(`RSI ${r.toFixed(1)}`); }
 
-  const atrArr = atrSeries(candles, 14);
-  const a = atrArr[i] || 0;
-  const distEMA = Math.abs(price - e20[i]);
-  if (a > 0 && distEMA <= a * cfg.pullback_atr * 2) {
-    score += 20; reasons.push("Pullback ke EMA20");
-  }
+  const atrArr = atrSeries(candles, 14), a = atrArr[i] || 0;
+  if (a > 0 && Math.abs(price - e20[i]) <= a * cfg.pullback_atr * 2) { score += 20; reasons.push("Pullback ke EMA20"); }
 
   return { score: Math.max(0, Math.min(score, 100)), reasons };
 }
 
 // ===================== SIGNAL GENERATOR =====================
 function generateSignal({ entry, bias, htf }, preset, nowUtcHour) {
-  const out = {
-    side: null, score: 0, smcScore: 0, techScore: 0,
-    reasons: [], dir: null, entry: null, sl: null, tp: [], atr: null, risk: null,
-    management: null,
-  };
+  const out = { side: null, score: 0, smcScore: 0, techScore: 0, reasons: [], dir: null, entry: null, sl: null, tp: [], atr: null, risk: null, management: null };
 
-  if (!entry?.length || !bias?.length || !htf?.length) {
-    out.reasons.push("Data candle kurang");
-    return out;
-  }
-  if (entry.length < 60 || bias.length < 60 || htf.length < 60) {
-    out.reasons.push("Candle belum cukup (min 60)");
-    return out;
-  }
+  if (!entry?.length || !bias?.length || !htf?.length) { out.reasons.push("Data candle kurang"); return out; }
+  if (entry.length < 60 || bias.length < 60 || htf.length < 60) { out.reasons.push("Candle belum cukup (min 60)"); return out; }
+  if (preset.killzone && !inKillzone(nowUtcHour, preset.killzone_tight)) { out.reasons.push("Di luar killzone"); return out; }
 
-  // 1) Killzone
-  if (preset.killzone && !inKillzone(nowUtcHour, preset.killzone_tight)) {
-    out.reasons.push("Di luar killzone");
-    return out;
-  }
-
-  // 2) HTF bias
   const htfBias = scoreBiasTF(htf, preset.smc);
-  if (htfBias.dir === "neutral") {
-    out.reasons.push("HTF netral");
-    return out;
-  }
+  if (htfBias.dir === "neutral") { out.reasons.push("HTF netral"); return out; }
 
-  // 3) Bias TF harus selaras HTF
   const midBias = scoreBiasTF(bias, preset.smc);
-  if (midBias.dir !== htfBias.dir) {
-    out.reasons.push(`Bias TF tidak selaras (${midBias.dir} vs ${htfBias.dir})`);
-    return out;
-  }
+  if (midBias.dir !== htfBias.dir) { out.reasons.push(`Bias TF tidak selaras (${midBias.dir} vs ${htfBias.dir})`); return out; }
 
   const dir = htfBias.dir;
-
-  // 4) Skor di entry TF
   const atrArr = atrSeries(entry, 14);
   const smc  = scoreSMC(entry, dir, preset.smc, atrArr);
   const tech = scoreTech(entry, dir, preset.cfg);
 
   const total = (1 - preset.tech_weight) * smc.score + preset.tech_weight * tech.score;
-  out.smcScore  = Math.round(smc.score);
+  out.smcScore = Math.round(smc.score);
   out.techScore = Math.round(tech.score);
-  out.score     = Math.round(total);
-  out.reasons   = [...smc.reasons, ...tech.reasons];
-  out.dir       = dir;
+  out.score = Math.round(total);
+  out.reasons = [...smc.reasons, ...tech.reasons];
+  out.dir = dir;
 
-  // 5) Threshold
-  if (smc.score < preset.smc.min_smc_score) {
-    out.reasons.push(`SMC ${smc.score} < ${preset.smc.min_smc_score}`);
-    return out;
-  }
-  if (total < preset.min_total) {
-    out.reasons.push(`Total ${total.toFixed(1)} < ${preset.min_total}`);
-    return out;
-  }
+  if (smc.score < preset.smc.min_smc_score) { out.reasons.push(`SMC ${smc.score} < ${preset.smc.min_smc_score}`); return out; }
+  if (total < preset.min_total) { out.reasons.push(`Total ${total.toFixed(1)} < ${preset.min_total}`); return out; }
 
-  // 6) SL & TP
   const price = entry.at(-1).close;
   const a = atrArr.at(-1) || 0;
   if (a <= 0) { out.reasons.push("ATR nol"); return out; }
 
   const swings = findSwings(entry, preset.smc.swing_len);
-  const lastSwing = dir === "bullish"
-    ? swings.filter(s => s.type === "L").at(-1)
-    : swings.filter(s => s.type === "H").at(-1);
-
+  const lastSwing = dir === "bullish" ? swings.filter(s => s.type === "L").at(-1) : swings.filter(s => s.type === "H").at(-1);
   let slDist = lastSwing ? Math.abs(price - lastSwing.price) : a * preset.cfg.sl_min_atr;
   slDist = Math.max(slDist, a * preset.cfg.sl_min_atr);
   slDist = Math.min(slDist, a * preset.cfg.sl_max_atr);
 
-  const sl = dir === "bullish" ? price - slDist : price + slDist;
-  const tp = preset.cfg.tp_r.slice(0, preset.target_tp).map(r =>
-    dir === "bullish" ? price + slDist * r : price - slDist * r
-  );
-
   out.side = dir === "bullish" ? "BUY" : "SELL";
   out.entry = price;
-  out.sl = sl;
-  out.tp = tp;
+  out.sl = dir === "bullish" ? price - slDist : price + slDist;
+  out.tp = preset.cfg.tp_r.slice(0, preset.target_tp).map(r => dir === "bullish" ? price + slDist * r : price - slDist * r);
   out.atr = a;
   out.risk = slDist;
   out.management = preset.management;
   return out;
 }
 
-// ===================== FETCH CANDLE =====================
-// Default: Twelve Data. Ganti fungsi ini kalau pakai provider lain.
-// Map interval Twelve Data: 1min, 5min, 15min, 30min, 1h, 4h, 1day
-const TD_INTERVAL = {
-  "1m": "1min",
-  "3m": "3min",
-  "5m": "5min",
-  "15m": "15min",
-  "30m": "30min",
-  "1h": "1h",
-  "4h": "4h",
-  "1d": "1day",
-};
-
-async function fetchCandles(symbol, tf, size = 200) {
-  const apiKey = process.env.TWELVEDATA_API_KEY;
-  if (!apiKey) throw new Error("TWELVEDATA_API_KEY belum diset");
-
-  const interval = TD_INTERVAL[tf];
-  if (!interval) throw new Error(`TF tidak didukung: ${tf}`);
-
-  const url =
-    `https://api.twelvedata.com/time_series` +
-    `?symbol=${encodeURIComponent(symbol)}` +
-    `&interval=${interval}` +
-    `&outputsize=${size}` +
-    `&apikey=${apiKey}`;
-
-  const res = await fetch(url);
-  const json = await res.json();
-
-  if (json.status === "error" || !json.values) {
-    throw new Error(`TwelveData error: ${json.message || "unknown"}`);
+// ===================== HANDLER VERCEL =====================
+export default async function handler(req, res) {
+  // Wajib POST karena kita mengirim payload candle dari frontend
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "Method not allowed, use POST" });
   }
 
-  // Urut kronologis (Twelve Data: terbaru → terlama)
-  return json.values
-    .slice()
-    .reverse()
-    .map(v => ({
-      time: v.datetime,
-      open: parseFloat(v.open),
-      high: parseFloat(v.high),
-      low: parseFloat(v.low),
-      close: parseFloat(v.close),
-      volume: v.volume ? parseFloat(v.volume) : 0,
-    }));
-}
-
-// ===================== HANDLER =====================
-export default async function handler(req, res) {
   try {
-    const {
-      symbol = "EUR/USD",
-      style = "daytrade",
-    } = req.method === "POST" ? (req.body || {}) : (req.query || {});
+    const { 
+      symbol = "XAUUSD", 
+      style = "daytrade", 
+      entry = [], 
+      bias = [], 
+      htf = [] 
+    } = req.body || {};
 
     const preset = STYLE_PRESETS[style];
     if (!preset) {
-      return res.status(400).json({
-        ok: false,
-        error: `Style tidak dikenal: ${style}`,
-        available: Object.keys(STYLE_PRESETS),
-      });
+      return res.status(400).json({ ok: false, error: `Style tidak dikenal: ${style}` });
     }
 
-    // Fetch 3 TF paralel
-    const [entry, bias, htf] = await Promise.all([
-      fetchCandles(symbol, preset.tf_entry),
-      fetchCandles(symbol, preset.tf_bias),
-      fetchCandles(symbol, preset.tf_htf),
-    ]);
+    // Validasi array candle dari WebSocket frontend
+    if (!Array.isArray(entry) || !Array.isArray(bias) || !Array.isArray(htf)) {
+      return res.status(400).json({ ok: false, error: "Payload entry, bias, dan htf harus berupa array" });
+    }
 
     const nowUtcHour = new Date().getUTCHours();
     const signal = generateSignal({ entry, bias, htf }, preset, nowUtcHour);
@@ -575,24 +452,10 @@ export default async function handler(req, res) {
       symbol,
       style,
       label: preset.label,
-      timeframes: {
-        entry: preset.tf_entry,
-        bias:  preset.tf_bias,
-        htf:   preset.tf_htf,
-      },
+      timeframes: { entry: preset.tf_entry, bias: preset.tf_bias, htf: preset.tf_htf },
       utcHour: nowUtcHour,
-      killzone: preset.killzone
-        ? inKillzone(nowUtcHour, preset.killzone_tight)
-        : "disabled",
+      killzone: preset.killzone ? inKillzone(nowUtcHour, preset.killzone_tight) : "disabled",
       signal,
-      meta: {
-        max_hold_bars: preset.max_hold_bars,
-        target_tp: preset.target_tp,
-        exit_mode: preset.exit_mode,
-        min_total: preset.min_total,
-        min_smc_score: preset.smc.min_smc_score,
-        tech_weight: preset.tech_weight,
-      },
       ts: new Date().toISOString(),
     });
   } catch (err) {
