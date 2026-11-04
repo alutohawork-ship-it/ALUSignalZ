@@ -50,10 +50,10 @@
             <!-- Dropdown Multi-Asset Lengkap -->
             <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
                 <optgroup label="Gold, Silver & Commodities">
-                    <option value="veranta|XAU-USD">XAU-USD / Gold (Commodities)</option>
-                    <option value="veranta|XAG-USD">XAG-USD / Silver (Commodities)</option>
-                    <option value="veranta|EURUSD">EUR/USD (Forex)</option>
-                    <option value="veranta|USDJPY">USD/JPY (Forex)</option>
+                    <option value="veranta|XAU-USD">XAU-USD / Gold (Veranta)</option>
+                    <option value="veranta|XAG-USD">XAG-USD / Silver (Veranta)</option>
+                    <option value="veranta|EURUSD">EUR/USD (Veranta)</option>
+                    <option value="veranta|USDJPY">USD/JPY (Veranta)</option>
                 </optgroup>
                 <optgroup label="Crypto">
                     <option value="binance|BTCUSDT">BTC/USDT (Binance)</option>
@@ -190,7 +190,7 @@
             <!-- List Ticker Lengkap Semua Pair -->
             <div id="tickerListContainer" class="space-y-1 max-h-[190px] overflow-y-auto pr-1">
                 
-                <!-- Gold & Silver (Commodities) -->
+                <!-- Gold & Silver (Veranta Provider) -->
                 <div onclick="selectTicker('veranta|XAU-USD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
                     <span class="font-bold text-[10px] text-white">XAU-USD <span class="text-[7px] text-yellow-400">Gold</span></span>
                     <span id="price-XAU-USD" class="text-[10px] font-mono font-bold text-white">--.--</span>
@@ -276,7 +276,7 @@
         }
 
         // =======================================================
-        // WEBSOCKET MULTI-ASSET STREAM
+        // WEBSOCKET MULTI-ASSET STREAM (MENGGUNAKAN STANDAR API RESMI)
         // =======================================================
         let ws;
         let pingInterval;
@@ -298,7 +298,7 @@
                         channel: "ticks",
                         payload: {
                             symbols: ["XAU-USD", "XAG-USD", "EURUSD", "USDJPY", "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "xyz:BRENTOIL", "DJI", "xyz:SP500", "xyz:AAPL", "NVDAUSDT", "TSLAUSDT"],
-                            providers: ["binance", "veranta", "ostium", "hyperliquid"]
+                            providers: ["veranta", "binance", "ostium", "hyperliquid"]
                         }
                     };
                     ws.send(JSON.stringify(subFrame));
