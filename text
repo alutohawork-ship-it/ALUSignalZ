@@ -1,0 +1,5 @@
+📁 gutsai-trading-agent/
+├── 📁 api/
+│   └── 📄 generate.js       (Backend Proxy Vercel Serverless)
+├── 📄 index.html            (Frontend UI Utama)
+└── 📄 vercel.json           (Konfigurasi Routing Vercel)
