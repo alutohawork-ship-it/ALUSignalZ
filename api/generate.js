@@ -23,18 +23,18 @@ export default async function handler(req, res) {
         else if (isCrypto) mult = 12.0;
         else if (symbol.includes('JPY')) mult = 0.20;
 
-        // ==========================================
-        // PENGATURAN SPESIFIK: SL, TP, & RISK-REWARD
-        // ==========================================
-        let riskMultiplier = 0.0010; // Default Scalping
-        let rrTP1 = 1.0, rrTP2 = 1.8, rrTP3 = 3.0; // Default R:R Ratio
+        // =========================================================
+        // PENGATURAN SPESIFIK: TIMEFRAME, SL, TP, & RISK-REWARD
+        // =========================================================
+        let riskMultiplier = 0.0005; // Default Scalping M1+M15 (Sangat ketat & cepat)
+        let rrTP1 = 1.0, rrTP2 = 1.5, rrTP3 = 2.2; 
         let tfDesc = "";
 
         if (tradingStyle.includes('Scalping')) {
-            // M3 + M15 (Hit & Run cepat, SL ketat, TP dekat)
-            riskMultiplier = 0.0008; 
-            rrTP1 = 1.0; rrTP2 = 1.6; rrTP3 = 2.5;
-            tfDesc = "Scalping (M3+M15 - Hit & Run)";
+            // M1 + M15 (Scalping micro-structure, hit & run cepat)
+            riskMultiplier = 0.0005; 
+            rrTP1 = 0.8; rrTP2 = 1.4; rrTP3 = 2.0;
+            tfDesc = "Scalping (M1+M15 - Hit & Run)";
         } else if (tradingStyle.includes('Day Trading')) {
             // M5 + M30 (Menangkap impuls harian menengah)
             riskMultiplier = 0.0022; 
@@ -53,19 +53,19 @@ export default async function handler(req, res) {
         }
 
         riskMultiplier *= mult;
-        const spreadBuffer = currentPrice * 0.00015 * mult;
+        const spreadBuffer = currentPrice * 0.0001 * mult;
         let entryMin, entryMax, sl, tp1, tp2, tp3;
 
         if (direction === 'BUY') {
-            entryMin = currentPrice - (spreadBuffer * 1.2);
-            entryMax = currentPrice + (spreadBuffer * 0.4);
+            entryMin = currentPrice - (spreadBuffer * 1.0);
+            entryMax = currentPrice + (spreadBuffer * 0.3);
             sl = currentPrice - (currentPrice * riskMultiplier);
             tp1 = currentPrice + (currentPrice * riskMultiplier * rrTP1);
             tp2 = currentPrice + (currentPrice * riskMultiplier * rrTP2);
             tp3 = currentPrice + (currentPrice * riskMultiplier * rrTP3);
         } else {
-            entryMin = currentPrice - (spreadBuffer * 0.4);
-            entryMax = currentPrice + (spreadBuffer * 1.2);
+            entryMin = currentPrice - (spreadBuffer * 0.3);
+            entryMax = currentPrice + (spreadBuffer * 1.0);
             sl = currentPrice + (currentPrice * riskMultiplier);
             tp1 = currentPrice - (currentPrice * riskMultiplier * rrTP1);
             tp2 = currentPrice - (currentPrice * riskMultiplier * rrTP2);
@@ -73,8 +73,8 @@ export default async function handler(req, res) {
         }
 
         let analysisReasonText = lang === 'en'
-            ? `SMC Analysis (${tfDesc}): Structured liquidity sweep mapped with targeted risk-to-reward ratios for ${tradingStyle.toLowerCase()} execution.`
-            : `Analisis SMC (${tfDesc}): Sapuan likuiditas terstruktur dengan kalkulasi SL/TP dan Risk-to-Reward (R:R) khusus gaya ${tradingStyle.toLowerCase()}.`;
+            ? `SMC Analysis (${tfDesc}): Micro liquidity sweep on M1 with strict order block mitigation aligned to M15 macro bias. Rapid execution designed for hit & run scalping.`
+            : `Analisis SMC (${tfDesc}): Sapuan likuiditas mikro pada M1 dengan mitigasi order block ketat selaras bias makro M15. Eksekusi cepat dirancang khusus untuk scalping hit & run.`;
 
         const aiResponsePayload = {
             signal: direction,
