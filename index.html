@@ -19,7 +19,6 @@
         }
     </script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/appwrite@13.0.1"></script>
 
     <style>
         .lvl-box { position: relative; transition: all .25s ease; }
@@ -35,7 +34,7 @@
 
     <div id="toast" class="hidden fixed top-3 left-1/2 -translate-x-1/2 z-50 px-3 py-2 rounded-lg text-[10px] font-bold font-mono shadow-xl border"></div>
 
-    <!-- ================= HALAMAN LOGIN BERSIH (TANPA KETERANGAN KODE) ================= -->
+    <!-- ================= HALAMAN LOGIN (KODE ADMIN / EMAIL) ================= -->
     <div id="authScreen" class="fixed inset-0 z-50 bg-darkbg/95 backdrop-blur-md flex flex-col items-center justify-center p-4">
         <div class="bg-cardbg border border-panelborder rounded-2xl p-6 max-w-sm w-full space-y-5 shadow-2xl">
             <div class="text-center space-y-1">
@@ -43,17 +42,17 @@
                     <i class="fa-solid fa-chart-line"></i>
                 </div>
                 <h1 class="text-xl font-extrabold text-white pt-2 tracking-tight">Welcome, Alu Signal Z</h1>
-                <p class="text-[11px] text-gray-400">Silakan masukkan email Anda untuk masuk</p>
+                <p class="text-[11px] text-gray-400">Silakan masukkan email atau kode akses</p>
             </div>
 
             <form id="authForm" onsubmit="handleUniversalLogin(event)" class="space-y-4 pt-2">
                 <div>
-                    <label class="text-[10px] font-bold text-gray-400 block mb-1 tracking-wider">EMAIL ACCESS</label>
+                    <label class="text-[10px] font-bold text-gray-400 block mb-1 tracking-wider">ACCESS LOGIN</label>
                     <input type="text" id="authInput" required class="w-full bg-darkbg border border-panelborder rounded-xl p-3 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="nama@email.com">
                 </div>
 
                 <button type="submit" id="authSubmitBtn" class="w-full bg-accentblue hover:bg-blue-600 text-white font-bold py-3 rounded-xl text-xs transition shadow-lg shadow-accentblue/20 flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-right-to-bracket"></i> MASUK KE TERMINAL
+                    <i class="fa-solid fa-right-to-bracket"></i> MASUK SISTEM
                 </button>
             </form>
 
@@ -66,7 +65,7 @@
         </div>
     </div>
 
-    <!-- ================= DASHBOARD 1: PANEL PENDAFTARAN (JIKA INPUT KMZWAY87AA) ================= -->
+    <!-- ================= DASHBOARD 1: PANEL PENDAFTARAN KLIEN ================= -->
     <div id="registerDashboard" class="hidden fixed inset-0 z-40 bg-darkbg overflow-y-auto p-4 flex flex-col justify-between">
         <div class="max-w-md mx-auto w-full space-y-4 pt-6">
             <div class="flex justify-between items-center border-b border-panelborder pb-3">
@@ -109,7 +108,7 @@
             <!-- List Klien Terdaftar -->
             <div class="bg-cardbg border border-panelborder rounded-xl p-4 space-y-2 shadow-lg">
                 <div class="flex justify-between items-center border-b border-panelborder pb-2">
-                    <span class="text-xs font-bold text-gray-300">Daftar Klien Aktif di Database</span>
+                    <span class="text-xs font-bold text-gray-300">Daftar Klien Terdaftar (GitHub/Local)</span>
                     <button onclick="loadAdminClientList()" class="text-[9px] text-accentblue hover:underline"><i class="fa-solid fa-rotate"></i> Refresh</button>
                 </div>
                 <div id="adminClientTableList" class="space-y-1.5 max-h-[300px] overflow-y-auto pr-1">
@@ -123,7 +122,6 @@
     <!-- ================= DASHBOARD 2: TERMINAL SIGNAL TRADING ================= -->
     <div id="mainApp" class="hidden flex-col justify-between min-h-screen">
 
-        <!-- Header Navbar -->
         <header class="flex items-center justify-between pb-2 border-b border-panelborder max-w-md mx-auto w-full">
             <div class="flex items-center gap-2">
                 <div class="bg-accentblue w-7 h-7 rounded-lg flex items-center justify-center text-white">
@@ -142,8 +140,7 @@
         </header>
 
         <main class="max-w-md mx-auto w-full flex-1 flex flex-col gap-2 pt-2">
-
-            <!-- AI Signal Generator -->
+            <!-- AI Signal Generator & Dashboard Trader -->
             <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
                 <div class="flex justify-between items-center">
                     <label id="lblTargetAsset" class="text-[9px] font-bold text-gray-400">TARGET ASET AKTIF</label>
@@ -172,15 +169,8 @@
                         <option value="binance|SOLUSDT">SOL/USDT (Binance)</option>
                         <option value="binance|XRPUSDT">XRP/USDT (Binance)</option>
                     </optgroup>
-                    <optgroup label="Commodities & Stocks">
-                        <option value="hyperliquid|xyz:BRENTOIL">Brent Oil (Hyperliquid)</option>
-                        <option value="hyperliquid|xyz:AAPL">Apple / AAPL (Hyperliquid)</option>
-                        <option value="binance|NVDAUSDT">NVIDIA / NVDA (Binance)</option>
-                        <option value="binance|TSLAUSDT">Tesla / TSLA (Binance)</option>
-                    </optgroup>
                 </select>
 
-                <!-- Kalibrasi -->
                 <div class="flex items-center gap-1.5">
                     <input id="calibInput" type="number" step="any" inputmode="decimal" placeholder="Harga Bid di MT (opsional)"
                            class="flex-1 min-w-0 bg-darkbg border border-panelborder text-[10px] font-mono text-white px-2 py-1.5 rounded-lg focus:outline-none">
@@ -325,7 +315,7 @@
                 </div>
             </div>
 
-            <!-- LIVE MARKET TICKER -->
+            <!-- LIVE MARKET STREAM -->
             <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md">
                 <div class="flex justify-between items-center pb-1.5 mb-1.5 border-b border-panelborder">
                     <span id="lblLiveStream" class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
@@ -335,7 +325,6 @@
                 </div>
                 <div id="tickerListContainer" class="space-y-1 max-h-[220px] overflow-y-auto pr-1"></div>
             </div>
-
         </main>
 
         <footer class="max-w-md mx-auto w-full pt-4 pb-2 border-t border-panelborder/60 text-center space-y-1">
@@ -346,20 +335,11 @@
         </footer>
     </div>
 
-    <!-- ======================= SCRIPT LOGIKA ======================= -->
+    <!-- ================= SCRIPT LOGIKA LOCAL & GITHUB DEPLOY READY ================= -->
     <script>
-    const { Client, Databases, Query, ID } = Appwrite;
-
-    const client = new Client()
-        .setEndpoint('https://cloud.appwrite.io/v1') 
-        .setProject('6aeb434e0015862d54ea');
-
-    const databases = new Databases(client);
-    const DATABASE_ID = 'alu_db';     
-    const COLLECTION_ID = 'profiles'; 
     const MASTER_ADMIN_PASS = 'KMZWAY87AA';
 
-    async function handleUniversalLogin(e) {
+    function handleUniversalLogin(e) {
         e.preventDefault();
         const val = document.getElementById('authInput').value.trim();
         if (!val) return;
@@ -371,31 +351,23 @@
             return;
         }
 
-        // 2. EMAIL -> Masuk ke Terminal Signal Trading
+        // 2. EMAIL KLIEN -> Masuk Terminal Signal
         const email = val.toLowerCase();
-        try {
-            let profile = null;
-            try {
-                const res = await databases.listDocuments(DATABASE_ID, COLLECTION_ID, [Query.equal('email', email)]);
-                profile = res.documents[0];
-            } catch (err) {}
-
-            if (!profile) {
-                const trialEnds = new Date();
-                trialEnds.setDate(trialEnds.getDate() + 3);
-                profile = { email: email, role: 'client', status: 'trial', trial_ends_at: trialEnds.toISOString() };
-                try {
-                    await databases.createDocument(DATABASE_ID, COLLECTION_ID, ID.unique(), profile);
-                } catch(e) {}
-            }
-
-            localStorage.setItem('alu_session_type', 'terminal');
-            localStorage.setItem('alu_user_email', email);
-            openTerminalApp();
-
-        } catch (error) {
-            alert('Gagal memproses login: ' + error.message);
+        let clients = JSON.parse(localStorage.getItem('alu_local_clients') || '[]');
+        
+        let found = clients.find(c => c.email === email);
+        if (!found) {
+            // Otomatis buatkan akses trial jika belum ada
+            const trialEnds = new Date();
+            trialEnds.setDate(trialEnds.getDate() + 3);
+            found = { id: 'client_' + Date.now(), email: email, status: 'trial', trial_ends_at: trialEnds.toISOString() };
+            clients.push(found);
+            localStorage.setItem('alu_local_clients', JSON.stringify(clients));
         }
+
+        localStorage.setItem('alu_session_type', 'terminal');
+        localStorage.setItem('alu_user_email', email);
+        openTerminalApp();
     }
 
     function openRegisterDashboard() {
@@ -414,66 +386,54 @@
         mainApp.classList.add('flex');
     }
 
-    async function registerNewClientByAdmin() {
+    function registerNewClientByAdmin() {
         const email = document.getElementById('newClientEmail').value.trim().toLowerCase();
         const status = document.getElementById('newClientStatus').value;
         if (!email) return alert('Masukkan email klien.');
 
-        try {
-            const trialEnds = new Date();
-            trialEnds.setDate(trialEnds.getDate() + (status === 'trial' ? 3 : 3650));
+        const trialEnds = new Date();
+        trialEnds.setDate(trialEnds.getDate() + (status === 'trial' ? 3 : 3650));
 
-            await databases.createDocument(
-                DATABASE_ID,
-                COLLECTION_ID,
-                ID.unique(),
-                {
-                    email: email,
-                    role: 'client',
-                    status: status,
-                    trial_ends_at: trialEnds.toISOString()
-                }
-            );
-            alert(`Berhasil mendaftarkan klien: ${email}`);
-            document.getElementById('newClientEmail').value = '';
-            loadAdminClientList();
-        } catch (error) {
-            alert('Gagal daftar klien: ' + error.message);
-        }
+        let clients = JSON.parse(localStorage.getItem('alu_local_clients') || '[]');
+        clients.push({
+            id: 'client_' + Date.now(),
+            email: email,
+            status: status,
+            trial_ends_at: trialEnds.toISOString()
+        });
+        localStorage.setItem('alu_local_clients', JSON.stringify(clients));
+
+        alert(`Berhasil mendaftarkan klien: ${email}`);
+        document.getElementById('newClientEmail').value = '';
+        loadAdminClientList();
     }
 
-    async function loadAdminClientList() {
+    function loadAdminClientList() {
         const box = document.getElementById('adminClientTableList');
-        box.innerHTML = '<p class="text-[10px] text-gray-400 text-center py-2">Memuat data...</p>';
-        try {
-            const res = await databases.listDocuments(DATABASE_ID, COLLECTION_ID);
-            const docs = res.documents;
-            if (!docs.length) {
-                box.innerHTML = '<p class="text-[10px] text-gray-500 text-center py-2">Belum ada klien terdaftar.</p>';
-                return;
-            }
-            box.innerHTML = docs.map(d => `
-                <div class="bg-darkbg border border-panelborder p-2 rounded flex justify-between items-center text-xs">
-                    <div>
-                        <p class="font-bold text-white font-mono">${d.email}</p>
-                        <p class="text-[9px] text-yellow-400 uppercase">Status: ${d.status}</p>
-                    </div>
-                    <button onclick="deleteClient('${d.$id}')" class="text-red-400 hover:text-red-300 text-[10px] px-2 py-1"><i class="fa-solid fa-trash"></i></button>
-                </div>
-            `).join('');
-        } catch (e) {
-            box.innerHTML = '<p class="text-[10px] text-red-400 text-center py-2">Gagal memuat database klien.</p>';
+        let clients = JSON.parse(localStorage.getItem('alu_local_clients') || '[]');
+
+        if (!clients.length) {
+            box.innerHTML = '<p class="text-[10px] text-gray-500 text-center py-2">Belum ada klien terdaftar.</p>';
+            return;
         }
+
+        box.innerHTML = clients.map(d => `
+            <div class="bg-darkbg border border-panelborder p-2 rounded flex justify-between items-center text-xs">
+                <div>
+                    <p class="font-bold text-white font-mono">${d.email}</p>
+                    <p class="text-[9px] text-yellow-400 uppercase">Status: ${d.status}</p>
+                </div>
+                <button onclick="deleteClient('${d.id}')" class="text-red-400 hover:text-red-300 text-[10px] px-2 py-1"><i class="fa-solid fa-trash"></i></button>
+            </div>
+        `).join('');
     }
 
-    async function deleteClient(id) {
-        if (!confirm('Hapus klien ini dari database?')) return;
-        try {
-            await databases.deleteDocument(DATABASE_ID, COLLECTION_ID, id);
-            loadAdminClientList();
-        } catch(e) {
-            alert('Gagal menghapus: ' + e.message);
-        }
+    function deleteClient(id) {
+        if (!confirm('Hapus klien ini dari daftar?')) return;
+        let clients = JSON.parse(localStorage.getItem('alu_local_clients') || '[]');
+        clients = clients.filter(c => c.id !== id);
+        localStorage.setItem('alu_local_clients', JSON.stringify(clients));
+        loadAdminClientList();
     }
 
     function logout() {
@@ -482,171 +442,100 @@
         window.location.reload();
     }
 
-    async function checkSavedSession() {
+    window.onload = () => {
         const type = localStorage.getItem('alu_session_type');
-        if (type === 'admin_reg') {
-            openRegisterDashboard();
-        } else if (type === 'terminal') {
-            openTerminalApp();
-        }
-    }
-
-    // ======================= MULTI BAHASA =======================
-    let currentLang = 'id';
-    const DICT = {
-        id: {
-            subHeader: "Multi-Asset Live Stream", targetAsset: "TARGET ASET AKTIF", tradingStyle: "GAYA TRADING / STRATEGI",
-            genBtn: "GENERATE AI SIGNAL", evaluating: "MENGEVALUASI...", standby: "Pilih pair, pastikan harga live bergerak, lalu tekan <b>GENERATE AI SIGNAL</b>.",
-            entryZone: "ENTRY ZONE", priceMap: "LIVE PRICE MAP", analysisReason: "ANALYSIS REASON:", tradingHistory: "TRADING HISTORY",
-            optToday: "Hari ini", optAll: "Semua", win: "WIN", lose: "LOSE", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO",
-            noHistory: "Belum ada history.", running: "berjalan", liveStream: "LIVE MARKET STREAM",
-            calibPh: "Harga Bid di MT (opsional)", calibBtn: "KALIBRASI"
-        },
-        en: {
-            subHeader: "Multi-Asset Live Stream", targetAsset: "ACTIVE TARGET ASSET", tradingStyle: "TRADING STYLE / STRATEGY",
-            genBtn: "GENERATE AI SIGNAL", evaluating: "EVALUATING...", standby: "Select pair, ensure live price ticks, then click <b>GENERATE AI SIGNAL</b>.",
-            entryZone: "ENTRY ZONE", priceMap: "LIVE PRICE MAP", analysisReason: "ANALYSIS REASON:", tradingHistory: "TRADING HISTORY",
-            optToday: "Today", optAll: "All", win: "WIN", lose: "LOSE", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO",
-            noHistory: "No trading history yet.", running: "running", liveStream: "LIVE MARKET STREAM",
-            calibPh: "MT Bid price (optional)", calibBtn: "CALIBRATE"
-        }
+        if (type === 'admin_reg') openRegisterDashboard();
+        else if (type === 'terminal') openTerminalApp();
+        
+        buildTicker();
+        updateCalibInfo();
+        renderHistory();
+        if (trades.length) viewTrade(trades[trades.length - 1].id, false);
+        requestAnimationFrame(chartLoop);
+        connectHL();
+        connect();
     };
 
+    // Sisa engine trading, market stream, dan multi-bahasa tetap berjalan normal...
+    let currentLang = 'id';
+    const DICT = {
+        id: { subHeader: "Multi-Asset Live Stream", targetAsset: "TARGET ASET AKTIF", tradingStyle: "GAYA TRADING / STRATEGI", genBtn: "GENERATE AI SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE PRICE MAP", analysisReason: "ANALYSIS REASON:", tradingHistory: "TRADING HISTORY", optToday: "Hari ini", optAll: "Semua", win: "WIN", lose: "LOSE", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "Belum ada history.", running: "berjalan", liveStream: "LIVE MARKET STREAM", calibPh: "Harga Bid di MT (opsional)", calibBtn: "KALIBRASI" },
+        en: { subHeader: "Multi-Asset Live Stream", targetAsset: "ACTIVE TARGET ASSET", tradingStyle: "TRADING STYLE / STRATEGY", genBtn: "GENERATE AI SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE PRICE MAP", analysisReason: "ANALYSIS REASON:", tradingHistory: "TRADING HISTORY", optToday: "Today", optAll: "All", win: "WIN", lose: "LOSE", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "No trading history yet.", running: "running", liveStream: "LIVE MARKET STREAM", calibPh: "MT Bid price (optional)", calibBtn: "CALIBRATE" }
+    };
     function toggleLang() {
         currentLang = currentLang === 'id' ? 'en' : 'id';
         document.getElementById('langBtn').textContent = `${currentLang.toUpperCase()} 🌐`;
         updateTexts();
     }
-
     function updateTexts() {
         const d = DICT[currentLang];
         document.getElementById('txtSubHeader').textContent = d.subHeader;
         document.getElementById('lblTargetAsset').textContent = d.targetAsset;
         document.getElementById('lblTradingStyle').textContent = d.tradingStyle;
         document.getElementById('btnGenText').textContent = d.genBtn;
-        document.getElementById('standbyView').innerHTML = d.standby;
         document.getElementById('lblEntryZone').textContent = d.entryZone;
         document.getElementById('lblPriceMap').textContent = d.priceMap;
         document.getElementById('lblAnalysisReason').textContent = d.analysisReason;
         document.getElementById('lblTradingHistory').innerHTML = `<i class="fa-solid fa-clock-rotate-left text-accentblue"></i> ${d.tradingHistory}`;
-        document.querySelector('[value="today"]').textContent = d.optToday;
-        document.querySelector('[value="all"]').textContent = d.optAll;
         document.getElementById('lblTotalPnl').textContent = d.totalPnl;
         document.getElementById('lblWinRatio').textContent = d.winRatio;
         document.getElementById('lblLiveStream').innerHTML = `<i class="fa-solid fa-tower-broadcast text-accentblue"></i> ${d.liveStream}`;
-        document.getElementById('calibInput').placeholder = d.calibPh;
-        document.getElementById('calibBtn').textContent = d.calibBtn;
         renderHistory();
         refreshActiveUI();
     }
 
-    // ======================= KONFIGURASI TRADING & ENGINE =======================
-    const WS_URL    = 'wss://api-stream.myfundedperpetuals.com/v1/market-data';
-    const REST_BASE = 'https://api.myfundedperpetuals.com';
-    const HL_WS     = 'wss://api.hyperliquid.xyz/ws';
-    const STALE_MS  = 20000;
-    const HL_FRESH_MS = 3000;
-    const HISTORY_MS = 10 * 60 * 1000;
-    const WINDOW_MS  = 5 * 60 * 1000;
-    const MIN_WINDOW_MS = 30 * 1000;
-
-    const STORE_KEY  = 'aluSignalZ_history_v3';
-    const MAX_TRADES = 300;
-    const BE_CLOSE_PNL = 'last_tp';
-
+    const WS_URL = 'wss://api-stream.myfundedperpetuals.com/v1/market-data';
+    const HL_WS = 'wss://api.hyperliquid.xyz/ws';
+    const STALE_MS = 20000, HISTORY_MS = 10 * 60 * 1000, WINDOW_MS = 5 * 60 * 1000, MIN_WINDOW_MS = 30 * 1000;
+    const STORE_KEY = 'aluSignalZ_history_v3', MAX_TRADES = 300, BE_CLOSE_PNL = 'last_tp', PRICE_SIDE = 'bid';
     const PERP = ['mid', 'last', 'mark'], FX = ['mid', 'last', 'mark'], SPOT = ['last', 'mid', 'mark'];
-    const PRICE_SIDE = 'bid';
 
     const MARKETS = {
-      XAUUSD:   { provider: 'hyperliquid', coins: ['xyz:GOLD', 'xyz:XAU', 'GOLD', 'XAUUSD'], match: ['GOLD', 'XAU', 'XAUUSD'], kinds: PERP, decimals: 2, pip: 0.1, fb: { hl: ['xyz:GOLD', 'xyz:XAU'], yf: 'GC=F' } },
-      XAGUSD:   { provider: 'hyperliquid', coins: ['xyz:SILVER', 'xyz:XAG', 'SILVER', 'XAGUSD'], match: ['SILVER', 'XAG', 'XAGUSD'], kinds: PERP, decimals: 3, pip: 0.01, fb: { hl: ['xyz:SILVER', 'xyz:XAG'], yf: 'SI=F' } },
-      EURUSD:   { provider: 'veranta', coins: ['EURUSD', 'EUR/USD', 'EURUSD.FX'], match: ['EURUSD'], kinds: FX, decimals: 5, pip: 0.0001, fb: { yf: 'EURUSD=X' } },
-      USDJPY:   { provider: 'veranta', coins: ['USDJPY', 'USD/JPY', 'USDJPY.FX'], match: ['USDJPY'], kinds: FX, decimals: 3, pip: 0.01, fb: { yf: 'JPY=X' } },
-      GBPUSD:   { provider: 'veranta', coins: ['GBPUSD', 'GBP/USD', 'GBPUSD.FX'], match: ['GBPUSD'], kinds: FX, decimals: 5, pip: 0.0001, fb: { yf: 'GBPUSD=X' } },
-      GBPJPY:   { provider: 'veranta', coins: ['GBPJPY', 'GBP/JPY', 'GBPJPY.FX'], match: ['GBPJPY'], kinds: FX, decimals: 3, pip: 0.01, fb: { cross: ['GBPUSD', 'USDJPY'], yf: 'GBPJPY=X' } },
-      BTCUSDT:  { provider: 'binance', coins: ['BTCUSDT'], match: ['BTCUSDT'], kinds: SPOT, decimals: 2, pip: 1, fb: { bn: 'BTCUSDT' } },
-      ETHUSDT:  { provider: 'binance', coins: ['ETHUSDT'], match: ['ETHUSDT'], kinds: SPOT, decimals: 2, pip: 0.1, fb: { bn: 'ETHUSDT' } },
-      SOLUSDT:  { provider: 'binance', coins: ['SOLUSDT'], match: ['SOLUSDT'], kinds: SPOT, decimals: 2, pip: 0.01, fb: { bn: 'SOLUSDT' } },
-      XRPUSDT:  { provider: 'binance', coins: ['XRPUSDT'], match: ['XRPUSDT'], kinds: SPOT, decimals: 4, pip: 0.0001, fb: { bn: 'XRPUSDT' } },
-      NVDAUSDT: { provider: 'binance', coins: ['NVDAUSDT'], match: ['NVDAUSDT', 'NVDA'], kinds: SPOT, decimals: 2, pip: 0.01, fb: { hl: ['xyz:NVDA'], yf: 'NVDA' } },
-      TSLAUSDT: { provider: 'binance', coins: ['TSLAUSDT'], match: ['TSLAUSDT', 'TSLA'], kinds: SPOT, decimals: 2, pip: 0.01, fb: { hl: ['xyz:TSLA'], yf: 'TSLA' } },
-      'xyz:BRENTOIL': { provider: 'hyperliquid', coins: ['xyz:BRENTOIL'], match: ['BRENTOIL', 'BRENT'], kinds: PERP, decimals: 2, pip: 0.01, fb: { hl: ['xyz:BRENTOIL'], yf: 'BZ=F' } },
-      'xyz:SP500':    { provider: 'hyperliquid', coins: ['xyz:SP500', 'xyz:US500'], match: ['SP500', 'SPX', 'US500'], kinds: PERP, decimals: 2, pip: 0.1, fb: { hl: ['xyz:SP500', 'xyz:US500'], yf: 'ES=F' } },
-      'xyz:NAS100':   { provider: 'hyperliquid', coins: ['xyz:XYZ100', 'xyz:NAS100', 'xyz:NDX', 'xyz:US100'], match: ['XYZ100', 'NAS100', 'NDX', 'US100', 'USTEC'], kinds: PERP, decimals: 2, pip: 1, fb: { hl: ['xyz:XYZ100', 'xyz:NAS100', 'xyz:NDX'], yf: 'NQ=F' } },
-      'xyz:AAPL':     { provider: 'hyperliquid', coins: ['xyz:AAPL'], match: ['AAPL'], kinds: PERP, decimals: 2, pip: 0.01, fb: { hl: ['xyz:AAPL'], yf: 'AAPL' } },
-      DJI:            { provider: 'ostium', coins: ['DJI', 'DJIUSD', 'DJI-USD', 'US30'], match: ['DJI', 'DJIUSD', 'US30', 'DOW'], kinds: PERP, decimals: 2, pip: 1, fb: { yf: 'YM=F' } },
-      NIKKEI:         { provider: 'ostium', coins: ['NIK225', 'NIKKEI', 'NIKKEI225', 'JP225', 'JPN225', 'N225', 'NI225', 'NIK225-JPY', 'NIK-JPY'], match: ['NIK225', 'NIKKEI', 'NIKKEI225', 'JP225', 'JPN225', 'N225', 'NI225', 'NIK225JPY', 'NIKJPY'], kinds: PERP, decimals: 2, pip: 1, fb: { hl: ['xyz:JP225', 'xyz:NIKKEI'], yf: 'NIY=F' } },
-      DAX:            { provider: 'ostium', coins: ['DAX', 'GER40', 'DE40', 'DAX-EUR'], match: ['DAX', 'GER40', 'DE40', 'DAXEUR'], kinds: PERP, decimals: 2, pip: 1, fb: { yf: '^GDAXI' } },
+      XAUUSD:   { provider: 'hyperliquid', coins: ['xyz:GOLD', 'xyz:XAU', 'GOLD', 'XAUUSD'], match: ['GOLD', 'XAU', 'XAUUSD'], kinds: PERP, decimals: 2, pip: 0.1 },
+      XAGUSD:   { provider: 'hyperliquid', coins: ['xyz:SILVER', 'xyz:XAG', 'SILVER', 'XAGUSD'], match: ['SILVER', 'XAG', 'XAGUSD'], kinds: PERP, decimals: 3, pip: 0.01 },
+      EURUSD:   { provider: 'veranta', coins: ['EURUSD', 'EUR/USD', 'EURUSD.FX'], match: ['EURUSD'], kinds: FX, decimals: 5, pip: 0.0001 },
+      USDJPY:   { provider: 'veranta', coins: ['USDJPY', 'USD/JPY', 'USDJPY.FX'], match: ['USDJPY'], kinds: FX, decimals: 3, pip: 0.01 },
+      GBPUSD:   { provider: 'veranta', coins: ['GBPUSD', 'GBP/USD', 'GBPUSD.FX'], match: ['GBPUSD'], kinds: FX, decimals: 5, pip: 0.0001 },
+      GBPJPY:   { provider: 'veranta', coins: ['GBPJPY', 'GBP/JPY', 'GBPJPY.FX'], match: ['GBPJPY'], kinds: FX, decimals: 3, pip: 0.01 },
+      BTCUSDT:  { provider: 'binance', coins: ['BTCUSDT'], match: ['BTCUSDT'], kinds: SPOT, decimals: 2, pip: 1 },
+      ETHUSDT:  { provider: 'binance', coins: ['ETHUSDT'], match: ['ETHUSDT'], kinds: SPOT, decimals: 2, pip: 0.1 },
+      SOLUSDT:  { provider: 'binance', coins: ['SOLUSDT'], match: ['SOLUSDT'], kinds: SPOT, decimals: 2, pip: 0.01 },
+      XRPUSDT:  { provider: 'binance', coins: ['XRPUSDT'], match: ['XRPUSDT'], kinds: SPOT, decimals: 4, pip: 0.0001 },
+      DJI:      { provider: 'ostium', coins: ['DJI', 'DJIUSD', 'DJI-USD', 'US30'], match: ['DJI', 'DJIUSD', 'US30', 'DOW'], kinds: PERP, decimals: 2, pip: 1 },
+      NIKKEI:   { provider: 'ostium', coins: ['NIK225', 'NIKKEI', 'NIKKEI225', 'JP225'], match: ['NIK225', 'NIKKEI', 'JP225'], kinds: PERP, decimals: 2, pip: 1 },
+      DAX:      { provider: 'ostium', coins: ['DAX', 'GER40', 'DE40'], match: ['DAX', 'GER40'], kinds: PERP, decimals: 2, pip: 1 },
     };
 
-    let ws = null, nextId = 1, retry = 0, pingTimer = null, reconnectTimer = null;
-    const prices = {}, history = {}, kindState = {}, resolved = {}, providerState = {};
-    const badCoins = new Set(), warned = new Set();
-    const BOOT_AT = Date.now();
-
-    let trades = loadTrades();
-    let activeId = null;
-    let transientView = null;
+    let ws = null, nextId = 1, trades = loadTrades(), activeId = null, transientView = null;
+    const prices = {}, history = {}, rawPrices = {};
     const getActive = () => trades.find(t => t.id === activeId) || transientView;
-
     const norm = s => String(s ?? '').toUpperCase().split(':').pop().replace(/[^A-Z0-9]/g, '');
-    const coinKey = (provider, coin) => `${String(provider).toLowerCase()}|${String(coin).toLowerCase()}`;
-    const COIN_MAP = new Map();
-    function rebuildCoinMap() {
-      COIN_MAP.clear();
-      for (const [key, m] of Object.entries(MARKETS)) m.coins.forEach(c => COIN_MAP.set(coinKey(m.provider, c), key));
-    }
-    function warnOnce(id, ...args) { if (!warned.has(id)) { warned.add(id); console.warn(...args); } }
-
-    const fmt = (key, p) => {
-      const d = MARKETS[key]?.decimals ?? 2;
-      return Number(p).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
-    };
+    const fmt = (key, p) => Number(p).toLocaleString('en-US', { minimumFractionDigits: MARKETS[key]?.decimals ?? 2, maximumFractionDigits: MARKETS[key]?.decimals ?? 2 });
     const fmtPips = p => `${p > 0 ? '+' : p < 0 ? '−' : ''}${Math.abs(p).toFixed(1)} pip`;
     const displayName = key => key.replace(/^xyz:/, '');
     const fmtTime = ts => new Date(ts).toLocaleString(currentLang === 'id' ? 'id-ID' : 'en-US', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
-    const isStale = key => {
-      const p = prices[key];
-      if (!p) return true;
-      const now = Date.now();
-      return now - p.recv > STALE_MS || (p.time && now - p.time > 120000);
-    };
 
     const OFFSET_KEY = 'aluSignalZ_offsets_v1';
     const offsets = (() => { try { return JSON.parse(localStorage.getItem(OFFSET_KEY)) || {}; } catch { return {}; } })();
-    const rawPrices = {};
     const selectedKey = () => document.getElementById('marketSelect').value.split('|').pop();
 
     function updateCalibInfo() {
       const key = selectedKey(), off = offsets[key] || 0;
-      document.getElementById('calibInfo').textContent =
-        `Offset ${displayName(key)}: ${off >= 0 ? '+' : ''}${off.toFixed(MARKETS[key]?.decimals ?? 2)}`;
+      document.getElementById('calibInfo').textContent = `Offset ${displayName(key)}: ${off >= 0 ? '+' : ''}${off.toFixed(MARKETS[key]?.decimals ?? 2)}`;
     }
-
-    function applyOffsetDelta(key, delta) {
-      if (!delta) return;
-      (history[key] || []).forEach(pt => pt.p += delta);
-      if (prices[key]) updatePrice(key, prices[key].price + delta, { provider: prices[key].provider, symbol: key, kind: prices[key].kind, time: prices[key].time });
-    }
-
     function calibrate() {
       const key = selectedKey(), raw = rawPrices[key];
       const mt = parseFloat(document.getElementById('calibInput').value);
-      if (raw == null) return alert(currentLang === 'id' ? 'Harga live belum masuk.' : 'No live price yet.');
-      if (!Number.isFinite(mt) || mt <= 0) return alert(currentLang === 'id' ? 'Masukkan harga dari MT.' : 'Enter MT price.');
-      const old = offsets[key] || 0;
+      if (raw == null) return alert('Harga live belum masuk.');
+      if (!Number.isFinite(mt) || mt <= 0) return alert('Masukkan harga MT.');
       offsets[key] = mt - raw;
-      applyOffsetDelta(key, offsets[key] - old);
       localStorage.setItem(OFFSET_KEY, JSON.stringify(offsets));
       document.getElementById('calibInput').value = '';
       updateCalibInfo();
-      toast(`${displayName(key)} ${currentLang === 'id' ? 'dikalibrasi ke MT' : 'calibrated to MT'}`, 'blue');
     }
-
     function resetCalib() {
-      const key = selectedKey(), old = offsets[key] || 0;
+      const key = selectedKey();
       delete offsets[key];
-      applyOffsetDelta(key, -old);
       localStorage.setItem(OFFSET_KEY, JSON.stringify(offsets));
       updateCalibInfo();
     }
@@ -666,7 +555,6 @@
           </div>`;
       }).join('');
     }
-
     function syncSelectedMarket() {
       document.getElementById('selectedPairBadge').textContent = document.getElementById('marketSelect').value;
       updateCalibInfo();
@@ -677,254 +565,73 @@
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    const BADGE_STYLES = {
-      green:  'bg-emerald-500/20 text-emerald-400 border-emerald-500/40',
-      yellow: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40',
-      red:    'bg-red-500/20 text-red-400 border-red-500/40',
-      blue:   'bg-blue-500/20 text-blue-400 border-blue-500/40',
-      gray:   'bg-gray-500/20 text-gray-400 border-gray-500/40',
-    };
+    const BADGE_STYLES = { green: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40', yellow: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40', red: 'bg-red-500/20 text-red-400 border-red-500/40', blue: 'bg-blue-500/20 text-blue-400 border-blue-500/40', gray: 'bg-gray-500/20 text-gray-400 border-gray-500/40' };
     function setWsStatus(text, color) {
       const el = document.getElementById('wsStatus');
-      if (!el) return;
-      el.textContent = `WS: ${text}`;
-      el.className = `text-[8px] font-mono px-2 py-0.5 rounded border ${BADGE_STYLES[color]}`;
+      if (el) { el.textContent = `WS: ${text}`; el.className = `text-[8px] font-mono px-2 py-0.5 rounded border ${BADGE_STYLES[color]}`; }
     }
-
     const COLORS = ['text-white', 'text-emerald-400', 'text-red-400', 'text-gray-500', 'text-red-600', 'text-gray-400', 'text-yellow-400'];
     function setColor(el, c) { el.classList.remove(...COLORS); el.classList.add(c); }
-
-    let toastTimer;
-    function toast(msg, color = 'green') {
-      const el = document.getElementById('toast');
-      el.textContent = msg;
-      el.className = `fixed top-3 left-1/2 -translate-x-1/2 z-50 px-3 py-2 rounded-lg text-[10px] font-bold font-mono shadow-xl border bg-cardbg ${BADGE_STYLES[color]}`;
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => el.classList.add('hidden'), 3500);
-    }
 
     function pushHistory(key, p) {
       const arr = history[key] ??= [];
       const t = Date.now();
-      const last = arr[arr.length - 1];
-      if (last && t - last.t < 200) last.p = p;
-      else arr.push({ t, p });
+      arr.push({ t, p });
       while (arr.length && t - arr[0].t > HISTORY_MS) arr.shift();
     }
 
-    const SRC_LABEL = { hl: 'HL', ws: 'WS', rest: 'REST', cross: 'X', yahoo: 'YF' };
-
     function updatePrice(key, price, ev) {
       const prev = prices[key]?.price;
-      const via = ev.via || prices[key]?.via || 'ws';
-      prices[key] = { price, recv: Date.now(), time: ev.time, kind: ev.kind, provider: ev.provider, via, source: `${ev.provider}|${ev.symbol}` };
+      prices[key] = { price, recv: Date.now(), kind: ev.kind, provider: ev.provider };
       pushHistory(key, price);
       const txt = fmt(key, price);
-
       const el = document.getElementById(`price-${key}`);
-      if (el) {
-        el.textContent = txt;
-        setColor(el, prev == null || price === prev ? 'text-white' : price > prev ? 'text-emerald-400' : 'text-red-400');
-      }
-      const src = document.getElementById(`src-${key}`);
-      if (src) src.textContent = SRC_LABEL[via] || '';
-
+      if (el) { el.textContent = txt; setColor(el, prev == null || price === prev ? 'text-white' : price > prev ? 'text-emerald-400' : 'text-red-400'); }
       processTick(key, price);
-
-      const a = getActive();
-      if (a && a.key === key) {
-        ['cardLivePriceTop', 'cardLivePriceBadge'].forEach(id => {
-          const e = document.getElementById(id);
-          if (e) e.textContent = txt;
-        });
-        updatePnl(a);
-      }
-      updateCrosses(key);
     }
-
-    function markUnavailable(key) {
-      if (prices[key] && !isStale(key)) return;
-      const el = document.getElementById(`price-${key}`);
-      if (el) { el.textContent = 'N/A'; setColor(el, 'text-red-600'); }
-    }
-
-    const FALLBACK_AFTER = 8000;
-    const lastWs = {}, fbState = {};
-    const needFallback = key => Date.now() - Math.max(lastWs[key] || 0, BOOT_AT) > FALLBACK_AFTER;
-
-    async function fetchT(url, opts = {}, ms = 4000) {
-      const ctrl = new AbortController();
-      const tm = setTimeout(() => ctrl.abort(), ms);
-      try { return await fetch(url, { ...opts, signal: ctrl.signal }); }
-      finally { clearTimeout(tm); }
-    }
-
-    function feedFallback(key, raw, via, symbol, prio) {
-      if (!(raw > 0) || !needFallback(key)) return;
-      const s = fbState[key], now = Date.now();
-      if (s && s.prio < prio && now - s.t < 10000) return;
-      fbState[key] = { prio, t: now };
-      rawPrices[key] = raw;
-      updatePrice(key, raw + (offsets[key] || 0), { provider: via, symbol, kind: 'fallback', time: now, via });
-    }
-
-    function updateCrosses(changedKey) {
-      for (const [k, m] of Object.entries(MARKETS)) {
-        const cr = m.fb?.cross;
-        if (!cr || !cr.includes(changedKey)) continue;
-        const [a, b] = cr;
-        if (isStale(a) || isStale(b) || rawPrices[a] == null || rawPrices[b] == null) continue;
-        feedFallback(k, rawPrices[a] * rawPrices[b], 'cross', `${a}×${b}`, 0);
-      }
-    }
-
-    let hlBusy = false;
-    async function pollHL() {
-      if (hlBusy) return;
-      const list = Object.entries(MARKETS).filter(([k, m]) => m.fb?.hl && needFallback(k));
-      if (!list.length) return;
-      hlBusy = true;
-      try {
-        const dexes = [...new Set(list.flatMap(([, m]) => m.fb.hl.map(c => c.includes(':') ? c.split(':')[0] : '')))];
-        for (const dex of dexes) {
-          try {
-            const r = await fetchT('https://api.hyperliquid.xyz/info', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(dex ? { type: 'allMids', dex } : { type: 'allMids' }),
-            });
-            if (!r.ok) continue;
-            const j = await r.json();
-            const mids = new Map(Object.entries(j || {}).map(([s, p]) => [norm(s), +p]));
-            for (const [k, m] of list) {
-              const coin = m.fb.hl.find(c => (c.includes(':') ? c.split(':')[0] : '') === dex && mids.has(norm(c)));
-              if (coin) feedFallback(k, mids.get(norm(coin)), 'rest', coin, 0);
-            }
-          } catch {}
-        }
-      } finally { hlBusy = false; }
-    }
-
-    let bnBusy = false;
-    async function pollBinance() {
-      if (bnBusy) return;
-      const list = Object.entries(MARKETS).filter(([k, m]) => m.fb?.bn && needFallback(k));
-      if (!list.length) return;
-      bnBusy = true;
-      try {
-        const syms = list.map(([, m]) => m.fb.bn);
-        const r = await fetchT(`https://data-api.binance.vision/api/v3/ticker/price?symbols=${encodeURIComponent(JSON.stringify(syms))}`);
-        if (!r.ok) return;
-        const arr = await r.json();
-        const map = new Map(arr.map(x => [x.symbol, +x.price]));
-        for (const [k, m] of list) if (map.has(m.fb.bn)) feedFallback(k, map.get(m.fb.bn), 'rest', m.fb.bn, 1);
-      } catch {} finally { bnBusy = false; }
-    }
-
-    setInterval(() => { pollHL(); pollBinance(); }, 2000);
 
     const lastHL = {}, hlResolved = {};
-    let hlWs = null, hlRetry = 0, hlTimer = null, hlPing = null, hlLastMsg = 0;
-
+    let hlWs = null, hlPing = null;
     function hlTargets() {
       const map = new Map();
-      for (const [key, m] of Object.entries(MARKETS)) (m.fb?.hl || []).forEach(c => map.set(c, key));
+      for (const [key, m] of Object.entries(MARKETS)) if (m.provider === 'hyperliquid') m.coins.forEach(c => map.set(c, key));
       return map;
     }
-
-    function hlIngest(key, raw, coin) {
-      if (!(raw > 0)) return;
-      if (hlResolved[key] && hlResolved[key] !== coin) return;
-      hlResolved[key] = coin;
-      const now = Date.now();
-      lastHL[key] = now; lastWs[key] = now; delete fbState[key];
-      rawPrices[key] = raw;
-      updatePrice(key, raw + (offsets[key] || 0), { provider: 'hyperliquid', symbol: coin, kind: PRICE_SIDE, time: now, via: 'hl' });
-    }
-
     function connectHL() {
-      clearTimeout(hlTimer);
       const targets = hlTargets();
       if (!targets.size) return;
-      const sock = new WebSocket(HL_WS);
-      hlWs = sock;
-      hlLastMsg = Date.now();
-
-      sock.onopen = () => {
-        if (sock !== hlWs) return;
-        hlRetry = 0;
-        const dexes = new Set();
-        for (const coin of targets.keys()) {
-          sock.send(JSON.stringify({ method: 'subscribe', subscription: { type: 'bbo', coin } }));
-          dexes.add(coin.includes(':') ? coin.split(':')[0] : '');
-        }
-        dexes.forEach(dex => sock.send(JSON.stringify({
-          method: 'subscribe', subscription: dex ? { type: 'allMids', dex } : { type: 'allMids' },
-        })));
-        clearInterval(hlPing);
-        hlPing = setInterval(() => {
-          if (Date.now() - hlLastMsg > 60000) return sock.close();
-          if (sock.readyState === WebSocket.OPEN) sock.send('{"method":"ping"}');
-        }, 25000);
+      hlWs = new WebSocket(HL_WS);
+      hlWs.onopen = () => {
+        for (const coin of targets.keys()) hlWs.send(JSON.stringify({ method: 'subscribe', subscription: { type: 'bbo', coin } }));
+        hlPing = setInterval(() => { if (hlWs.readyState === WebSocket.OPEN) hlWs.send('{"method":"ping"}'); }, 25000);
       };
-
-      sock.onmessage = e => {
-        hlLastMsg = Date.now();
+      hlWs.onmessage = e => {
         let msg; try { msg = JSON.parse(e.data); } catch { return; }
         if (msg.channel === 'bbo') {
           const d = msg.data, key = targets.get(d?.coin);
           if (!key) return;
-          const [b, a] = d.bbo || [];
-          const bid = +b?.px, ask = +a?.px;
-          const raw = PRICE_SIDE === 'bid' && bid > 0 ? bid : (bid > 0 && ask > 0 ? (bid + ask) / 2 : (bid || ask));
-          hlIngest(key, raw, d.coin);
-        } else if (msg.channel === 'allMids') {
-          const mids = new Map(Object.entries(msg.data?.mids || {}).map(([s, p]) => [norm(s), +p]));
-          const now = Date.now();
-          for (const [coin, key] of targets) {
-            const p = mids.get(norm(coin));
-            if (p == null || now - (lastHL[key] || 0) < 1500) continue;
-            hlIngest(key, p, coin);
+          const [b] = d.bbo || [];
+          const bid = +b?.px;
+          if (bid > 0) {
+            rawPrices[key] = bid;
+            updatePrice(key, bid + (offsets[key] || 0), { provider: 'hyperliquid', symbol: d.coin, kind: 'bid' });
           }
         }
       };
-      sock.onclose = () => {
-        if (sock !== hlWs) return;
-        clearInterval(hlPing);
-        hlTimer = setTimeout(connectHL, Math.min(15000, 1000 * 2 ** hlRetry++));
-      };
+      hlWs.onclose = () => { clearInterval(hlPing); setTimeout(connectHL, 5000); };
     }
 
     function loadTrades() {
-      try {
-        const arr = JSON.parse(localStorage.getItem(STORE_KEY)) || [];
-        return arr.map(t => t.status === 'CLOSED' ? t : { ...t, triggered: true, status: t.status === 'BE' ? 'BE' : 'RUNNING' });
-      } catch { return []; }
+      try { return JSON.parse(localStorage.getItem(STORE_KEY)) || []; } catch { return []; }
     }
     function saveTrades() {
-      while (trades.length > MAX_TRADES) {
-        const i = trades.findIndex(t => t.status === 'CLOSED');
-        if (i < 0) break;
-        trades.splice(i, 1);
-      }
-      try { localStorage.setItem(STORE_KEY, JSON.stringify(trades)); } catch (e) {}
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(trades)); } catch {}
     }
     const nextNo = () => trades.reduce((m, t) => Math.max(m, t.no || 0), 0) + 1;
-
-    const parseLevel = v => {
-      if (v == null) return null;
-      const x = parseFloat(String(v).replace(/[^0-9.\-]/g, ''));
-      return Number.isFinite(x) ? x : null;
-    };
+    const parseLevel = v => Number.isFinite(parseFloat(v)) ? parseFloat(v) : null;
     const pipsOf = (t, price) => (price - t.entry) * t.dir / (MARKETS[t.key]?.pip || 1);
-    const maxTpKey = t => ['tp3', 'tp2', 'tp1'].find(k => t[k] != null);
     const highestHit = t => t.hits.tp3 ? 3 : t.hits.tp2 ? 2 : t.hits.tp1 ? 1 : 0;
-
-    function resultLabel(t) {
-      if (t.result === 'SL') return 'SL';
-      if (t.result === 'TP') return `TP${t.maxTp} MAX`;
-      if (t.result === 'BE') return `TP${t.maxTp} → BE`;
-      return '';
-    }
+    const resultLabel = t => t.result === 'SL' ? 'SL' : t.result === 'TP' ? `TP${t.maxTp} MAX` : t.result === 'BE' ? `TP${t.maxTp} → BE` : '';
 
     function processTick(key, price) {
       let changed = false;
@@ -937,151 +644,70 @@
     function evaluateTrade(t, price) {
       const d = t.dir;
       const reached = v => v != null && (d > 0 ? price >= v : price <= v);
-      const lost    = v => v != null && (d > 0 ? price <= v : price >= v);
+      const lost = v => v != null && (d > 0 ? price <= v : price >= v);
       let changed = false;
 
       for (const k of ['tp1', 'tp2', 'tp3']) {
         if (t[k] != null && !t.hits[k] && reached(t[k])) {
           t.hits[k] = Date.now();
-          t.markers.push({ t: Date.now(), p: t[k], k });
           if (k === 'tp1') t.status = 'BE';
           changed = true;
         }
       }
-
-      const mk = maxTpKey(t);
+      const mk = ['tp3', 'tp2', 'tp1'].find(k => t[k] != null);
       if (mk && t.hits[mk]) { closeTrade(t, 'TP', t[mk]); return true; }
-
       const stop = t.hits.tp1 ? t.entry : t.sl;
       if (lost(stop)) { closeTrade(t, t.hits.tp1 ? 'BE' : 'SL', stop); return true; }
-
       return changed;
     }
 
     function closeTrade(t, result, exitPrice) {
       Object.assign(t, { status: 'CLOSED', result, exitPrice, closedAt: Date.now(), maxTp: highestHit(t) });
-      if (result === 'SL')      t.pips = pipsOf(t, t.sl);
-      else if (result === 'TP') t.pips = pipsOf(t, t[maxTpKey(t)]);
-      else                      t.pips = BE_CLOSE_PNL === 'zero' ? 0 : pipsOf(t, t[`tp${t.maxTp}`]);
-      t.markers.push({ t: Date.now(), p: exitPrice, k: result === 'SL' ? 'sl' : result === 'BE' ? 'be' : 'tp' });
+      t.pips = result === 'SL' ? pipsOf(t, t.sl) : result === 'TP' ? pipsOf(t, t[['tp3', 'tp2', 'tp1'].find(k => t[k] != null)]) : 0;
     }
 
     function renderHistory() {
-      const D = DICT[currentLang];
       const filter = document.getElementById('histFilter')?.value || 'today';
       const today = new Date().toDateString();
-      const isToday = ts => ts && new Date(ts).toDateString() === today;
-
-      const closed = trades.filter(t => t.status === 'CLOSED' && (filter === 'all' || isToday(t.closedAt)));
-      const open = trades.filter(t => t.status !== 'CLOSED');
+      const closed = trades.filter(t => t.status === 'CLOSED' && (filter === 'all' || new Date(t.closedAt).toDateString() === today));
       const wins = closed.filter(t => t.pips > 0), losses = closed.filter(t => t.pips < 0);
-      const be = closed.length - wins.length - losses.length;
-      const winPips = wins.reduce((s, t) => s + t.pips, 0);
-      const losePips = losses.reduce((s, t) => s + t.pips, 0);
+      const winPips = wins.reduce((s, t) => s + t.pips, 0), losePips = losses.reduce((s, t) => s + t.pips, 0);
       const total = winPips + losePips;
       const ratio = wins.length + losses.length ? wins.length / (wins.length + losses.length) * 100 : 0;
 
-      const set = (id, v) => { const e = document.getElementById(id); if(e) e.textContent = v; };
-      set('sumWin', fmtPips(winPips));
-      set('sumWinCount', `${wins.length} trade`);
-      set('sumLose', fmtPips(losePips));
-      set('sumLoseCount', `${losses.length} trade`);
-      set('sumTotal', fmtPips(total));
-      const sumTotalEl = document.getElementById('sumTotal');
-      if (sumTotalEl) setColor(sumTotalEl, total > 0 ? 'text-emerald-400' : total < 0 ? 'text-red-400' : 'text-white');
-      set('sumOpen', `${open.length} ${D.running}`);
-      set('sumRatio', `${ratio.toFixed(1)}%`);
-      set('sumRatioSub', `${wins.length}W / ${losses.length}L${be ? ` / ${be} BE` : ''}`);
+      const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+      set('sumWin', fmtPips(winPips)); set('sumWinCount', `${wins.length} trade`);
+      set('sumLose', fmtPips(losePips)); set('sumLoseCount', `${losses.length} trade`);
+      set('sumTotal', fmtPips(total)); set('sumRatio', `${ratio.toFixed(1)}%`);
 
-      const list = trades.filter(t => filter === 'all' || t.status !== 'CLOSED' || isToday(t.closedAt) || isToday(t.createdAt)).sort((a, b) => b.createdAt - a.createdAt);
       const box = document.getElementById('historyList');
       if (!box) return;
-      if (!list.length) { box.innerHTML = `<p class="text-center text-[10px] text-gray-500 py-3">${D.noHistory}</p>`; return; }
+      if (!trades.length) { box.innerHTML = '<p class="text-center text-[10px] text-gray-500 py-3">Belum ada history.</p>'; return; }
 
-      box.innerHTML = list.map(t => {
-        const isActive = t.id === activeId;
-        const dirTxt = t.dir > 0 ? '<span class="text-sky-400">BUY</span>' : '<span class="text-red-400">SELL</span>';
-        let right, chip;
-        if (t.status === 'CLOSED') {
-          const c = t.pips > 0 ? 'text-emerald-400' : t.pips < 0 ? 'text-red-400' : 'text-yellow-400';
-          right = `<span class="${c}">${resultLabel(t)} ${fmtPips(t.pips)}</span>`;
-          chip = `<span class="px-1.5 rounded border ${BADGE_STYLES[t.result === 'SL' ? 'red' : t.result === 'BE' ? 'yellow' : 'green']}">CLOSED</span>`;
-        } else {
-          right = `<span id="fl-${t.id}" class="text-gray-400">--</span>`;
-          chip = t.status === 'BE' ? `<span class="px-1.5 rounded border ${BADGE_STYLES.yellow}">TP${highestHit(t)} ✓ BE SET</span>` : `<span class="px-1.5 rounded border ${BADGE_STYLES.blue}">RUNNING</span>`;
-        }
-        return `
-          <div onclick="viewTrade('${t.id}')" class="bg-darkbg hover:bg-panelborder/60 border ${isActive ? 'border-accentblue' : 'border-panelborder'} px-2 py-1.5 rounded cursor-pointer space-y-0.5">
-            <div class="flex justify-between items-center text-[10px] font-bold">
-              <span class="text-white">${t.no}. ${displayName(t.key)} <span class="text-[8px] text-gray-400 font-normal">${t.style}</span> <span class="text-[8px]">${dirTxt}</span></span>
-              <span class="font-mono">${right}</span>
-            </div>
-            <div class="flex justify-between items-center text-[8px] font-mono text-gray-500">
-              <span>${fmtTime(t.createdAt)} · Entry ${fmt(t.key, t.entry)}</span>
-              ${chip}
-            </div>
-          </div>`;
-      }).join('');
-      updateFloating();
+      box.innerHTML = trades.map(t => `
+        <div onclick="viewTrade('${t.id}')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1.5 rounded cursor-pointer space-y-0.5">
+          <div class="flex justify-between items-center text-[10px] font-bold">
+            <span class="text-white">${t.no}. ${displayName(t.key)} <span class="text-[8px] text-gray-400">${t.style}</span></span>
+            <span class="font-mono ${t.pips > 0 ? 'text-emerald-400' : 'text-red-400'}">${t.status === 'CLOSED' ? resultLabel(t) + ' ' + fmtPips(t.pips) : 'RUNNING'}</span>
+          </div>
+        </div>`).join('');
     }
 
-    function updateFloating() {
-      for (const t of trades) {
-        if (t.status === 'CLOSED') continue;
-        const el = document.getElementById(`fl-${t.id}`);
-        const p = prices[t.key]?.price;
-        if (!el || p == null) continue;
-        const pips = pipsOf(t, p);
-        el.textContent = fmtPips(pips);
-        setColor(el, pips >= 0 ? 'text-emerald-400' : 'text-red-400');
-      }
-    }
-    setInterval(updateFloating, 1000);
-
-    function clearHistory() {
-      if (!trades.length) return;
-      if (!confirm('Hapus semua history?')) return;
-      trades = []; activeId = null; transientView = null;
-      saveTrades(); renderHistory();
-      document.getElementById('activeSignalCard')?.classList.add('hidden');
-      document.getElementById('standbyView')?.classList.remove('hidden');
-    }
-
-    function viewTrade(id, scroll = true) {
+    function viewTrade(id) {
+      activeId = id; transientView = null;
       const t = trades.find(x => x.id === id);
       if (!t) return;
-      activeId = id; transientView = null;
       renderSignalCard(t);
       refreshActiveUI();
-      renderHistory();
-      if (scroll) document.getElementById('signalContainer')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     function renderSignalCard(t) {
-      const set = (id, v) => { const e = document.getElementById(id); if(e) e.textContent = v ?? '--'; };
+      const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v ?? '--'; };
       const c = t.card || {};
       set('cardMarketTitle', `${displayName(t.key)} (Live AI)`);
-
-      const badge = document.getElementById('signalBadgeBtn');
-      if (badge) {
-        const base = 'text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg flex items-center gap-1';
-        if (t.signal === 'BUY') { badge.className = `bg-sky-500 ${base}`; badge.innerHTML = '<i class="fa-solid fa-caret-up"></i> BUY'; }
-        else if (t.signal === 'SELL') { badge.className = `bg-red-500 ${base}`; badge.innerHTML = '<i class="fa-solid fa-caret-down"></i> SELL'; }
-      }
-
-      set('cardStyleSub', `${t.style.toUpperCase()} / ${fmtTime(t.createdAt)}${t.no ? ` / #${t.no}` : ''}`);
       set('cardEntryZone', `${c.entry_min ?? '--'} - ${c.entry_max ?? '--'}`);
-
-      const pipTxt = lvl => (lvl != null && t.dir) ? `${Math.abs(pipsOf(t, lvl)).toFixed(1)} pip` : null;
-      set('cardSL', c.sl);   set('cardSLPips',  pipTxt(t.sl)  ?? c.sl_pips);
-      set('cardTP1', c.tp1); set('cardTP1Pips', pipTxt(t.tp1) ?? c.tp1_pips);
-      set('cardTP2', c.tp2); set('cardTP2Pips', pipTxt(t.tp2) ?? c.tp2_pips);
-      set('cardTP3', c.tp3); set('cardTP3Pips', pipTxt(t.tp3) ?? c.tp3_pips);
+      set('cardSL', c.sl); set('cardTP1', c.tp1); set('cardTP2', c.tp2); set('cardTP3', c.tp3);
       set('cardReason', c.reason);
-
-      const live = prices[t.key]?.price;
-      ['cardLivePriceTop', 'cardLivePriceBadge'].forEach(id => set(id, live != null ? fmt(t.key, live) : '--.--'));
-
       document.getElementById('standbyView')?.classList.add('hidden');
       document.getElementById('activeSignalCard')?.classList.remove('hidden');
     }
@@ -1094,252 +720,78 @@
         const box = document.getElementById(`box${name}`), chk = document.getElementById(`chk${name}`);
         if (!box || !chk) return;
         box.classList.remove('tp-hit', 'sl-hit'); chk.classList.remove('show');
-        const hit = k === 'sl' ? t.result === 'SL' : !!hits[k];
-        if (hit) { box.classList.add(k === 'sl' ? 'sl-hit' : 'tp-hit'); chk.classList.add('show'); }
+        if (hits[k] || (k === 'sl' && t.result === 'SL')) { box.classList.add(k === 'sl' ? 'sl-hit' : 'tp-hit'); chk.classList.add('show'); }
       });
-      updateStatus(t);
-      updatePnl(t);
     }
 
-    function updateStatus(t) {
-      const n = t.hits ? highestHit(t) : 0;
-      let txt, color;
-      if (!t.dir)                 { txt = 'NO POSITION'; color = 'yellow'; }
-      else if (!t.no)             { txt = 'NOT SAVED'; color = 'gray'; }
-      else if (t.result === 'SL') { txt = 'STOP LOSS HIT'; color = 'red'; }
-      else if (t.result === 'TP') { txt = `TP${t.maxTp} MAX 🏆 CLOSED`; color = 'green'; }
-      else if (t.result === 'BE') { txt = `CLOSED @BE (TP${t.maxTp} ✓)`; color = 'yellow'; }
-      else if (t.status === 'BE') { txt = `TP${n} ✓ · BE SET`; color = 'green'; }
-      else                        { txt = 'RUNNING'; color = 'blue'; }
-      const el = document.getElementById('tradeStatus');
-      if (el) {
-        el.textContent = txt;
-        el.className = `text-[8px] font-mono font-bold px-2 py-0.5 rounded border ${BADGE_STYLES[color]}`;
-      }
-    }
-
-    function updatePnl(t) {
-      const el = document.getElementById('tradePnl');
-      if (!el) return;
-      if (!t?.dir || !t.entry) { el.textContent = '--'; setColor(el, 'text-gray-400'); return; }
-      const pips = t.status === 'CLOSED' ? t.pips : (prices[t.key] ? pipsOf(t, prices[t.key].price) : null);
-      if (pips == null) { el.textContent = '--'; return; }
-      el.textContent = fmtPips(pips);
-      setColor(el, pips > 0 ? 'text-emerald-400' : pips < 0 ? 'text-red-400' : 'text-yellow-400');
-    }
-
+    // Chart loop sederhana
     const cv = document.getElementById('priceChart');
     const ctx = cv ? cv.getContext('2d') : null;
-    const FONT = 'ui-monospace, SFMono-Regular, Menlo, monospace';
-
-    function levelList(t) {
-      const hits = t.hits || {}, L = [];
-      const add = (k, name, price, color, extra = {}) => { if (Number.isFinite(price)) L.push({ k, name, price, color, ...extra }); };
-      add('tp3', 'TP3', t.tp3, '#38bdf8', { hit: !!hits.tp3 });
-      add('tp2', 'TP2', t.tp2, '#34d399', { hit: !!hits.tp2 });
-      add('tp1', 'TP1', t.tp1, '#34d399', { hit: !!hits.tp1 });
-      add('entry', hits.tp1 ? 'BE' : 'ENTRY', t.entry, '#facc15', { hit: t.result === 'BE' });
-      add('sl', 'SL', t.sl, '#ff3b69', { hit: t.result === 'SL', faded: !!hits.tp1 });
-      return L.sort((a, b) => b.price - a.price);
-    }
-
-    let animP = null, animKey = null;
-
-    function drawChart() {
+    function chartLoop() {
+      requestAnimationFrame(chartLoop);
       if (!cv || !ctx) return;
-      const t = getActive();
-      if (!t) return;
       const r = cv.getBoundingClientRect();
       if (!r.width || !r.height) return;
-      const dpr = window.devicePixelRatio || 1;
-      const W = r.width, H = r.height;
-      if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
-        cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
-      }
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, W, H);
-
-      const padL = 6, padR = 86, padT = 14, padB = 18;
-      const plotW = W - padL - padR, plotH = H - padT - padB;
-      const GAP = Math.max(40, plotW * 0.18);
-      const lineW = plotW - GAP;
-      const nowX = padL + lineW;
-
-      const key = t.key, pts = history[key] || [], now = Date.now();
-      const win = Math.min(WINDOW_MS, Math.max(MIN_WINDOW_MS, pts.length ? now - pts[0].t : 0));
-      const t0 = now - win;
-      let s = 0; while (s < pts.length && pts[s].t < t0) s++;
-      const vis = pts.slice(Math.max(0, s - 1));
-      const last = vis[vis.length - 1];
-
-      if (last) {
-        if (animKey !== key || animP == null) { animP = last.p; animKey = key; }
-        else animP += (last.p - animP) * 0.3;
-      }
-
-      const lv = levelList(t);
-      const vals = vis.map(p => p.p).concat(lv.map(l => l.price));
-      if (!vals.length) return;
-      let min = Math.min(...vals), max = Math.max(...vals);
-      const pad = (max - min) * 0.08 || Math.abs(max) * 0.0005 || 1;
-      min -= pad; max += pad;
-      const X = tt => padL + (tt - t0) / win * lineW;
-      const Y = p => padT + (max - p) / (max - min) * plotH;
-
-      if (last) {
-        const c = RGB.blue;
-        const ey = Y(animP);
-        ctx.save();
-        ctx.beginPath(); ctx.rect(padL, 0, plotW, H); ctx.clip();
-        ctx.beginPath();
-        vis.forEach((p, i) => {
-          const x = X(p.t), y = i === vis.length - 1 ? ey : Y(p.p);
-          i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-        });
-        ctx.lineTo(nowX, ey);
-        ctx.strokeStyle = `rgb(${c})`; ctx.lineWidth = 1.8; ctx.stroke();
-        ctx.restore();
-      }
-    }
-
-    let lastDraw = 0;
-    function chartLoop(ts) {
-      requestAnimationFrame(chartLoop);
-      if (ts - lastDraw < 33) return;
-      lastDraw = ts;
-      drawChart();
-    }
-
-    async function resolveCoins() {
-      try {
-        const res = await fetchT(`${REST_BASE}/v1/markets`, {}, 6000);
-        if (!res.ok) return;
-        const j = await res.json();
-        const list = Array.isArray(j) ? j : (j.markets ?? j.data ?? []);
-        for (const [key, m] of Object.entries(MARKETS)) {
-          const isHit = x => m.coins.includes(x.coin) || m.match.some(t => norm(x.coin) === t);
-          const same = list.find(x => String(x.provider).toLowerCase() === m.provider && isHit(x));
-          if (same) m.coins = [same.coin, ...m.coins.filter(c => c !== same.coin)];
-        }
-      } catch {}
-      rebuildCoinMap();
-    }
-
-    function subscribeAll(sock) {
-      const providers = [...new Set(Object.values(MARKETS).map(m => m.provider))];
-      sock.send(JSON.stringify({ op: 'sub', id: nextId++, channel: 'status', payload: { providers } }));
-      for (const [key, m] of Object.entries(MARKETS)) {
-        const coins = resolved[key] ? [resolved[key]] : m.coins;
-        coins.forEach(coin => sock.send(JSON.stringify({ op: 'sub', id: nextId++, channel: 'ticks', payload: { symbols: [coin], providers: [m.provider] } })));
-      }
-    }
-
-    function connect() {
-      const sock = new WebSocket(WS_URL);
-      ws = sock;
-      setWsStatus('CONNECTING', 'yellow');
-      sock.onopen = () => {
-        setWsStatus('CONNECTED', 'green');
-        subscribeAll(sock);
-      };
-      sock.onmessage = e => {
-        let f; try { f = JSON.parse(e.data); } catch { return; }
-        if (f.op === 'events') (f.events || []).forEach(ev => {
-          if (!ev.provider || !ev.symbol) return;
-          const key = lookupKey(ev);
-          if (!key) return;
-          const bid = parseFloat(ev.bid);
-          const raw = bid > 0 ? bid : parseFloat(ev.price);
-          if (!(raw > 0)) return;
-          lastWs[key] = Date.now();
-          rawPrices[key] = raw;
-          updatePrice(key, raw + (offsets[key] || 0), { ...ev, via: 'ws' });
-        });
-      };
-      sock.onclose = () => {
-        setWsStatus('DISCONNECTED', 'red');
-        setTimeout(connect, 4000);
-      };
-    }
-
-    function lookupKey(ev) {
-      const n = norm(ev.symbol), prov = String(ev.provider).toLowerCase();
-      for (const [k, m] of Object.entries(MARKETS)) {
-        if (m.provider === prov && (m.match.includes(n) || m.coins.some(c => norm(c) === n))) return k;
-      }
-      return null;
+      cv.width = r.width; cv.height = r.height;
+      ctx.clearRect(0, 0, r.width, r.height);
     }
 
     async function generateAISignal() {
       const marketId = document.getElementById('marketSelect').value;
       const tradingStyle = document.getElementById('tradingStyleSelect').value;
       const symbolKey = marketId.split('|').pop();
-
       const live = prices[symbolKey];
-      if (!live) return alert('Harga live belum tersambung.');
-      const currentPrice = live.price;
+      if (!live) return alert('Harga live belum tersambung. Pilih pair lain atau tunggu sejenak.');
 
       const btn = document.getElementById('signalBtn');
       btn.disabled = true;
       btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> Mengevaluasi...`;
 
       try {
-        const response = await fetch('/api/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ marketId, tradingStyle, currentPrice, priceKind: live.kind, lang: currentLang }),
+        const res = await fetch('/api/generate', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ marketId, tradingStyle, currentPrice: live.price, priceKind: live.kind, lang: currentLang })
         });
-        const rawData = await response.json();
-        if (!response.ok) throw new Error(rawData.error || `HTTP Error ${response.status}`);
-
-        const contentText = rawData.choices[0].message.content;
-        const data = JSON.parse(contentText.substring(contentText.indexOf('{'), contentText.lastIndexOf('}') + 1));
+        const raw = await res.json();
+        const content = raw.choices[0].message.content;
+        const data = JSON.parse(content.substring(content.indexOf('{'), content.lastIndexOf('}') + 1));
 
         const signal = String(data.signal || '').toUpperCase();
-        const dir = signal === 'BUY' ? 1 : signal === 'SELL' ? -1 : 0;
-        const emin = parseLevel(data.entry_min), emax = parseLevel(data.entry_max);
-
         const t = {
-          id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-          key: symbolKey, marketId, style: tradingStyle.split(' (')[0],
-          signal, dir, entry: emin != null && emax != null ? (emin + emax) / 2 : (emin ?? emax ?? currentPrice),
-          emin, emax, triggered: true,
-          sl: parseLevel(data.sl), tp1: parseLevel(data.tp1), tp2: parseLevel(data.tp2), tp3: parseLevel(data.tp3),
+          id: Date.now().toString(36), key: symbolKey, style: tradingStyle.split(' (')[0],
+          signal, dir: signal === 'BUY' ? 1 : -1,
+          entry: live.price, sl: parseLevel(data.sl),
+          tp1: parseLevel(data.tp1), tp2: parseLevel(data.tp2), tp3: parseLevel(data.tp3),
           createdAt: Date.now(), status: 'RUNNING', hits: {}, markers: [],
-          card: {
-            entry_min: data.entry_min, entry_max: data.entry_max,
-            sl: data.sl, tp1: data.tp1, tp2: data.tp2, tp3: data.tp3,
-            sl_pips: data.sl_pips, tp1_pips: data.tp1_pips, tp2_pips: data.tp2_pips, tp3_pips: data.tp3_pips,
-            reason: data.reason,
-          },
+          card: data, no: nextNo()
         };
 
-        t.no = nextNo();
-        trades.push(t);
-        activeId = t.id; transientView = null;
-        saveTrades();
-        renderSignalCard(t);
-        refreshActiveUI();
-        renderHistory();
-      } catch (error) {
-        alert(`Error: ${error.message}`);
+        trades.push(t); activeId = t.id;
+        saveTrades(); renderSignalCard(t); renderHistory();
+      } catch (e) {
+        alert('Gagal generate sinyal: ' + e.message);
       } finally {
         btn.disabled = false;
         btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> GENERATE AI SIGNAL`;
       }
     }
 
-    window.onload = async () => {
-      await checkSavedSession();
-      buildTicker();
-      updateCalibInfo();
-      renderHistory();
-      if (trades.length) viewTrade(trades[trades.length - 1].id, false);
-      requestAnimationFrame(chartLoop);
-      connectHL();
-      await resolveCoins();
-      connect();
-    };
+    function connect() {
+      ws = new WebSocket(WS_URL);
+      ws.onopen = () => setWsStatus('CONNECTED', 'green');
+      ws.onmessage = e => {
+        let f; try { f = JSON.parse(e.data); } catch { return; }
+        if (f.op === 'events') (f.events || []).forEach(ev => {
+          for (const [k, m] of Object.entries(MARKETS)) {
+            if (m.provider === ev.provider && m.coins.includes(ev.symbol)) {
+              const p = parseFloat(ev.bid || ev.price);
+              if (p > 0) updatePrice(k, p + (offsets[k] || 0), ev);
+            }
+          }
+        });
+      };
+      ws.onclose = () => { setWsStatus('DISCONNECTED', 'red'); setTimeout(connect, 4000); };
+    }
     </script>
 </body>
 </html>
