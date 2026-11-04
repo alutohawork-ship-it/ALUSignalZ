@@ -30,6 +30,7 @@
                      display: none; align-items: center; justify-content: center; font-size: 9px; color: #0b0e14; z-index: 5; }
         .hit-badge.show { display: flex; animation: pop .45s ease-out; }
         @keyframes pop { 0% { transform: scale(0); } 60% { transform: scale(1.4); } 100% { transform: scale(1); } }
+        input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
     </style>
 </head>
 <body class="bg-darkbg text-gray-200 font-sans min-h-screen flex flex-col justify-between p-2">
@@ -91,6 +92,15 @@
                     <option value="binance|TSLAUSDT">Tesla / TSLA (Binance)</option>
                 </optgroup>
             </select>
+
+            <!-- Kalibrasi ke harga broker MT -->
+            <div class="flex items-center gap-1.5">
+                <input id="calibInput" type="number" step="any" inputmode="decimal" placeholder="Harga Bid di MT (opsional)"
+                       class="flex-1 min-w-0 bg-darkbg border border-panelborder text-[10px] font-mono text-white px-2 py-1.5 rounded-lg focus:outline-none">
+                <button onclick="calibrate()" id="calibBtn" class="text-[9px] font-bold px-2 py-1.5 rounded-lg bg-accentblue/20 text-accentblue border border-accentblue/40">KALIBRASI</button>
+                <button onclick="resetCalib()" class="text-[9px] font-bold px-2 py-1.5 rounded-lg bg-panelborder text-gray-300 border border-panelborder">RESET</button>
+            </div>
+            <p id="calibInfo" class="text-[8px] font-mono text-gray-500">Offset: 0</p>
 
             <div>
                 <label id="lblTradingStyle" class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
@@ -232,7 +242,7 @@
             </div>
         </div>
 
-        <!-- LIVE MARKET TICKER -->
+        <!-- LIVE MARKET TICKER (dibuat otomatis dari dropdown) -->
         <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md">
             <div class="flex justify-between items-center pb-1.5 mb-1.5 border-b border-panelborder">
                 <span id="lblLiveStream" class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
@@ -240,72 +250,14 @@
                 </span>
                 <span id="livePulse" class="text-[8px] text-emerald-400 font-mono animate-pulse">● Live Stream</span>
             </div>
-
-            <div id="tickerListContainer" class="space-y-1 max-h-[220px] overflow-y-auto pr-1">
-                <div onclick="selectTicker('hyperliquid|XAUUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">XAUUSD <span class="text-[7px] text-yellow-400">Gold (Hyperliquid)</span></span>
-                    <span id="price-XAUUSD" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-                <div onclick="selectTicker('hyperliquid|XAGUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">XAGUSD <span class="text-[7px] text-yellow-400">Silver (Hyperliquid)</span></span>
-                    <span id="price-XAGUSD" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-                <div onclick="selectTicker('veranta|EURUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">EURUSD <span class="text-[7px] text-blue-400">Veranta</span></span>
-                    <span id="price-EURUSD" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-                <div onclick="selectTicker('veranta|USDJPY')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">USDJPY <span class="text-[7px] text-blue-400">Veranta</span></span>
-                    <span id="price-USDJPY" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-                <div onclick="selectTicker('veranta|GBPUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">GBPUSD <span class="text-[7px] text-blue-400">Veranta</span></span>
-                    <span id="price-GBPUSD" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-                <div onclick="selectTicker('veranta|GBPJPY')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">GBPJPY <span class="text-[7px] text-blue-400">Veranta</span></span>
-                    <span id="price-GBPJPY" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-                <div onclick="selectTicker('ostium|DJI')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">DJI (US30) <span class="text-[7px] text-orange-400">Ostium</span></span>
-                    <span id="price-DJI" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-                <div onclick="selectTicker('hyperliquid|xyz:SP500')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">S&P 500 <span class="text-[7px] text-orange-400">Hyperliquid</span></span>
-                    <span id="price-xyz:SP500" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-                <div onclick="selectTicker('hyperliquid|xyz:NAS100')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">NAS100 <span class="text-[7px] text-orange-400">Hyperliquid</span></span>
-                    <span id="price-xyz:NAS100" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-                <div onclick="selectTicker('ostium|NIKKEI')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">NIKKEI 225 <span class="text-[7px] text-orange-400">Ostium</span></span>
-                    <span id="price-NIKKEI" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-                <div onclick="selectTicker('ostium|DAX')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">DAX 40 <span class="text-[7px] text-orange-400">Ostium</span></span>
-                    <span id="price-DAX" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-                <div onclick="selectTicker('binance|BTCUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">BTCUSDT <span class="text-[7px] text-emerald-400">Binance</span></span>
-                    <span id="price-BTCUSDT" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-                <div onclick="selectTicker('binance|ETHUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">ETHUSDT <span class="text-[7px] text-emerald-400">Binance</span></span>
-                    <span id="price-ETHUSDT" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-                <div onclick="selectTicker('binance|SOLUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">SOLUSDT <span class="text-[7px] text-emerald-400">Binance</span></span>
-                    <span id="price-SOLUSDT" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-            </div>
+            <div id="tickerListContainer" class="space-y-1 max-h-[220px] overflow-y-auto pr-1"></div>
         </div>
 
     </main>
 
     <!-- ======================= SCRIPT ENGINE ======================= -->
     <script>
-    // Multi-Bahasa
+    // ======================= MULTI BAHASA =======================
     let currentLang = 'id';
     const DICT = {
         id: {
@@ -313,14 +265,16 @@
             genBtn: "GENERATE AI SIGNAL", evaluating: "MENGEVALUASI...", standby: "Pilih pair, pastikan harga live bergerak, lalu tekan <b>GENERATE AI SIGNAL</b>.",
             entryZone: "ENTRY ZONE", priceMap: "LIVE PRICE MAP", analysisReason: "ANALYSIS REASON:", tradingHistory: "TRADING HISTORY",
             optToday: "Hari ini", optAll: "Semua", win: "WIN", lose: "LOSE", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO",
-            noHistory: "Belum ada history.", running: "RUNNING", pending: "PENDING", liveStream: "LIVE MARKET STREAM"
+            noHistory: "Belum ada history.", running: "RUNNING", pending: "PENDING", liveStream: "LIVE MARKET STREAM",
+            calibPh: "Harga Bid di MT (opsional)", calibBtn: "KALIBRASI"
         },
         en: {
             subHeader: "Multi-Asset Live Stream", targetAsset: "ACTIVE TARGET ASSET", tradingStyle: "TRADING STYLE / STRATEGY",
             genBtn: "GENERATE AI SIGNAL", evaluating: "EVALUATING...", standby: "Select pair, ensure live price ticks, then click <b>GENERATE AI SIGNAL</b>.",
             entryZone: "ENTRY ZONE", priceMap: "LIVE PRICE MAP", analysisReason: "ANALYSIS REASON:", tradingHistory: "TRADING HISTORY",
             optToday: "Today", optAll: "All", win: "WIN", lose: "LOSE", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO",
-            noHistory: "No trading history yet.", running: "RUNNING", pending: "PENDING", liveStream: "LIVE MARKET STREAM"
+            noHistory: "No trading history yet.", running: "RUNNING", pending: "PENDING", liveStream: "LIVE MARKET STREAM",
+            calibPh: "MT Bid price (optional)", calibBtn: "CALIBRATE"
         }
     };
 
@@ -346,10 +300,12 @@
         document.getElementById('lblTotalPnl').textContent = d.totalPnl;
         document.getElementById('lblWinRatio').textContent = d.winRatio;
         document.getElementById('lblLiveStream').innerHTML = `<i class="fa-solid fa-tower-broadcast text-accentblue"></i> ${d.liveStream}`;
+        document.getElementById('calibInput').placeholder = d.calibPh;
+        document.getElementById('calibBtn').textContent = d.calibBtn;
         renderHistory();
     }
 
-    // Konfigurasi Stream & Pairs
+    // ======================= KONFIGURASI =======================
     const WS_URL    = 'wss://api-stream.myfundedperpetuals.com/v1/market-data';
     const REST_BASE = 'https://api.myfundedperpetuals.com';
     const STALE_MS  = 20000;
@@ -361,7 +317,11 @@
     const MAX_TRADES = 300;
     const BE_CLOSE_PNL = 'last_tp';
 
-    const PERP = ['mark', 'mid', 'last'], FX = ['mid', 'last', 'mark'], SPOT = ['last', 'mid', 'mark'];
+    // mid (orderbook) jauh lebih realtime daripada mark (dihaluskan & lambat)
+    const PERP = ['mid', 'last', 'mark'], FX = ['mid', 'last', 'mark'], SPOT = ['last', 'mid', 'mark'];
+    // MT menampilkan harga Bid. Dipakai jika server mengirim bid/ask. Ganti ke 'mid' jika ingin harga tengah.
+    const PRICE_SIDE = 'bid';
+
     const MARKETS = {
       XAUUSD:   { provider: 'hyperliquid', coins: ['xyz:GOLD', 'xyz:XAU', 'GOLD', 'XAUUSD'], match: ['GOLD', 'XAU', 'XAUUSD'], kinds: PERP, decimals: 2, pip: 0.1 },
       XAGUSD:   { provider: 'hyperliquid', coins: ['xyz:SILVER', 'xyz:XAG', 'SILVER', 'XAGUSD'], match: ['SILVER', 'XAG', 'XAGUSD'], kinds: PERP, decimals: 3, pip: 0.01 },
@@ -416,8 +376,63 @@
       return now - p.recv > STALE_MS || (p.time && now - p.time > 120000);
     };
 
+    // ======================= KALIBRASI KE BROKER MT =======================
+    const OFFSET_KEY = 'aluSignalZ_offsets_v1';
+    const offsets = (() => { try { return JSON.parse(localStorage.getItem(OFFSET_KEY)) || {}; } catch { return {}; } })();
+    const rawPrices = {};
+    const selectedKey = () => document.getElementById('marketSelect').value.split('|').pop();
+
+    function updateCalibInfo() {
+      const key = selectedKey(), off = offsets[key] || 0;
+      document.getElementById('calibInfo').textContent =
+        `Offset ${displayName(key)}: ${off >= 0 ? '+' : ''}${off.toFixed(MARKETS[key]?.decimals ?? 2)}`;
+    }
+
+    function applyOffsetDelta(key, delta) {
+      if (!delta) return;
+      (history[key] || []).forEach(pt => pt.p += delta);
+      if (prices[key]) updatePrice(key, prices[key].price + delta, { provider: 'calib', symbol: key, kind: prices[key].kind, time: prices[key].time });
+    }
+
+    function calibrate() {
+      const key = selectedKey(), raw = rawPrices[key];
+      const mt = parseFloat(document.getElementById('calibInput').value);
+      if (raw == null) return alert(currentLang === 'id' ? 'Harga live belum masuk.' : 'No live price yet.');
+      if (!Number.isFinite(mt) || mt <= 0) return alert(currentLang === 'id' ? 'Masukkan harga dari MT.' : 'Enter MT price.');
+      const old = offsets[key] || 0;
+      offsets[key] = mt - raw;
+      applyOffsetDelta(key, offsets[key] - old);
+      localStorage.setItem(OFFSET_KEY, JSON.stringify(offsets));
+      document.getElementById('calibInput').value = '';
+      updateCalibInfo();
+      toast(`${displayName(key)} ${currentLang === 'id' ? 'dikalibrasi ke MT' : 'calibrated to MT'}`, 'blue');
+    }
+
+    function resetCalib() {
+      const key = selectedKey(), old = offsets[key] || 0;
+      delete offsets[key];
+      applyOffsetDelta(key, -old);
+      localStorage.setItem(OFFSET_KEY, JSON.stringify(offsets));
+      updateCalibInfo();
+    }
+
+    // ======================= TICKER OTOMATIS =======================
+    const PROV_COLOR = { hyperliquid: 'text-yellow-400', veranta: 'text-blue-400', ostium: 'text-orange-400', binance: 'text-emerald-400' };
+    function buildTicker() {
+      const opts = [...document.querySelectorAll('#marketSelect option')];
+      document.getElementById('tickerListContainer').innerHTML = opts.map(o => {
+        const [prov, key] = o.value.split('|');
+        return `
+          <div onclick="selectTicker('${o.value}')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+            <span class="font-bold text-[10px] text-white">${displayName(key)} <span class="text-[7px] ${PROV_COLOR[prov] || 'text-gray-400'}">${prov}</span></span>
+            <span id="price-${key}" class="text-[10px] font-mono font-bold text-white">--.--</span>
+          </div>`;
+      }).join('');
+    }
+
     function syncSelectedMarket() {
       document.getElementById('selectedPairBadge').textContent = document.getElementById('marketSelect').value;
+      updateCalibInfo();
     }
     function selectTicker(marketId) {
       document.getElementById('marketSelect').value = marketId;
@@ -486,6 +501,7 @@
       if (el) { el.textContent = 'N/A'; setColor(el, 'text-red-600'); }
     }
 
+    // ======================= TRADES =======================
     function loadTrades() {
       try { return JSON.parse(localStorage.getItem(STORE_KEY)) || []; } catch { return []; }
     }
@@ -523,30 +539,27 @@
       if (changed) { saveTrades(); renderHistory(); refreshActiveUI(); }
     }
 
-    // LOGIKA CEK TRADING & TRIGGER ENTRY ZONE
     function evaluateTrade(t, price) {
       const d = t.dir;
       const reached = v => v != null && (d > 0 ? price >= v : price <= v);
       const lost    = v => v != null && (d > 0 ? price <= v : price >= v);
       let changed = false;
 
-      // 0. Pemicu Entry: Cek apakah harga menyentuh rentang area entry (emin s/d emax)
       if (!t.triggered) {
-        const inZone = (t.emin != null && t.emax != null) 
+        const inZone = (t.emin != null && t.emax != null)
           ? (price >= Math.min(t.emin, t.emax) && price <= Math.max(t.emin, t.emax))
           : (Math.abs(price - t.entry) <= (MARKETS[t.key]?.pip || 1) * 3);
-          
+
         if (inZone) {
           t.triggered = true;
           t.status = 'RUNNING';
           changed = true;
           toast(`${displayName(t.key)} ENTRY ZONE TOUCHED! POSISI AKTIF`, 'blue');
         } else {
-          return false; // Bila belum tersentuh zona entry, abaikan pemicu TP/SL
+          return false;
         }
       }
 
-      // 1. Cek TP berurutan
       for (const k of ['tp1', 'tp2', 'tp3']) {
         if (t[k] != null && !t.hits[k] && reached(t[k])) {
           t.hits[k] = Date.now();
@@ -622,7 +635,7 @@
           chip = `<span class="px-1.5 rounded border ${BADGE_STYLES[t.result === 'SL' ? 'red' : t.result === 'BE' ? 'yellow' : 'green']}">CLOSED</span>`;
         } else {
           right = `<span id="fl-${t.id}" class="text-gray-400">--</span>`;
-          chip = !t.triggered 
+          chip = !t.triggered
             ? `<span class="px-1.5 rounded border ${BADGE_STYLES.gray}">PENDING</span>`
             : t.status === 'BE'
             ? `<span class="px-1.5 rounded border ${BADGE_STYLES.yellow}">TP${highestHit(t)} ✓ BE SET</span>`
@@ -727,7 +740,7 @@
       else if (t.result === 'TP')      { txt = `TP${t.maxTp} MAX 🏆 CLOSED`; color = 'green'; }
       else if (t.result === 'BE')      { txt = `CLOSED @BE (TP${t.maxTp} ✓)`; color = 'yellow'; }
       else if (t.status === 'BE')      { txt = `TP${n} ✓ · BE SET`; color = 'green'; }
-      else if (!t.triggered)          { txt = 'PENDING'; color = 'gray'; }
+      else if (!t.triggered)           { txt = 'PENDING'; color = 'gray'; }
       else                             { txt = 'RUNNING'; color = 'blue'; }
       const el = document.getElementById('tradeStatus');
       el.textContent = txt;
@@ -744,7 +757,7 @@
       setColor(el, pips > 0 ? 'text-emerald-400' : pips < 0 ? 'text-red-400' : 'text-yellow-400');
     }
 
-    // ======================= PERBAIKAN GRAFIK (LIVE PRICE MAP) =======================
+    // ======================= GRAFIK (LIVE PRICE MAP) =======================
     const RGB = { green: '0,192,118', red: '255,59,105', blue: '41,98,255' };
     const cv = document.getElementById('priceChart');
     const ctx = cv.getContext('2d');
@@ -758,19 +771,18 @@
         { k: 'tp1', name: 'TP1', price: t.tp1, color: '#34d399', hit: !!hits.tp1 },
         { k: 'sl',  name: 'SL',  price: t.sl,  color: '#ff3b69', hit: t.result === 'SL', faded: !!hits.tp1 },
       ];
-
-      // Jika ada entry range (emin & emax), buat 2 garis entry (ENTRY MIN & ENTRY MAX)
       if (t.emin != null && t.emax != null && t.emin !== t.emax) {
         list.push({ k: 'entry_max', name: 'ENTRY', price: Math.max(t.emin, t.emax), color: '#facc15', hit: t.result === 'BE' });
         list.push({ k: 'entry_min', name: 'ENTRY', price: Math.min(t.emin, t.emax), color: '#facc15', hit: t.result === 'BE' });
       } else if (t.entry != null) {
         list.push({ k: 'entry', name: hits.tp1 ? 'ENTRY (BE)' : 'ENTRY', price: t.entry, color: '#facc15', hit: t.result === 'BE' });
       }
-
       return list.filter(l => Number.isFinite(l.price));
     }
 
     const lineRgb = (t, p) => (!t.dir || !t.entry) ? RGB.blue : (!t.triggered ? RGB.blue : (p - t.entry) * t.dir >= 0 ? RGB.green : RGB.red);
+
+    let animP = null, animKey = null;
 
     function drawChart() {
       const t = getActive();
@@ -785,15 +797,25 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, W, H);
 
-      // Lebarkan padding kanan (padR = 80) agar label harga tidak terpotong!
-      const padL = 6, padR = 80, padT = 12, padB = 18;
+      const padL = 6, padR = 74, padT = 12, padB = 18;
       const plotW = W - padL - padR, plotH = H - padT - padB;
-      const key = t.key, pts = history[key] || [], now = Date.now();
+      // RUANG KOSONG antara ujung line & kolom label harga (agar tidak mepet)
+      const GAP = Math.max(40, plotW * 0.18);
+      const lineW = plotW - GAP;
+      const nowX = padL + lineW;
 
+      const key = t.key, pts = history[key] || [], now = Date.now();
       const win = Math.min(WINDOW_MS, Math.max(MIN_WINDOW_MS, pts.length ? now - pts[0].t : 0));
       const t0 = now - win;
       let s = 0; while (s < pts.length && pts[s].t < t0) s++;
       const vis = pts.slice(Math.max(0, s - 1));
+      const last = vis[vis.length - 1];
+
+      // Animasi halus ujung line menuju harga terbaru
+      if (last) {
+        if (animKey !== key || animP == null) { animP = last.p; animKey = key; }
+        else animP += (last.p - animP) * 0.3;
+      }
 
       const lv = levelList(t);
       const vals = vis.map(p => p.p).concat(lv.map(l => l.price));
@@ -801,24 +823,24 @@
       let min = Math.min(...vals), max = Math.max(...vals);
       const pad = (max - min) * 0.1 || Math.abs(max) * 0.0005 || 1;
       min -= pad; max += pad;
-      const X = tt => padL + (tt - t0) / win * plotW;
+      const X = tt => padL + (tt - t0) / win * lineW;
       const Y = p => padT + (max - p) / (max - min) * plotH;
 
-      // Grid Horizontal
+      // Grid
       ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 1;
       for (let i = 0; i <= 4; i++) {
         const gy = padT + plotH * i / 4;
         ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(padL + plotW, gy); ctx.stroke();
       }
 
-      // Area Entry Zone (Diarsir transparan di antara entry min & max)
+      // Entry zone
       if (t.emin != null && t.emax != null && t.emin !== t.emax) {
         const yTop = Y(Math.max(t.emin, t.emax)), yBot = Y(Math.min(t.emin, t.emax));
         ctx.fillStyle = 'rgba(250, 204, 21, 0.12)';
         ctx.fillRect(padL, yTop, plotW, yBot - yTop);
       }
 
-      // Garis Level Horizontal (TP, SL, ENTRY)
+      // Level lines
       ctx.font = `700 8px ${FONT}`;
       lv.forEach(l => {
         const ly = Y(l.price);
@@ -832,7 +854,7 @@
         ctx.globalAlpha = 1;
       });
 
-      // Garis Vertikal Signal Marker
+      // Signal marker
       if (t.createdAt >= t0) {
         const sx = X(t.createdAt);
         ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.setLineDash([2, 3]);
@@ -842,41 +864,47 @@
         ctx.fillText('SIGNAL', sx, padT + plotH - 2);
       }
 
-      // Plot Garis Harga Live Stream
-      const last = vis[vis.length - 1];
       if (last) {
         const c = lineRgb(t, last.p);
-        const ex = padL + plotW, ey = Y(last.p);
+        const ey = Y(animP);
 
         ctx.save();
         ctx.beginPath(); ctx.rect(padL, 0, plotW, H); ctx.clip();
         ctx.beginPath();
-        vis.forEach((p, i) => i ? ctx.lineTo(X(p.t), Y(p.p)) : ctx.moveTo(X(p.t), Y(p.p)));
-        ctx.lineTo(ex, ey);
+        vis.forEach((p, i) => {
+          const x = X(p.t), y = i === vis.length - 1 ? ey : Y(p.p);
+          i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+        });
+        ctx.lineTo(nowX, ey);
         ctx.strokeStyle = `rgb(${c})`; ctx.lineWidth = 1.7; ctx.lineJoin = 'round'; ctx.stroke();
-        ctx.lineTo(ex, padT + plotH); ctx.lineTo(X(vis[0].t), padT + plotH); ctx.closePath();
+        ctx.lineTo(nowX, padT + plotH); ctx.lineTo(X(vis[0].t), padT + plotH); ctx.closePath();
         const g = ctx.createLinearGradient(0, padT, 0, padT + plotH);
         g.addColorStop(0, `rgba(${c},0.22)`); g.addColorStop(1, `rgba(${c},0)`);
         ctx.fillStyle = g; ctx.fill();
 
         (t.markers || []).forEach(m => {
           if (m.t < t0) return;
-          ctx.beginPath(); ctx.arc(X(m.t), Y(m.p), 4, 0, Math.PI * 2);
+          ctx.beginPath(); ctx.arc(Math.min(X(m.t), nowX), Y(m.p), 4, 0, Math.PI * 2);
           ctx.fillStyle = m.k === 'sl' ? '#ff3b69' : m.k === 'be' ? '#facc15' : '#34d399'; ctx.fill();
           ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.stroke();
         });
         ctx.restore();
 
+        // Garis putus-putus penghubung ujung line -> label harga live
+        ctx.strokeStyle = `rgba(${c},0.55)`; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
+        ctx.beginPath(); ctx.moveTo(nowX + 6, ey); ctx.lineTo(padL + plotW + 3, ey); ctx.stroke();
+        ctx.setLineDash([]);
+
         const pulse = 3 + 2.5 * Math.abs(Math.sin(now / 350));
-        ctx.beginPath(); ctx.arc(ex, ey, pulse + 2, 0, Math.PI * 2); ctx.fillStyle = `rgba(${c},0.25)`; ctx.fill();
-        ctx.beginPath(); ctx.arc(ex, ey, 3, 0, Math.PI * 2); ctx.fillStyle = `rgb(${c})`; ctx.fill();
+        ctx.beginPath(); ctx.arc(nowX, ey, pulse + 2, 0, Math.PI * 2); ctx.fillStyle = `rgba(${c},0.25)`; ctx.fill();
+        ctx.beginPath(); ctx.arc(nowX, ey, 3, 0, Math.PI * 2); ctx.fillStyle = `rgb(${c})`; ctx.fill();
       } else {
         ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = `600 10px ${FONT}`;
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText('Menunggu harga live...', padL + plotW / 2, padT + plotH / 2);
       }
 
-      // RENDERING BUBBLE HARGA DI SISI KANAN CANVAS (DIPERBAIKI)
+      // Label level di kanan
       ctx.font = `700 8.5px ${FONT}`;
       const labels = lv.map(l => ({ ...l, y: Y(l.price) })).sort((a, b) => a.y - b.y);
       for (let i = 1; i < labels.length; i++) {
@@ -891,17 +919,17 @@
         ctx.globalAlpha = 1;
       });
 
-      // Bubble Harga Live Paling Kanan
+      // Bubble harga live
       if (last) {
-        const ly = Math.min(Math.max(Y(last.p), padT + 6), padT + plotH - 6);
+        const ly = Math.min(Math.max(Y(animP), padT + 6), padT + plotH - 6);
         ctx.fillStyle = '#ffffff'; ctx.fillRect(lx, ly - 7, lw, 14);
         ctx.fillStyle = '#0b0e14'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(fmt(key, last.p), lx + lw / 2, ly + 0.5);
       }
 
       ctx.font = `500 8px ${FONT}`; ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.textBaseline = 'bottom';
-      ctx.textAlign = 'left';  ctx.fillText(new Date(t0).toLocaleTimeString('id-ID', { hour12: false }), padL, H - 2);
-      ctx.textAlign = 'right'; ctx.fillText(t.status === 'CLOSED' ? 'CLOSED' : isStale(key) ? 'MARKET IDLE' : 'NOW', padL + plotW, H - 2);
+      ctx.textAlign = 'left';   ctx.fillText(new Date(t0).toLocaleTimeString('id-ID', { hour12: false }), padL, H - 2);
+      ctx.textAlign = 'center'; ctx.fillText(t.status === 'CLOSED' ? 'CLOSED' : isStale(key) ? 'MARKET IDLE' : 'NOW', nowX, H - 2);
     }
 
     let lastDraw = 0;
@@ -912,6 +940,7 @@
       drawChart();
     }
 
+    // ======================= STREAM / WEBSOCKET =======================
     async function fetchMarkets() {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 6000);
@@ -972,6 +1001,8 @@
       sock.onopen = () => {
         if (sock !== ws) return;
         retry = 0;
+        sock.openedAt = Date.now();
+        Object.keys(kindState).forEach(k => delete kindState[k]);
         setWsStatus('CONNECTED', 'green');
         subscribeAll(sock);
         clearInterval(pingTimer);
@@ -979,7 +1010,7 @@
       };
       sock.onmessage = e => onFrame(sock, e);
       sock.onerror = () => { if (sock === ws) setWsStatus('ERROR', 'red'); };
-      sock.onclose = e => {
+      sock.onclose = () => {
         if (sock !== ws) return;
         clearInterval(pingTimer);
         setWsStatus('DISCONNECTED', 'red');
@@ -1031,14 +1062,56 @@
       }
     }
 
+    // Watchdog: resubscribe market yang macet & reconnect socket "zombie"
+    function resubscribeMarket(key) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      for (const [id, r] of ws.reqs) {
+        if (r.key === key) { send(ws, { op: 'unsub', id }); ws.reqs.delete(id); }
+      }
+      const m = MARKETS[key];
+      m.coins.forEach(c => badCoins.delete(coinKey(m.provider, c)));
+      delete resolved[key]; delete kindState[key];
+      m.coins.forEach(coin => subscribe(ws, 'ticks', { symbols: [coin], providers: [m.provider] }, { key, coin }));
+    }
+
+    const lastResub = {};
+    setInterval(() => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const now = Date.now();
+      if (now - ws.lastMsg > 30000) { ws.close(); return; }
+      for (const key of Object.keys(MARKETS)) {
+        const p = prices[key];
+        const idle = !p || now - p.recv > STALE_MS;
+        if (idle && now - (lastResub[key] || ws.openedAt || now) > 30000) {
+          lastResub[key] = now;
+          resubscribeMarket(key);
+        }
+      }
+    }, 5000);
+
+    function lookupKey(ev) {
+      const ck = coinKey(ev.provider, ev.symbol);
+      let key = COIN_MAP.get(ck);
+      if (key) return key;
+      // Fallback: cocokkan nama ternormalisasi (GOLD == xyz:GOLD, dst)
+      const n = norm(ev.symbol), prov = String(ev.provider).toLowerCase();
+      for (const [k, m] of Object.entries(MARKETS)) {
+        if (m.provider === prov && (m.match.includes(n) || m.coins.some(c => norm(c) === n))) {
+          COIN_MAP.set(ck, k);
+          return k;
+        }
+      }
+      return null;
+    }
+
     function handleEvent(ev) {
-      if (ev.state !== undefined && ev.price === undefined) {
+      if (ev.state !== undefined && ev.price === undefined && ev.bid === undefined) {
         providerState[ev.provider] = ev.state;
         return;
       }
-      if (!ev.provider || !ev.symbol || ev.price == null) return;
+      if (!ev.provider || !ev.symbol) return;
 
-      const key = COIN_MAP.get(coinKey(ev.provider, ev.symbol));
+      const key = lookupKey(ev);
       if (!key) return;
 
       if (!resolved[key]) {
@@ -1047,22 +1120,38 @@
       }
       if (resolved[key] !== ev.symbol) return;
 
+      // Harga: Bid (seperti MT) jika ada, lalu mid bid/ask, lalu price
+      const bid = parseFloat(ev.bid), ask = parseFloat(ev.ask);
+      const raw = PRICE_SIDE === 'bid' && bid > 0 ? bid
+                : (bid > 0 && ask > 0 ? (bid + ask) / 2 : parseFloat(ev.price));
+      if (!(raw > 0)) return;
+
+      // Prioritas kind + buang tick lama / out-of-order
       const m = MARKETS[key];
       const idx = m.kinds.indexOf(ev.kind);
       const rank = idx < 0 ? 99 : idx;
+      const now = Date.now(), ts = Number(ev.time) || 0;
       const ks = kindState[key];
-      if (ks && rank > ks.rank && Date.now() - ks.ts < STALE_MS) return;
-      kindState[key] = { rank, ts: Date.now() };
+      if (ks && now - ks.ts < STALE_MS) {
+        if (rank > ks.rank) return;
+        if (rank === ks.rank && ts && ks.evTime && ts < ks.evTime) return;
+      }
+      kindState[key] = { rank, ts: now, evTime: ts };
 
-      const p = parseFloat(ev.price);
-      if (p > 0) updatePrice(key, p, ev);
+      rawPrices[key] = raw;
+      updatePrice(key, raw + (offsets[key] || 0), ev);
     }
 
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && (!ws || ws.readyState >= WebSocket.CLOSING)) connect();
+      if (document.visibilityState !== 'visible') return;
+      if (!ws || ws.readyState >= WebSocket.CLOSING || Date.now() - ws.lastMsg > 15000) {
+        const old = ws;
+        connect();
+        try { old?.close(); } catch {}
+      }
     });
 
-    // AI SIGNAL GENERATOR
+    // ======================= AI SIGNAL GENERATOR =======================
     async function generateAISignal() {
       const marketId = document.getElementById('marketSelect').value;
       const tradingStyle = document.getElementById('tradingStyleSelect').value;
@@ -1098,7 +1187,6 @@
         const emin = parseLevel(data.entry_min), emax = parseLevel(data.entry_max);
         const entry = emin != null && emax != null ? (emin + emax) / 2 : (emin ?? emax ?? currentPrice);
 
-        // Status awal: PENDING (triggered = false)
         const t = {
           id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
           key: symbolKey, marketId, style: tradingStyle.split(' (')[0],
@@ -1132,11 +1220,13 @@
         alert(`Error: ${error.message}`);
       } finally {
         btn.disabled = false;
-        btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> ${DICT[currentLang].genBtn}`;
+        btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnGenText">${DICT[currentLang].genBtn}</span>`;
       }
     }
 
     window.onload = async () => {
+      buildTicker();
+      updateCalibInfo();
       renderHistory();
       if (trades.length) viewTrade(trades[trades.length - 1].id, false);
       requestAnimationFrame(chartLoop);
