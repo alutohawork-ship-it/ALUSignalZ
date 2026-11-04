@@ -3,43 +3,19 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: 'Method Not Allowed' });
     }
 
-    const { marketId, htf, ltf } = req.body;
-    
-    // Mengambil API Key rahasia dari Environment Variables Vercel (.env)
+    const { marketId, tradingStyle } = req.body;
     const gutsKey = process.env.GUTSAI_API_KEY;
-    const myfundedKey = process.env.MYFUNDED_API_KEY;
 
     if (!gutsKey) {
         return res.status(500).json({ error: 'Server Error: GUTSAI_API_KEY tidak ditemukan di .env' });
     }
 
     try {
-        // 1. Ambil spesifikasi detail market dari REST API MyFundedPerps
-        let marketSpecs = null;
-        try {
-            const cleanMarketId = encodeURIComponent(marketId);
-            const specsRes = await fetch(`https://developers.myfundedperpetuals.com/v1/markets/${cleanMarketId}`, {
-                headers: myfundedKey ? { 'Authorization': `Bearer ${myfundedKey}` } : {}
-            });
-            if (specsRes.ok) {
-                const specsData = await specsRes.json();
-                marketSpecs = specsData.data;
-            }
-        } catch (e) {
-            console.log("Specs fetch fallback to default");
-        }
-
-        const maxLeverage = marketSpecs?.max_leverage || "10";
-        const minNotional = marketSpecs?.min_notional || "10";
-
-        // 2. Kirim instruksi ke GutsAI Engine
         const systemPrompt = `Anda adalah AI Prop Firm Trading Agent spesialis MyFundedPerps. 
 Target Market: ${marketId}
-Max Leverage Venue: ${maxLeverage}x
-Min Notional: $${minNotional}
-Timeframe HTF: ${htf} | LTF: ${ltf}
+Gaya Eksekusi: ${tradingStyle}
 
-Evaluasi kondisi teknikal dan berikan output terstruktur dalam Bahasa Indonesia:
+Evaluasi kondisi teknikal sesuai gaya trading tersebut dan berikan output terstruktur dalam Bahasa Indonesia:
 - SIGNAL: [BUY / SELL / HOLD]
 - ENTRY: [Harga entry]
 - SL: [Stop Loss]
@@ -53,10 +29,10 @@ Evaluasi kondisi teknikal dan berikan output terstruktur dalam Bahasa Indonesia:
                 'Authorization': `Bearer ${gutsKey}`
             },
             body: JSON.stringify({
-                model: 'guts-default',
+                model: 'guts-default', // Sesuaikan dengan model GutsAI Anda jika berbeda
                 messages: [
                     { role: 'system', content: systemPrompt },
-                    { role: 'user', content: `Analisis sinyal live untuk ${marketId}.` }
+                    { role: 'user', content: `Analisis sinyal live untuk ${marketId} dengan gaya ${tradingStyle}.` }
                 ],
                 temperature: 0.2
             })
