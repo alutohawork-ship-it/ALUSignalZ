@@ -44,22 +44,22 @@
         <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
             <div class="flex justify-between items-center">
                 <label class="text-[9px] font-bold text-gray-400">TARGET ASET AKTIF</label>
-                <span id="selectedPairBadge" class="text-[9px] font-mono text-accentblue font-bold">binance|BTCUSDT</span>
+                <span id="selectedPairBadge" class="text-[9px] font-mono text-accentblue font-bold">veranta|XAU-USD</span>
             </div>
 
             <!-- Dropdown Multi-Asset Lengkap -->
             <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
+                <optgroup label="Gold, Silver & Commodities">
+                    <option value="veranta|XAU-USD">XAU-USD / Gold (Commodities)</option>
+                    <option value="veranta|XAG-USD">XAG-USD / Silver (Commodities)</option>
+                    <option value="veranta|EURUSD">EUR/USD (Forex)</option>
+                    <option value="veranta|USDJPY">USD/JPY (Forex)</option>
+                </optgroup>
                 <optgroup label="Crypto">
                     <option value="binance|BTCUSDT">BTC/USDT (Binance)</option>
                     <option value="binance|ETHUSDT">ETH/USDT (Binance)</option>
                     <option value="binance|SOLUSDT">SOL/USDT (Binance)</option>
                     <option value="binance|XRPUSDT">XRP/USDT (Binance)</option>
-                </optgroup>
-                <optgroup label="Gold, Silver & Forex">
-                    <option value="veranta|XAUUSD">XAU/USD / Gold (Veranta)</option>
-                    <option value="veranta|XAGUSD">XAG/USD / Silver (Veranta)</option>
-                    <option value="veranta|EURUSD">EUR/USD (Veranta)</option>
-                    <option value="veranta|USDJPY">USD/JPY (Veranta)</option>
                 </optgroup>
                 <optgroup label="Commodities & Indices">
                     <option value="hyperliquid|xyz:BRENTOIL">Brent Oil (Hyperliquid)</option>
@@ -178,7 +178,7 @@
             </div>
         </div>
 
-        <!-- BAGIAN PALING BAWAH: Live Market Ticker (Menampilkan Semua Pair Pilihan) -->
+        <!-- BAGIAN PALING BAWAH: Live Market Ticker -->
         <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md">
             <div class="flex justify-between items-center pb-1.5 mb-1.5 border-b border-panelborder">
                 <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
@@ -190,6 +190,26 @@
             <!-- List Ticker Lengkap Semua Pair -->
             <div id="tickerListContainer" class="space-y-1 max-h-[190px] overflow-y-auto pr-1">
                 
+                <!-- Gold & Silver (Commodities) -->
+                <div onclick="selectTicker('veranta|XAU-USD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">XAU-USD <span class="text-[7px] text-yellow-400">Gold</span></span>
+                    <span id="price-XAU-USD" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+                <div onclick="selectTicker('veranta|XAG-USD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">XAG-USD <span class="text-[7px] text-yellow-400">Silver</span></span>
+                    <span id="price-XAG-USD" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+
+                <!-- Forex -->
+                <div onclick="selectTicker('veranta|EURUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">EURUSD <span class="text-[7px] text-blue-400">Veranta</span></span>
+                    <span id="price-EURUSD" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+                <div onclick="selectTicker('veranta|USDJPY')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">USDJPY <span class="text-[7px] text-blue-400">Veranta</span></span>
+                    <span id="price-USDJPY" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+
                 <!-- Crypto -->
                 <div onclick="selectTicker('binance|BTCUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
                     <span class="font-bold text-[10px] text-white">BTCUSDT <span class="text-[7px] text-emerald-400">Binance</span></span>
@@ -208,31 +228,13 @@
                     <span id="price-XRPUSDT" class="text-[10px] font-mono font-bold text-white">--.--</span>
                 </div>
 
-                <!-- Gold & Forex -->
-                <div onclick="selectTicker('veranta|XAUUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">XAUUSD <span class="text-[7px] text-yellow-400">Veranta (Gold)</span></span>
-                    <span id="price-XAUUSD" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-                <div onclick="selectTicker('veranta|XAGUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">XAGUSD <span class="text-[7px] text-yellow-400">Veranta (Silver)</span></span>
-                    <span id="price-XAGUSD" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-                <div onclick="selectTicker('veranta|EURUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">EURUSD <span class="text-[7px] text-blue-400">Veranta (Forex)</span></span>
-                    <span id="price-EURUSD" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-                <div onclick="selectTicker('veranta|USDJPY')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">USDJPY <span class="text-[7px] text-blue-400">Veranta (Forex)</span></span>
-                    <span id="price-USDJPY" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-
                 <!-- Commodities & Indices -->
                 <div onclick="selectTicker('hyperliquid|xyz:BRENTOIL')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
                     <span class="font-bold text-[10px] text-white">xyz:BRENTOIL <span class="text-[7px] text-orange-400">Hyperliquid</span></span>
                     <span id="price-xyz:BRENTOIL" class="text-[10px] font-mono font-bold text-white">--.--</span>
                 </div>
                 <div onclick="selectTicker('ostium|DJI')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">DJI <span class="text-[7px] text-purple-400">Ostium (Indice)</span></span>
+                    <span class="font-bold text-[10px] text-white">DJI <span class="text-[7px] text-purple-400">Ostium</span></span>
                     <span id="price-DJI" class="text-[10px] font-mono font-bold text-white">--.--</span>
                 </div>
                 <div onclick="selectTicker('hyperliquid|xyz:SP500')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
@@ -274,7 +276,7 @@
         }
 
         // =======================================================
-        // WEBSOCKET MULTI-ASSET STREAM (MENCAKUP SEMUA SYMBOL)
+        // WEBSOCKET MULTI-ASSET STREAM
         // =======================================================
         let ws;
         let pingInterval;
@@ -295,7 +297,7 @@
                         id: 1,
                         channel: "ticks",
                         payload: {
-                            symbols: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "XAUUSD", "XAGUSD", "EURUSD", "USDJPY", "xyz:BRENTOIL", "DJI", "xyz:SP500", "xyz:AAPL", "NVDAUSDT", "TSLAUSDT"],
+                            symbols: ["XAU-USD", "XAG-USD", "EURUSD", "USDJPY", "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "xyz:BRENTOIL", "DJI", "xyz:SP500", "xyz:AAPL", "NVDAUSDT", "TSLAUSDT"],
                             providers: ["binance", "veranta", "ostium", "hyperliquid"]
                         }
                     };
@@ -347,7 +349,7 @@
         }
 
         // ==========================================
-        // GENERATE AI SIGNAL DENGAN VALIDASI HARGA LIVE
+        // GENERATE AI SIGNAL
         // ==========================================
         async function generateAISignal() {
             const marketId = document.getElementById('marketSelect').value;
@@ -357,9 +359,8 @@
             const priceEl = document.getElementById(`price-${symbolKey}`);
             let currentPrice = priceEl ? priceEl.textContent.trim() : "--.--";
 
-            // Validasi jika harga belum konek / masih "--.--"
             if (currentPrice === "--.--" || currentPrice === "") {
-                alert("Tunggu sebentar hingga harga live pada pair tersebut tersambung (angka harga muncul di list bawah) sebelum generate sinyal!");
+                alert("Tunggu sebentar hingga harga live pada pair tersebut tersambung sebelum generate sinyal!");
                 return;
             }
 
@@ -389,7 +390,6 @@
                     throw new Error("Respon AI tidak valid. Coba klik sekali lagi.");
                 }
 
-                // Render UI Card
                 document.getElementById('cardMarketTitle').textContent = `${symbolKey} SPOT (Live AI)`;
                 document.getElementById('cardLivePriceTop').textContent = `$${data.current_price || currentPrice}`;
                 
