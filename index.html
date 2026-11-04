@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GutsAI & MyFundedPerps Terminal</title>
+    <title>GutsAI & MyFundedPerps Live Terminal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -30,14 +30,11 @@
             </div>
             <div>
                 <h1 class="font-bold text-xs text-white">GutsAI <span class="text-accentblue">Terminal</span></h1>
-                <p class="text-[9px] text-gray-400">Official WebSocket Stream</p>
+                <p class="text-[9px] text-gray-400">Public Live Terminal</p>
             </div>
         </div>
         <div class="flex items-center gap-2">
             <span id="wsStatus" class="text-[9px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">WS: OFF</span>
-            <button onclick="toggleModal('configModal')" class="text-xs bg-panelborder hover:bg-gray-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1">
-                <i class="fa-solid fa-key text-yellow-400"></i> Key
-            </button>
         </div>
     </header>
 
@@ -58,7 +55,7 @@
                 <option value="binance|SOLUSDT">SOL/USDT (Binance)</option>
             </select>
 
-            <!-- Multi-Timeframe -->
+            <!-- Multi-Timeframe Selector -->
             <div class="grid grid-cols-2 gap-2">
                 <div>
                     <label class="text-[9px] font-bold text-gray-400 block mb-1">TF ANALISIS (HTF)</label>
@@ -92,7 +89,7 @@
             </div>
         </div>
 
-        <!-- BAGIAN PALING BAWAH: Live Market Ticker (WebSocket Streaming) -->
+        <!-- BAGIAN PALING BAWAH: Live Market Ticker (WebSocket Streaming Resmi) -->
         <div class="bg-cardbg rounded-xl border border-panelborder p-3 mt-2 shadow-md">
             <div class="flex justify-between items-center pb-2 mb-2 border-b border-panelborder">
                 <span class="text-[10px] font-bold text-gray-400 flex items-center gap-1">
@@ -163,33 +160,8 @@
 
     </main>
 
-    <!-- Modal API Key -->
-    <div id="configModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-        <div class="bg-cardbg border border-panelborder rounded-2xl p-5 max-w-sm w-full shadow-2xl relative">
-            <button onclick="toggleModal('configModal')" class="absolute top-4 right-4 text-gray-400 hover:text-white">
-                <i class="fa-solid fa-xmark text-lg"></i>
-            </button>
-            <h3 class="font-bold text-white text-sm mb-1">Pengaturan API Key</h3>
-            <p class="text-[10px] text-gray-400 mb-3">Masukkan GutsAI API Key Anda</p>
-            <div class="space-y-3">
-                <input type="password" id="gutsKeyInput" placeholder="sk-gutsai-..." class="w-full bg-darkbg border border-panelborder p-2.5 rounded-lg text-xs text-white font-mono focus:outline-none focus:border-accentblue">
-                <button onclick="saveConfig()" class="w-full bg-accentblue hover:bg-blue-600 text-white font-bold py-2.5 rounded-xl text-xs transition">Simpan API Key</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Script WebSocket & AI Engine -->
+    <!-- Script Engine -->
     <script>
-        const gutsKeyInput = document.getElementById('gutsKeyInput');
-        if(localStorage.getItem('guts_key')) gutsKeyInput.value = localStorage.getItem('guts_key');
-
-        function toggleModal(id) { document.getElementById(id).classList.toggle('hidden'); }
-        function saveConfig() {
-            localStorage.setItem('guts_key', gutsKeyInput.value.trim());
-            toggleModal('configModal');
-            alert('API Key tersimpan!');
-        }
-
         function syncSelectedMarket() {
             const val = document.getElementById('marketSelect').value;
             document.getElementById('selectedPairBadge').textContent = val;
@@ -219,7 +191,7 @@
                     wsStatus.textContent = 'WS: CONNECTED';
                     wsStatus.className = 'text-[9px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40';
 
-                    // Payload Subscribe Sesuai Format Resmi Dokumen
+                    // Payload Subscribe Sesuai Format Resmi
                     const subFrame = {
                         op: "sub",
                         id: 1,
@@ -243,7 +215,6 @@
                 ws.onmessage = (event) => {
                     try {
                         const frame = JSON.parse(event.data);
-
                         if (frame.op === "events" && Array.isArray(frame.events)) {
                             frame.events.forEach(ev => {
                                 if (ev.symbol && ev.price) {
@@ -285,10 +256,9 @@
         }
 
         // ==========================================
-        // INTEGRASI GUTSAI ENGINE
+        // INTEGRASI GUTSAI VIA BACKEND SERVERLESS PROXY
         // ==========================================
         async function generateAISignal() {
-            const gutsKey = gutsKeyInput.value.trim();
             const marketId = document.getElementById('marketSelect').value;
             const htf = document.getElementById('htfSelect').value;
             const ltf = document.getElementById('ltfSelect').value;
@@ -297,49 +267,21 @@
             const badge = document.getElementById('signalBadge');
             const btn = document.getElementById('signalBtn');
 
-            if (!gutsKey) {
-                toggleModal('configModal');
-                alert("Masukkan API Key GutsAI terlebih dahulu!");
-                return;
-            }
-
             btn.disabled = true;
             btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> MENGEVALUASI...`;
             reasonEl.textContent = `Menganalisis data pasar ${marketId} (${htf} & ${ltf})...`;
             badge.textContent = 'ANALYZING';
 
             try {
-                const systemPrompt = `Anda adalah AI Prop Firm Trading Agent MyFundedPerps. 
-Target Market: ${marketId}
-Timeframe HTF: ${htf} | LTF: ${ltf}
-Berikan analisis teknikal terstruktur dalam bahasa Indonesia:
-- SIGNAL: [BUY / SELL / HOLD]
-- ENTRY: [Harga entry]
-- SL: [Stop Loss]
-- TP: [Take Profit]
-- REASON: [Alasan konfluensi]`;
-
-                const targetApi = 'https://api.gutsai.id/v1/chat/completions';
-                const proxiedApi = `https://corsproxy.io/?url=${encodeURIComponent(targetApi)}`;
-
-                const response = await fetch(proxiedApi, {
+                // Memanggil endpoint backend internal /api/generate
+                const response = await fetch('/api/generate', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${gutsKey}`
-                    },
-                    body: JSON.stringify({
-                        model: 'guts-default',
-                        messages: [
-                            { role: 'system', content: systemPrompt },
-                            { role: 'user', content: `Analisis sinyal live untuk ${marketId}.` }
-                        ],
-                        temperature: 0.2
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ marketId, htf, ltf })
                 });
 
                 const data = await response.json();
-                if (!response.ok) throw new Error(data.error?.message || `HTTP Error ${response.status}`);
+                if (!response.ok) throw new Error(data.error || `HTTP Error ${response.status}`);
 
                 const outputText = data.choices[0].message.content;
                 reasonEl.textContent = outputText;
