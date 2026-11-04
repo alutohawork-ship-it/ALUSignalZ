@@ -26,7 +26,7 @@ const SPEC = {
 // ======================= GAYA TRADING =======================
 // htf / mtf / ltf : HTF = bias | MTF = struktur & POI | LTF = trigger saja
 // bufM / bufL     : buffer SL = max(bufM x ATR_MTF, bufL x ATR_LTF)
-// minSl / maxSl   : jarak SL dalam satuan ATR_MTF
+// minSl / maxSl   : jarak SL minimum/target maksimum (x ATR_MTF)
 // maxPull         : jarak maksimal POI dari harga (x ATR_MTF)
 // confirm         : true = intraday/swing wajib konfirmasi, false = scalp/day boleh reaksi
 // sweepLook       : sweep dianggap relevan jika terjadi dalam N candle LTF terakhir
@@ -37,7 +37,12 @@ const STYLES = {
   intra: { htf: '4h',  mtf: '1h',  ltf: '5m',  confirm: true,  maxPull: 3.0, bufM: 0.4, bufL: 0.5, minSl: 1.0, maxSl: 2.5, rr: [1.5, 2.5, 3.5], maxTpR: 7, sweepLook: 10 },
   swing: { htf: '1d',  mtf: '4h',  ltf: '15m', confirm: true,  maxPull: 3.0, bufM: 0.4, bufL: 0.4, minSl: 1.0, maxSl: 3.0, rr: [1.5, 2.8, 4.5], maxTpR: 8, sweepLook: 10 },
 };
-const pickStyle = s => /scalp/i.test(s) ? 'scalp' : /day/i.test(s) ? 'day' : /swing/i.test(s) ? 'swing' : 'intra';
+// Urutan penting: "Swing ... Daily" dan "Intraday" mengandung kata "day"
+const pickStyle = s =>
+  /scalp/i.test(s) ? 'scalp' :
+  /swing/i.test(s) ? 'swing' :
+  /intra/i.test(s) ? 'intra' :
+  /day/i.test(s)   ? 'day'   : 'intra';
 
 const TF_LABEL = { '1m': 'M1', '3m': 'M3', '5m': 'M5', '15m': 'M15', '30m': 'M30', '1h': 'H1', '4h': 'H4', '1d': 'D1' };
 const TF_MS = { '1m': 6e4, '3m': 18e4, '5m': 3e5, '15m': 9e5, '30m': 18e5, '1h': 36e5, '4h': 144e5, '1d': 864e5 };
@@ -60,15 +65,24 @@ async function fetchJSON(url, opts = {}, ms = 4500) {
     const r = await fetch(url, { ...opts, signal: ctrl.signal });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return await r.json();
-  } finally { clearTimeout(tm); }
+  } finally {
+    clearTimeout(tm);
+  }
 }
 
 function aggregate(c, ms) {
   const out = [];
   for (const k of c) {
-    const b = Math.floor(k.t / ms) * ms, last = out[out.length - 1];
-    if (last && last.t === b) { last.h = Math.max(last.h, k.h); last.l = Math.min(last.l, k.l); last.c = k.c; last.v += k.v; }
-    else out.push({ ...k, t: b });
+    const b = Math.floor(k.t / ms) * ms;
+    const last = out[out.length - 1];
+    if (last && last.t === b) {
+      last.h = Math.max(last.h, k.h);
+      last.l = Math.min(last.l, k.l);
+      last.c = k.c;
+      last.v += k.v;
+    } else {
+      out.push({ ...k, t: b });
+    }
   }
   return out;
 }
@@ -76,7 +90,8 @@ function aggregate(c, ms) {
 async function fromHL(coin, tf) {
   const end = Date.now(), start = end - TF_MS[tf] * 300;
   const j = await fetchJSON('https://api.hyperliquid.xyz/info', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type: 'candleSnapshot', req: { coin, interval: tf, startTime: start, endTime: end } }),
   });
   return (Array.isArray(j) ? j : []).map(k => ({ t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v }));
@@ -91,7 +106,9 @@ async function fromYahoo(sym, tf) {
   const { i, r, agg } = YF_TF[tf];
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=${i}&range=${r}&includePrePost=true`;
   const j = await fetchJSON(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-  const res = j?.chart?.result?.[0], ts = res?.timestamp || [], q = res?.indicators?.quote?.[0] || {};
+  const res = j?.chart?.result?.[0];
+  const ts = res?.timestamp || [];
+  const q = res?.indicators?.quote?.[0] || {};
   let c = [];
   ts.forEach((t, k) => {
     const o = q.open?.[k], h = q.high?.[k], l = q.low?.[k], cl = q.close?.[k];
@@ -108,6 +125,7 @@ async function getCandles(spec, tf) {
   (spec.hl || []).forEach(c => tries.push(['Hyperliquid', () => fromHL(c, tf)]));
   if (spec.bn) tries.push(['Binance', () => fromBinance(spec.bn, tf)]);
   if (spec.yf) tries.push(['Yahoo', () => fromYahoo(spec.yf, tf)]);
+
   let fallback = null;
   for (const [src, fn] of tries) {
     try {
@@ -137,17 +155,17 @@ function atr(c, n = 14) {
   return cnt ? sum / cnt : 0;
 }
 
-// Swing high/low (fractal k candle kiri-kanan)
+// Swing high/low (fractal: k candle kiri dan kanan)
 function swings(c, k) {
   const s = [];
   for (let i = k; i < c.length - k; i++) {
-    let H = true, L = true;
+    let isH = true, isL = true;
     for (let j = 1; j <= k; j++) {
-      if (c[i].h <= c[i - j].h || c[i].h < c[i + j].h) H = false;
-      if (c[i].l >= c[i - j].l || c[i].l > c[i + j].l) L = false;
+      if (c[i].h <= c[i - j].h || c[i].h < c[i + j].h) isH = false;
+      if (c[i].l >= c[i - j].l || c[i].l > c[i + j].l) isL = false;
     }
-    if (H) s.push({ i, type: 'H', p: c[i].h });
-    if (L) s.push({ i, type: 'L', p: c[i].l });
+    if (isH) s.push({ i, type: 'H', p: c[i].h });
+    if (isL) s.push({ i, type: 'L', p: c[i].l });
   }
   return s;
 }
@@ -157,6 +175,7 @@ function structure(c, k) {
   const sw = swings(c, k), events = [];
   let trend = 0, lastH = null, lastL = null, si = 0;
   for (let i = 0; i < c.length; i++) {
+    // swing baru hanya dianggap ada setelah k candle berikutnya terbentuk
     while (si < sw.length && sw[si].i + k <= i) {
       const s = { ...sw[si++] };
       if (s.type === 'H') lastH = s; else lastL = s;
@@ -172,12 +191,13 @@ function structure(c, k) {
       trend = -1;
     }
   }
-  return { trend, events, last: events.at(-1), swings: sw };
+  return { trend, events, last: events[events.length - 1], swings: sw };
 }
 
-// Leg terakhir untuk menghitung kedalaman pullback
+// Leg terakhir (swing low ke high atau sebaliknya)
 function legOf(sw) {
-  const lh = sw.filter(s => s.type === 'H').at(-1), ll = sw.filter(s => s.type === 'L').at(-1);
+  const hs = sw.filter(s => s.type === 'H'), ls = sw.filter(s => s.type === 'L');
+  const lh = hs[hs.length - 1], ll = ls[ls.length - 1];
   if (!lh || !ll) return null;
   return { up: lh.i > ll.i, hi: lh.p, lo: ll.p, range: Math.max(lh.p - ll.p, 1e-9) };
 }
@@ -192,20 +212,24 @@ function depth(leg, dir, p) {
 function liquidity(c, sw, tol) {
   const n = c.length;
   const untaken = s => {
-    for (let j = s.i + 1; j < n; j++) if (s.type === 'H' ? c[j].h > s.p : c[j].l < s.p) return false;
+    for (let j = s.i + 1; j < n; j++) {
+      if (s.type === 'H' ? c[j].h > s.p : c[j].l < s.p) return false;
+    }
     return true;
   };
   const pools = sw.filter(untaken).map(s => ({ type: s.type, p: s.p, i: s.i, eq: false }));
-  for (const a of pools) a.eq = pools.some(b => b !== a && b.type === a.type && Math.abs(b.p - a.p) <= tol);
+  for (const a of pools) {
+    a.eq = pools.some(b => b !== a && b.type === a.type && Math.abs(b.p - a.p) <= tol);
+  }
   return pools;
 }
 
-// Sweep: wick menembus swing lalu close kembali
-function findSweep(c, sw, tol, recent = 6) {
+// Sweep: wick menembus swing lalu close kembali ke dalam range
+function findSweep(c, sw, tol, recent) {
   const n = c.length;
-  let best = null;
   for (let i = n - 1; i >= Math.max(1, n - recent); i--) {
     const prior = sw.filter(s => s.i < i - 1 && s.i >= i - 60);
+    let best = null;
     for (const s of prior) {
       const bull = s.type === 'L' && c[i].l < s.p && c[i].c > s.p;
       const bear = s.type === 'H' && c[i].h > s.p && c[i].c < s.p;
@@ -228,10 +252,18 @@ function sndZones(c, R, look = 120) {
     const dir = Math.sign(k.c - k.o);
     let j = i - 1;
     const base = [c[j]];
-    while (base.length < 3 && j - 1 >= 0 && (c[j - 1].h - c[j - 1].l) < 0.8 * R) { j--; base.push(c[j]); }
-    const lo = dir > 0 ? Math.min(...base.map(x => x.l)) : Math.min(...base.map(x => Math.min(x.o, x.c)));
-    const hi = dir > 0 ? Math.max(...base.map(x => Math.max(x.o, x.c))) : Math.max(...base.map(x => x.h));
+    while (base.length < 3 && j - 1 >= 0 && (c[j - 1].h - c[j - 1].l) < 0.8 * R) {
+      j--;
+      base.push(c[j]);
+    }
+    const lo = dir > 0
+      ? Math.min(...base.map(x => x.l))
+      : Math.min(...base.map(x => Math.min(x.o, x.c)));
+    const hi = dir > 0
+      ? Math.max(...base.map(x => Math.max(x.o, x.c)))
+      : Math.max(...base.map(x => x.h));
     if (hi <= lo) continue;
+
     let touches = 0, inside = false, broken = false;
     for (let m = i + 2; m < n; m++) {
       if (dir > 0 ? c[m].c < lo : c[m].c > hi) { broken = true; break; }
@@ -280,7 +312,8 @@ function orderBlock(c, ev) {
 
 // Support & Resistance: cluster swing (minimal 2 sentuhan)
 function snrLevels(points, tol) {
-  const s = [...points].sort((a, b) => a.p - b.p), out = [];
+  const s = [...points].sort((a, b) => a.p - b.p);
+  const out = [];
   let g = [];
   const flush = () => {
     if (g.length >= 2) out.push({ p: g.reduce((a, x) => a + x.p, 0) / g.length, n: g.length });
@@ -299,7 +332,8 @@ function candleSignal(c, R) {
   const n = c.length;
   for (const i of [n - 2, n - 3]) {
     if (i < 1) continue;
-    const k = c[i], p = c[i - 1], rng = k.h - k.l, body = Math.abs(k.c - k.o);
+    const k = c[i], p = c[i - 1];
+    const rng = k.h - k.l, body = Math.abs(k.c - k.o);
     if (rng <= 0) continue;
     const up = k.h - Math.max(k.o, k.c), dn = Math.min(k.o, k.c) - k.l;
     if (k.c > k.o && p.c < p.o && k.c > p.o && k.o <= p.c && body >= 0.6 * R) return { dir: 1, name: 'bullish engulfing', i };
@@ -315,7 +349,10 @@ function momentum(c, R) {
   let disp = null;
   for (let i = c.length - 2; i >= c.length - 4 && i >= 0; i--) {
     const k = c[i], rng = k.h - k.l, body = Math.abs(k.c - k.o);
-    if (body >= 1.5 * R && body >= 0.65 * rng) { disp = { dir: Math.sign(k.c - k.o), i }; break; }
+    if (body >= 1.5 * R && body >= 0.65 * rng) {
+      disp = { dir: Math.sign(k.c - k.o), i };
+      break;
+    }
   }
   return { disp };
 }
@@ -327,18 +364,23 @@ function frame(c, k, tf, sweepLook) {
   const s = structure(c, k);
   const tol = 0.25 * R;
   const lastEv = d => [...s.events].reverse().find(e => e.dir === d);
+
   const zones = [
     ...sndZones(c, R),
     ...fvgs(c, R),
     orderBlock(c, lastEv(1)),
     orderBlock(c, lastEv(-1)),
   ].filter(Boolean);
+
   // Kontinuasi: level BOS terakhir menjadi zona retest (S/R flip)
   if (s.last && c.length - 1 - s.last.i <= 40) {
     zones.push({ kind: 'BOS retest', dir: s.last.dir, lo: s.last.level - 0.25 * R, hi: s.last.level + 0.25 * R, i: s.last.i, touches: 0 });
   }
+
   return {
-    tf: lbl, c, R, s, trend: s.trend, last: s.last,
+    tf: lbl, c, R, s,
+    trend: s.trend,
+    last: s.last,
     pools: liquidity(c, s.swings, tol).map(p => ({ ...p, tf: lbl })),
     sweep: findSweep(c, s.swings, tol, sweepLook),
     zones: zones.map(z => ({ ...z, tf: lbl })),
@@ -359,7 +401,8 @@ function trigger(F, dir) {
   const L = F.L, n = L.c.length;
   if (L.sweep?.dir === dir && n - 1 - L.sweep.i <= 4)
     return { kind: 'sweep', name: `sweep ${dir > 0 ? 'SSL' : 'BSL'} ${L.tf}` };
-  if (L.cs?.dir === dir) return { kind: 'rejection', name: `${L.cs.name} ${L.tf}` };
+  if (L.cs?.dir === dir)
+    return { kind: 'rejection', name: `${L.cs.name} ${L.tf}` };
   if (L.last?.dir === dir && n - 1 - L.last.i <= 4)
     return { kind: L.last.type === 'CHoCH' ? 'choch' : 'bos', name: `${L.last.type} ${L.tf}` };
   if (L.mo.disp?.dir === dir && n - 1 - L.mo.disp.i <= 3)
@@ -371,4 +414,60 @@ function trigger(F, dir) {
 function analyze(F, price, st, spec) {
   const { H, M, L } = F;
   const RL = L.R, RM = M.R, nL = L.c.length, nM = M.c.length;
-  const KIND_W = { Demand: 1.2
+  const KIND_W = { Demand: 1.2, Supply: 1.2, OB: 1.0, 'BOS retest': 1.0, FVG: 0.8, 'S/R': 0.8 };
+
+  // 1) BIAS: HTF memimpin. LTF hanya boleh membalik arah jika ada reversal valid
+  let dir = H.trend || M.trend || L.trend || (L.last?.dir ?? 1);
+  let counter = false;
+  if (L.last && L.last.dir !== dir) {
+    const d2 = L.last.dir;
+    const choch = L.last.type === 'CHoCH' && nL - 1 - L.last.i <= 10;
+    const swept = [H, M, L].some(f => f.sweep?.dir === d2);
+    const inZone = [H, M].some(f => f.zones.some(z => z.dir === d2 && zdist(z, d2, price) === 0));
+    if (choch && swept && inZone) { dir = d2; counter = true; }
+  }
+
+  const trig = trigger(F, dir);
+  const dM = depth(M.leg, dir, price);
+  const depthOK = dM != null && dM >= 0.3 && dM <= 0.9;
+
+  // 2) POI: zona terbaik searah dir dari HTF dan MTF (LTF tidak membuat zona)
+  const pois = [];
+  for (const [tw, f] of [[3, H], [2, M]]) {
+    for (const z of f.zones) {
+      if (z.dir !== dir) continue;
+      const d = zdist(z, dir, price);
+      if (!Number.isFinite(d) || d > st.maxPull * RM) continue;
+      const fresh = z.touches === 0 ? 0.3 : 0;
+      const w = tw * (KIND_W[z.kind] ?? 1) + fresh;
+      pois.push({ lo: z.lo, hi: z.hi, kind: z.kind, name: `${f.tf} ${z.kind}${fresh ? ' fresh' : ''}`, dist: d, w, score: w - d / RM * 0.4 });
+    }
+    for (const lv of f.levels) {
+      const z = { lo: lv.p - 0.2 * f.R, hi: lv.p + 0.2 * f.R };
+      const d = zdist(z, dir, price);
+      if (!Number.isFinite(d) || d > st.maxPull * RM) continue;
+      const w = tw * 0.8;
+      pois.push({ lo: z.lo, hi: z.hi, kind: 'S/R', name: `${f.tf} S/R ${lv.n}x`, dist: d, w, score: w - d / RM * 0.4 });
+    }
+  }
+  pois.sort((a, b) => b.score - a.score);
+  const poi = pois[0] || null;
+  const inPoi = !!poi && poi.dist === 0;
+  const contTrig = !!trig && (trig.kind === 'bos' || trig.kind === 'disp');
+  const mAligned = M.trend === dir || M.last?.dir === dir;
+  const notChasing = !!L.last && Math.abs(price - L.last.level) <= 1.5 * RM;
+
+  // 3) MODE ENTRY
+  let mode;
+  if (inPoi && trig) mode = 'REACTION';
+  else if (inPoi) mode = st.confirm ? 'CONFIRM' : 'PULLBACK';
+  else if (contTrig && mAligned && notChasing && (!poi || poi.dist > 0.5 * RL)) mode = 'CONTINUATION';
+  else if (poi) mode = 'PULLBACK';
+  else mode = st.confirm ? 'CONFIRM' : 'REACTION_LIMIT';
+  const market = mode === 'REACTION' || mode === 'CONTINUATION';
+
+  // Cadangan tanpa POI: swing MTF terdekat di sisi yang benar
+  const swingPoi = () => {
+    const sw = M.s.swings
+      .filter(s => s.type === (dir > 0 ? 'L' : 'H') && nM - 1 - s.i <= 40 &&
+        (dir > 0 ? s.p < price - 0.2 * RM : s
