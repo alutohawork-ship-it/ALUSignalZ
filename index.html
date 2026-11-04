@@ -1,3 +1,6 @@
+Baik! Kode KMZWAY87AA kita tetapkan sebagai Password / Token Pendaftaran rahasia yang wajib diisi oleh pengguna baru saat mereka mendaftar di halaman depan.
+Dengan cara ini, hanya orang yang mengetahui kode KMZWAY87AA saja yang bisa mendaftar dan mendapatkan akses Trial gratis ke terminal trading Anda.
+Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan fitur Password Pendaftaran (KMZWAY87AA):
 <!DOCTYPE html>
 <html lang="id" class="dark">
 <head>
@@ -40,33 +43,46 @@
 
     <div id="toast" class="hidden fixed top-3 left-1/2 -translate-x-1/2 z-50 px-3 py-2 rounded-lg text-[10px] font-bold font-mono shadow-xl border"></div>
 
-    <!-- ================= HALAMAN LOGIN (EMAIL ONLY) ================= -->
+    <!-- ================= HALAMAN LOGIN / REGISTER (DENGAN KODE PASS) ================= -->
     <div id="authScreen" class="fixed inset-0 z-50 bg-darkbg/95 backdrop-blur-md flex flex-col items-center justify-center p-4">
-        <div class="bg-cardbg border border-panelborder rounded-2xl p-6 max-w-sm w-full space-y-5 shadow-2xl">
+        <div class="bg-cardbg border border-panelborder rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl">
             <div class="text-center space-y-1">
                 <div class="bg-accentblue w-12 h-12 rounded-xl flex items-center justify-center text-white mx-auto text-xl shadow-lg shadow-accentblue/30">
                     <i class="fa-solid fa-chart-line"></i>
                 </div>
                 <h1 class="text-xl font-extrabold text-white pt-2 tracking-tight">Welcome, Alu Signal Z</h1>
-                <p class="text-[11px] text-gray-400">Masukkan email Anda untuk mengakses terminal</p>
+                <p class="text-[11px] text-gray-400">Silakan login atau daftar menggunakan kode akses</p>
             </div>
 
-            <!-- FORM 1 KOLOM EMAIL SAJA -->
-            <form id="authForm" onsubmit="handleEmailLogin(event)" class="space-y-4 pt-2">
+            <!-- Tab Selector -->
+            <div class="flex border-b border-panelborder text-xs font-bold text-gray-400">
+                <button id="tabLoginBtn" onclick="switchAuthTab('login')" class="flex-1 py-2 border-b-2 border-accentblue text-white">MASUK (LOGIN)</button>
+                <button id="tabRegBtn" onclick="switchAuthTab('register')" class="flex-1 py-2 border-b-2 border-transparent">DAFTAR BARU</button>
+            </div>
+
+            <!-- Form -->
+            <form id="authForm" onsubmit="handleAuth(event)" class="space-y-3">
                 <div>
-                    <label class="text-[10px] font-bold text-gray-400 block mb-1 tracking-wider">EMAIL ACCESSS</label>
-                    <input type="email" id="authEmail" required class="w-full bg-darkbg border border-panelborder rounded-xl p-3 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="nama@email.com">
+                    <label class="text-[10px] font-bold text-gray-400 block mb-1">EMAIL</label>
+                    <input type="email" id="authEmail" required class="w-full bg-darkbg border border-panelborder rounded-lg p-2.5 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="nama@email.com">
                 </div>
 
-                <button type="submit" id="authSubmitBtn" class="w-full bg-accentblue hover:bg-blue-600 text-white font-bold py-3 rounded-xl text-xs transition shadow-lg shadow-accentblue/20 flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-right-to-bracket"></i> MASUK KE TERMINAL
+                <!-- Input Kode Pendaftaran (Hanya tampil saat tab DAFTAR BARU dipilih) -->
+                <div id="regPassContainer" class="hidden">
+                    <label class="text-[10px] font-bold text-yellow-400 block mb-1">KODE PENDAFTARAN (PASS)</label>
+                    <input type="text" id="authRegPass" class="w-full bg-darkbg border border-yellow-500/50 rounded-lg p-2.5 text-xs font-mono text-yellow-300 focus:outline-none focus:border-yellow-400" placeholder="Masukkan kode pass">
+                    <p class="text-[8px] text-gray-400 mt-1">Dapatkan kode pass dari admin via WhatsApp.</p>
+                </div>
+
+                <button type="submit" id="authSubmitBtn" class="w-full bg-accentblue hover:bg-blue-600 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-lg shadow-accentblue/20">
+                    MASUK KE TERMINAL
                 </button>
             </form>
 
             <!-- FOOTER INFO ADMIN -->
             <div class="pt-4 border-t border-panelborder/60 text-center space-y-1.5">
                 <p class="text-[10px] text-gray-400 font-medium">Bantuan & Informasi Admin:</p>
-                <a href="https://wa.me/6285817038501?text=Halo%20Admin%20Alu%20Signal%20Z,%20saya%20ingin%20bertanya%20mengenai%20akses/langganan" target="_blank" class="inline-flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-full text-xs font-bold font-mono transition">
+                <a href="https://wa.me/6285817038501?text=Halo%20Admin%20Alu%20Signal%20Z,%20saya%20ingin%20meminta%20kode%20pendaftaran%20(pass)" target="_blank" class="inline-flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-full text-xs font-bold font-mono transition">
                     <i class="fa-brands fa-whatsapp text-sm text-emerald-400"></i> +6285817038501
                 </a>
             </div>
@@ -328,39 +344,39 @@
         </footer>
     </div>
 
-    <!-- ======================= SCRIPT LOGIKA EMAIL LOGIN & ENGINE ======================= -->
+    <!-- ======================= SCRIPT AUTH & ENGINE ======================= -->
     <script>
-    // ======================= APPWRITE SINGLE-INPUT EMAIL LOGIN =======================
     const { Client, Databases, Query, ID } = Appwrite;
 
     const client = new Client()
         .setEndpoint('https://cloud.appwrite.io/v1') 
-        .setProject('6aeb434e0015862d54ea'); // ID Proyek Appwrite Anda
+        .setProject('6aeb434e0015862d54ea'); // Project ID Appwrite Anda
 
     const databases = new Databases(client);
 
     const DATABASE_ID = 'alu_db';     
     const COLLECTION_ID = 'profiles'; 
-    const ADMIN_EMAIL = 'admin@alusignal.com'; // Email yang ditunjuk sebagai Admin
+    const REG_PASSCODE = 'KMZWAY87AA'; // Kode Pass untuk Pendaftaran Baru
 
-    let currentUserProfile = null;
+    let currentAuthMode = 'login'; // 'login' atau 'register'
 
-    async function handleEmailLogin(e) {
+    function switchAuthTab(mode) {
+        currentAuthMode = mode;
+        const isLogin = mode === 'login';
+        document.getElementById('tabLoginBtn').className = `flex-1 py-2 border-b-2 ${isLogin ? 'border-accentblue text-white' : 'border-transparent text-gray-400'}`;
+        document.getElementById('tabRegBtn').className = `flex-1 py-2 border-b-2 ${!isLogin ? 'border-accentblue text-white' : 'border-transparent text-gray-400'}`;
+        document.getElementById('regPassContainer').classList.toggle('hidden', isLogin);
+        document.getElementById('authSubmitBtn').textContent = isLogin ? 'MASUK KE TERMINAL' : 'DAFTAR & DAPATKAN TRIAL';
+    }
+
+    async function handleAuth(e) {
         e.preventDefault();
         const email = document.getElementById('authEmail').value.trim().toLowerCase();
 
-        if (!email) return alert('Silakan masukkan email Anda.');
+        if (!email) return alert('Silakan masukkan email.');
 
         try {
-            // 1. Cek apakah ini Email Admin
-            if (email === ADMIN_EMAIL) {
-                currentUserProfile = { email: ADMIN_EMAIL, role: 'admin', status: 'lifetime' };
-                localStorage.setItem('alu_user_email', email);
-                openTerminalApp(true);
-                return;
-            }
-
-            // 2. Cari data email di Database Appwrite
+            // Cek apakah email sudah terdaftar di database
             const res = await databases.listDocuments(
                 DATABASE_ID,
                 COLLECTION_ID,
@@ -369,8 +385,18 @@
 
             let profile = res.documents[0];
 
-            // 3. Jika belum terdaftar, otomatis daftarkan Klien Baru (Trial 3 Hari)
-            if (!profile) {
+            if (currentAuthMode === 'register') {
+                // Proses Pendaftaran Klien Baru
+                const inputPass = document.getElementById('authRegPass').value.trim();
+                if (inputPass !== REG_PASSCODE) {
+                    return alert('Kode Pendaftaran (Pass) salah! Hubungi Admin untuk mendapatkan kode yang benar.');
+                }
+
+                if (profile) {
+                    return alert('Email ini sudah terdaftar! Silakan pilih tab Masuk (Login).');
+                }
+
+                // Buat Trial 3 Hari untuk pendaftar baru
                 const trialEnds = new Date();
                 trialEnds.setDate(trialEnds.getDate() + 3);
 
@@ -385,21 +411,24 @@
                         trial_ends_at: trialEnds.toISOString()
                     }
                 );
-                alert(`Email terdaftar! Anda mendapatkan Akses Trial Gratis 3 Hari.`);
+                alert('Pendaftaran berhasil! Akun Anda aktif dengan Trial 3 Hari.');
+            } else {
+                // Proses Login
+                if (!profile) {
+                    return alert('Email belum terdaftar. Silakan pilih tab "DAFTAR BARU" dan masukkan kode pass.');
+                }
             }
 
-            // 4. Validasi Status Klien (Trial / Langganan)
+            // Validasi Masa Aktif Klien (Trial / Langganan / Admin)
             const now = new Date();
             const isTrialValid = profile.status === 'trial' && new Date(profile.trial_ends_at) > now;
             const isSubscribed = profile.status === 'monthly' || profile.status === 'lifetime';
 
             if (!isTrialValid && !isSubscribed && profile.role !== 'admin') {
-                alert('Masa Trial atau Langganan untuk email ini telah habis. Silakan hubungi Admin WhatsApp.');
-                return;
+                return alert('Masa trial atau langganan email ini telah habis. Silakan hubungi Admin WhatsApp.');
             }
 
-            // Simpan sesi login lokal & buka aplikasi
-            currentUserProfile = profile;
+            // Simpan sesi lokal & masuk terminal
             localStorage.setItem('alu_user_email', email);
             openTerminalApp(profile.role === 'admin');
 
@@ -426,9 +455,9 @@
         const savedEmail = localStorage.getItem('alu_user_email');
         if (savedEmail) {
             document.getElementById('authEmail').value = savedEmail;
-            // Verifikasi otomatis sesi tersimpan
+            currentAuthMode = 'login';
             const fakeEvent = { preventDefault: () => {} };
-            await handleEmailLogin(fakeEvent);
+            await handleAuth(fakeEvent);
         }
     }
 
@@ -1641,3 +1670,4 @@
     </script>
 </body>
 </html>
+
