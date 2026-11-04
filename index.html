@@ -19,6 +19,9 @@
         }
     </script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Appwrite Web SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/appwrite@13.0.1"></script>
 
     <style>
         .lvl-box { position: relative; transition: all .25s ease; }
@@ -37,226 +40,437 @@
 
     <div id="toast" class="hidden fixed top-3 left-1/2 -translate-x-1/2 z-50 px-3 py-2 rounded-lg text-[10px] font-bold font-mono shadow-xl border"></div>
 
-    <!-- Header Navbar -->
-    <header class="flex items-center justify-between pb-2 border-b border-panelborder max-w-md mx-auto w-full">
-        <div class="flex items-center gap-2">
-            <div class="bg-accentblue w-7 h-7 rounded-lg flex items-center justify-center text-white">
-                <i class="fa-solid fa-chart-line text-xs"></i>
+    <!-- ================= HALAMAN LOGIN / REGISTER (APPWRITE AUTH) ================= -->
+    <div id="authScreen" class="fixed inset-0 z-50 bg-darkbg/95 backdrop-blur-md flex flex-col items-center justify-center p-4">
+        <div class="bg-cardbg border border-panelborder rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl">
+            <div class="text-center space-y-1">
+                <div class="bg-accentblue w-12 h-12 rounded-xl flex items-center justify-center text-white mx-auto text-xl shadow-lg shadow-accentblue/30">
+                    <i class="fa-solid fa-chart-line"></i>
+                </div>
+                <h1 class="text-xl font-extrabold text-white pt-2 tracking-tight">Welcome, Alu Signal Z</h1>
+                <p class="text-[11px] text-gray-400">Silakan login atau daftar untuk mulai trading</p>
             </div>
-            <div>
-                <h1 class="font-bold text-xs text-white">Alu <span class="text-accentblue">Signal Z</span></h1>
-                <p id="txtSubHeader" class="text-[8px] text-gray-400">Multi-Asset Live Stream</p>
+
+            <!-- Tab Selector -->
+            <div class="flex border-b border-panelborder text-xs font-bold text-gray-400">
+                <button id="tabLoginBtn" onclick="switchAuthTab('login')" class="flex-1 py-2 border-b-2 border-accentblue text-white">LOGIN</button>
+                <button id="tabRegBtn" onclick="switchAuthTab('register')" class="flex-1 py-2 border-b-2 border-transparent">DAFTAR (TRIAL)</button>
+            </div>
+
+            <form id="authForm" onsubmit="handleAuth(event)" class="space-y-3">
+                <div>
+                    <label class="text-[10px] font-bold text-gray-400 block mb-1">EMAIL</label>
+                    <input type="email" id="authEmail" required class="w-full bg-darkbg border border-panelborder rounded-lg p-2.5 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="nama@email.com">
+                </div>
+                <div>
+                    <label class="text-[10px] font-bold text-gray-400 block mb-1">PASSWORD</label>
+                    <input type="password" id="authPassword" required minlength="8" class="w-full bg-darkbg border border-panelborder rounded-lg p-2.5 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="••••••••">
+                </div>
+
+                <div id="trialOptionContainer" class="hidden">
+                    <label class="text-[10px] font-bold text-gray-400 block mb-1">PILIH MASA TRIAL GRATIS</label>
+                    <select id="authTrialDays" class="w-full bg-darkbg border border-panelborder rounded-lg p-2.5 text-xs font-bold text-white focus:outline-none">
+                        <option value="1">1 Hari Trial</option>
+                        <option value="3" selected>3 Hari Trial (Rekomendasi)</option>
+                        <option value="5">5 Hari Trial</option>
+                        <option value="7">7 Hari Trial</option>
+                    </select>
+                </div>
+
+                <button type="submit" id="authSubmitBtn" class="w-full bg-accentblue hover:bg-blue-600 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-lg shadow-accentblue/20">
+                    MASUK KE TERMINAL
+                </button>
+            </form>
+
+            <!-- FOOTER INFO ADMIN DI HALAMAN LOGIN -->
+            <div class="pt-4 border-t border-panelborder/60 text-center space-y-1.5">
+                <p class="text-[10px] text-gray-400 font-medium">Bantuan & Informasi Admin:</p>
+                <a href="https://wa.me/6285817038501?text=Halo%20Admin%20Alu%20Signal%20Z,%20saya%20ingin%20bertanya%20mengenai%20akses/langganan" target="_blank" class="inline-flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-full text-xs font-bold font-mono transition">
+                    <i class="fa-brands fa-whatsapp text-sm text-emerald-400"></i> +6285817038501
+                </a>
             </div>
         </div>
-        <div class="flex items-center gap-2">
-            <button onclick="toggleLang()" id="langBtn" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-panelborder text-gray-300 border border-panelborder hover:border-accentblue">ID 🌐</button>
-            <span id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">WS: OFF</span>
-        </div>
-    </header>
+    </div>
 
-    <main class="max-w-md mx-auto w-full flex-1 flex flex-col gap-2 pt-2">
+    <!-- ================= KONTEN UTAMA APLIKASI (DI-HIDE SEBELUM LOGIN) ================= -->
+    <div id="mainApp" class="hidden flex-col justify-between min-h-screen">
 
-        <!-- AI Signal Generator -->
-        <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
-            <div class="flex justify-between items-center">
-                <label id="lblTargetAsset" class="text-[9px] font-bold text-gray-400">TARGET ASET AKTIF</label>
-                <span id="selectedPairBadge" class="text-[9px] font-mono text-accentblue font-bold">hyperliquid|XAUUSD</span>
+        <!-- Header Navbar -->
+        <header class="flex items-center justify-between pb-2 border-b border-panelborder max-w-md mx-auto w-full">
+            <div class="flex items-center gap-2">
+                <div class="bg-accentblue w-7 h-7 rounded-lg flex items-center justify-center text-white">
+                    <i class="fa-solid fa-chart-line text-xs"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-xs text-white">Alu <span class="text-accentblue">Signal Z</span></h1>
+                    <p id="txtSubHeader" class="text-[8px] text-gray-400">Multi-Asset Live Stream</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <button id="adminPanelBtn" onclick="toggleAdminPanel()" class="hidden text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40">ADMIN 👑</button>
+                <button onclick="logout()" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">LOGOUT</button>
+                <button onclick="toggleLang()" id="langBtn" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-panelborder text-gray-300 border border-panelborder hover:border-accentblue">ID 🌐</button>
+                <span id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">WS: OFF</span>
+            </div>
+        </header>
+
+        <main class="max-w-md mx-auto w-full flex-1 flex flex-col gap-2 pt-2">
+
+            <!-- PANEL DASHBOARD ADMIN (STATISTIK KLIEN) -->
+            <div id="adminPanel" class="hidden bg-cardbg rounded-xl border border-purple-500/40 p-3 space-y-2 shadow-lg">
+                <div class="flex justify-between items-center border-b border-panelborder pb-1.5">
+                    <span class="text-[10px] font-bold text-purple-400 flex items-center gap-1">
+                        <i class="fa-solid fa-user-shield"></i> STATISTIK KLIEN TERDAFTAR
+                    </span>
+                    <button onclick="loadAdminStats()" class="text-[9px] text-gray-400 hover:text-white"><i class="fa-solid fa-rotate"></i> Refresh</button>
+                </div>
+                <div class="grid grid-cols-4 gap-1.5 text-center font-mono">
+                    <div class="bg-darkbg p-1.5 rounded border border-panelborder">
+                        <p class="text-[7px] text-gray-400">TOTAL</p>
+                        <p id="statTotalClients" class="text-xs font-bold text-white">0</p>
+                    </div>
+                    <div class="bg-darkbg p-1.5 rounded border border-panelborder">
+                        <p class="text-[7px] text-yellow-400">TRIAL</p>
+                        <p id="statTrialClients" class="text-xs font-bold text-yellow-400">0</p>
+                    </div>
+                    <div class="bg-darkbg p-1.5 rounded border border-panelborder">
+                        <p class="text-[7px] text-emerald-400">MONTHLY</p>
+                        <p id="statMonthlyClients" class="text-xs font-bold text-emerald-400">0</p>
+                    </div>
+                    <div class="bg-darkbg p-1.5 rounded border border-panelborder">
+                        <p class="text-[7px] text-purple-400">LIFETIME</p>
+                        <p id="statLifetimeClients" class="text-xs font-bold text-purple-400">0</p>
+                    </div>
+                </div>
             </div>
 
-            <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                <optgroup label="Gold, Silver & Forex">
-                    <option value="hyperliquid|XAUUSD">XAUUSD / Gold (Hyperliquid)</option>
-                    <option value="hyperliquid|XAGUSD">XAGUSD / Silver (Hyperliquid)</option>
-                    <option value="veranta|EURUSD">EUR/USD (Veranta)</option>
-                    <option value="veranta|USDJPY">USD/JPY (Veranta)</option>
-                    <option value="veranta|GBPUSD">GBP/USD (Veranta)</option>
-                    <option value="veranta|GBPJPY">GBP/JPY (Veranta)</option>
-                </optgroup>
-                <optgroup label="Indices / Indeks Global">
-                    <option value="ostium|DJI">Dow Jones / US30 (Ostium)</option>
-                    <option value="hyperliquid|xyz:SP500">S&P 500 / US500 (Hyperliquid)</option>
-                    <option value="hyperliquid|xyz:NAS100">Nasdaq 100 / US100 (Hyperliquid)</option>
-                    <option value="ostium|NIKKEI">Nikkei 225 / Jepang (Ostium)</option>
-                    <option value="ostium|DAX">DAX 40 / Eropa (Ostium)</option>
-                </optgroup>
-                <optgroup label="Crypto">
-                    <option value="binance|BTCUSDT">BTC/USDT (Binance)</option>
-                    <option value="binance|ETHUSDT">ETH/USDT (Binance)</option>
-                    <option value="binance|SOLUSDT">SOL/USDT (Binance)</option>
-                    <option value="binance|XRPUSDT">XRP/USDT (Binance)</option>
-                </optgroup>
-                <optgroup label="Commodities & Stocks">
-                    <option value="hyperliquid|xyz:BRENTOIL">Brent Oil (Hyperliquid)</option>
-                    <option value="hyperliquid|xyz:AAPL">Apple / AAPL (Hyperliquid)</option>
-                    <option value="binance|NVDAUSDT">NVIDIA / NVDA (Binance)</option>
-                    <option value="binance|TSLAUSDT">Tesla / TSLA (Binance)</option>
-                </optgroup>
-            </select>
+            <!-- AI Signal Generator -->
+            <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
+                <div class="flex justify-between items-center">
+                    <label id="lblTargetAsset" class="text-[9px] font-bold text-gray-400">TARGET ASET AKTIF</label>
+                    <span id="selectedPairBadge" class="text-[9px] font-mono text-accentblue font-bold">hyperliquid|XAUUSD</span>
+                </div>
 
-            <!-- Kalibrasi ke harga broker MT -->
-            <div class="flex items-center gap-1.5">
-                <input id="calibInput" type="number" step="any" inputmode="decimal" placeholder="Harga Bid di MT (opsional)"
-                       class="flex-1 min-w-0 bg-darkbg border border-panelborder text-[10px] font-mono text-white px-2 py-1.5 rounded-lg focus:outline-none">
-                <button onclick="calibrate()" id="calibBtn" class="text-[9px] font-bold px-2 py-1.5 rounded-lg bg-accentblue/20 text-accentblue border border-accentblue/40">KALIBRASI</button>
-                <button onclick="resetCalib()" class="text-[9px] font-bold px-2 py-1.5 rounded-lg bg-panelborder text-gray-300 border border-panelborder">RESET</button>
-            </div>
-            <p id="calibInfo" class="text-[8px] font-mono text-gray-500">Offset: 0</p>
-
-            <div>
-                <label id="lblTradingStyle" class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
-                <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                    <option value="Scalping (M1 & M15)">Scalping (M1 & M15)</option>
-                    <option value="Day Trading (M3 & M30)">Day Trading (M3 & M30)</option>
-                    <option value="Intraday (M5 & H1)">Intraday (M5 & H1)</option>
-                    <option value="Swing Trading (M15 & H4/Daily)">Swing Trading (M15 & H4/Daily)</option>
+                <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
+                    <optgroup label="Gold, Silver & Forex">
+                        <option value="hyperliquid|XAUUSD">XAUUSD / Gold (Hyperliquid)</option>
+                        <option value="hyperliquid|XAGUSD">XAGUSD / Silver (Hyperliquid)</option>
+                        <option value="veranta|EURUSD">EUR/USD (Veranta)</option>
+                        <option value="veranta|USDJPY">USD/JPY (Veranta)</option>
+                        <option value="veranta|GBPUSD">GBP/USD (Veranta)</option>
+                        <option value="veranta|GBPJPY">GBP/JPY (Veranta)</option>
+                    </optgroup>
+                    <optgroup label="Indices / Indeks Global">
+                        <option value="ostium|DJI">Dow Jones / US30 (Ostium)</option>
+                        <option value="hyperliquid|xyz:SP500">S&P 500 / US500 (Hyperliquid)</option>
+                        <option value="hyperliquid|xyz:NAS100">Nasdaq 100 / US100 (Hyperliquid)</option>
+                        <option value="ostium|NIKKEI">Nikkei 225 / Jepang (Ostium)</option>
+                        <option value="ostium|DAX">DAX 40 / Eropa (Ostium)</option>
+                    </optgroup>
+                    <optgroup label="Crypto">
+                        <option value="binance|BTCUSDT">BTC/USDT (Binance)</option>
+                        <option value="binance|ETHUSDT">ETH/USDT (Binance)</option>
+                        <option value="binance|SOLUSDT">SOL/USDT (Binance)</option>
+                        <option value="binance|XRPUSDT">XRP/USDT (Binance)</option>
+                    </optgroup>
+                    <optgroup label="Commodities & Stocks">
+                        <option value="hyperliquid|xyz:BRENTOIL">Brent Oil (Hyperliquid)</option>
+                        <option value="hyperliquid|xyz:AAPL">Apple / AAPL (Hyperliquid)</option>
+                        <option value="binance|NVDAUSDT">NVIDIA / NVDA (Binance)</option>
+                        <option value="binance|TSLAUSDT">Tesla / TSLA (Binance)</option>
+                    </optgroup>
                 </select>
-            </div>
 
-            <button onclick="generateAISignal()" id="signalBtn" class="w-full bg-gradient-to-r from-accentblue to-indigo-600 hover:from-blue-600 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-accentblue/20 transition active:scale-95">
-                <i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnGenText">GENERATE AI SIGNAL</span>
-            </button>
-        </div>
+                <!-- Kalibrasi ke harga broker MT -->
+                <div class="flex items-center gap-1.5">
+                    <input id="calibInput" type="number" step="any" inputmode="decimal" placeholder="Harga Bid di MT (opsional)"
+                           class="flex-1 min-w-0 bg-darkbg border border-panelborder text-[10px] font-mono text-white px-2 py-1.5 rounded-lg focus:outline-none">
+                    <button onclick="calibrate()" id="calibBtn" class="text-[9px] font-bold px-2 py-1.5 rounded-lg bg-accentblue/20 text-accentblue border border-accentblue/40">KALIBRASI</button>
+                    <button onclick="resetCalib()" class="text-[9px] font-bold px-2 py-1.5 rounded-lg bg-panelborder text-gray-300 border border-panelborder">RESET</button>
+                </div>
+                <p id="calibInfo" class="text-[8px] font-mono text-gray-500">Offset: 0</p>
 
-        <!-- KARTU SIGNAL -->
-        <div id="signalContainer" class="bg-cardbg rounded-xl border border-panelborder p-3 shadow-md space-y-3">
-
-            <div class="flex items-center justify-between border-b border-panelborder pb-2">
-                <span id="cardMarketTitle" class="text-xs font-bold text-white">SELECT PAIR SPOT</span>
-                <span id="cardLivePriceTop" class="text-xs font-mono font-bold text-accentblue">--.--</span>
-            </div>
-
-            <div id="standbyView" class="py-5 text-center text-xs text-gray-400">
-                Pilih pair, pastikan harga live bergerak, lalu tekan <b>GENERATE AI SIGNAL</b>.
-            </div>
-
-            <div id="activeSignalCard" class="hidden space-y-3">
-
-                <div class="bg-darkbg/80 border border-panelborder rounded-xl p-3 text-center space-y-1">
-                    <div class="flex justify-center">
-                        <span id="signalBadgeBtn" class="bg-sky-500 text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg flex items-center gap-1">
-                            <i class="fa-solid fa-caret-up"></i> BUY
-                        </span>
-                    </div>
-                    <p id="cardStyleSub" class="text-[9px] text-gray-400 pt-1">SCALPING / Just Now</p>
-                    <p id="lblEntryZone" class="text-[9px] font-bold text-gray-400 tracking-widest pt-1">ENTRY ZONE</p>
-                    <h2 id="cardEntryZone" class="text-xl font-black text-white font-mono tracking-tight">-- - --</h2>
-                    <div class="pt-1">
-                        <span class="inline-flex items-center gap-1.5 bg-darkbg border border-panelborder px-2.5 py-0.5 rounded-full text-[9px] text-gray-300 font-mono">
-                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                            LIVE <span id="cardLivePriceBadge" class="font-bold text-white">--.--</span>
-                        </span>
-                    </div>
+                <div>
+                    <label id="lblTradingStyle" class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
+                    <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
+                        <option value="Scalping (M1 & M15)">Scalping (M1 & M15)</option>
+                        <option value="Day Trading (M3 & M30)">Day Trading (M3 & M30)</option>
+                        <option value="Intraday (M5 & H1)">Intraday (M5 & H1)</option>
+                        <option value="Swing Trading (M15 & H4/Daily)">Swing Trading (M15 & H4/Daily)</option>
+                    </select>
                 </div>
 
-                <!-- Kotak SL & TP -->
-                <div class="grid grid-cols-4 gap-1.5">
-                    <div id="boxSL" class="lvl-box bg-darkbg/70 border border-red-500/30 rounded-lg p-2 text-center">
-                        <span id="chkSL" class="hit-badge bg-red-400"><i class="fa-solid fa-xmark"></i></span>
-                        <p class="text-[8px] font-bold text-red-400">SL</p>
-                        <p id="cardSL" class="text-[10px] font-extrabold text-red-400 font-mono">--</p>
-                        <p id="cardSLPips" class="text-[7px] text-red-400/80 font-mono">--</p>
-                    </div>
-                    <div id="boxTP1" class="lvl-box bg-darkbg/70 border border-emerald-500/30 rounded-lg p-2 text-center">
-                        <span id="chkTP1" class="hit-badge bg-emerald-400"><i class="fa-solid fa-check"></i></span>
-                        <p class="text-[8px] font-bold text-emerald-400">TP1</p>
-                        <p id="cardTP1" class="text-[10px] font-extrabold text-emerald-400 font-mono">--</p>
-                        <p id="cardTP1Pips" class="text-[7px] text-emerald-400/80 font-mono">--</p>
-                    </div>
-                    <div id="boxTP2" class="lvl-box bg-darkbg/70 border border-emerald-500/30 rounded-lg p-2 text-center">
-                        <span id="chkTP2" class="hit-badge bg-emerald-400"><i class="fa-solid fa-check"></i></span>
-                        <p class="text-[8px] font-bold text-emerald-400">TP2</p>
-                        <p id="cardTP2" class="text-[10px] font-extrabold text-emerald-400 font-mono">--</p>
-                        <p id="cardTP2Pips" class="text-[7px] text-emerald-400/80 font-mono">--</p>
-                    </div>
-                    <div id="boxTP3" class="lvl-box bg-darkbg/70 border border-sky-500/30 rounded-lg p-2 text-center">
-                        <span id="chkTP3" class="hit-badge bg-emerald-400"><i class="fa-solid fa-check"></i></span>
-                        <p class="text-[8px] font-bold text-sky-400">TP3</p>
-                        <p id="cardTP3" class="text-[10px] font-extrabold text-sky-400 font-mono">--</p>
-                        <p id="cardTP3Pips" class="text-[7px] text-sky-400/80 font-mono">--</p>
-                    </div>
+                <button onclick="generateAISignal()" id="signalBtn" class="w-full bg-gradient-to-r from-accentblue to-indigo-600 hover:from-blue-600 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-accentblue/20 transition active:scale-95">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnGenText">GENERATE AI SIGNAL</span>
+                </button>
+            </div>
+
+            <!-- KARTU SIGNAL -->
+            <div id="signalContainer" class="bg-cardbg rounded-xl border border-panelborder p-3 shadow-md space-y-3">
+
+                <div class="flex items-center justify-between border-b border-panelborder pb-2">
+                    <span id="cardMarketTitle" class="text-xs font-bold text-white">SELECT PAIR SPOT</span>
+                    <span id="cardLivePriceTop" class="text-xs font-mono font-bold text-accentblue">--.--</span>
                 </div>
 
-                <!-- Live Price Map -->
-                <div class="bg-darkbg/80 border border-panelborder rounded-xl p-2.5 space-y-2">
-                    <div class="flex justify-between items-center">
-                        <p id="lblPriceMap" class="text-[9px] font-bold text-gray-400 tracking-wider">LIVE PRICE MAP</p>
-                        <div class="flex items-center gap-1.5">
-                            <span id="tradePnl" class="text-[9px] font-mono font-bold text-gray-400">--</span>
-                            <span id="tradeStatus" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40">RUNNING</span>
+                <div id="standbyView" class="py-5 text-center text-xs text-gray-400">
+                    Pilih pair, pastikan harga live bergerak, lalu tekan <b>GENERATE AI SIGNAL</b>.
+                </div>
+
+                <div id="activeSignalCard" class="hidden space-y-3">
+
+                    <div class="bg-darkbg/80 border border-panelborder rounded-xl p-3 text-center space-y-1">
+                        <div class="flex justify-center">
+                            <span id="signalBadgeBtn" class="bg-sky-500 text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg flex items-center gap-1">
+                                <i class="fa-solid fa-caret-up"></i> BUY
+                            </span>
+                        </div>
+                        <p id="cardStyleSub" class="text-[9px] text-gray-400 pt-1">SCALPING / Just Now</p>
+                        <p id="lblEntryZone" class="text-[9px] font-bold text-gray-400 tracking-widest pt-1">ENTRY ZONE</p>
+                        <h2 id="cardEntryZone" class="text-xl font-black text-white font-mono tracking-tight">-- - --</h2>
+                        <div class="pt-1">
+                            <span class="inline-flex items-center gap-1.5 bg-darkbg border border-panelborder px-2.5 py-0.5 rounded-full text-[9px] text-gray-300 font-mono">
+                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                                LIVE <span id="cardLivePriceBadge" class="font-bold text-white">--.--</span>
+                            </span>
                         </div>
                     </div>
-                    <div class="relative w-full h-[240px]">
-                        <canvas id="priceChart" class="absolute inset-0 w-full h-full"></canvas>
+
+                    <!-- Kotak SL & TP -->
+                    <div class="grid grid-cols-4 gap-1.5">
+                        <div id="boxSL" class="lvl-box bg-darkbg/70 border border-red-500/30 rounded-lg p-2 text-center">
+                            <span id="chkSL" class="hit-badge bg-red-400"><i class="fa-solid fa-xmark"></i></span>
+                            <p class="text-[8px] font-bold text-red-400">SL</p>
+                            <p id="cardSL" class="text-[10px] font-extrabold text-red-400 font-mono">--</p>
+                            <p id="cardSLPips" class="text-[7px] text-red-400/80 font-mono">--</p>
+                        </div>
+                        <div id="boxTP1" class="lvl-box bg-darkbg/70 border border-emerald-500/30 rounded-lg p-2 text-center">
+                            <span id="chkTP1" class="hit-badge bg-emerald-400"><i class="fa-solid fa-check"></i></span>
+                            <p class="text-[8px] font-bold text-emerald-400">TP1</p>
+                            <p id="cardTP1" class="text-[10px] font-extrabold text-emerald-400 font-mono">--</p>
+                            <p id="cardTP1Pips" class="text-[7px] text-emerald-400/80 font-mono">--</p>
+                        </div>
+                        <div id="boxTP2" class="lvl-box bg-darkbg/70 border border-emerald-500/30 rounded-lg p-2 text-center">
+                            <span id="chkTP2" class="hit-badge bg-emerald-400"><i class="fa-solid fa-check"></i></span>
+                            <p class="text-[8px] font-bold text-emerald-400">TP2</p>
+                            <p id="cardTP2" class="text-[10px] font-extrabold text-emerald-400 font-mono">--</p>
+                            <p id="cardTP2Pips" class="text-[7px] text-emerald-400/80 font-mono">--</p>
+                        </div>
+                        <div id="boxTP3" class="lvl-box bg-darkbg/70 border border-sky-500/30 rounded-lg p-2 text-center">
+                            <span id="chkTP3" class="hit-badge bg-emerald-400"><i class="fa-solid fa-check"></i></span>
+                            <p class="text-[8px] font-bold text-sky-400">TP3</p>
+                            <p id="cardTP3" class="text-[10px] font-extrabold text-sky-400 font-mono">--</p>
+                            <p id="cardTP3Pips" class="text-[7px] text-sky-400/80 font-mono">--</p>
+                        </div>
+                    </div>
+
+                    <!-- Live Price Map -->
+                    <div class="bg-darkbg/80 border border-panelborder rounded-xl p-2.5 space-y-2">
+                        <div class="flex justify-between items-center">
+                            <p id="lblPriceMap" class="text-[9px] font-bold text-gray-400 tracking-wider">LIVE PRICE MAP</p>
+                            <div class="flex items-center gap-1.5">
+                                <span id="tradePnl" class="text-[9px] font-mono font-bold text-gray-400">--</span>
+                                <span id="tradeStatus" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40">RUNNING</span>
+                            </div>
+                        </div>
+                        <div class="relative w-full h-[240px]">
+                            <canvas id="priceChart" class="absolute inset-0 w-full h-full"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="bg-darkbg border border-panelborder rounded-lg p-2.5 text-[10px] text-gray-300 leading-relaxed">
+                        <p id="lblAnalysisReason" class="font-bold text-gray-400 mb-1">ANALYSIS REASON:</p>
+                        <span id="cardReason">---</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TRADING HISTORY -->
+            <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
+                <div class="flex justify-between items-center">
+                    <span id="lblTradingHistory" class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
+                        <i class="fa-solid fa-clock-rotate-left text-accentblue"></i> TRADING HISTORY
+                    </span>
+                    <div class="flex items-center gap-1.5">
+                        <select id="histFilter" onchange="renderHistory()" class="bg-darkbg border border-panelborder text-[9px] font-bold text-white px-1.5 py-0.5 rounded focus:outline-none">
+                            <option value="today">Hari ini</option>
+                            <option value="all">Semua</option>
+                        </select>
+                        <button onclick="clearHistory()" title="Hapus history" class="text-[10px] text-gray-500 hover:text-red-400 px-1">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
                     </div>
                 </div>
 
-                <div class="bg-darkbg border border-panelborder rounded-lg p-2.5 text-[10px] text-gray-300 leading-relaxed">
-                    <p id="lblAnalysisReason" class="font-bold text-gray-400 mb-1">ANALYSIS REASON:</p>
-                    <span id="cardReason">---</span>
+                <div class="grid grid-cols-2 gap-1.5 text-center">
+                    <div class="bg-darkbg/70 border border-emerald-500/30 rounded-lg p-1.5">
+                        <p class="text-[8px] font-bold text-emerald-400">WIN</p>
+                        <p id="sumWin" class="text-[11px] font-extrabold text-emerald-400 font-mono">+0.0 pip</p>
+                        <p id="sumWinCount" class="text-[7px] text-gray-500 font-mono">0 trade</p>
+                    </div>
+                    <div class="bg-darkbg/70 border border-red-500/30 rounded-lg p-1.5">
+                        <p class="text-[8px] font-bold text-red-400">LOSE</p>
+                        <p id="sumLose" class="text-[11px] font-extrabold text-red-400 font-mono">-0.0 pip</p>
+                        <p id="sumLoseCount" class="text-[7px] text-gray-500 font-mono">0 trade</p>
+                    </div>
+                    <div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5">
+                        <p id="lblTotalPnl" class="text-[8px] font-bold text-gray-400">TOTAL PNL (WIN − LOSE)</p>
+                        <p id="sumTotal" class="text-[11px] font-extrabold text-white font-mono">0.0 pip</p>
+                        <p id="sumOpen" class="text-[7px] text-gray-500 font-mono">0 berjalan</p>
+                    </div>
+                    <div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5">
+                        <p id="lblWinRatio" class="text-[8px] font-bold text-gray-400">WIN RATIO</p>
+                        <p id="sumRatio" class="text-[11px] font-extrabold text-accentblue font-mono">0%</p>
+                        <p id="sumRatioSub" class="text-[7px] text-gray-500 font-mono">0W / 0L</p>
+                    </div>
                 </div>
-            </div>
-        </div>
 
-        <!-- TRADING HISTORY -->
-        <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
-            <div class="flex justify-between items-center">
-                <span id="lblTradingHistory" class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
-                    <i class="fa-solid fa-clock-rotate-left text-accentblue"></i> TRADING HISTORY
-                </span>
-                <div class="flex items-center gap-1.5">
-                    <select id="histFilter" onchange="renderHistory()" class="bg-darkbg border border-panelborder text-[9px] font-bold text-white px-1.5 py-0.5 rounded focus:outline-none">
-                        <option value="today">Hari ini</option>
-                        <option value="all">Semua</option>
-                    </select>
-                    <button onclick="clearHistory()" title="Hapus history" class="text-[10px] text-gray-500 hover:text-red-400 px-1">
-                        <i class="fa-solid fa-trash"></i>
-                    </button>
-                </div>
-            </div>
-
-            <div class="grid grid-cols-2 gap-1.5 text-center">
-                <div class="bg-darkbg/70 border border-emerald-500/30 rounded-lg p-1.5">
-                    <p class="text-[8px] font-bold text-emerald-400">WIN</p>
-                    <p id="sumWin" class="text-[11px] font-extrabold text-emerald-400 font-mono">+0.0 pip</p>
-                    <p id="sumWinCount" class="text-[7px] text-gray-500 font-mono">0 trade</p>
-                </div>
-                <div class="bg-darkbg/70 border border-red-500/30 rounded-lg p-1.5">
-                    <p class="text-[8px] font-bold text-red-400">LOSE</p>
-                    <p id="sumLose" class="text-[11px] font-extrabold text-red-400 font-mono">-0.0 pip</p>
-                    <p id="sumLoseCount" class="text-[7px] text-gray-500 font-mono">0 trade</p>
-                </div>
-                <div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5">
-                    <p id="lblTotalPnl" class="text-[8px] font-bold text-gray-400">TOTAL PNL (WIN − LOSE)</p>
-                    <p id="sumTotal" class="text-[11px] font-extrabold text-white font-mono">0.0 pip</p>
-                    <p id="sumOpen" class="text-[7px] text-gray-500 font-mono">0 berjalan</p>
-                </div>
-                <div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5">
-                    <p id="lblWinRatio" class="text-[8px] font-bold text-gray-400">WIN RATIO</p>
-                    <p id="sumRatio" class="text-[11px] font-extrabold text-accentblue font-mono">0%</p>
-                    <p id="sumRatioSub" class="text-[7px] text-gray-500 font-mono">0W / 0L</p>
+                <div id="historyList" class="space-y-1 max-h-[260px] overflow-y-auto pr-1">
+                    <p id="lblNoHistory" class="text-center text-[10px] text-gray-500 py-3">Belum ada history.</p>
                 </div>
             </div>
 
-            <div id="historyList" class="space-y-1 max-h-[260px] overflow-y-auto pr-1">
-                <p id="lblNoHistory" class="text-center text-[10px] text-gray-500 py-3">Belum ada history.</p>
+            <!-- LIVE MARKET TICKER -->
+            <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md">
+                <div class="flex justify-between items-center pb-1.5 mb-1.5 border-b border-panelborder">
+                    <span id="lblLiveStream" class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
+                        <i class="fa-solid fa-tower-broadcast text-accentblue"></i> LIVE MARKET STREAM
+                    </span>
+                    <span id="livePulse" class="text-[8px] text-emerald-400 font-mono animate-pulse">● Live Stream</span>
+                </div>
+                <div id="tickerListContainer" class="space-y-1 max-h-[220px] overflow-y-auto pr-1"></div>
             </div>
-        </div>
 
-        <!-- LIVE MARKET TICKER (dibuat otomatis dari dropdown) -->
-        <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md">
-            <div class="flex justify-between items-center pb-1.5 mb-1.5 border-b border-panelborder">
-                <span id="lblLiveStream" class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
-                    <i class="fa-solid fa-tower-broadcast text-accentblue"></i> LIVE MARKET STREAM
-                </span>
-                <span id="livePulse" class="text-[8px] text-emerald-400 font-mono animate-pulse">● Live Stream</span>
-            </div>
-            <div id="tickerListContainer" class="space-y-1 max-h-[220px] overflow-y-auto pr-1"></div>
-        </div>
+        </main>
 
-    </main>
+        <!-- FOOTER INFO ADMIN -->
+        <footer class="max-w-md mx-auto w-full pt-4 pb-2 border-t border-panelborder/60 text-center space-y-1">
+            <p class="text-[10px] text-gray-400">Punya pertanyaan atau ingin perpanjang langganan?</p>
+            <a href="https://wa.me/6285817038501?text=Halo%20Admin%20Alu%20Signal%20Z,%20saya%20ingin%20berlangganan" target="_blank" class="inline-flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full text-xs font-bold font-mono transition">
+                <i class="fa-brands fa-whatsapp text-sm text-emerald-400"></i> Admin WhatsApp: +6285817038501
+            </a>
+        </footer>
+    </div>
 
-    <!-- ======================= SCRIPT ENGINE ======================= -->
+    <!-- ======================= SCRIPT ENGINE & APPWRITE ======================= -->
     <script>
+    // ======================= APPWRITE AUTH & MEMBERSHIP =======================
+    const { Client, Account, Databases, ID } = Appwrite;
+
+    const client = new Client()
+        .setEndpoint('https://cloud.appwrite.io/v1') 
+        .setProject('YOUR_PROJECT_ID'); // Ganti dengan Project ID Appwrite Anda
+
+    const account = new Account(client);
+    const databases = new Databases(client);
+
+    const DATABASE_ID = 'alu_db';     // ID Database Appwrite Anda
+    const COLLECTION_ID = 'profiles'; // ID Collection Appwrite Anda
+
+    let currentAuthMode = 'login';
+    let currentUserProfile = null;
+
+    function switchAuthTab(mode) {
+        currentAuthMode = mode;
+        const isLogin = mode === 'login';
+        document.getElementById('tabLoginBtn').className = `flex-1 py-2 border-b-2 ${isLogin ? 'border-accentblue text-white' : 'border-transparent text-gray-400'}`;
+        document.getElementById('tabRegBtn').className = `flex-1 py-2 border-b-2 ${!isLogin ? 'border-accentblue text-white' : 'border-transparent text-gray-400'}`;
+        document.getElementById('trialOptionContainer').classList.toggle('hidden', isLogin);
+        document.getElementById('authSubmitBtn').textContent = isLogin ? 'MASUK KE TERMINAL' : 'DAFTAR & MULAI TRIAL';
+    }
+
+    async function handleAuth(e) {
+        e.preventDefault();
+        const email = document.getElementById('authEmail').value;
+        const password = document.getElementById('authPassword').value;
+
+        try {
+            if (currentAuthMode === 'register') {
+                const trialDays = parseInt(document.getElementById('authTrialDays').value);
+                const trialEndsAt = new Date();
+                trialEndsAt.setDate(trialEndsAt.getDate() + trialDays);
+
+                const user = await account.create(ID.unique(), email, password);
+                await account.createEmailPasswordSession(email, password);
+
+                await databases.createDocument(
+                    DATABASE_ID,
+                    COLLECTION_ID,
+                    user.$id,
+                    {
+                        email: email,
+                        role: 'client',
+                        status: 'trial',
+                        trial_ends_at: trialEndsAt.toISOString()
+                    }
+                );
+
+                alert(`Pendaftaran berhasil! Akun Anda aktif dengan masa Trial ${trialDays} Hari.`);
+                checkUserSession();
+            } else {
+                await account.createEmailPasswordSession(email, password);
+                checkUserSession();
+            }
+        } catch (error) {
+            alert('Gagal: ' + error.message);
+        }
+    }
+
+    async function checkUserSession() {
+        try {
+            const user = await account.get();
+            const profile = await databases.getDocument(DATABASE_ID, COLLECTION_ID, user.$id);
+            currentUserProfile = profile;
+
+            const now = new Date();
+            const isTrial = profile.status === 'trial' && new Date(profile.trial_ends_at) > now;
+            const isSubscribed = profile.status === 'monthly' || profile.status === 'lifetime';
+
+            if (!isTrial && !isSubscribed && profile.role !== 'admin') {
+                alert('Masa Trial / Akses Langganan Anda Telah Habis. Silakan hubungi Admin via WhatsApp untuk perpanjang akses.');
+                await account.deleteSession('current');
+                location.reload();
+                return;
+            }
+
+            document.getElementById('authScreen').classList.add('hidden');
+            const mainApp = document.getElementById('mainApp');
+            if (mainApp) {
+                mainApp.classList.remove('hidden');
+                mainApp.classList.add('flex');
+            }
+
+            if (profile.role === 'admin') {
+                document.getElementById('adminPanelBtn')?.classList.remove('hidden');
+                loadAdminStats();
+            }
+        } catch (error) {
+            document.getElementById('authScreen').classList.remove('hidden');
+            const mainApp = document.getElementById('mainApp');
+            if (mainApp) mainApp.classList.add('hidden');
+        }
+    }
+
+    async function logout() {
+        try { await account.deleteSession('current'); } catch (e) {}
+        window.location.reload();
+    }
+
+    function toggleAdminPanel() {
+        document.getElementById('adminPanel').classList.toggle('hidden');
+    }
+
+    async function loadAdminStats() {
+        try {
+            const res = await databases.listDocuments(DATABASE_ID, COLLECTION_ID);
+            const docs = res.documents;
+            document.getElementById('statTotalClients').textContent = docs.length;
+            document.getElementById('statTrialClients').textContent = docs.filter(p => p.status === 'trial').length;
+            document.getElementById('statMonthlyClients').textContent = docs.filter(p => p.status === 'monthly').length;
+            document.getElementById('statLifetimeClients').textContent = docs.filter(p => p.status === 'lifetime').length;
+        } catch (e) {}
+    }
+
     // ======================= MULTI BAHASA =======================
     let currentLang = 'id';
     const DICT = {
@@ -306,7 +520,7 @@
         refreshActiveUI();
     }
 
-    // ======================= KONFIGURASI =======================
+    // ======================= KONFIGURASI TRADING =======================
     const WS_URL    = 'wss://api-stream.myfundedperpetuals.com/v1/market-data';
     const REST_BASE = 'https://api.myfundedperpetuals.com';
     const HL_WS     = 'wss://api.hyperliquid.xyz/ws';
@@ -321,14 +535,8 @@
     const BE_CLOSE_PNL = 'last_tp';
 
     const PERP = ['mid', 'last', 'mark'], FX = ['mid', 'last', 'mark'], SPOT = ['last', 'mid', 'mark'];
-    // MT menampilkan harga Bid. Ganti ke 'mid' jika ingin harga tengah.
     const PRICE_SIDE = 'bid';
 
-    // fb = sumber cadangan / feed langsung
-    //   hl    : coin Hyperliquid (WS bbo langsung + REST allMids)
-    //   bn    : symbol Binance REST
-    //   yf    : symbol Yahoo (via /api/quote)
-    //   cross : [A, B] -> harga = A × B (sintetis)
     const MARKETS = {
       XAUUSD:   { provider: 'hyperliquid', coins: ['xyz:GOLD', 'xyz:XAU', 'GOLD', 'XAUUSD'], match: ['GOLD', 'XAU', 'XAUUSD'], kinds: PERP, decimals: 2, pip: 0.1,
                   fb: { hl: ['xyz:GOLD', 'xyz:XAU'], yf: 'GC=F' } },
@@ -392,7 +600,6 @@
       return now - p.recv > STALE_MS || (p.time && now - p.time > 120000);
     };
 
-    // ======================= KALIBRASI KE BROKER MT =======================
     const OFFSET_KEY = 'aluSignalZ_offsets_v1';
     const offsets = (() => { try { return JSON.parse(localStorage.getItem(OFFSET_KEY)) || {}; } catch { return {}; } })();
     const rawPrices = {};
@@ -432,7 +639,6 @@
       updateCalibInfo();
     }
 
-    // ======================= TICKER OTOMATIS =======================
     const PROV_COLOR = { hyperliquid: 'text-yellow-400', veranta: 'text-blue-400', ostium: 'text-orange-400', binance: 'text-emerald-400' };
     function buildTicker() {
       const opts = [...document.querySelectorAll('#marketSelect option')];
@@ -528,7 +734,6 @@
       if (el) { el.textContent = 'N/A'; setColor(el, 'text-red-600'); }
     }
 
-    // ======================= FALLBACK FEED =======================
     const FALLBACK_AFTER = 8000;
     const lastWs = {}, fbState = {};
     let proxyOk = true;
@@ -632,7 +837,6 @@
     setInterval(() => { pollHL(); pollBinance(); }, 2000);
     setInterval(pollProxy, 4000);
 
-    // ======================= HYPERLIQUID DIRECT WS (XAUUSD realtime) =======================
     const lastHL = {}, hlResolved = {};
     let hlWs = null, hlRetry = 0, hlTimer = null, hlPing = null, hlLastMsg = 0;
 
@@ -708,8 +912,6 @@
       };
     }
 
-    // ======================= TRADES =======================
-    // Trade langsung dianggap aktif: pip berjalan langsung tampil (tanpa status WAITING)
     function loadTrades() {
       try {
         const arr = JSON.parse(localStorage.getItem(STORE_KEY)) || [];
@@ -950,15 +1152,11 @@
       setColor(el, pips > 0 ? 'text-emerald-400' : pips < 0 ? 'text-red-400' : 'text-yellow-400');
     }
 
-    // ======================= GRAFIK (LIVE LINE CHART) =======================
     const RGB = { green: '0,192,118', red: '255,59,105', blue: '41,98,255' };
     const cv = document.getElementById('priceChart');
     const ctx = cv.getContext('2d');
     const FONT = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
-    // Level diurutkan dari harga tertinggi (atas) ke terendah (bawah)
-    // SELL: SL -> ENTRY -> TP1 -> TP2 -> TP3   |   BUY: TP3 -> TP2 -> TP1 -> ENTRY -> SL
-    // Entry hanya satu garis (harga tengah zona)
     function levelList(t) {
       const hits = t.hits || {}, L = [];
       const add = (k, name, price, color, extra = {}) => { if (Number.isFinite(price)) L.push({ k, name, price, color, ...extra }); };
@@ -970,7 +1168,6 @@
       return L.sort((a, b) => b.price - a.price);
     }
 
-    // Susun label kanan: urutan tetap, jarak minimal, tidak keluar area chart
     function layoutLabels(items, top, bottom, gap = 14) {
       for (let i = 0; i < items.length; i++) {
         if (items[i].y < top) items[i].y = top;
@@ -987,7 +1184,6 @@
     }
 
     const lineRgb = (t, p) => (!t.dir || !t.entry) ? RGB.blue : (p - t.entry) * t.dir >= 0 ? RGB.green : RGB.red;
-
     let animP = null, animKey = null;
 
     function drawChart() {
@@ -1005,7 +1201,7 @@
 
       const padL = 6, padR = 86, padT = 14, padB = 18;
       const plotW = W - padL - padR, plotH = H - padT - padB;
-      const GAP = Math.max(40, plotW * 0.18);     // ruang kosong di kanan line agar tidak mepet label
+      const GAP = Math.max(40, plotW * 0.18);
       const lineW = plotW - GAP;
       const nowX = padL + lineW;
 
@@ -1016,7 +1212,6 @@
       const vis = pts.slice(Math.max(0, s - 1));
       const last = vis[vis.length - 1];
 
-      // Animasi halus ujung line menuju harga terbaru
       if (last) {
         if (animKey !== key || animP == null) { animP = last.p; animKey = key; }
         else animP += (last.p - animP) * 0.3;
@@ -1029,16 +1224,14 @@
       const pad = (max - min) * 0.08 || Math.abs(max) * 0.0005 || 1;
       min -= pad; max += pad;
       const X = tt => padL + (tt - t0) / win * lineW;
-      const Y = p => padT + (max - p) / (max - min) * plotH;   // harga tinggi = atas
+      const Y = p => padT + (max - p) / (max - min) * plotH;
 
-      // Grid
       ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 1;
       for (let i = 0; i <= 4; i++) {
         const gy = padT + plotH * i / 4;
         ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(padL + plotW, gy); ctx.stroke();
       }
 
-      // Area risiko (Entry -> SL) & area profit (Entry -> TP terjauh)
       if (t.dir && t.entry != null) {
         const farTp = [t.tp3, t.tp2, t.tp1].find(v => Number.isFinite(v));
         const band = (a, b, color) => {
@@ -1049,7 +1242,6 @@
         if (farTp != null) band(t.entry, farTp, 'rgba(0,192,118,0.06)');
       }
 
-      // Garis level horizontal (entry satu garis)
       lv.forEach(l => {
         const ly = Y(l.price);
         ctx.strokeStyle = l.color; ctx.globalAlpha = l.faded ? 0.3 : l.hit ? 1 : 0.75; ctx.lineWidth = l.hit ? 1.6 : 1;
@@ -1059,7 +1251,6 @@
         ctx.globalAlpha = 1;
       });
 
-      // Marker waktu signal
       if (t.createdAt >= t0) {
         const sx = X(t.createdAt);
         ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.setLineDash([2, 3]);
@@ -1070,7 +1261,6 @@
         ctx.fillText('SIGNAL', sx, padT + plotH - 2);
       }
 
-      // Line harga live
       if (last) {
         const c = lineRgb(t, last.p);
         const ey = Y(animP);
@@ -1078,7 +1268,6 @@
         ctx.save();
         ctx.beginPath(); ctx.rect(padL, 0, plotW, H); ctx.clip();
 
-        // Garis harga (dengan glow)
         ctx.beginPath();
         vis.forEach((p, i) => {
           const x = X(p.t), y = i === vis.length - 1 ? ey : Y(p.p);
@@ -1090,13 +1279,11 @@
         ctx.stroke();
         ctx.shadowBlur = 0;
 
-        // Area di bawah line
         ctx.lineTo(nowX, padT + plotH); ctx.lineTo(X(vis[0].t), padT + plotH); ctx.closePath();
         const g = ctx.createLinearGradient(0, padT, 0, padT + plotH);
         g.addColorStop(0, `rgba(${c},0.20)`); g.addColorStop(1, `rgba(${c},0)`);
         ctx.fillStyle = g; ctx.fill();
 
-        // Marker TP / SL / BE yang sudah kena
         (t.markers || []).forEach(m => {
           if (m.t < t0) return;
           ctx.beginPath(); ctx.arc(Math.min(X(m.t), nowX), Y(m.p), 4, 0, Math.PI * 2);
@@ -1105,12 +1292,10 @@
         });
         ctx.restore();
 
-        // Garis putus penghubung ujung line -> label
         ctx.strokeStyle = `rgba(${c},0.55)`; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
         ctx.beginPath(); ctx.moveTo(nowX + 6, ey); ctx.lineTo(padL + plotW + 3, ey); ctx.stroke();
         ctx.setLineDash([]);
 
-        // Titik NOW berdenyut
         const pulse = 3 + 2.5 * Math.abs(Math.sin(now / 350));
         ctx.beginPath(); ctx.arc(nowX, ey, pulse + 2, 0, Math.PI * 2); ctx.fillStyle = `rgba(${c},0.25)`; ctx.fill();
         ctx.beginPath(); ctx.arc(nowX, ey, 3, 0, Math.PI * 2); ctx.fillStyle = `rgb(${c})`; ctx.fill();
@@ -1120,7 +1305,6 @@
         ctx.fillText('Menunggu harga live...', padL + plotW / 2, padT + plotH / 2);
       }
 
-      // Badge arah posisi (kiri atas)
       if (t.dir) {
         const sell = t.dir < 0;
         const txt = sell ? '▼ SELL' : '▲ BUY';
@@ -1132,7 +1316,6 @@
         ctx.fillText(txt, padL + 7, 8);
       }
 
-      // Label level di kanan
       ctx.font = `700 8px ${FONT}`;
       const lx = padL + plotW + 3, lw = padR - 5;
       const labels = layoutLabels(
@@ -1154,7 +1337,6 @@
         ctx.globalAlpha = 1;
       });
 
-      // Bubble harga live (paling depan)
       if (last) {
         const ly = Math.min(Math.max(Y(animP), padT + 7), padT + plotH - 7);
         ctx.fillStyle = '#ffffff'; ctx.fillRect(lx, ly - 7, lw, 14);
@@ -1177,7 +1359,6 @@
       drawChart();
     }
 
-    // ======================= STREAM / WEBSOCKET (RELAY) =======================
     async function fetchMarkets() {
       const res = await fetchT(`${REST_BASE}/v1/markets`, {}, 6000);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1309,7 +1490,6 @@
       m.coins.forEach(coin => subscribe(ws, 'ticks', { symbols: [coin], providers: [m.provider] }, { key, coin }));
     }
 
-    // Watchdog
     const lastResub = {};
     setInterval(() => {
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -1347,7 +1527,6 @@
 
       const key = lookupKey(ev);
       if (!key) return;
-      // Feed langsung Hyperliquid aktif -> abaikan relay (lebih lambat)
       if (Date.now() - (lastHL[key] || 0) < HL_FRESH_MS) return;
 
       if (!resolved[key]) {
@@ -1361,7 +1540,6 @@
                 : (bid > 0 && ask > 0 ? (bid + ask) / 2 : parseFloat(ev.price));
       if (!(raw > 0)) return;
 
-      // Prioritas kind: tick lain langsung diterima jika kind utama diam > 1.5 detik
       const m = MARKETS[key];
       const idx = m.kinds.indexOf(ev.kind);
       const rank = idx < 0 ? 99 : idx;
@@ -1393,7 +1571,6 @@
       }
     });
 
-    // ======================= AI SIGNAL GENERATOR =======================
     async function generateAISignal() {
       const marketId = document.getElementById('marketSelect').value;
       const tradingStyle = document.getElementById('tradingStyleSelect').value;
@@ -1467,15 +1644,18 @@
       }
     }
 
+    const originalOnload = window.onload;
     window.onload = async () => {
+      await checkUserSession();
       buildTicker();
       updateCalibInfo();
       renderHistory();
       if (trades.length) viewTrade(trades[trades.length - 1].id, false);
       requestAnimationFrame(chartLoop);
-      connectHL();          // feed langsung Hyperliquid (XAUUSD realtime)
+      connectHL();
       await resolveCoins();
-      connect();            // relay untuk pair lain
+      connect();
+      if (originalOnload) originalOnload();
     };
     </script>
 </body>
