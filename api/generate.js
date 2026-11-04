@@ -11,28 +11,28 @@ export default async function handler(req, res) {
     }
 
     try {
-        const systemPrompt = `Anda adalah AI Prop Firm Trading Agent spesialis MyFundedPerps.
+        const systemPrompt = `Anda adalah AI Prop Firm Trading Agent spesialis MyFundedPerps. 
 Target Market: ${marketId}
-Harga Live Saat Ini: ${currentPrice || 'Gunakan harga pasar terkini'}
+Harga Live Saat Ini: ${currentPrice}
 Gaya Eksekusi: ${tradingStyle}
 
-Berdasarkan harga live tersebut, buatlah analisis teknikal dan Wajib kembalikan format JSON murni TANPA markdown formatting lain:
+TUGAS UTAMA: Berdasarkan harga live ${currentPrice} tersebut, hitung secara matematis level harga riil untuk scalping/daytrading prop firm. Jangan pernah bilang tidak punya akses harga. 
+
+Wajib kembalikan format JSON MURNI tanpa teks pembuka/penutup, tanpa markdown block (contoh: jangan pakai \`\`\`json):
 {
-  "signal": "BUY", // BUY, SELL, atau HOLD
-  "symbol": "${marketId}",
-  "style": "${tradingStyle}",
-  "entry_min": "3965",
-  "entry_max": "3967",
-  "current_price": "${currentPrice || '3966.30'}",
-  "sl": "3962",
-  "sl_pips": "-60 pips",
-  "tp1": "3969",
-  "tp1_pips": "+30 pips",
-  "tp2": "3971",
-  "tp2_pips": "+50 pips",
-  "tp3": "3974",
-  "tp3_pips": "+80 pips",
-  "reason": "Konfluensi Break of Structure (BOS) pada timeframe LTF dengan sweep liquidity pada swing low."
+  "signal": "BUY",
+  "entry_min": "1.1250",
+  "entry_max": "1.1255",
+  "current_price": "${currentPrice}",
+  "sl": "1.1220",
+  "sl_pips": "-30 pips",
+  "tp1": "1.1275",
+  "tp1_pips": "+25 pips",
+  "tp2": "1.1290",
+  "tp2_pips": "+40 pips",
+  "tp3": "1.1320",
+  "tp3_pips": "+70 pips",
+  "reason": "Konfluensi struktur market terdekat pada harga ${currentPrice} dengan manajemen risiko ketat prop firm."
 }`;
 
         const gutsRes = await fetch('https://api.gutsai.id/v1/chat/completions', {
@@ -45,7 +45,7 @@ Berdasarkan harga live tersebut, buatlah analisis teknikal dan Wajib kembalikan 
                 model: 'claude-opus-5.5',
                 messages: [
                     { role: 'system', content: systemPrompt },
-                    { role: 'user', content: `Buat sinyal trading JSON untuk ${marketId} pada harga ${currentPrice}.` }
+                    { role: 'user', content: `Buat format JSON sinyal untuk ${marketId} di harga ${currentPrice}.` }
                 ],
                 temperature: 0.1
             })
