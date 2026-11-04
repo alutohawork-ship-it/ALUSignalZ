@@ -19,6 +19,10 @@
         }
     </script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- CONSOLE DEBUG UNTUK HP: hapus tanda komentar di 2 baris bawah jika ingin melihat console di HP -->
+    <!-- <script src="https://cdn.jsdelivr.net/npm/eruda"></script> -->
+    <!-- <script>eruda.init();</script> -->
 </head>
 <body class="bg-darkbg text-gray-200 font-sans min-h-screen flex flex-col justify-between p-2">
 
@@ -40,16 +44,16 @@
 
     <!-- BAGIAN TENGAH: AI Signal Generator -->
     <main class="max-w-md mx-auto w-full flex-1 flex flex-col gap-2 pt-2">
-        
+
         <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
             <div class="flex justify-between items-center">
                 <label class="text-[9px] font-bold text-gray-400">TARGET ASET AKTIF</label>
                 <span id="selectedPairBadge" class="text-[9px] font-mono text-accentblue font-bold">hyperliquid|XAUUSD</span>
             </div>
 
-            <!-- Dropdown Multi-Asset (XAU & XAG diarahkan ke hyperliquid) -->
+            <!-- Dropdown Multi-Asset -->
             <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                <optgroup label="Gold, Silver & Commodities">
+                <optgroup label="Gold, Silver & Forex">
                     <option value="hyperliquid|XAUUSD">XAUUSD / Gold (Hyperliquid)</option>
                     <option value="hyperliquid|XAGUSD">XAGUSD / Silver (Hyperliquid)</option>
                     <option value="veranta|EURUSD">EUR/USD (Veranta)</option>
@@ -84,14 +88,14 @@
                 </select>
             </div>
 
-            <button onclick="generateAISignal()" id="signalBtn" class="w-full bg-gradient-to-r from-accentblue to-indigo-600 hover:from-blue-600 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-accentblue/20 transition active:scale-98">
+            <button onclick="generateAISignal()" id="signalBtn" class="w-full bg-gradient-to-r from-accentblue to-indigo-600 hover:from-blue-600 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-accentblue/20 transition active:scale-95">
                 <i class="fa-solid fa-wand-magic-sparkles"></i> GENERATE AI SIGNAL
             </button>
         </div>
 
         <!-- TAMPILAN CARD KOTAK SIGNAL AI -->
         <div id="signalContainer" class="bg-cardbg rounded-xl border border-panelborder p-3 shadow-md space-y-3">
-            
+
             <div class="flex items-center justify-between border-b border-panelborder pb-2">
                 <span id="cardMarketTitle" class="text-xs font-bold text-white">SELECT PAIR SPOT</span>
                 <span id="cardLivePriceTop" class="text-xs font-mono font-bold text-accentblue">--.--</span>
@@ -104,7 +108,7 @@
 
             <!-- Active Card -->
             <div id="activeSignalCard" class="hidden space-y-3">
-                
+
                 <div class="bg-darkbg/80 border border-panelborder rounded-xl p-3 text-center space-y-1">
                     <div class="flex justify-center">
                         <span id="signalBadgeBtn" class="bg-sky-500 text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg flex items-center gap-1">
@@ -188,8 +192,8 @@
             </div>
 
             <div id="tickerListContainer" class="space-y-1 max-h-[190px] overflow-y-auto pr-1">
-                
-                <!-- Gold & Silver (Hyperliquid Provider) -->
+
+                <!-- Gold & Silver -->
                 <div onclick="selectTicker('hyperliquid|XAUUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
                     <span class="font-bold text-[10px] text-white">XAUUSD <span class="text-[7px] text-yellow-400">Gold (Hyperliquid)</span></span>
                     <span id="price-XAUUSD" class="text-[10px] font-mono font-bold text-white">--.--</span>
@@ -222,184 +226,448 @@
                     <span class="font-bold text-[10px] text-white">SOLUSDT <span class="text-[7px] text-emerald-400">Binance</span></span>
                     <span id="price-SOLUSDT" class="text-[10px] font-mono font-bold text-white">--.--</span>
                 </div>
+                <div onclick="selectTicker('binance|XRPUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">XRPUSDT <span class="text-[7px] text-emerald-400">Binance</span></span>
+                    <span id="price-XRPUSDT" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+
+                <!-- Commodities & Indices -->
+                <div onclick="selectTicker('hyperliquid|xyz:BRENTOIL')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">BRENT OIL <span class="text-[7px] text-orange-400">Hyperliquid</span></span>
+                    <span id="price-xyz:BRENTOIL" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+                <div onclick="selectTicker('ostium|DJI')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">DJI <span class="text-[7px] text-orange-400">Ostium</span></span>
+                    <span id="price-DJI" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+                <div onclick="selectTicker('hyperliquid|xyz:SP500')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">S&P 500 <span class="text-[7px] text-orange-400">Hyperliquid</span></span>
+                    <span id="price-xyz:SP500" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+
+                <!-- Stocks -->
+                <div onclick="selectTicker('hyperliquid|xyz:AAPL')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">AAPL <span class="text-[7px] text-purple-400">Hyperliquid</span></span>
+                    <span id="price-xyz:AAPL" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+                <div onclick="selectTicker('binance|NVDAUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">NVDA <span class="text-[7px] text-purple-400">Binance</span></span>
+                    <span id="price-NVDAUSDT" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+                <div onclick="selectTicker('binance|TSLAUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">TSLA <span class="text-[7px] text-purple-400">Binance</span></span>
+                    <span id="price-TSLAUSDT" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
 
             </div>
         </div>
 
     </main>
 
-    <!-- Script Engine -->
+    <!-- ======================= SCRIPT ENGINE ======================= -->
     <script>
-        function syncSelectedMarket() {
-            const val = document.getElementById('marketSelect').value;
-            document.getElementById('selectedPairBadge').textContent = val;
+    // ======================= KONFIGURASI =======================
+    const WS_URL    = 'wss://api-stream.myfundedperpetuals.com/v1/market-data';
+    const REST_BASE = 'https://api.myfundedperpetuals.com'; // ⚠️ cocokkan dengan base URL di API Reference
+    const STALE_MS  = 20000; // harga dianggap macet jika tidak update > 20 detik
+
+    // key    = bagian setelah "|" pada value dropdown (dan id "price-KEY" di ticker)
+    // coins  = kandidat nama coin (dipakai jika /v1/markets tidak bisa diakses)
+    // match  = kata kunci untuk mencari market di /v1/markets
+    // kinds  = prioritas jenis harga: perp -> mark, forex -> mid, spot -> last
+    const PERP = ['mark', 'mid', 'last'], FX = ['mid', 'last', 'mark'], SPOT = ['last', 'mid', 'mark'];
+    const MARKETS = {
+      XAUUSD:   { provider: 'hyperliquid', coins: ['xyz:GOLD', 'xyz:XAU', 'GOLD', 'XAUUSD'],     match: ['GOLD', 'XAU', 'XAUUSD'],   kinds: PERP, decimals: 2 },
+      XAGUSD:   { provider: 'hyperliquid', coins: ['xyz:SILVER', 'xyz:XAG', 'SILVER', 'XAGUSD'], match: ['SILVER', 'XAG', 'XAGUSD'], kinds: PERP, decimals: 3 },
+      EURUSD:   { provider: 'veranta', coins: ['EURUSD'],   match: ['EURUSD'],   kinds: FX,   decimals: 5 },
+      USDJPY:   { provider: 'veranta', coins: ['USDJPY'],   match: ['USDJPY'],   kinds: FX,   decimals: 3 },
+      BTCUSDT:  { provider: 'binance', coins: ['BTCUSDT'],  match: ['BTCUSDT'],  kinds: SPOT, decimals: 2 },
+      ETHUSDT:  { provider: 'binance', coins: ['ETHUSDT'],  match: ['ETHUSDT'],  kinds: SPOT, decimals: 2 },
+      SOLUSDT:  { provider: 'binance', coins: ['SOLUSDT'],  match: ['SOLUSDT'],  kinds: SPOT, decimals: 2 },
+      XRPUSDT:  { provider: 'binance', coins: ['XRPUSDT'],  match: ['XRPUSDT'],  kinds: SPOT, decimals: 4 },
+      NVDAUSDT: { provider: 'binance', coins: ['NVDAUSDT'], match: ['NVDAUSDT'], kinds: SPOT, decimals: 2 },
+      TSLAUSDT: { provider: 'binance', coins: ['TSLAUSDT'], match: ['TSLAUSDT'], kinds: SPOT, decimals: 2 },
+      'xyz:BRENTOIL': { provider: 'hyperliquid', coins: ['xyz:BRENTOIL'], match: ['BRENTOIL', 'BRENT'], kinds: PERP, decimals: 2 },
+      'xyz:SP500':    { provider: 'hyperliquid', coins: ['xyz:SP500'],    match: ['SP500', 'SPX'],       kinds: PERP, decimals: 2 },
+      'xyz:AAPL':     { provider: 'hyperliquid', coins: ['xyz:AAPL'],     match: ['AAPL'],               kinds: PERP, decimals: 2 },
+      DJI:            { provider: 'ostium', coins: ['DJI', 'DJIUSD', 'US30'], match: ['DJI', 'DJIUSD', 'US30'], kinds: PERP, decimals: 2 },
+    };
+
+    // ======================= STATE =======================
+    let ws = null, nextId = 1, retry = 0, pingTimer = null, reconnectTimer = null, activeSignalKey = null;
+    const prices = {};          // key -> { price, recv, time, kind, source }
+    const kindState = {};       // key -> { rank, ts }
+    const resolved = {};        // key -> coin yang terbukti mengirim data
+    const badCoins = new Set(); // "provider|coin" yang ditolak permanen oleh server
+    const providerState = {};
+    const warned = new Set();
+
+    const norm = s => String(s ?? '').toUpperCase().split(':').pop().replace(/[^A-Z0-9]/g, '');
+    const coinKey = (provider, coin) => `${String(provider).toLowerCase()}|${String(coin).toLowerCase()}`;
+    const COIN_MAP = new Map();
+    function rebuildCoinMap() {
+      COIN_MAP.clear();
+      for (const [key, m] of Object.entries(MARKETS)) m.coins.forEach(c => COIN_MAP.set(coinKey(m.provider, c), key));
+    }
+    function warnOnce(id, ...args) { if (!warned.has(id)) { warned.add(id); console.warn(...args); } }
+
+    const fmt = (key, p) => {
+      const d = MARKETS[key]?.decimals ?? 2;
+      return p.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+    };
+    const isStale = key => {
+      const p = prices[key];
+      if (!p) return true;
+      const now = Date.now();
+      return now - p.recv > STALE_MS || (p.time && now - p.time > 120000);
+    };
+
+    // ======================= UI =======================
+    function syncSelectedMarket() {
+      document.getElementById('selectedPairBadge').textContent = document.getElementById('marketSelect').value;
+    }
+    function selectTicker(marketId) {
+      document.getElementById('marketSelect').value = marketId;
+      syncSelectedMarket();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    const WS_STYLES = {
+      green:  'bg-emerald-500/20 text-emerald-400 border-emerald-500/40',
+      yellow: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40',
+      red:    'bg-red-500/20 text-red-400 border-red-500/40',
+    };
+    function setWsStatus(text, color) {
+      const el = document.getElementById('wsStatus');
+      el.textContent = `WS: ${text}`;
+      el.className = `text-[8px] font-mono px-2 py-0.5 rounded border ${WS_STYLES[color]}`;
+    }
+
+    const COLORS = ['text-white', 'text-emerald-400', 'text-red-400', 'text-gray-500', 'text-red-600'];
+    function setColor(el, c) { el.classList.remove(...COLORS); el.classList.add(c); }
+
+    function updatePrice(key, price, ev) {
+      const prev = prices[key]?.price;
+      prices[key] = { price, recv: Date.now(), time: ev.time, kind: ev.kind, source: `${ev.provider}|${ev.symbol}` };
+      const txt = fmt(key, price);
+
+      const el = document.getElementById(`price-${key}`);
+      if (el) {
+        el.textContent = txt;
+        setColor(el, prev == null || price === prev ? 'text-white' : price > prev ? 'text-emerald-400' : 'text-red-400');
+        el.title = `${ev.provider} | ${ev.symbol} | ${ev.kind}`;
+      }
+      // Harga di kartu sinyal ikut bergerak live
+      if (key === activeSignalKey) {
+        ['cardLivePriceTop', 'cardLivePriceBadge', 'mapLivePrice'].forEach(id => document.getElementById(id).textContent = txt);
+      }
+    }
+
+    function markUnavailable(key) {
+      console.error(`[WS] ${key}: semua kandidat coin ditolak server. Cek nama coin dengan findMarket('${MARKETS[key].match[0]}')`);
+      const el = document.getElementById(`price-${key}`);
+      if (el) { el.textContent = 'N/A'; setColor(el, 'text-red-600'); el.title = 'Coin tidak valid untuk provider ini'; }
+    }
+
+    // ======================= REST: CARI COIN YANG BENAR =======================
+    async function fetchMarkets() {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 6000);
+      try {
+        const res = await fetch(`${REST_BASE}/v1/markets`, { signal: ctrl.signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const j = await res.json();
+        return Array.isArray(j) ? j : (j.markets ?? j.data ?? j.items ?? []);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    async function resolveCoins() {
+      try {
+        const list = await fetchMarkets();
+        const rows = [];
+        for (const [key, m] of Object.entries(MARKETS)) {
+          const hit = list.find(x => String(x.provider).toLowerCase() === m.provider &&
+            (m.coins.includes(x.coin) || m.match.some(t => norm(x.coin) === t || norm(x.symbol) === t)));
+          if (hit?.coin) m.coins = [hit.coin];
+          rows.push({ key, provider: m.provider, coin: hit?.coin ?? '❌ TIDAK DITEMUKAN', symbol: hit?.symbol ?? '-' });
+        }
+        console.table(rows);
+      } catch (e) {
+        console.warn('[REST] /v1/markets tidak bisa diakses (CORS / base URL). Memakai daftar kandidat coin.', e.message);
+      }
+      rebuildCoinMap();
+    }
+
+    // Cari coin di console, contoh: findMarket('gold'), findMarket('eur')
+    window.findMarket = async (q = '') => {
+      const list = await fetchMarkets();
+      const Q = q.toUpperCase();
+      console.table(list
+        .filter(x => !Q || `${x.symbol} ${x.coin} ${x.name ?? ''}`.toUpperCase().includes(Q))
+        .map(x => ({ symbol: x.symbol, coin: x.coin, provider: x.provider, id: x.id ?? x.market_id })));
+    };
+
+    // ======================= WEBSOCKET =======================
+    function send(sock, obj) { if (sock?.readyState === WebSocket.OPEN) sock.send(JSON.stringify(obj)); }
+
+    function subscribe(sock, channel, payload, meta = {}) {
+      const id = nextId++;
+      sock.reqs.set(id, { type: 'sub', channel, payload, ...meta });
+      send(sock, { op: 'sub', id, channel, payload });
+      return id;
+    }
+
+    function subscribeAll(sock) {
+      const providers = [...new Set(Object.values(MARKETS).map(m => m.provider))];
+      subscribe(sock, 'status', { providers });
+
+      for (const [key, m] of Object.entries(MARKETS)) {
+        const coins = resolved[key] ? [resolved[key]] : m.coins.filter(c => !badCoins.has(coinKey(m.provider, c)));
+        if (!coins.length) { markUnavailable(key); continue; }
+        // satu subscription per coin, supaya coin yang salah tidak menggagalkan yang lain
+        coins.forEach(coin => subscribe(sock, 'ticks', { symbols: [coin], providers: [m.provider] }, { key, coin }));
+      }
+    }
+
+    function sendPing(sock) {
+      if (Date.now() - sock.lastMsg > 60000) {
+        console.warn('[WS] Tidak ada frame selama 60 detik, reconnect');
+        return sock.close();
+      }
+      const id = nextId++;
+      sock.reqs.set(id, { type: 'ping', t0: performance.now() });
+      send(sock, { op: 'req', id, method: 'ping' });
+    }
+
+    function connect() {
+      clearTimeout(reconnectTimer); reconnectTimer = null;
+      const sock = new WebSocket(WS_URL);
+      sock.reqs = new Map();
+      sock.lastMsg = Date.now();
+      ws = sock;
+      setWsStatus('CONNECTING', 'yellow');
+
+      sock.onopen = () => {
+        if (sock !== ws) return;
+        retry = 0;
+        setWsStatus('CONNECTED', 'green');
+        subscribeAll(sock);
+        clearInterval(pingTimer);
+        pingTimer = setInterval(() => sendPing(sock), 20000);
+      };
+      sock.onmessage = e => onFrame(sock, e);
+      sock.onerror = () => { if (sock === ws) setWsStatus('ERROR', 'red'); };
+      sock.onclose = e => {
+        if (sock !== ws) return; // socket lama setelah "draining", abaikan
+        clearInterval(pingTimer);
+        setWsStatus('DISCONNECTED', 'red');
+        console.warn(`[WS] Terputus (code ${e.code}) ${e.reason || ''}`);
+        scheduleReconnect();
+      };
+    }
+
+    function scheduleReconnect() {
+      if (reconnectTimer) return;
+      const delay = Math.min(30000, 1000 * 2 ** retry++) * (0.5 + Math.random() * 0.5); // backoff + jitter
+      reconnectTimer = setTimeout(connect, delay);
+    }
+
+    function onFrame(sock, e) {
+      sock.lastMsg = Date.now();
+      let f;
+      try { f = JSON.parse(e.data); } catch { return; }
+      const req = sock.reqs.get(f.id);
+
+      switch (f.op) {
+        case 'events':
+          (f.events || []).forEach(handleEvent);
+          break;
+        case 'sub_err':
+          handleSubErr(sock, f, req);
+          break;
+        case 'end': // server mengakhiri subscription, buat ulang
+          sock.reqs.delete(f.id);
+          if (req?.type === 'sub' && sock === ws) subscribe(sock, req.channel, req.payload, { key: req.key, coin: req.coin });
+          break;
+        case 'res':
+          if (req?.type === 'ping') {
+            setWsStatus(`LIVE ${Math.round(performance.now() - req.t0)}ms`, 'green');
+            if (f.upstreamReadAgeMs < 0) warnOnce('upstream', '[WS] Koneksi upstream server sedang tidak tersedia');
+          }
+          sock.reqs.delete(f.id);
+          break;
+        case 'err':
+          console.error('[WS] Request gagal:', f.error);
+          sock.reqs.delete(f.id);
+          break;
+        case 'draining': // server mengganti koneksi: buka pengganti, tutup yang lama
+          console.warn('[WS] Server draining, membuat koneksi pengganti');
+          if (sock === ws) { connect(); setTimeout(() => sock.close(), 10000); }
+          break;
+        // sub_ok, snapshot_end, dan op lain diabaikan (sesuai docs)
+      }
+    }
+
+    function handleSubErr(sock, f, req) {
+      sock.reqs.delete(f.id);
+      const reason = f.error?.reason ?? f.error?.message ?? JSON.stringify(f.error);
+      if (req?.type !== 'sub') return console.error('[WS] sub_err:', f.error);
+      console.error(`[WS] Subscribe DITOLAK ${req.key ?? req.channel} (${req.payload.providers}|${req.payload.symbols}): ${reason}`, f.error);
+      if (!req.key) return;
+
+      // Error kapasitas = sementara, coba lagi nanti
+      if (/capacity|limit|busy|unavailable|retry/i.test(reason)) {
+        setTimeout(() => sock === ws && subscribe(sock, req.channel, req.payload, { key: req.key, coin: req.coin }), 5000 + Math.random() * 5000);
+        return;
+      }
+      // Error filter = permanen, jangan diulang terus
+      const m = MARKETS[req.key];
+      badCoins.add(coinKey(m.provider, req.coin));
+      if (!resolved[req.key] && m.coins.every(c => badCoins.has(coinKey(m.provider, c)))) markUnavailable(req.key);
+    }
+
+    function dropOtherCandidates(key, coin) {
+      for (const [id, r] of ws.reqs) {
+        if (r.key === key && r.coin !== coin) { send(ws, { op: 'unsub', id }); ws.reqs.delete(id); }
+      }
+    }
+
+    function handleEvent(ev) {
+      // Event providerStatus
+      if (ev.state !== undefined && ev.price === undefined) {
+        providerState[ev.provider] = ev.state;
+        (ev.state === 'connected' ? console.log : console.warn)(`[STATUS] ${ev.provider}: ${ev.state}${ev.reason ? ' - ' + ev.reason : ''}`);
+        return;
+      }
+      if (!ev.provider || !ev.symbol || ev.price == null) return;
+
+      const key = COIN_MAP.get(coinKey(ev.provider, ev.symbol));
+      if (!key) return warnOnce(`unk-${ev.provider}|${ev.symbol}`, '[WS] Tick dari coin tak terdaftar:', ev);
+
+      // Kandidat pertama yang mengirim data = coin yang benar
+      if (!resolved[key]) {
+        resolved[key] = ev.symbol;
+        console.log(`[WS] ✔ ${key} tersambung via ${ev.provider} | ${ev.symbol}`);
+        dropOtherCandidates(key, ev.symbol);
+      }
+      if (resolved[key] !== ev.symbol) return;
+
+      // Kebijakan kind: jangan timpa harga prioritas tinggi dengan yang lebih rendah
+      const m = MARKETS[key];
+      const idx = m.kinds.indexOf(ev.kind);
+      const rank = idx < 0 ? 99 : idx;
+      const ks = kindState[key];
+      if (ks && rank > ks.rank && Date.now() - ks.ts < STALE_MS) return;
+      kindState[key] = { rank, ts: Date.now() };
+
+      const p = parseFloat(ev.price);
+      if (p > 0) updatePrice(key, p, ev);
+    }
+
+    // HP sering memutus koneksi saat layar mati / pindah aplikasi
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && (!ws || ws.readyState >= WebSocket.CLOSING)) connect();
+    });
+
+    // Watchdog: tandai harga yang macet (abu-abu)
+    setInterval(() => {
+      for (const key of Object.keys(MARKETS)) {
+        const el = document.getElementById(`price-${key}`);
+        if (el && prices[key] && isStale(key)) { setColor(el, 'text-gray-500'); el.title = 'Tidak ada update terbaru'; }
+      }
+    }, 3000);
+
+    // Diagnosa: ketik wsDebug() di console
+    window.wsDebug = () => {
+      console.table(Object.fromEntries(Object.keys(MARKETS).map(k => [k, {
+        harga: prices[k]?.price ?? '-',
+        sumber: prices[k]?.source ?? '-',
+        kind: prices[k]?.kind ?? '-',
+        umur_detik: prices[k] ? ((Date.now() - prices[k].recv) / 1000).toFixed(1) : '-',
+        coin: resolved[k] ?? `(mencoba: ${MARKETS[k].coins.join(', ')})`,
+      }])));
+      console.log('Status provider:', providerState);
+      console.log('Coin ditolak:', [...badCoins]);
+    };
+
+    // ======================= AI SIGNAL =======================
+    async function generateAISignal() {
+      const marketId = document.getElementById('marketSelect').value;
+      const tradingStyle = document.getElementById('tradingStyleSelect').value;
+      const symbolKey = marketId.split('|').pop();
+
+      const live = prices[symbolKey];
+      if (!live) return alert('Harga live pair ini belum tersambung. Tunggu sebentar lalu coba lagi.');
+      if (isStale(symbolKey) && !confirm('Harga pair ini sedang tidak update (pasar tutup / koneksi bermasalah). Tetap lanjut?')) return;
+      const currentPrice = live.price;
+
+      const btn = document.getElementById('signalBtn');
+      btn.disabled = true;
+      btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> MENGEVALUASI...`;
+
+      try {
+        const response = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ marketId, tradingStyle, currentPrice, priceKind: live.kind }),
+        });
+        const rawData = await response.json();
+        if (!response.ok) throw new Error(rawData.error || `HTTP Error ${response.status}`);
+
+        const contentText = rawData.choices[0].message.content;
+        let data;
+        try {
+          data = JSON.parse(contentText.substring(contentText.indexOf('{'), contentText.lastIndexOf('}') + 1));
+        } catch {
+          throw new Error('Respon AI tidak valid. Coba klik sekali lagi.');
         }
 
-        function selectTicker(marketId) {
-            const selectEl = document.getElementById('marketSelect');
-            selectEl.value = marketId;
-            syncSelectedMarket();
-            window.scrollTo({ top: 0, behavior: 'smooth' });
+        const shownPrice = fmt(symbolKey, prices[symbolKey].price);
+        const set = (id, v) => document.getElementById(id).textContent = v ?? '--';
+        set('cardMarketTitle', `${symbolKey} (Live AI)`);
+
+        const badgeBtn = document.getElementById('signalBadgeBtn');
+        const base = 'text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg flex items-center gap-1';
+        if (data.signal === 'BUY') {
+          badgeBtn.className = `bg-sky-500 ${base}`;
+          badgeBtn.innerHTML = `<i class="fa-solid fa-caret-up"></i> BUY`;
+        } else if (data.signal === 'SELL') {
+          badgeBtn.className = `bg-red-500 ${base}`;
+          badgeBtn.innerHTML = `<i class="fa-solid fa-caret-down"></i> SELL`;
+        } else {
+          badgeBtn.className = `bg-yellow-500 ${base}`;
+          badgeBtn.innerHTML = `HOLD`;
         }
 
-        let ws;
-        let pingInterval;
+        set('cardStyleSub', `${tradingStyle.toUpperCase()} / Just Now`);
+        set('cardEntryZone', `${data.entry_min} - ${data.entry_max}`);
+        ['cardLivePriceTop', 'cardLivePriceBadge', 'mapLivePrice'].forEach(id => set(id, shownPrice));
+        set('cardSL', data.sl);   set('cardSLPips', data.sl_pips);
+        set('cardTP1', data.tp1); set('cardTP1Pips', data.tp1_pips);
+        set('cardTP2', data.tp2); set('cardTP2Pips', data.tp2_pips);
+        set('cardTP3', data.tp3); set('cardTP3Pips', data.tp3_pips);
+        set('mapTP3', data.tp3);  set('mapTP2', data.tp2); set('mapTP1', data.tp1);
+        set('mapSL', data.sl);
+        set('cardReason', data.reason);
 
-        function connectWebSocket() {
-            const wsStatus = document.getElementById('wsStatus');
-            const wsUrl = 'wss://api-stream.myfundedperpetuals.com/v1/market-data';
+        activeSignalKey = symbolKey; // mulai sekarang harga di kartu bergerak live
+        document.getElementById('standbyView').classList.add('hidden');
+        document.getElementById('activeSignalCard').classList.remove('hidden');
+      } catch (error) {
+        alert(`Gagal mengambil sinyal: ${error.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> GENERATE AI SIGNAL`;
+      }
+    }
 
-            try {
-                ws = new WebSocket(wsUrl);
-
-                ws.onopen = () => {
-                    wsStatus.textContent = 'WS: CONNECTED';
-                    wsStatus.className = 'text-[8px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40';
-
-                    const subFrame = {
-                        op: "sub",
-                        id: 1,
-                        channel: "ticks",
-                        payload: {
-                            symbols: ["XAUUSD", "XAGUSD", "EURUSD", "USDJPY", "BTCUSDT", "ETHUSDT", "SOLUSDT"],
-                            providers: ["hyperliquid", "veranta", "binance", "ostium"]
-                        }
-                    };
-                    ws.send(JSON.stringify(subFrame));
-
-                    clearInterval(pingInterval);
-                    pingInterval = setInterval(() => {
-                        if (ws.readyState === WebSocket.OPEN) {
-                            ws.send(JSON.stringify({ op: "req", id: 99, method: "ping" }));
-                        }
-                    }, 25000);
-                };
-
-                ws.onmessage = (event) => {
-                    try {
-                        const frame = JSON.parse(event.data);
-                        if (frame.op === "events" && Array.isArray(frame.events)) {
-                            frame.events.forEach(ev => {
-                                if (ev.symbol && ev.price) {
-                                    const priceEl = document.getElementById(`price-${ev.symbol}`);
-                                    if (priceEl) {
-                                        const numPrice = parseFloat(ev.price);
-                                        priceEl.textContent = numPrice.toLocaleString('en-US', { minimumFractionDigits: 2 });
-                                    }
-                                }
-                            });
-                        }
-                    } catch (err) {
-                        console.error("Frame Parse Error:", err);
-                    }
-                };
-
-                ws.onerror = (err) => {
-                    console.error("WS Error:", err);
-                    wsStatus.textContent = 'WS: ERROR';
-                };
-
-                ws.onclose = () => {
-                    wsStatus.textContent = 'WS: DISCONNECTED';
-                    wsStatus.className = 'text-[8px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40';
-                    clearInterval(pingInterval);
-                    setTimeout(connectWebSocket, 5000);
-                };
-
-            } catch (e) {
-                console.error("WS Exception:", e);
-            }
-        }
-
-        async function generateAISignal() {
-            const marketId = document.getElementById('marketSelect').value;
-            const tradingStyle = document.getElementById('tradingStyleSelect').value;
-            
-            const symbolKey = marketId.includes('|') ? marketId.split('|')[1] : marketId;
-            const priceEl = document.getElementById(`price-${symbolKey}`);
-            let currentPrice = priceEl ? priceEl.textContent.trim() : "--.--";
-
-            if (currentPrice === "--.--" || currentPrice === "") {
-                alert("Tunggu sebentar hingga harga live pada pair tersebut tersambung sebelum generate sinyal!");
-                return;
-            }
-
-            const btn = document.getElementById('signalBtn');
-            const standbyView = document.getElementById('standbyView');
-            const activeCard = document.getElementById('activeSignalCard');
-
-            btn.disabled = true;
-            btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> MENGEVALUASI...`;
-
-            try {
-                const response = await fetch('/api/generate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ marketId, tradingStyle, currentPrice })
-                });
-
-                const rawData = await response.json();
-                if (!response.ok) throw new Error(rawData.error || `HTTP Error ${response.status}`);
-
-                const contentText = rawData.choices[0].message.content;
-                let data;
-                try {
-                    const cleanJson = contentText.substring(contentText.indexOf('{'), contentText.lastIndexOf('}') + 1);
-                    data = JSON.parse(cleanJson);
-                } catch (e) {
-                    throw new Error("Respon AI tidak valid. Coba klik sekali lagi.");
-                }
-
-                document.getElementById('cardMarketTitle').textContent = `${symbolKey} SPOT (Live AI)`;
-                document.getElementById('cardLivePriceTop').textContent = `$${data.current_price || currentPrice}`;
-                
-                const badgeBtn = document.getElementById('signalBadgeBtn');
-                if (data.signal === 'BUY') {
-                    badgeBtn.className = "bg-sky-500 text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg flex items-center gap-1";
-                    badgeBtn.innerHTML = `<i class="fa-solid fa-caret-up"></i> BUY`;
-                } else if (data.signal === 'SELL') {
-                    badgeBtn.className = "bg-red-500 text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg flex items-center gap-1";
-                    badgeBtn.innerHTML = `<i class="fa-solid fa-caret-down"></i> SELL`;
-                } else {
-                    badgeBtn.className = "bg-yellow-500 text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg flex items-center gap-1";
-                    badgeBtn.innerHTML = `HOLD`;
-                }
-
-                document.getElementById('cardStyleSub').textContent = `${tradingStyle.toUpperCase()} / Just Now`;
-                document.getElementById('cardEntryZone').textContent = `${data.entry_min} - ${data.entry_max}`;
-                document.getElementById('cardLivePriceBadge').textContent = data.current_price || currentPrice;
-
-                document.getElementById('cardSL').textContent = data.sl;
-                document.getElementById('cardSLPips').textContent = data.sl_pips;
-                document.getElementById('cardTP1').textContent = data.tp1;
-                document.getElementById('cardTP1Pips').textContent = data.tp1_pips;
-                document.getElementById('cardTP2').textContent = data.tp2;
-                document.getElementById('cardTP2Pips').textContent = data.tp2_pips;
-                document.getElementById('cardTP3').textContent = data.tp3;
-                document.getElementById('cardTP3Pips').textContent = data.tp3_pips;
-
-                document.getElementById('mapTP3').textContent = data.tp3;
-                document.getElementById('mapTP2').textContent = data.tp2;
-                document.getElementById('mapTP1').textContent = data.tp1;
-                document.getElementById('mapLivePrice').textContent = data.current_price || currentPrice;
-                document.getElementById('mapSL').textContent = data.sl;
-
-                document.getElementById('cardReason').textContent = data.reason;
-
-                standbyView.classList.add('hidden');
-                activeCard.classList.remove('hidden');
-
-            } catch (error) {
-                alert(`Gagal mengambil sinyal: ${error.message}`);
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> GENERATE AI SIGNAL`;
-            }
-        }
-
-        window.onload = () => {
-            connectWebSocket();
-        };
+    // ======================= START =======================
+    window.onload = async () => {
+      await resolveCoins(); // cari coin yang benar dulu, baru connect
+      connect();
+    };
     </script>
 </body>
 </html>
