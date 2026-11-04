@@ -20,61 +20,66 @@
     </script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
-<body class="bg-darkbg text-gray-200 font-sans min-h-screen flex flex-col justify-between p-3">
+<body class="bg-darkbg text-gray-200 font-sans min-h-screen flex flex-col justify-between p-2">
 
     <!-- Header Navbar -->
-    <header class="flex items-center justify-between pb-3 border-b border-panelborder max-w-md mx-auto w-full">
+    <header class="flex items-center justify-between pb-2 border-b border-panelborder max-w-md mx-auto w-full">
         <div class="flex items-center gap-2">
-            <div class="bg-accentblue w-8 h-8 rounded-lg flex items-center justify-center text-white">
-                <i class="fa-solid fa-chart-line text-sm"></i>
+            <div class="bg-accentblue w-7 h-7 rounded-lg flex items-center justify-center text-white">
+                <i class="fa-solid fa-chart-line text-xs"></i>
             </div>
             <div>
                 <h1 class="font-bold text-xs text-white">Alu <span class="text-accentblue">Signal Z</span></h1>
-                <p class="text-[9px] text-gray-400">Multi-Asset Live Stream</p>
+                <p class="text-[8px] text-gray-400">Multi-Asset Live Stream</p>
             </div>
         </div>
         <div class="flex items-center gap-2">
-            <span id="wsStatus" class="text-[9px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">WS: OFF</span>
+            <span id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">WS: OFF</span>
         </div>
     </header>
 
     <!-- BAGIAN TENGAH: AI Signal Generator -->
-    <main class="max-w-md mx-auto w-full flex-1 flex flex-col gap-3 pt-3">
+    <main class="max-w-md mx-auto w-full flex-1 flex flex-col gap-2 pt-2">
         
-        <div class="bg-cardbg rounded-xl border border-panelborder p-3 space-y-2.5 shadow-md">
+        <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
             <div class="flex justify-between items-center">
-                <label class="text-[10px] font-bold text-gray-400">TARGET ASET AKTIF</label>
-                <span id="selectedPairBadge" class="text-[10px] font-mono text-accentblue font-bold">binance|BTCUSDT</span>
+                <label class="text-[9px] font-bold text-gray-400">TARGET ASET AKTIF</label>
+                <span id="selectedPairBadge" class="text-[9px] font-mono text-accentblue font-bold">binance|BTCUSDT</span>
             </div>
 
-            <!-- Dropdown Multi-Asset Lengkap -->
-            <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2.5 rounded-lg focus:outline-none">
-                <optgroup label="Crypto">
+            <!-- Dropdown Multi-Asset Lengkap (Crypto, Forex, Gold, Indeks, Saham) -->
+            <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
+                <optgroup label="Crypto Majors & Alts">
                     <option value="binance|BTCUSDT">BTC/USDT (Binance)</option>
                     <option value="binance|ETHUSDT">ETH/USDT (Binance)</option>
                     <option value="binance|SOLUSDT">SOL/USDT (Binance)</option>
+                    <option value="binance|XRPUSDT">XRP/USDT (Binance)</option>
+                    <option value="binance|DOGEUSDT">DOGE/USDT (Binance)</option>
                 </optgroup>
-                <optgroup label="Currency / Forex & Gold">
-                    <option value="veranta|XAUUSD">XAU/USD (Gold - Veranta)</option>
-                    <option value="veranta|EURUSD">EUR/USD (Forex - Veranta)</option>
-                    <option value="veranta|USDJPY">USD/JPY (Forex - Veranta)</option>
+                <optgroup label="Gold, Silver & Forex">
+                    <option value="veranta|XAUUSD">XAU/USD / Gold (Veranta)</option>
+                    <option value="veranta|XAGUSD">XAG/USD / Silver (Veranta)</option>
+                    <option value="veranta|EURUSD">EUR/USD (Veranta)</option>
+                    <option value="veranta|USDJPY">USD/JPY (Veranta)</option>
                 </optgroup>
                 <optgroup label="Commodities & Indices">
                     <option value="hyperliquid|xyz:BRENTOIL">Brent Oil (Hyperliquid)</option>
                     <option value="ostium|DJI">Dow Jones / DJI (Ostium)</option>
                     <option value="hyperliquid|xyz:SP500">S&P 500 (Hyperliquid)</option>
+                    <option value="hyperliquid|xyz:NAS100">Nasdaq / NAS100 (Hyperliquid)</option>
                 </optgroup>
                 <optgroup label="Stocks / Saham">
                     <option value="hyperliquid|xyz:AAPL">Apple / AAPL (Hyperliquid)</option>
                     <option value="binance|NVDAUSDT">NVIDIA / NVDA (Binance)</option>
                     <option value="binance|TSLAUSDT">Tesla / TSLA (Binance)</option>
+                    <option value="hyperliquid|xyz:COIN">Coinbase / COIN (Hyperliquid)</option>
                 </optgroup>
             </select>
 
             <!-- Pilihan Gaya Trading -->
             <div>
-                <label class="text-[9px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
-                <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2.5 rounded-lg focus:outline-none">
+                <label class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
+                <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
                     <option value="Scalping (M1 & M15)">Scalping (M1 & M15)</option>
                     <option value="Day Trading (M3 & M30)">Day Trading (M3 & M30)</option>
                     <option value="Intraday (M5 & H1)">Intraday (M5 & H1)</option>
@@ -82,106 +87,139 @@
                 </select>
             </div>
 
-            <button onclick="generateAISignal()" id="signalBtn" class="w-full bg-gradient-to-r from-accentblue to-indigo-600 hover:from-blue-600 text-white font-bold py-3 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-accentblue/20 transition active:scale-98 mt-1">
+            <button onclick="generateAISignal()" id="signalBtn" class="w-full bg-gradient-to-r from-accentblue to-indigo-600 hover:from-blue-600 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-accentblue/20 transition active:scale-98">
                 <i class="fa-solid fa-wand-magic-sparkles"></i> GENERATE AI SIGNAL
             </button>
         </div>
 
         <!-- Output Sinyal AI -->
-        <div class="bg-cardbg rounded-xl border border-panelborder p-4 shadow-md">
-            <div class="flex items-center justify-between pb-3 mb-3 border-b border-panelborder">
-                <span class="text-xs font-bold text-gray-300">AI SIGNAL RESULT</span>
-                <span id="signalBadge" class="px-3 py-1 rounded-md text-xs font-extrabold tracking-wider bg-gray-800 text-gray-400 border border-gray-700">STANDBY</span>
+        <div class="bg-cardbg rounded-xl border border-panelborder p-3 shadow-md">
+            <div class="flex items-center justify-between pb-2 mb-2 border-b border-panelborder">
+                <span class="text-[10px] font-bold text-gray-300">AI SIGNAL RESULT</span>
+                <span id="signalBadge" class="px-2 py-0.5 rounded text-[10px] font-extrabold tracking-wider bg-gray-800 text-gray-400 border border-gray-700">STANDBY</span>
             </div>
-            <div id="signalReason" class="bg-darkbg border border-panelborder rounded-lg p-3 text-xs text-gray-300 min-h-[140px] max-h-[200px] overflow-y-auto leading-relaxed whitespace-pre-wrap">
+            <div id="signalReason" class="bg-darkbg border border-panelborder rounded-lg p-2.5 text-[11px] text-gray-300 min-h-[110px] max-h-[160px] overflow-y-auto leading-relaxed whitespace-pre-wrap">
                 Pilih pair di bawah, tentukan gaya trading, lalu klik Generate AI Signal.
             </div>
         </div>
 
-        <!-- BAGIAN PALING BAWAH: Live Market Ticker -->
-        <div class="bg-cardbg rounded-xl border border-panelborder p-3 mt-2 shadow-md">
-            <div class="flex justify-between items-center pb-2 mb-2 border-b border-panelborder">
-                <span class="text-[10px] font-bold text-gray-400 flex items-center gap-1">
+        <!-- BAGIAN PALING BAWAH: Live Market Ticker (Diperkecil & Muat Semua List) -->
+        <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md">
+            <div class="flex justify-between items-center pb-1.5 mb-1.5 border-b border-panelborder">
+                <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
                     <i class="fa-solid fa-tower-broadcast text-accentblue"></i> LIVE STREAM (MYFUNDEDPERPS)
                 </span>
-                <span id="livePulse" class="text-[9px] text-emerald-400 font-mono animate-pulse">● Live Stream</span>
+                <span id="livePulse" class="text-[8px] text-emerald-400 font-mono animate-pulse">● Live Stream</span>
             </div>
 
-            <!-- List Ticker Vertikal Real-Time -->
-            <div id="tickerListContainer" class="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
+            <!-- List Ticker Vertikal Ringkas & Padat -->
+            <div id="tickerListContainer" class="space-y-1 max-h-[180px] overflow-y-auto pr-1">
                 
-                <!-- BTC -->
-                <div onclick="selectTicker('binance|BTCUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder p-2 rounded-lg flex items-center justify-between cursor-pointer transition">
-                    <div class="flex items-center gap-2">
-                        <div class="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center text-[10px] font-bold">₿</div>
-                        <div>
-                            <div class="flex items-center gap-1.5"><span class="font-bold text-xs text-white">BTCUSDT</span><span class="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 rounded">10x</span></div>
-                            <span class="text-[9px] text-gray-400">Binance (Crypto)</span>
-                        </div>
+                <!-- BTCUSDT -->
+                <div onclick="selectTicker('binance|BTCUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1.5 rounded flex items-center justify-between cursor-pointer transition">
+                    <div class="flex items-center gap-1.5">
+                        <span class="font-bold text-[11px] text-white">BTCUSDT</span>
+                        <span class="text-[7px] bg-emerald-500/20 text-emerald-400 px-1 rounded">10x</span>
                     </div>
                     <div class="text-right font-mono">
-                        <div id="price-BTCUSDT" class="text-xs font-bold text-white">--.--</div>
-                        <div id="time-BTCUSDT" class="text-[8px] text-gray-500">Connecting...</div>
+                        <div id="price-BTCUSDT" class="text-[11px] font-bold text-white">--.--</div>
+                        <div id="time-BTCUSDT" class="text-[7px] text-gray-500">Connecting...</div>
                     </div>
                 </div>
 
                 <!-- XAUUSD (Gold) -->
-                <div onclick="selectTicker('veranta|XAUUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder p-2 rounded-lg flex items-center justify-between cursor-pointer transition">
-                    <div class="flex items-center gap-2">
-                        <div class="w-6 h-6 rounded-full bg-yellow-500/20 text-yellow-400 flex items-center justify-center text-[10px] font-bold">🪙</div>
-                        <div>
-                            <div class="flex items-center gap-1.5"><span class="font-bold text-xs text-white">XAUUSD</span><span class="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 rounded">10x</span></div>
-                            <span class="text-[9px] text-gray-400">Veranta (Gold)</span>
-                        </div>
+                <div onclick="selectTicker('veranta|XAUUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1.5 rounded flex items-center justify-between cursor-pointer transition">
+                    <div class="flex items-center gap-1.5">
+                        <span class="font-bold text-[11px] text-white">XAUUSD</span>
+                        <span class="text-[7px] bg-yellow-500/20 text-yellow-400 px-1 rounded">Gold</span>
                     </div>
                     <div class="text-right font-mono">
-                        <div id="price-XAUUSD" class="text-xs font-bold text-white">--.--</div>
-                        <div id="time-XAUUSD" class="text-[8px] text-gray-500">Connecting...</div>
+                        <div id="price-XAUUSD" class="text-[11px] font-bold text-white">--.--</div>
+                        <div id="time-XAUUSD" class="text-[7px] text-gray-500">Connecting...</div>
                     </div>
                 </div>
 
-                <!-- EURUSD (Forex) -->
-                <div onclick="selectTicker('veranta|EURUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder p-2 rounded-lg flex items-center justify-between cursor-pointer transition">
-                    <div class="flex items-center gap-2">
-                        <div class="w-6 h-6 rounded-full bg-green-500/20 text-green-400 flex items-center justify-center text-[10px] font-bold">€</div>
-                        <div>
-                            <div class="flex items-center gap-1.5"><span class="font-bold text-xs text-white">EURUSD</span><span class="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 rounded">50x</span></div>
-                            <span class="text-[9px] text-gray-400">Veranta (Forex)</span>
-                        </div>
+                <!-- XAGUSD (Silver) -->
+                <div onclick="selectTicker('veranta|XAGUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1.5 rounded flex items-center justify-between cursor-pointer transition">
+                    <div class="flex items-center gap-1.5">
+                        <span class="font-bold text-[11px] text-white">XAGUSD</span>
+                        <span class="text-[7px] bg-yellow-500/20 text-yellow-400 px-1 rounded">Silver</span>
                     </div>
                     <div class="text-right font-mono">
-                        <div id="price-EURUSD" class="text-xs font-bold text-white">--.--</div>
-                        <div id="time-EURUSD" class="text-[8px] text-gray-500">Connecting...</div>
+                        <div id="price-XAGUSD" class="text-[11px] font-bold text-white">--.--</div>
+                        <div id="time-XAGUSD" class="text-[7px] text-gray-500">Connecting...</div>
                     </div>
                 </div>
 
-                <!-- DJI (Indices) -->
-                <div onclick="selectTicker('ostium|DJI')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder p-2 rounded-lg flex items-center justify-between cursor-pointer transition">
-                    <div class="flex items-center gap-2">
-                        <div class="w-6 h-6 rounded-full bg-purple-500/20 text-purple-400 flex items-center justify-center text-[10px] font-bold">📈</div>
-                        <div>
-                            <div class="flex items-center gap-1.5"><span class="font-bold text-xs text-white">DJI</span><span class="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 rounded">12x</span></div>
-                            <span class="text-[9px] text-gray-400">Ostium (Indice)</span>
-                        </div>
+                <!-- EURUSD -->
+                <div onclick="selectTicker('veranta|EURUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1.5 rounded flex items-center justify-between cursor-pointer transition">
+                    <div class="flex items-center gap-1.5">
+                        <span class="font-bold text-[11px] text-white">EURUSD</span>
+                        <span class="text-[7px] bg-blue-500/20 text-blue-400 px-1 rounded">50x</span>
                     </div>
                     <div class="text-right font-mono">
-                        <div id="price-DJI" class="text-xs font-bold text-white">--.--</div>
-                        <div id="time-DJI" class="text-[8px] text-gray-500">Connecting...</div>
+                        <div id="price-EURUSD" class="text-[11px] font-bold text-white">--.--</div>
+                        <div id="time-EURUSD" class="text-[7px] text-gray-500">Connecting...</div>
                     </div>
                 </div>
 
-                <!-- AAPL (Stock) -->
-                <div onclick="selectTicker('hyperliquid|xyz:AAPL')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder p-2 rounded-lg flex items-center justify-between cursor-pointer transition">
-                    <div class="flex items-center gap-2">
-                        <div class="w-6 h-6 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center text-[10px] font-bold">🍎</div>
-                        <div>
-                            <div class="flex items-center gap-1.5"><span class="font-bold text-xs text-white">xyz:AAPL</span><span class="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 rounded">5x</span></div>
-                            <span class="text-[9px] text-gray-400">Hyperliquid (Stock)</span>
-                        </div>
+                <!-- USDJPY -->
+                <div onclick="selectTicker('veranta|USDJPY')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1.5 rounded flex items-center justify-between cursor-pointer transition">
+                    <div class="flex items-center gap-1.5">
+                        <span class="font-bold text-[11px] text-white">USDJPY</span>
+                        <span class="text-[7px] bg-blue-500/20 text-blue-400 px-1 rounded">50x</span>
                     </div>
                     <div class="text-right font-mono">
-                        <div id="price-xyz:AAPL" class="text-xs font-bold text-white">--.--</div>
-                        <div id="time-xyz:AAPL" class="text-[8px] text-gray-500">Connecting...</div>
+                        <div id="price-USDJPY" class="text-[11px] font-bold text-white">--.--</div>
+                        <div id="time-USDJPY" class="text-[7px] text-gray-500">Connecting...</div>
+                    </div>
+                </div>
+
+                <!-- DJI -->
+                <div onclick="selectTicker('ostium|DJI')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1.5 rounded flex items-center justify-between cursor-pointer transition">
+                    <div class="flex items-center gap-1.5">
+                        <span class="font-bold text-[11px] text-white">DJI</span>
+                        <span class="text-[7px] bg-purple-500/20 text-purple-400 px-1 rounded">12x</span>
+                    </div>
+                    <div class="text-right font-mono">
+                        <div id="price-DJI" class="text-[11px] font-bold text-white">--.--</div>
+                        <div id="time-DJI" class="text-[7px] text-gray-500">Connecting...</div>
+                    </div>
+                </div>
+
+                <!-- ETHUSDT -->
+                <div onclick="selectTicker('binance|ETHUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1.5 rounded flex items-center justify-between cursor-pointer transition">
+                    <div class="flex items-center gap-1.5">
+                        <span class="font-bold text-[11px] text-white">ETHUSDT</span>
+                        <span class="text-[7px] bg-emerald-500/20 text-emerald-400 px-1 rounded">10x</span>
+                    </div>
+                    <div class="text-right font-mono">
+                        <div id="price-ETHUSDT" class="text-[11px] font-bold text-white">--.--</div>
+                        <div id="time-ETHUSDT" class="text-[7px] text-gray-500">Connecting...</div>
+                    </div>
+                </div>
+
+                <!-- SOLUSDT -->
+                <div onclick="selectTicker('binance|SOLUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1.5 rounded flex items-center justify-between cursor-pointer transition">
+                    <div class="flex items-center gap-1.5">
+                        <span class="font-bold text-[11px] text-white">SOLUSDT</span>
+                        <span class="text-[7px] bg-emerald-500/20 text-emerald-400 px-1 rounded">8x</span>
+                    </div>
+                    <div class="text-right font-mono">
+                        <div id="price-SOLUSDT" class="text-[11px] font-bold text-white">--.--</div>
+                        <div id="time-SOLUSDT" class="text-[7px] text-gray-500">Connecting...</div>
+                    </div>
+                </div>
+
+                <!-- AAPL -->
+                <div onclick="selectTicker('hyperliquid|xyz:AAPL')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1.5 rounded flex items-center justify-between cursor-pointer transition">
+                    <div class="flex items-center gap-1.5">
+                        <span class="font-bold text-[11px] text-white">xyz:AAPL</span>
+                        <span class="text-[7px] bg-red-500/20 text-red-400 px-1 rounded">5x</span>
+                    </div>
+                    <div class="text-right font-mono">
+                        <div id="price-xyz:AAPL" class="text-[11px] font-bold text-white">--.--</div>
+                        <div id="time-xyz:AAPL" class="text-[7px] text-gray-500">Connecting...</div>
                     </div>
                 </div>
 
@@ -205,7 +243,7 @@
         }
 
         // =======================================================
-        // WEBSOCKET MULTI-ASSET STREAM
+        // WEBSOCKET MULTI-ASSET STREAM (MENCAKUP SEMUA PROVIDER)
         // =======================================================
         let ws;
         let pingInterval;
@@ -219,14 +257,14 @@
 
                 ws.onopen = () => {
                     wsStatus.textContent = 'WS: CONNECTED';
-                    wsStatus.className = 'text-[9px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40';
+                    wsStatus.className = 'text-[8px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40';
 
                     const subFrame = {
                         op: "sub",
                         id: 1,
                         channel: "ticks",
                         payload: {
-                            symbols: ["BTCUSDT", "XAUUSD", "EURUSD", "DJI", "xyz:AAPL"],
+                            symbols: ["BTCUSDT", "XAUUSD", "XAGUSD", "EURUSD", "USDJPY", "DJI", "ETHUSDT", "SOLUSDT", "xyz:AAPL"],
                             providers: ["binance", "veranta", "ostium", "hyperliquid"]
                         }
                     };
@@ -273,7 +311,7 @@
 
                 ws.onclose = () => {
                     wsStatus.textContent = 'WS: DISCONNECTED';
-                    wsStatus.className = 'text-[9px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40';
+                    wsStatus.className = 'text-[8px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40';
                     clearInterval(pingInterval);
                     setTimeout(connectWebSocket, 5000);
                 };
@@ -315,13 +353,13 @@
                 const upper = outputText.toUpperCase();
                 if (upper.includes('BUY')) {
                     badge.textContent = 'BUY SIGNAL';
-                    badge.className = 'px-3 py-1 rounded-md text-xs font-extrabold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40';
+                    badge.className = 'px-2 py-0.5 rounded text-[10px] font-extrabold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40';
                 } else if (upper.includes('SELL')) {
                     badge.textContent = 'SELL SIGNAL';
-                    badge.className = 'px-3 py-1 rounded-md text-xs font-extrabold bg-red-500/20 text-red-400 border border-red-500/40';
+                    badge.className = 'px-2 py-0.5 rounded text-[10px] font-extrabold bg-red-500/20 text-red-400 border border-red-500/40';
                 } else {
                     badge.textContent = 'HOLD';
-                    badge.className = 'px-3 py-1 rounded-md text-xs font-extrabold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40';
+                    badge.className = 'px-2 py-0.5 rounded text-[10px] font-extrabold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40';
                 }
 
             } catch (error) {
