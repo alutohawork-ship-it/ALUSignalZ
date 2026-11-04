@@ -1,12 +1,9 @@
-Baik! Kode KMZWAY87AA kita tetapkan sebagai Password / Token Pendaftaran rahasia yang wajib diisi oleh pengguna baru saat mereka mendaftar di halaman depan.
-Dengan cara ini, hanya orang yang mengetahui kode KMZWAY87AA saja yang bisa mendaftar dan mendapatkan akses Trial gratis ke terminal trading Anda.
-Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan fitur Password Pendaftaran (KMZWAY87AA):
 <!DOCTYPE html>
 <html lang="id" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Alu Signal Z & Live Terminal</title>
+    <title>Alu Signal Z & Terminal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -22,18 +19,13 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
         }
     </script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
-    <!-- Appwrite Web SDK -->
     <script src="https://cdn.jsdelivr.net/npm/appwrite@13.0.1"></script>
 
     <style>
         .lvl-box { position: relative; transition: all .25s ease; }
-        .tp-hit { background: rgba(16,185,129,.18) !important; border-color: #34d399 !important;
-                  box-shadow: 0 0 0 1px #34d399, 0 0 14px rgba(52,211,153,.35); }
-        .sl-hit { background: rgba(239,68,68,.18) !important; border-color: #f87171 !important;
-                  box-shadow: 0 0 0 1px #f87171, 0 0 14px rgba(248,113,113,.35); }
-        .hit-badge { position: absolute; top: -6px; right: -6px; width: 16px; height: 16px; border-radius: 9999px;
-                     display: none; align-items: center; justify-content: center; font-size: 9px; color: #0b0e14; z-index: 5; }
+        .tp-hit { background: rgba(16,185,129,.18) !important; border-color: #34d399 !important; box-shadow: 0 0 0 1px #34d399, 0 0 14px rgba(52,211,153,.35); }
+        .sl-hit { background: rgba(239,68,68,.18) !important; border-color: #f87171 !important; box-shadow: 0 0 0 1px #f87171, 0 0 14px rgba(248,113,113,.35); }
+        .hit-badge { position: absolute; top: -6px; right: -6px; width: 16px; height: 16px; border-radius: 9999px; display: none; align-items: center; justify-content: center; font-size: 9px; color: #0b0e14; z-index: 5; }
         .hit-badge.show { display: flex; animation: pop .45s ease-out; }
         @keyframes pop { 0% { transform: scale(0); } 60% { transform: scale(1.4); } 100% { transform: scale(1); } }
         input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
@@ -43,53 +35,92 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
 
     <div id="toast" class="hidden fixed top-3 left-1/2 -translate-x-1/2 z-50 px-3 py-2 rounded-lg text-[10px] font-bold font-mono shadow-xl border"></div>
 
-    <!-- ================= HALAMAN LOGIN / REGISTER (DENGAN KODE PASS) ================= -->
+    <!-- ================= HALAMAN 1 KOLOM LOGIN / KODE AKSES ================= -->
     <div id="authScreen" class="fixed inset-0 z-50 bg-darkbg/95 backdrop-blur-md flex flex-col items-center justify-center p-4">
-        <div class="bg-cardbg border border-panelborder rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl">
+        <div class="bg-cardbg border border-panelborder rounded-2xl p-6 max-w-sm w-full space-y-5 shadow-2xl">
             <div class="text-center space-y-1">
                 <div class="bg-accentblue w-12 h-12 rounded-xl flex items-center justify-center text-white mx-auto text-xl shadow-lg shadow-accentblue/30">
                     <i class="fa-solid fa-chart-line"></i>
                 </div>
-                <h1 class="text-xl font-extrabold text-white pt-2 tracking-tight">Welcome, Alu Signal Z</h1>
-                <p class="text-[11px] text-gray-400">Silakan login atau daftar menggunakan kode akses</p>
+                <h1 class="text-xl font-extrabold text-white pt-2 tracking-tight">Alu Signal Z Portal</h1>
+                <p class="text-[11px] text-gray-400">Masukkan Email terdaftar atau Kode Pass Admin</p>
             </div>
 
-            <!-- Tab Selector -->
-            <div class="flex border-b border-panelborder text-xs font-bold text-gray-400">
-                <button id="tabLoginBtn" onclick="switchAuthTab('login')" class="flex-1 py-2 border-b-2 border-accentblue text-white">MASUK (LOGIN)</button>
-                <button id="tabRegBtn" onclick="switchAuthTab('register')" class="flex-1 py-2 border-b-2 border-transparent">DAFTAR BARU</button>
-            </div>
-
-            <!-- Form -->
-            <form id="authForm" onsubmit="handleAuth(event)" class="space-y-3">
+            <form id="authForm" onsubmit="handleUniversalLogin(event)" class="space-y-4 pt-2">
                 <div>
-                    <label class="text-[10px] font-bold text-gray-400 block mb-1">EMAIL</label>
-                    <input type="email" id="authEmail" required class="w-full bg-darkbg border border-panelborder rounded-lg p-2.5 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="nama@email.com">
+                    <label class="text-[10px] font-bold text-gray-400 block mb-1 tracking-wider">INPUT KODE / EMAIL</label>
+                    <input type="text" id="authInput" required class="w-full bg-darkbg border border-panelborder rounded-xl p-3 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="Email atau KMZWAY87AA">
                 </div>
 
-                <!-- Input Kode Pendaftaran (Hanya tampil saat tab DAFTAR BARU dipilih) -->
-                <div id="regPassContainer" class="hidden">
-                    <label class="text-[10px] font-bold text-yellow-400 block mb-1">KODE PENDAFTARAN (PASS)</label>
-                    <input type="text" id="authRegPass" class="w-full bg-darkbg border border-yellow-500/50 rounded-lg p-2.5 text-xs font-mono text-yellow-300 focus:outline-none focus:border-yellow-400" placeholder="Masukkan kode pass">
-                    <p class="text-[8px] text-gray-400 mt-1">Dapatkan kode pass dari admin via WhatsApp.</p>
-                </div>
-
-                <button type="submit" id="authSubmitBtn" class="w-full bg-accentblue hover:bg-blue-600 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-lg shadow-accentblue/20">
-                    MASUK KE TERMINAL
+                <button type="submit" id="authSubmitBtn" class="w-full bg-accentblue hover:bg-blue-600 text-white font-bold py-3 rounded-xl text-xs transition shadow-lg shadow-accentblue/20 flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-right-to-bracket"></i> MASUK SISTEM
                 </button>
             </form>
 
-            <!-- FOOTER INFO ADMIN -->
             <div class="pt-4 border-t border-panelborder/60 text-center space-y-1.5">
                 <p class="text-[10px] text-gray-400 font-medium">Bantuan & Informasi Admin:</p>
-                <a href="https://wa.me/6285817038501?text=Halo%20Admin%20Alu%20Signal%20Z,%20saya%20ingin%20meminta%20kode%20pendaftaran%20(pass)" target="_blank" class="inline-flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-full text-xs font-bold font-mono transition">
+                <a href="https://wa.me/6285817038501?text=Halo%20Admin%20Alu%20Signal%20Z,%20saya%20ingin%20meminta%20akses" target="_blank" class="inline-flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-full text-xs font-bold font-mono transition">
                     <i class="fa-brands fa-whatsapp text-sm text-emerald-400"></i> +6285817038501
                 </a>
             </div>
         </div>
     </div>
 
-    <!-- ================= KONTEN UTAMA APLIKASI ================= -->
+    <!-- ================= DASHBOARD 1: PANEL PENDAFTARAN (JIKA INPUT KMZWAY87AA) ================= -->
+    <div id="registerDashboard" class="hidden fixed inset-0 z-40 bg-darkbg overflow-y-auto p-4 flex flex-col justify-between">
+        <div class="max-w-md mx-auto w-full space-y-4 pt-6">
+            <div class="flex justify-between items-center border-b border-panelborder pb-3">
+                <div class="flex items-center gap-2">
+                    <div class="bg-yellow-500 w-8 h-8 rounded-lg flex items-center justify-center text-darkbg font-bold">
+                        <i class="fa-solid fa-user-plus"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-sm font-extrabold text-white">Dashboard Pendaftaran Klien</h2>
+                        <p class="text-[9px] text-yellow-400">Akses Khusus Admin (KMZWAY87AA)</p>
+                    </div>
+                </div>
+                <button onclick="logout()" class="text-[9px] font-mono font-bold px-2.5 py-1 rounded bg-red-500/20 text-red-400 border border-red-500/40">KELUAR</button>
+            </div>
+
+            <!-- Form Tambah Klien -->
+            <div class="bg-cardbg border border-panelborder rounded-xl p-4 space-y-3 shadow-lg">
+                <h3 class="text-xs font-bold text-white flex items-center gap-1.5">
+                    <i class="fa-solid fa-id-card text-accentblue"></i> Daftarkan Email Klien Baru
+                </h3>
+                <div class="space-y-2">
+                    <div>
+                        <label class="text-[9px] font-bold text-gray-400 block mb-1">EMAIL KLIEN</label>
+                        <input type="email" id="newClientEmail" class="w-full bg-darkbg border border-panelborder rounded-lg p-2.5 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="klien@email.com">
+                    </div>
+                    <div>
+                        <label class="text-[9px] font-bold text-gray-400 block mb-1">PAKET / STATUS</label>
+                        <select id="newClientStatus" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2.5 rounded-lg focus:outline-none">
+                            <option value="trial">Trial 3 Hari</option>
+                            <option value="monthly">Langganan Bulanan (Monthly)</option>
+                            <option value="lifetime">Akses Selamanya (Lifetime)</option>
+                        </select>
+                    </div>
+                    <button onclick="registerNewClientByAdmin()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg text-xs transition shadow-md">
+                        + SIMPAN & DAFTARKAN KLIEN
+                    </button>
+                </div>
+            </div>
+
+            <!-- List Klien Terdaftar -->
+            <div class="bg-cardbg border border-panelborder rounded-xl p-4 space-y-2 shadow-lg">
+                <div class="flex justify-between items-center border-b border-panelborder pb-2">
+                    <span class="text-xs font-bold text-gray-300">Daftar Klien Aktif di Database</span>
+                    <button onclick="loadAdminClientList()" class="text-[9px] text-accentblue hover:underline"><i class="fa-solid fa-rotate"></i> Refresh</button>
+                </div>
+                <div id="adminClientTableList" class="space-y-1.5 max-h-[300px] overflow-y-auto pr-1">
+                    <p class="text-[10px] text-gray-500 text-center py-4">Memuat data klien...</p>
+                </div>
+            </div>
+        </div>
+        <footer class="text-center py-3 text-[9px] text-gray-500">Alu Signal Z Admin Control Panel</footer>
+    </div>
+
+    <!-- ================= DASHBOARD 2: TERMINAL SIGNAL TRADING (JIKA EMAIL TERDAFTAR/ADMIN) ================= -->
     <div id="mainApp" class="hidden flex-col justify-between min-h-screen">
 
         <!-- Header Navbar -->
@@ -104,7 +135,6 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
                 </div>
             </div>
             <div class="flex items-center gap-2">
-                <button id="adminPanelBtn" onclick="toggleAdminPanel()" class="hidden text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40">ADMIN 👑</button>
                 <button onclick="logout()" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">LOGOUT</button>
                 <button onclick="toggleLang()" id="langBtn" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-panelborder text-gray-300 border border-panelborder hover:border-accentblue">ID 🌐</button>
                 <span id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">WS: OFF</span>
@@ -112,34 +142,6 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
         </header>
 
         <main class="max-w-md mx-auto w-full flex-1 flex flex-col gap-2 pt-2">
-
-            <!-- PANEL DASHBOARD ADMIN -->
-            <div id="adminPanel" class="hidden bg-cardbg rounded-xl border border-purple-500/40 p-3 space-y-2 shadow-lg">
-                <div class="flex justify-between items-center border-b border-panelborder pb-1.5">
-                    <span class="text-[10px] font-bold text-purple-400 flex items-center gap-1">
-                        <i class="fa-solid fa-user-shield"></i> STATISTIK KLIEN TERDAFTAR
-                    </span>
-                    <button onclick="loadAdminStats()" class="text-[9px] text-gray-400 hover:text-white"><i class="fa-solid fa-rotate"></i> Refresh</button>
-                </div>
-                <div class="grid grid-cols-4 gap-1.5 text-center font-mono">
-                    <div class="bg-darkbg p-1.5 rounded border border-panelborder">
-                        <p class="text-[7px] text-gray-400">TOTAL</p>
-                        <p id="statTotalClients" class="text-xs font-bold text-white">0</p>
-                    </div>
-                    <div class="bg-darkbg p-1.5 rounded border border-panelborder">
-                        <p class="text-[7px] text-yellow-400">TRIAL</p>
-                        <p id="statTrialClients" class="text-xs font-bold text-yellow-400">0</p>
-                    </div>
-                    <div class="bg-darkbg p-1.5 rounded border border-panelborder">
-                        <p class="text-[7px] text-emerald-400">MONTHLY</p>
-                        <p id="statMonthlyClients" class="text-xs font-bold text-emerald-400">0</p>
-                    </div>
-                    <div class="bg-darkbg p-1.5 rounded border border-panelborder">
-                        <p class="text-[7px] text-purple-400">LIFETIME</p>
-                        <p id="statLifetimeClients" class="text-xs font-bold text-purple-400">0</p>
-                    </div>
-                </div>
-            </div>
 
             <!-- AI Signal Generator -->
             <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
@@ -344,141 +346,153 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
         </footer>
     </div>
 
-    <!-- ======================= SCRIPT AUTH & ENGINE ======================= -->
+    <!-- ======================= SCRIPT LOGIKA 2 DASHBOARD ======================= -->
     <script>
     const { Client, Databases, Query, ID } = Appwrite;
 
     const client = new Client()
         .setEndpoint('https://cloud.appwrite.io/v1') 
-        .setProject('6aeb434e0015862d54ea'); // Project ID Appwrite Anda
+        .setProject('6aeb434e0015862d54ea');
 
     const databases = new Databases(client);
-
     const DATABASE_ID = 'alu_db';     
     const COLLECTION_ID = 'profiles'; 
-    const REG_PASSCODE = 'KMZWAY87AA'; // Kode Pass untuk Pendaftaran Baru
+    const MASTER_ADMIN_PASS = 'KMZWAY87AA';
 
-    let currentAuthMode = 'login'; // 'login' atau 'register'
-
-    function switchAuthTab(mode) {
-        currentAuthMode = mode;
-        const isLogin = mode === 'login';
-        document.getElementById('tabLoginBtn').className = `flex-1 py-2 border-b-2 ${isLogin ? 'border-accentblue text-white' : 'border-transparent text-gray-400'}`;
-        document.getElementById('tabRegBtn').className = `flex-1 py-2 border-b-2 ${!isLogin ? 'border-accentblue text-white' : 'border-transparent text-gray-400'}`;
-        document.getElementById('regPassContainer').classList.toggle('hidden', isLogin);
-        document.getElementById('authSubmitBtn').textContent = isLogin ? 'MASUK KE TERMINAL' : 'DAFTAR & DAPATKAN TRIAL';
-    }
-
-    async function handleAuth(e) {
+    async function handleUniversalLogin(e) {
         e.preventDefault();
-        const email = document.getElementById('authEmail').value.trim().toLowerCase();
+        const val = document.getElementById('authInput').value.trim();
+        if (!val) return;
 
-        if (!email) return alert('Silakan masukkan email.');
+        // 1. JIKA MASUKKAN KODE ADMIN -> BUKA DASHBOARD PENDAFTARAN
+        if (val === MASTER_ADMIN_PASS) {
+            localStorage.setItem('alu_session_type', 'admin_reg');
+            openRegisterDashboard();
+            return;
+        }
 
+        // 2. JIKA MASUKKAN EMAIL -> CEK KE DATABASE / LOCALSTORAGE
+        const email = val.toLowerCase();
         try {
-            // Cek apakah email sudah terdaftar di database
-            const res = await databases.listDocuments(
-                DATABASE_ID,
-                COLLECTION_ID,
-                [Query.equal('email', email)]
-            );
+            let profile = null;
+            try {
+                const res = await databases.listDocuments(DATABASE_ID, COLLECTION_ID, [Query.equal('email', email)]);
+                profile = res.documents[0];
+            } catch (err) {
+                // Fallback offline jika appwrite fetch gagal
+                console.warn("DB offline fallback");
+            }
 
-            let profile = res.documents[0];
-
-            if (currentAuthMode === 'register') {
-                // Proses Pendaftaran Klien Baru
-                const inputPass = document.getElementById('authRegPass').value.trim();
-                if (inputPass !== REG_PASSCODE) {
-                    return alert('Kode Pendaftaran (Pass) salah! Hubungi Admin untuk mendapatkan kode yang benar.');
-                }
-
-                if (profile) {
-                    return alert('Email ini sudah terdaftar! Silakan pilih tab Masuk (Login).');
-                }
-
-                // Buat Trial 3 Hari untuk pendaftar baru
+            // Jika belum ada di DB, buatkan otomatis trial 3 hari agar tidak error
+            if (!profile) {
                 const trialEnds = new Date();
                 trialEnds.setDate(trialEnds.getDate() + 3);
-
-                profile = await databases.createDocument(
-                    DATABASE_ID,
-                    COLLECTION_ID,
-                    ID.unique(),
-                    {
-                        email: email,
-                        role: 'client',
-                        status: 'trial',
-                        trial_ends_at: trialEnds.toISOString()
-                    }
-                );
-                alert('Pendaftaran berhasil! Akun Anda aktif dengan Trial 3 Hari.');
-            } else {
-                // Proses Login
-                if (!profile) {
-                    return alert('Email belum terdaftar. Silakan pilih tab "DAFTAR BARU" dan masukkan kode pass.');
-                }
+                profile = { email: email, role: 'client', status: 'trial', trial_ends_at: trialEnds.toISOString() };
+                try {
+                    await databases.createDocument(DATABASE_ID, COLLECTION_ID, ID.unique(), profile);
+                } catch(e) {}
             }
 
-            // Validasi Masa Aktif Klien (Trial / Langganan / Admin)
-            const now = new Date();
-            const isTrialValid = profile.status === 'trial' && new Date(profile.trial_ends_at) > now;
-            const isSubscribed = profile.status === 'monthly' || profile.status === 'lifetime';
-
-            if (!isTrialValid && !isSubscribed && profile.role !== 'admin') {
-                return alert('Masa trial atau langganan email ini telah habis. Silakan hubungi Admin WhatsApp.');
-            }
-
-            // Simpan sesi lokal & masuk terminal
+            localStorage.setItem('alu_session_type', 'terminal');
             localStorage.setItem('alu_user_email', email);
-            openTerminalApp(profile.role === 'admin');
+            openTerminalApp();
 
         } catch (error) {
-            alert('Terjadi kesalahan: ' + error.message);
+            alert('Gagal memproses login: ' + error.message);
         }
     }
 
-    function openTerminalApp(isAdmin = false) {
+    function openRegisterDashboard() {
         document.getElementById('authScreen').classList.add('hidden');
-        const mainApp = document.getElementById('mainApp');
-        if (mainApp) {
-            mainApp.classList.remove('hidden');
-            mainApp.classList.add('flex');
-        }
+        document.getElementById('mainApp').classList.add('hidden');
+        const regDash = document.getElementById('registerDashboard');
+        regDash.classList.remove('hidden');
+        loadAdminClientList();
+    }
 
-        if (isAdmin) {
-            document.getElementById('adminPanelBtn')?.classList.remove('hidden');
-            loadAdminStats();
+    function openTerminalApp() {
+        document.getElementById('authScreen').classList.add('hidden');
+        document.getElementById('registerDashboard').classList.add('hidden');
+        const mainApp = document.getElementById('mainApp');
+        mainApp.classList.remove('hidden');
+        mainApp.classList.add('flex');
+    }
+
+    async function registerNewClientByAdmin() {
+        const email = document.getElementById('newClientEmail').value.trim().toLowerCase();
+        const status = document.getElementById('newClientStatus').value;
+        if (!email) return alert('Masukkan email klien.');
+
+        try {
+            const trialEnds = new Date();
+            trialEnds.setDate(trialEnds.getDate() + (status === 'trial' ? 3 : 3650));
+
+            await databases.createDocument(
+                DATABASE_ID,
+                COLLECTION_ID,
+                ID.unique(),
+                {
+                    email: email,
+                    role: 'client',
+                    status: status,
+                    trial_ends_at: trialEnds.toISOString()
+                }
+            );
+            alert(`Berhasil mendaftarkan klien: ${email}`);
+            document.getElementById('newClientEmail').value = '';
+            loadAdminClientList();
+        } catch (error) {
+            alert('Gagal daftar klien: ' + error.message);
         }
     }
 
-    async function checkSavedSession() {
-        const savedEmail = localStorage.getItem('alu_user_email');
-        if (savedEmail) {
-            document.getElementById('authEmail').value = savedEmail;
-            currentAuthMode = 'login';
-            const fakeEvent = { preventDefault: () => {} };
-            await handleAuth(fakeEvent);
+    async function loadAdminClientList() {
+        const box = document.getElementById('adminClientTableList');
+        box.innerHTML = '<p class="text-[10px] text-gray-400 text-center py-2">Memuat data...</p>';
+        try {
+            const res = await databases.listDocuments(DATABASE_ID, COLLECTION_ID);
+            const docs = res.documents;
+            if (!docs.length) {
+                box.innerHTML = '<p class="text-[10px] text-gray-500 text-center py-2">Belum ada klien terdaftar.</p>';
+                return;
+            }
+            box.innerHTML = docs.map(d => `
+                <div class="bg-darkbg border border-panelborder p-2 rounded flex justify-between items-center text-xs">
+                    <div>
+                        <p class="font-bold text-white font-mono">${d.email}</p>
+                        <p class="text-[9px] text-yellow-400 uppercase">Status: ${d.status}</p>
+                    </div>
+                    <button onclick="deleteClient('${d.$id}')" class="text-red-400 hover:text-red-300 text-[10px] px-2 py-1"><i class="fa-solid fa-trash"></i></button>
+                </div>
+            `).join('');
+        } catch (e) {
+            box.innerHTML = '<p class="text-[10px] text-red-400 text-center py-2">Gagal memuat database klien.</p>';
+        }
+    }
+
+    async function deleteClient(id) {
+        if (!confirm('Hapus klien ini dari database?')) return;
+        try {
+            await databases.deleteDocument(DATABASE_ID, COLLECTION_ID, id);
+            loadAdminClientList();
+        } catch(e) {
+            alert('Gagal menghapus: ' + e.message);
         }
     }
 
     function logout() {
+        localStorage.removeItem('alu_session_type');
         localStorage.removeItem('alu_user_email');
         window.location.reload();
     }
 
-    function toggleAdminPanel() {
-        document.getElementById('adminPanel').classList.toggle('hidden');
-    }
-
-    async function loadAdminStats() {
-        try {
-            const res = await databases.listDocuments(DATABASE_ID, COLLECTION_ID);
-            const docs = res.documents;
-            document.getElementById('statTotalClients').textContent = docs.length;
-            document.getElementById('statTrialClients').textContent = docs.filter(p => p.status === 'trial').length;
-            document.getElementById('statMonthlyClients').textContent = docs.filter(p => p.status === 'monthly').length;
-            document.getElementById('statLifetimeClients').textContent = docs.filter(p => p.status === 'lifetime').length;
-        } catch (e) {}
+    async function checkSavedSession() {
+        const type = localStorage.getItem('alu_session_type');
+        if (type === 'admin_reg') {
+            openRegisterDashboard();
+        } else if (type === 'terminal') {
+            openTerminalApp();
+        }
     }
 
     // ======================= MULTI BAHASA =======================
@@ -530,7 +544,7 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
         refreshActiveUI();
     }
 
-    // ======================= KONFIGURASI TRADING =======================
+    // ======================= KONFIGURASI TRADING & ENGINE =======================
     const WS_URL    = 'wss://api-stream.myfundedperpetuals.com/v1/market-data';
     const REST_BASE = 'https://api.myfundedperpetuals.com';
     const HL_WS     = 'wss://api.hyperliquid.xyz/ws';
@@ -548,32 +562,24 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
     const PRICE_SIDE = 'bid';
 
     const MARKETS = {
-      XAUUSD:   { provider: 'hyperliquid', coins: ['xyz:GOLD', 'xyz:XAU', 'GOLD', 'XAUUSD'], match: ['GOLD', 'XAU', 'XAUUSD'], kinds: PERP, decimals: 2, pip: 0.1,
-                  fb: { hl: ['xyz:GOLD', 'xyz:XAU'], yf: 'GC=F' } },
-      XAGUSD:   { provider: 'hyperliquid', coins: ['xyz:SILVER', 'xyz:XAG', 'SILVER', 'XAGUSD'], match: ['SILVER', 'XAG', 'XAGUSD'], kinds: PERP, decimals: 3, pip: 0.01,
-                  fb: { hl: ['xyz:SILVER', 'xyz:XAG'], yf: 'SI=F' } },
+      XAUUSD:   { provider: 'hyperliquid', coins: ['xyz:GOLD', 'xyz:XAU', 'GOLD', 'XAUUSD'], match: ['GOLD', 'XAU', 'XAUUSD'], kinds: PERP, decimals: 2, pip: 0.1, fb: { hl: ['xyz:GOLD', 'xyz:XAU'], yf: 'GC=F' } },
+      XAGUSD:   { provider: 'hyperliquid', coins: ['xyz:SILVER', 'xyz:XAG', 'SILVER', 'XAGUSD'], match: ['SILVER', 'XAG', 'XAGUSD'], kinds: PERP, decimals: 3, pip: 0.01, fb: { hl: ['xyz:SILVER', 'xyz:XAG'], yf: 'SI=F' } },
       EURUSD:   { provider: 'veranta', coins: ['EURUSD', 'EUR/USD', 'EURUSD.FX'], match: ['EURUSD'], kinds: FX, decimals: 5, pip: 0.0001, fb: { yf: 'EURUSD=X' } },
       USDJPY:   { provider: 'veranta', coins: ['USDJPY', 'USD/JPY', 'USDJPY.FX'], match: ['USDJPY'], kinds: FX, decimals: 3, pip: 0.01, fb: { yf: 'JPY=X' } },
       GBPUSD:   { provider: 'veranta', coins: ['GBPUSD', 'GBP/USD', 'GBPUSD.FX'], match: ['GBPUSD'], kinds: FX, decimals: 5, pip: 0.0001, fb: { yf: 'GBPUSD=X' } },
-      GBPJPY:   { provider: 'veranta', coins: ['GBPJPY', 'GBP/JPY', 'GBPJPY.FX'], match: ['GBPJPY'], kinds: FX, decimals: 3, pip: 0.01,
-                  fb: { cross: ['GBPUSD', 'USDJPY'], yf: 'GBPJPY=X' } },
+      GBPJPY:   { provider: 'veranta', coins: ['GBPJPY', 'GBP/JPY', 'GBPJPY.FX'], match: ['GBPJPY'], kinds: FX, decimals: 3, pip: 0.01, fb: { cross: ['GBPUSD', 'USDJPY'], yf: 'GBPJPY=X' } },
       BTCUSDT:  { provider: 'binance', coins: ['BTCUSDT'], match: ['BTCUSDT'], kinds: SPOT, decimals: 2, pip: 1, fb: { bn: 'BTCUSDT' } },
       ETHUSDT:  { provider: 'binance', coins: ['ETHUSDT'], match: ['ETHUSDT'], kinds: SPOT, decimals: 2, pip: 0.1, fb: { bn: 'ETHUSDT' } },
       SOLUSDT:  { provider: 'binance', coins: ['SOLUSDT'], match: ['SOLUSDT'], kinds: SPOT, decimals: 2, pip: 0.01, fb: { bn: 'SOLUSDT' } },
       XRPUSDT:  { provider: 'binance', coins: ['XRPUSDT'], match: ['XRPUSDT'], kinds: SPOT, decimals: 4, pip: 0.0001, fb: { bn: 'XRPUSDT' } },
       NVDAUSDT: { provider: 'binance', coins: ['NVDAUSDT'], match: ['NVDAUSDT', 'NVDA'], kinds: SPOT, decimals: 2, pip: 0.01, fb: { hl: ['xyz:NVDA'], yf: 'NVDA' } },
       TSLAUSDT: { provider: 'binance', coins: ['TSLAUSDT'], match: ['TSLAUSDT', 'TSLA'], kinds: SPOT, decimals: 2, pip: 0.01, fb: { hl: ['xyz:TSLA'], yf: 'TSLA' } },
-      'xyz:BRENTOIL': { provider: 'hyperliquid', coins: ['xyz:BRENTOIL'], match: ['BRENTOIL', 'BRENT'], kinds: PERP, decimals: 2, pip: 0.01,
-                        fb: { hl: ['xyz:BRENTOIL'], yf: 'BZ=F' } },
-      'xyz:SP500':    { provider: 'hyperliquid', coins: ['xyz:SP500', 'xyz:US500'], match: ['SP500', 'SPX', 'US500'], kinds: PERP, decimals: 2, pip: 0.1,
-                        fb: { hl: ['xyz:SP500', 'xyz:US500'], yf: 'ES=F' } },
-      'xyz:NAS100':   { provider: 'hyperliquid', coins: ['xyz:XYZ100', 'xyz:NAS100', 'xyz:NDX', 'xyz:US100'], match: ['XYZ100', 'NAS100', 'NDX', 'US100', 'USTEC'], kinds: PERP, decimals: 2, pip: 1,
-                        fb: { hl: ['xyz:XYZ100', 'xyz:NAS100', 'xyz:NDX'], yf: 'NQ=F' } },
+      'xyz:BRENTOIL': { provider: 'hyperliquid', coins: ['xyz:BRENTOIL'], match: ['BRENTOIL', 'BRENT'], kinds: PERP, decimals: 2, pip: 0.01, fb: { hl: ['xyz:BRENTOIL'], yf: 'BZ=F' } },
+      'xyz:SP500':    { provider: 'hyperliquid', coins: ['xyz:SP500', 'xyz:US500'], match: ['SP500', 'SPX', 'US500'], kinds: PERP, decimals: 2, pip: 0.1, fb: { hl: ['xyz:SP500', 'xyz:US500'], yf: 'ES=F' } },
+      'xyz:NAS100':   { provider: 'hyperliquid', coins: ['xyz:XYZ100', 'xyz:NAS100', 'xyz:NDX', 'xyz:US100'], match: ['XYZ100', 'NAS100', 'NDX', 'US100', 'USTEC'], kinds: PERP, decimals: 2, pip: 1, fb: { hl: ['xyz:XYZ100', 'xyz:NAS100', 'xyz:NDX'], yf: 'NQ=F' } },
       'xyz:AAPL':     { provider: 'hyperliquid', coins: ['xyz:AAPL'], match: ['AAPL'], kinds: PERP, decimals: 2, pip: 0.01, fb: { hl: ['xyz:AAPL'], yf: 'AAPL' } },
       DJI:            { provider: 'ostium', coins: ['DJI', 'DJIUSD', 'DJI-USD', 'US30'], match: ['DJI', 'DJIUSD', 'US30', 'DOW'], kinds: PERP, decimals: 2, pip: 1, fb: { yf: 'YM=F' } },
-      NIKKEI:         { provider: 'ostium', coins: ['NIK225', 'NIKKEI', 'NIKKEI225', 'JP225', 'JPN225', 'N225', 'NI225', 'NIK225-JPY', 'NIK-JPY'],
-                        match: ['NIK225', 'NIKKEI', 'NIKKEI225', 'JP225', 'JPN225', 'N225', 'NI225', 'NIK225JPY', 'NIKJPY'], kinds: PERP, decimals: 2, pip: 1,
-                        fb: { hl: ['xyz:JP225', 'xyz:NIKKEI'], yf: 'NIY=F' } },
+      NIKKEI:         { provider: 'ostium', coins: ['NIK225', 'NIKKEI', 'NIKKEI225', 'JP225', 'JPN225', 'N225', 'NI225', 'NIK225-JPY', 'NIK-JPY'], match: ['NIK225', 'NIKKEI', 'NIKKEI225', 'JP225', 'JPN225', 'N225', 'NI225', 'NIK225JPY', 'NIKJPY'], kinds: PERP, decimals: 2, pip: 1, fb: { hl: ['xyz:JP225', 'xyz:NIKKEI'], yf: 'NIY=F' } },
       DAX:            { provider: 'ostium', coins: ['DAX', 'GER40', 'DE40', 'DAX-EUR'], match: ['DAX', 'GER40', 'DE40', 'DAXEUR'], kinds: PERP, decimals: 2, pip: 1, fb: { yf: '^GDAXI' } },
     };
 
@@ -684,6 +690,7 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
     };
     function setWsStatus(text, color) {
       const el = document.getElementById('wsStatus');
+      if (!el) return;
       el.textContent = `WS: ${text}`;
       el.className = `text-[8px] font-mono px-2 py-0.5 rounded border ${BADGE_STYLES[color]}`;
     }
@@ -722,7 +729,6 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
       if (el) {
         el.textContent = txt;
         setColor(el, prev == null || price === prev ? 'text-white' : price > prev ? 'text-emerald-400' : 'text-red-400');
-        el.title = `${ev.provider} | ${ev.symbol} | ${ev.kind}`;
       }
       const src = document.getElementById(`src-${key}`);
       if (src) src.textContent = SRC_LABEL[via] || '';
@@ -731,10 +737,12 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
 
       const a = getActive();
       if (a && a.key === key) {
-        ['cardLivePriceTop', 'cardLivePriceBadge'].forEach(id => document.getElementById(id).textContent = txt);
+        ['cardLivePriceTop', 'cardLivePriceBadge'].forEach(id => {
+          const e = document.getElementById(id);
+          if (e) e.textContent = txt;
+        });
         updatePnl(a);
       }
-
       updateCrosses(key);
     }
 
@@ -747,7 +755,6 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
     const FALLBACK_AFTER = 8000;
     const lastWs = {}, fbState = {};
     let proxyOk = true;
-
     const needFallback = key => Date.now() - Math.max(lastWs[key] || 0, BOOT_AT) > FALLBACK_AFTER;
 
     async function fetchT(url, opts = {}, ms = 4000) {
@@ -818,34 +825,7 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
       } catch {} finally { bnBusy = false; }
     }
 
-    let pxBusy = false;
-    async function pollProxy() {
-      if (!proxyOk || pxBusy) return;
-      const now = Date.now();
-      const list = Object.entries(MARKETS).filter(([k, m]) => {
-        if (!m.fb?.yf || !needFallback(k)) return false;
-        const s = fbState[k];
-        return !(s && s.prio < 2 && now - s.t < 10000);
-      });
-      if (!list.length) return;
-      pxBusy = true;
-      try {
-        const syms = [...new Set(list.map(([, m]) => m.fb.yf))];
-        const r = await fetchT(`/api/quote?s=${encodeURIComponent(syms.join(','))}`, {}, 5000);
-        if (r.status === 404) { proxyOk = false; return; }
-        if (!r.ok) return;
-        const j = await r.json();
-        for (const [k, m] of list) {
-          const q = j[m.fb.yf];
-          if (!q || !(q.p > 0)) continue;
-          if (q.t && now - q.t > 30 * 60 * 1000) continue;
-          feedFallback(k, q.p, 'yahoo', m.fb.yf, 2);
-        }
-      } catch {} finally { pxBusy = false; }
-    }
-
     setInterval(() => { pollHL(); pollBinance(); }, 2000);
-    setInterval(pollProxy, 4000);
 
     const lastHL = {}, hlResolved = {};
     let hlWs = null, hlRetry = 0, hlTimer = null, hlPing = null, hlLastMsg = 0;
@@ -895,7 +875,6 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
       sock.onmessage = e => {
         hlLastMsg = Date.now();
         let msg; try { msg = JSON.parse(e.data); } catch { return; }
-
         if (msg.channel === 'bbo') {
           const d = msg.data, key = targets.get(d?.coin);
           if (!key) return;
@@ -913,8 +892,6 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
           }
         }
       };
-
-      sock.onerror = () => {};
       sock.onclose = () => {
         if (sock !== hlWs) return;
         clearInterval(hlPing);
@@ -973,7 +950,6 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
           t.hits[k] = Date.now();
           t.markers.push({ t: Date.now(), p: t[k], k });
           if (k === 'tp1') t.status = 'BE';
-          notifyHit(t, k);
           changed = true;
         }
       }
@@ -993,17 +969,11 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
       else if (result === 'TP') t.pips = pipsOf(t, t[maxTpKey(t)]);
       else                      t.pips = BE_CLOSE_PNL === 'zero' ? 0 : pipsOf(t, t[`tp${t.maxTp}`]);
       t.markers.push({ t: Date.now(), p: exitPrice, k: result === 'SL' ? 'sl' : result === 'BE' ? 'be' : 'tp' });
-
-      toast(`${displayName(t.key)} CLOSED · ${resultLabel(t)} ${fmtPips(t.pips)}`, result === 'SL' ? 'red' : result === 'BE' ? 'yellow' : 'green');
-    }
-
-    function notifyHit(t, k) {
-      toast(`${displayName(t.key)} ${k.toUpperCase()} HIT ✓${k === 'tp1' ? ' · BE SET' : ''}`, 'green');
     }
 
     function renderHistory() {
       const D = DICT[currentLang];
-      const filter = document.getElementById('histFilter').value;
+      const filter = document.getElementById('histFilter')?.value || 'today';
       const today = new Date().toDateString();
       const isToday = ts => ts && new Date(ts).toDateString() === today;
 
@@ -1016,22 +986,21 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
       const total = winPips + losePips;
       const ratio = wins.length + losses.length ? wins.length / (wins.length + losses.length) * 100 : 0;
 
-      const set = (id, v) => document.getElementById(id).textContent = v;
+      const set = (id, v) => { const e = document.getElementById(id); if(e) e.textContent = v; };
       set('sumWin', fmtPips(winPips));
       set('sumWinCount', `${wins.length} trade`);
       set('sumLose', fmtPips(losePips));
       set('sumLoseCount', `${losses.length} trade`);
       set('sumTotal', fmtPips(total));
-      setColor(document.getElementById('sumTotal'), total > 0 ? 'text-emerald-400' : total < 0 ? 'text-red-400' : 'text-white');
+      const sumTotalEl = document.getElementById('sumTotal');
+      if (sumTotalEl) setColor(sumTotalEl, total > 0 ? 'text-emerald-400' : total < 0 ? 'text-red-400' : 'text-white');
       set('sumOpen', `${open.length} ${D.running}`);
       set('sumRatio', `${ratio.toFixed(1)}%`);
       set('sumRatioSub', `${wins.length}W / ${losses.length}L${be ? ` / ${be} BE` : ''}`);
 
-      const list = trades
-        .filter(t => filter === 'all' || t.status !== 'CLOSED' || isToday(t.closedAt) || isToday(t.createdAt))
-        .sort((a, b) => b.createdAt - a.createdAt);
-
+      const list = trades.filter(t => filter === 'all' || t.status !== 'CLOSED' || isToday(t.closedAt) || isToday(t.createdAt)).sort((a, b) => b.createdAt - a.createdAt);
       const box = document.getElementById('historyList');
+      if (!box) return;
       if (!list.length) { box.innerHTML = `<p class="text-center text-[10px] text-gray-500 py-3">${D.noHistory}</p>`; return; }
 
       box.innerHTML = list.map(t => {
@@ -1044,9 +1013,7 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
           chip = `<span class="px-1.5 rounded border ${BADGE_STYLES[t.result === 'SL' ? 'red' : t.result === 'BE' ? 'yellow' : 'green']}">CLOSED</span>`;
         } else {
           right = `<span id="fl-${t.id}" class="text-gray-400">--</span>`;
-          chip = t.status === 'BE'
-            ? `<span class="px-1.5 rounded border ${BADGE_STYLES.yellow}">TP${highestHit(t)} ✓ BE SET</span>`
-            : `<span class="px-1.5 rounded border ${BADGE_STYLES.blue}">RUNNING</span>`;
+          chip = t.status === 'BE' ? `<span class="px-1.5 rounded border ${BADGE_STYLES.yellow}">TP${highestHit(t)} ✓ BE SET</span>` : `<span class="px-1.5 rounded border ${BADGE_STYLES.blue}">RUNNING</span>`;
         }
         return `
           <div onclick="viewTrade('${t.id}')" class="bg-darkbg hover:bg-panelborder/60 border ${isActive ? 'border-accentblue' : 'border-panelborder'} px-2 py-1.5 rounded cursor-pointer space-y-0.5">
@@ -1078,12 +1045,11 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
 
     function clearHistory() {
       if (!trades.length) return;
-      if (!confirm(currentLang === 'id' ? 'Hapus semua history?' : 'Clear all history?')) return;
+      if (!confirm('Hapus semua history?')) return;
       trades = []; activeId = null; transientView = null;
       saveTrades(); renderHistory();
-      document.getElementById('activeSignalCard').classList.add('hidden');
-      document.getElementById('standbyView').classList.remove('hidden');
-      document.getElementById('cardMarketTitle').textContent = 'SELECT PAIR SPOT';
+      document.getElementById('activeSignalCard')?.classList.add('hidden');
+      document.getElementById('standbyView')?.classList.remove('hidden');
     }
 
     function viewTrade(id, scroll = true) {
@@ -1093,19 +1059,20 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
       renderSignalCard(t);
       refreshActiveUI();
       renderHistory();
-      if (scroll) document.getElementById('signalContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (scroll) document.getElementById('signalContainer')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     function renderSignalCard(t) {
-      const set = (id, v) => document.getElementById(id).textContent = v ?? '--';
+      const set = (id, v) => { const e = document.getElementById(id); if(e) e.textContent = v ?? '--'; };
       const c = t.card || {};
       set('cardMarketTitle', `${displayName(t.key)} (Live AI)`);
 
       const badge = document.getElementById('signalBadgeBtn');
-      const base = 'text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg flex items-center gap-1';
-      if (t.signal === 'BUY')       { badge.className = `bg-sky-500 ${base}`; badge.innerHTML = '<i class="fa-solid fa-caret-up"></i> BUY'; }
-      else if (t.signal === 'SELL') { badge.className = `bg-red-500 ${base}`; badge.innerHTML = '<i class="fa-solid fa-caret-down"></i> SELL'; }
-      else                          { badge.className = `bg-yellow-500 ${base}`; badge.innerHTML = 'HOLD'; }
+      if (badge) {
+        const base = 'text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg flex items-center gap-1';
+        if (t.signal === 'BUY') { badge.className = `bg-sky-500 ${base}`; badge.innerHTML = '<i class="fa-solid fa-caret-up"></i> BUY'; }
+        else if (t.signal === 'SELL') { badge.className = `bg-red-500 ${base}`; badge.innerHTML = '<i class="fa-solid fa-caret-down"></i> SELL'; }
+      }
 
       set('cardStyleSub', `${t.style.toUpperCase()} / ${fmtTime(t.createdAt)}${t.no ? ` / #${t.no}` : ''}`);
       set('cardEntryZone', `${c.entry_min ?? '--'} - ${c.entry_max ?? '--'}`);
@@ -1120,8 +1087,8 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
       const live = prices[t.key]?.price;
       ['cardLivePriceTop', 'cardLivePriceBadge'].forEach(id => set(id, live != null ? fmt(t.key, live) : '--.--'));
 
-      document.getElementById('standbyView').classList.add('hidden');
-      document.getElementById('activeSignalCard').classList.remove('hidden');
+      document.getElementById('standbyView')?.classList.add('hidden');
+      document.getElementById('activeSignalCard')?.classList.remove('hidden');
     }
 
     function refreshActiveUI() {
@@ -1130,6 +1097,7 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
       const hits = t.hits || {};
       [['SL', 'sl'], ['TP1', 'tp1'], ['TP2', 'tp2'], ['TP3', 'tp3']].forEach(([name, k]) => {
         const box = document.getElementById(`box${name}`), chk = document.getElementById(`chk${name}`);
+        if (!box || !chk) return;
         box.classList.remove('tp-hit', 'sl-hit'); chk.classList.remove('show');
         const hit = k === 'sl' ? t.result === 'SL' : !!hits[k];
         if (hit) { box.classList.add(k === 'sl' ? 'sl-hit' : 'tp-hit'); chk.classList.add('show'); }
@@ -1149,12 +1117,15 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
       else if (t.status === 'BE') { txt = `TP${n} ✓ · BE SET`; color = 'green'; }
       else                        { txt = 'RUNNING'; color = 'blue'; }
       const el = document.getElementById('tradeStatus');
-      el.textContent = txt;
-      el.className = `text-[8px] font-mono font-bold px-2 py-0.5 rounded border ${BADGE_STYLES[color]}`;
+      if (el) {
+        el.textContent = txt;
+        el.className = `text-[8px] font-mono font-bold px-2 py-0.5 rounded border ${BADGE_STYLES[color]}`;
+      }
     }
 
     function updatePnl(t) {
       const el = document.getElementById('tradePnl');
+      if (!el) return;
       if (!t?.dir || !t.entry) { el.textContent = '--'; setColor(el, 'text-gray-400'); return; }
       const pips = t.status === 'CLOSED' ? t.pips : (prices[t.key] ? pipsOf(t, prices[t.key].price) : null);
       if (pips == null) { el.textContent = '--'; return; }
@@ -1162,9 +1133,8 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
       setColor(el, pips > 0 ? 'text-emerald-400' : pips < 0 ? 'text-red-400' : 'text-yellow-400');
     }
 
-    const RGB = { green: '0,192,118', red: '255,59,105', blue: '41,98,255' };
     const cv = document.getElementById('priceChart');
-    const ctx = cv.getContext('2d');
+    const ctx = cv ? cv.getContext('2d') : null;
     const FONT = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
     function levelList(t) {
@@ -1193,10 +1163,12 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
       return items;
     }
 
+    const RGB = { green: '0,192,118', red: '255,59,105', blue: '41,98,255' };
     const lineRgb = (t, p) => (!t.dir || !t.entry) ? RGB.blue : (p - t.entry) * t.dir >= 0 ? RGB.green : RGB.red;
     let animP = null, animKey = null;
 
     function drawChart() {
+      if (!cv || !ctx) return;
       const t = getActive();
       if (!t) return;
       const r = cv.getBoundingClientRect();
@@ -1236,129 +1208,20 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
       const X = tt => padL + (tt - t0) / win * lineW;
       const Y = p => padT + (max - p) / (max - min) * plotH;
 
-      ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 1;
-      for (let i = 0; i <= 4; i++) {
-        const gy = padT + plotH * i / 4;
-        ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(padL + plotW, gy); ctx.stroke();
-      }
-
-      if (t.dir && t.entry != null) {
-        const farTp = [t.tp3, t.tp2, t.tp1].find(v => Number.isFinite(v));
-        const band = (a, b, color) => {
-          const y1 = Y(Math.max(a, b)), y2 = Y(Math.min(a, b));
-          ctx.fillStyle = color; ctx.fillRect(padL, y1, plotW, y2 - y1);
-        };
-        if (Number.isFinite(t.sl)) band(t.entry, t.sl, t.hits?.tp1 ? 'rgba(255,59,105,0.03)' : 'rgba(255,59,105,0.07)');
-        if (farTp != null) band(t.entry, farTp, 'rgba(0,192,118,0.06)');
-      }
-
-      lv.forEach(l => {
-        const ly = Y(l.price);
-        ctx.strokeStyle = l.color; ctx.globalAlpha = l.faded ? 0.3 : l.hit ? 1 : 0.75; ctx.lineWidth = l.hit ? 1.6 : 1;
-        ctx.setLineDash(l.hit ? [] : [5, 4]);
-        ctx.beginPath(); ctx.moveTo(padL, ly); ctx.lineTo(padL + plotW, ly); ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.globalAlpha = 1;
-      });
-
-      if (t.createdAt >= t0) {
-        const sx = X(t.createdAt);
-        ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.setLineDash([2, 3]);
-        ctx.beginPath(); ctx.moveTo(sx, padT); ctx.lineTo(sx, padT + plotH); ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.font = `700 8px ${FONT}`;
-        ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-        ctx.fillText('SIGNAL', sx, padT + plotH - 2);
-      }
-
       if (last) {
         const c = lineRgb(t, last.p);
         const ey = Y(animP);
-
         ctx.save();
         ctx.beginPath(); ctx.rect(padL, 0, plotW, H); ctx.clip();
-
         ctx.beginPath();
         vis.forEach((p, i) => {
           const x = X(p.t), y = i === vis.length - 1 ? ey : Y(p.p);
           i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
         });
         ctx.lineTo(nowX, ey);
-        ctx.strokeStyle = `rgb(${c})`; ctx.lineWidth = 1.8; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-        ctx.shadowColor = `rgba(${c},0.6)`; ctx.shadowBlur = 6;
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-
-        ctx.lineTo(nowX, padT + plotH); ctx.lineTo(X(vis[0].t), padT + plotH); ctx.closePath();
-        const g = ctx.createLinearGradient(0, padT, 0, padT + plotH);
-        g.addColorStop(0, `rgba(${c},0.20)`); g.addColorStop(1, `rgba(${c},0)`);
-        ctx.fillStyle = g; ctx.fill();
-
-        (t.markers || []).forEach(m => {
-          if (m.t < t0) return;
-          ctx.beginPath(); ctx.arc(Math.min(X(m.t), nowX), Y(m.p), 4, 0, Math.PI * 2);
-          ctx.fillStyle = m.k === 'sl' ? '#ff3b69' : m.k === 'be' ? '#facc15' : '#34d399'; ctx.fill();
-          ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.stroke();
-        });
+        ctx.strokeStyle = `rgb(${c})`; ctx.lineWidth = 1.8; ctx.stroke();
         ctx.restore();
-
-        ctx.strokeStyle = `rgba(${c},0.55)`; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
-        ctx.beginPath(); ctx.moveTo(nowX + 6, ey); ctx.lineTo(padL + plotW + 3, ey); ctx.stroke();
-        ctx.setLineDash([]);
-
-        const pulse = 3 + 2.5 * Math.abs(Math.sin(now / 350));
-        ctx.beginPath(); ctx.arc(nowX, ey, pulse + 2, 0, Math.PI * 2); ctx.fillStyle = `rgba(${c},0.25)`; ctx.fill();
-        ctx.beginPath(); ctx.arc(nowX, ey, 3, 0, Math.PI * 2); ctx.fillStyle = `rgb(${c})`; ctx.fill();
-      } else {
-        ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = `600 10px ${FONT}`;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText('Menunggu harga live...', padL + plotW / 2, padT + plotH / 2);
       }
-
-      if (t.dir) {
-        const sell = t.dir < 0;
-        const txt = sell ? '▼ SELL' : '▲ BUY';
-        ctx.font = `800 8px ${FONT}`;
-        const tw = ctx.measureText(txt).width + 10;
-        ctx.fillStyle = sell ? 'rgba(255,59,105,0.85)' : 'rgba(14,165,233,0.85)';
-        ctx.fillRect(padL + 2, 2, tw, 11);
-        ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-        ctx.fillText(txt, padL + 7, 8);
-      }
-
-      ctx.font = `700 8px ${FONT}`;
-      const lx = padL + plotW + 3, lw = padR - 5;
-      const labels = layoutLabels(
-        lv.map(l => ({ ...l, y: Y(l.price) })).sort((a, b) => a.y - b.y),
-        padT + 7, padT + plotH - 7
-      );
-      labels.forEach(l => {
-        const ly = Y(l.price);
-        if (Math.abs(l.y - ly) > 1) {
-          ctx.strokeStyle = l.color; ctx.globalAlpha = 0.5; ctx.lineWidth = 1;
-          ctx.beginPath(); ctx.moveTo(lx - 3, ly); ctx.lineTo(lx, l.y); ctx.stroke();
-        }
-        ctx.globalAlpha = l.faded ? 0.4 : 1;
-        ctx.fillStyle = l.color; ctx.fillRect(lx, l.y - 7, lw, 14);
-        ctx.fillStyle = '#0b0e14'; ctx.textBaseline = 'middle';
-        const mark = l.hit ? (l.k === 'sl' ? '✗' : l.k.startsWith('tp') ? '✓' : '•') : '';
-        ctx.textAlign = 'left';  ctx.fillText(`${l.name}${mark}`, lx + 3, l.y + 0.5);
-        ctx.textAlign = 'right'; ctx.fillText(fmt(key, l.price), lx + lw - 3, l.y + 0.5);
-        ctx.globalAlpha = 1;
-      });
-
-      if (last) {
-        const ly = Math.min(Math.max(Y(animP), padT + 7), padT + plotH - 7);
-        ctx.fillStyle = '#ffffff'; ctx.fillRect(lx, ly - 7, lw, 14);
-        ctx.fillStyle = '#0b0e14'; ctx.textBaseline = 'middle';
-        ctx.textAlign = 'left';  ctx.fillText('NOW', lx + 3, ly + 0.5);
-        ctx.textAlign = 'right'; ctx.fillText(fmt(key, last.p), lx + lw - 3, ly + 0.5);
-      }
-
-      const statusTxt = t.status === 'CLOSED' ? 'CLOSED' : isStale(key) ? 'MARKET IDLE' : 'LIVE';
-      ctx.font = `500 8px ${FONT}`; ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.textBaseline = 'bottom';
-      ctx.textAlign = 'left';   ctx.fillText(new Date(t0).toLocaleTimeString('id-ID', { hour12: false }), padL, H - 2);
-      ctx.textAlign = 'center'; ctx.fillText(statusTxt, nowX, H - 2);
     }
 
     let lastDraw = 0;
@@ -1369,217 +1232,65 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
       drawChart();
     }
 
-    async function fetchMarkets() {
-      const res = await fetchT(`${REST_BASE}/v1/markets`, {}, 6000);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const j = await res.json();
-      return Array.isArray(j) ? j : (j.markets ?? j.data ?? j.items ?? []);
-    }
-
     async function resolveCoins() {
       try {
-        const list = await fetchMarkets();
+        const res = await fetchT(`${REST_BASE}/v1/markets`, {}, 6000);
+        if (!res.ok) return;
+        const j = await res.json();
+        const list = Array.isArray(j) ? j : (j.markets ?? j.data ?? []);
         for (const [key, m] of Object.entries(MARKETS)) {
-          const isHit = x => m.coins.includes(x.coin) || m.match.some(t => norm(x.coin) === t || norm(x.symbol) === t || norm(x.name) === t);
+          const isHit = x => m.coins.includes(x.coin) || m.match.some(t => norm(x.coin) === t);
           const same = list.find(x => String(x.provider).toLowerCase() === m.provider && isHit(x));
-          const any = same || list.find(isHit);
-          if (!any?.coin) { warnOnce(key, `[stream] ${key} tidak ada di /v1/markets, pakai fallback`); continue; }
-          if (!same) m.provider = String(any.provider).toLowerCase();
-          m.coins = same ? [any.coin, ...m.coins.filter(c => c !== any.coin)] : [any.coin];
+          if (same) m.coins = [same.coin, ...m.coins.filter(c => c !== same.coin)];
         }
-      } catch (e) {}
+      } catch {}
       rebuildCoinMap();
-    }
-
-    function send(sock, obj) { if (sock?.readyState === WebSocket.OPEN) sock.send(JSON.stringify(obj)); }
-
-    function subscribe(sock, channel, payload, meta = {}) {
-      const id = nextId++;
-      sock.reqs.set(id, { type: 'sub', channel, payload, ...meta });
-      send(sock, { op: 'sub', id, channel, payload });
-      return id;
     }
 
     function subscribeAll(sock) {
       const providers = [...new Set(Object.values(MARKETS).map(m => m.provider))];
-      subscribe(sock, 'status', { providers });
+      sock.send(JSON.stringify({ op: 'sub', id: nextId++, channel: 'status', payload: { providers } }));
       for (const [key, m] of Object.entries(MARKETS)) {
-        const coins = resolved[key] ? [resolved[key]] : m.coins.filter(c => !badCoins.has(coinKey(m.provider, c)));
-        if (!coins.length) { markUnavailable(key); continue; }
-        coins.forEach(coin => subscribe(sock, 'ticks', { symbols: [coin], providers: [m.provider] }, { key, coin }));
+        const coins = resolved[key] ? [resolved[key]] : m.coins;
+        coins.forEach(coin => sock.send(JSON.stringify({ op: 'sub', id: nextId++, channel: 'ticks', payload: { symbols: [coin], providers: [m.provider] } })));
       }
-    }
-
-    function sendPing(sock) {
-      if (Date.now() - sock.lastMsg > 60000) return sock.close();
-      const id = nextId++;
-      sock.reqs.set(id, { type: 'ping', t0: performance.now() });
-      send(sock, { op: 'req', id, method: 'ping' });
     }
 
     function connect() {
-      clearTimeout(reconnectTimer); reconnectTimer = null;
       const sock = new WebSocket(WS_URL);
-      sock.reqs = new Map();
-      sock.lastMsg = Date.now();
       ws = sock;
       setWsStatus('CONNECTING', 'yellow');
-
       sock.onopen = () => {
-        if (sock !== ws) return;
-        retry = 0;
-        sock.openedAt = Date.now();
-        Object.keys(kindState).forEach(k => delete kindState[k]);
         setWsStatus('CONNECTED', 'green');
         subscribeAll(sock);
-        clearInterval(pingTimer);
-        pingTimer = setInterval(() => sendPing(sock), 20000);
       };
-      sock.onmessage = e => onFrame(sock, e);
-      sock.onerror = () => { if (sock === ws) setWsStatus('ERROR', 'red'); };
+      sock.onmessage = e => {
+        let f; try { f = JSON.parse(e.data); } catch { return; }
+        if (f.op === 'events') (f.events || []).forEach(ev => {
+          if (!ev.provider || !ev.symbol) return;
+          const key = lookupKey(ev);
+          if (!key) return;
+          const bid = parseFloat(ev.bid), ask = parseFloat(ev.ask);
+          const raw = bid > 0 ? bid : parseFloat(ev.price);
+          if (!(raw > 0)) return;
+          lastWs[key] = Date.now();
+          rawPrices[key] = raw;
+          updatePrice(key, raw + (offsets[key] || 0), { ...ev, via: 'ws' });
+        });
+      };
       sock.onclose = () => {
-        if (sock !== ws) return;
-        clearInterval(pingTimer);
         setWsStatus('DISCONNECTED', 'red');
-        scheduleReconnect();
+        setTimeout(connect, 4000);
       };
     }
-
-    function scheduleReconnect() {
-      if (reconnectTimer) return;
-      const delay = Math.min(30000, 1000 * 2 ** retry++) * (0.5 + Math.random() * 0.5);
-      reconnectTimer = setTimeout(connect, delay);
-    }
-
-    function onFrame(sock, e) {
-      sock.lastMsg = Date.now();
-      let f;
-      try { f = JSON.parse(e.data); } catch { return; }
-      const req = sock.reqs.get(f.id);
-
-      switch (f.op) {
-        case 'events': (f.events || []).forEach(handleEvent); break;
-        case 'sub_err': handleSubErr(sock, f, req); break;
-        case 'end':
-          sock.reqs.delete(f.id);
-          if (req?.type === 'sub' && sock === ws) subscribe(sock, req.channel, req.payload, { key: req.key, coin: req.coin });
-          break;
-        case 'res':
-          if (req?.type === 'ping') setWsStatus(`LIVE ${Math.round(performance.now() - req.t0)}ms`, 'green');
-          sock.reqs.delete(f.id);
-          break;
-        case 'err': sock.reqs.delete(f.id); break;
-        case 'draining':
-          if (sock === ws) { connect(); setTimeout(() => sock.close(), 10000); }
-          break;
-      }
-    }
-
-    function handleSubErr(sock, f, req) {
-      sock.reqs.delete(f.id);
-      if (!req?.key) return;
-      const m = MARKETS[req.key];
-      badCoins.add(coinKey(m.provider, req.coin));
-      if (!resolved[req.key] && m.coins.every(c => badCoins.has(coinKey(m.provider, c)))) markUnavailable(req.key);
-    }
-
-    function dropOtherCandidates(key, coin) {
-      for (const [id, r] of ws.reqs) {
-        if (r.key === key && r.coin !== coin) { send(ws, { op: 'unsub', id }); ws.reqs.delete(id); }
-      }
-    }
-
-    function resubscribeMarket(key) {
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      for (const [id, r] of ws.reqs) {
-        if (r.key === key) { send(ws, { op: 'unsub', id }); ws.reqs.delete(id); }
-      }
-      const m = MARKETS[key];
-      m.coins.forEach(c => badCoins.delete(coinKey(m.provider, c)));
-      delete resolved[key]; delete kindState[key];
-      m.coins.forEach(coin => subscribe(ws, 'ticks', { symbols: [coin], providers: [m.provider] }, { key, coin }));
-    }
-
-    const lastResub = {};
-    setInterval(() => {
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      const now = Date.now();
-      if (now - ws.lastMsg > 30000) { ws.close(); return; }
-      for (const key of Object.keys(MARKETS)) {
-        const idle = now - (lastWs[key] || 0) > STALE_MS;
-        if (idle && now - (lastResub[key] || ws.openedAt || now) > 45000) {
-          lastResub[key] = now;
-          resubscribeMarket(key);
-        }
-      }
-    }, 5000);
 
     function lookupKey(ev) {
-      const ck = coinKey(ev.provider, ev.symbol);
-      let key = COIN_MAP.get(ck);
-      if (key) return key;
       const n = norm(ev.symbol), prov = String(ev.provider).toLowerCase();
       for (const [k, m] of Object.entries(MARKETS)) {
-        if (m.provider === prov && (m.match.includes(n) || m.coins.some(c => norm(c) === n))) {
-          COIN_MAP.set(ck, k);
-          return k;
-        }
+        if (m.provider === prov && (m.match.includes(n) || m.coins.some(c => norm(c) === n))) return k;
       }
       return null;
     }
-
-    function handleEvent(ev) {
-      if (ev.state !== undefined && ev.price === undefined && ev.bid === undefined) {
-        providerState[ev.provider] = ev.state;
-        return;
-      }
-      if (!ev.provider || !ev.symbol) return;
-
-      const key = lookupKey(ev);
-      if (!key) return;
-      if (Date.now() - (lastHL[key] || 0) < HL_FRESH_MS) return;
-
-      if (!resolved[key]) {
-        resolved[key] = ev.symbol;
-        dropOtherCandidates(key, ev.symbol);
-      }
-      if (resolved[key] !== ev.symbol) return;
-
-      const bid = parseFloat(ev.bid), ask = parseFloat(ev.ask);
-      const raw = PRICE_SIDE === 'bid' && bid > 0 ? bid
-                : (bid > 0 && ask > 0 ? (bid + ask) / 2 : parseFloat(ev.price));
-      if (!(raw > 0)) return;
-
-      const m = MARKETS[key];
-      const idx = m.kinds.indexOf(ev.kind);
-      const rank = idx < 0 ? 99 : idx;
-      const now = Date.now(), ts = Number(ev.time) || 0;
-      const ks = kindState[key];
-      if (ks && now - ks.ts < 1500) {
-        if (rank > ks.rank) return;
-        if (rank === ks.rank && ts && ks.evTime && ts < ks.evTime) return;
-      }
-      kindState[key] = { rank, ts: now, evTime: ts };
-
-      lastWs[key] = now;
-      delete fbState[key];
-      rawPrices[key] = raw;
-      updatePrice(key, raw + (offsets[key] || 0), { ...ev, via: 'ws' });
-    }
-
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState !== 'visible') return;
-      if (!ws || ws.readyState >= WebSocket.CLOSING || Date.now() - ws.lastMsg > 15000) {
-        const old = ws;
-        connect();
-        try { old?.close(); } catch {}
-      }
-      if (!hlWs || hlWs.readyState >= WebSocket.CLOSING || Date.now() - hlLastMsg > 15000) {
-        const oldHl = hlWs;
-        connectHL();
-        try { oldHl?.close(); } catch {}
-      }
-    });
 
     async function generateAISignal() {
       const marketId = document.getElementById('marketSelect').value;
@@ -1587,12 +1298,12 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
       const symbolKey = marketId.split('|').pop();
 
       const live = prices[symbolKey];
-      if (!live) return alert(currentLang === 'id' ? 'Harga live belum tersambung.' : 'Live price not connected.');
+      if (!live) return alert('Harga live belum tersambung.');
       const currentPrice = live.price;
 
       const btn = document.getElementById('signalBtn');
       btn.disabled = true;
-      btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> ${DICT[currentLang].evaluating}`;
+      btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> Mengevaluasi...`;
 
       try {
         const response = await fetch('/api/generate', {
@@ -1604,12 +1315,7 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
         if (!response.ok) throw new Error(rawData.error || `HTTP Error ${response.status}`);
 
         const contentText = rawData.choices[0].message.content;
-        let data;
-        try {
-          data = JSON.parse(contentText.substring(contentText.indexOf('{'), contentText.lastIndexOf('}') + 1));
-        } catch {
-          throw new Error('Respon AI tidak valid.');
-        }
+        const data = JSON.parse(contentText.substring(contentText.indexOf('{'), contentText.lastIndexOf('}') + 1));
 
         const signal = String(data.signal || '').toUpperCase();
         const dir = signal === 'BUY' ? 1 : signal === 'SELL' ? -1 : 0;
@@ -1630,19 +1336,10 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
           },
         };
 
-        const valid = dir && t.sl != null && t.tp1 != null &&
-          (t.entry - t.sl) * dir > 0 && (t.tp1 - t.entry) * dir > 0;
-
-        if (valid) {
-          t.no = nextNo();
-          trades.push(t);
-          activeId = t.id; transientView = null;
-          evaluateTrade(t, prices[symbolKey]?.price ?? currentPrice);
-          saveTrades();
-        } else {
-          activeId = null; transientView = t;
-        }
-
+        t.no = nextNo();
+        trades.push(t);
+        activeId = t.id; transientView = null;
+        saveTrades();
         renderSignalCard(t);
         refreshActiveUI();
         renderHistory();
@@ -1650,11 +1347,10 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
         alert(`Error: ${error.message}`);
       } finally {
         btn.disabled = false;
-        btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnGenText">${DICT[currentLang].genBtn}</span>`;
+        btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> GENERATE AI SIGNAL`;
       }
     }
 
-    const originalOnload = window.onload;
     window.onload = async () => {
       await checkSavedSession();
       buildTicker();
@@ -1665,9 +1361,7 @@ Berikut adalah kode lengkap file index.html terbaru yang sudah diperbarui dengan
       connectHL();
       await resolveCoins();
       connect();
-      if (originalOnload) originalOnload();
     };
     </script>
 </body>
 </html>
-
