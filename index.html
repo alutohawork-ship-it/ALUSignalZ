@@ -38,7 +38,7 @@
         </div>
     </header>
 
-    <!-- BAGIAN TENGAH: AI Signal Generator & Visual Display -->
+    <!-- BAGIAN TENGAH: AI Signal Generator -->
     <main class="max-w-md mx-auto w-full flex-1 flex flex-col gap-2 pt-2">
         
         <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
@@ -49,7 +49,7 @@
 
             <!-- Dropdown Multi-Asset Lengkap -->
             <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                <optgroup label="Crypto Majors & Alts">
+                <optgroup label="Crypto">
                     <option value="binance|BTCUSDT">BTC/USDT (Binance)</option>
                     <option value="binance|ETHUSDT">ETH/USDT (Binance)</option>
                     <option value="binance|SOLUSDT">SOL/USDT (Binance)</option>
@@ -89,24 +89,22 @@
             </button>
         </div>
 
-        <!-- TAMPILAN CARD KOTAK SIGNAL AI (SESUAI DESAIN DESAIN GAMBAR) -->
+        <!-- TAMPILAN CARD KOTAK SIGNAL AI -->
         <div id="signalContainer" class="bg-cardbg rounded-xl border border-panelborder p-3 shadow-md space-y-3">
             
-            <!-- Header Status -->
             <div class="flex items-center justify-between border-b border-panelborder pb-2">
-                <span id="cardMarketTitle" class="text-xs font-bold text-white">XAUUSD SPOT (Live AI)</span>
-                <span id="cardLivePriceTop" class="text-xs font-mono font-bold text-accentblue">$3966.30</span>
+                <span id="cardMarketTitle" class="text-xs font-bold text-white">SELECT PAIR SPOT</span>
+                <span id="cardLivePriceTop" class="text-xs font-mono font-bold text-accentblue">--.--</span>
             </div>
 
-            <!-- Standby Container (Placeholder) -->
-            <div id="standbyView" class="py-6 text-center text-xs text-gray-400">
-                Tekan <b>GENERATE AI SIGNAL</b> untuk menampilkan sinyal trading terstruktur.
+            <!-- Standby View -->
+            <div id="standbyView" class="py-5 text-center text-xs text-gray-400">
+                Pilih pair, pastikan harga live bergerak, lalu tekan <b>GENERATE AI SIGNAL</b>.
             </div>
 
-            <!-- Signal Output Card (Disembunyikan Awalnya) -->
+            <!-- Active Card -->
             <div id="activeSignalCard" class="hidden space-y-3">
                 
-                <!-- Entry Zone Main Box -->
                 <div class="bg-darkbg/80 border border-panelborder rounded-xl p-3 text-center space-y-1">
                     <div class="flex justify-center">
                         <span id="signalBadgeBtn" class="bg-sky-500 text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg flex items-center gap-1">
@@ -115,43 +113,36 @@
                     </div>
                     <p id="cardStyleSub" class="text-[9px] text-gray-400 pt-1">SCALPING / Just Now</p>
                     <p class="text-[9px] font-bold text-gray-400 tracking-widest pt-1">ENTRY ZONE</p>
-                    <h2 id="cardEntryZone" class="text-2xl font-black text-white font-mono tracking-tight">3965 - 3967</h2>
+                    <h2 id="cardEntryZone" class="text-xl font-black text-white font-mono tracking-tight">-- - --</h2>
                     <div class="pt-1">
                         <span class="inline-flex items-center gap-1.5 bg-darkbg border border-panelborder px-2.5 py-0.5 rounded-full text-[9px] text-gray-300 font-mono">
                             <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                            LIVE <span id="cardLivePriceBadge" class="font-bold text-white">3966.30</span>
+                            LIVE <span id="cardLivePriceBadge" class="font-bold text-white">--.--</span>
                         </span>
                     </div>
                 </div>
 
-                <!-- Grid 4 Kotak SL, TP1, TP2, TP3 -->
+                <!-- Grid 4 Kotak SL & TP -->
                 <div class="grid grid-cols-4 gap-1.5">
-                    <!-- SL Box -->
                     <div class="bg-darkbg/70 border border-red-500/30 rounded-lg p-2 text-center">
                         <p class="text-[8px] font-bold text-red-400">SL</p>
-                        <p id="cardSL" class="text-[11px] font-extrabold text-red-400 font-mono">3962</p>
-                        <p id="cardSLPips" class="text-[7px] text-red-400/80 font-mono">-60 pips</p>
+                        <p id="cardSL" class="text-[10px] font-extrabold text-red-400 font-mono">--</p>
+                        <p id="cardSLPips" class="text-[7px] text-red-400/80 font-mono">--</p>
                     </div>
-
-                    <!-- TP1 Box -->
                     <div class="bg-darkbg/70 border border-emerald-500/30 rounded-lg p-2 text-center">
                         <p class="text-[8px] font-bold text-emerald-400">TP1</p>
-                        <p id="cardTP1" class="text-[11px] font-extrabold text-emerald-400 font-mono">3969</p>
-                        <p id="cardTP1Pips" class="text-[7px] text-emerald-400/80 font-mono">+30 pips</p>
+                        <p id="cardTP1" class="text-[10px] font-extrabold text-emerald-400 font-mono">--</p>
+                        <p id="cardTP1Pips" class="text-[7px] text-emerald-400/80 font-mono">--</p>
                     </div>
-
-                    <!-- TP2 Box -->
                     <div class="bg-darkbg/70 border border-emerald-500/30 rounded-lg p-2 text-center">
                         <p class="text-[8px] font-bold text-emerald-400">TP2</p>
-                        <p id="cardTP2" class="text-[11px] font-extrabold text-emerald-400 font-mono">3971</p>
-                        <p id="cardTP2Pips" class="text-[7px] text-emerald-400/80 font-mono">+50 pips</p>
+                        <p id="cardTP2" class="text-[10px] font-extrabold text-emerald-400 font-mono">--</p>
+                        <p id="cardTP2Pips" class="text-[7px] text-emerald-400/80 font-mono">--</p>
                     </div>
-
-                    <!-- TP3 Box -->
                     <div class="bg-darkbg/70 border border-sky-500/30 rounded-lg p-2 text-center">
                         <p class="text-[8px] font-bold text-sky-400">TP3</p>
-                        <p id="cardTP3" class="text-[11px] font-extrabold text-sky-400 font-mono">3974</p>
-                        <p id="cardTP3Pips" class="text-[7px] text-sky-400/80 font-mono">+80 pips</p>
+                        <p id="cardTP3" class="text-[10px] font-extrabold text-sky-400 font-mono">--</p>
+                        <p id="cardTP3Pips" class="text-[7px] text-sky-400/80 font-mono">--</p>
                     </div>
                 </div>
 
@@ -160,29 +151,25 @@
                     <p class="text-[9px] font-bold text-gray-400 tracking-wider">LIVE PRICE MAP</p>
                     <div class="space-y-1.5 text-[10px] font-mono">
                         <div class="flex justify-between items-center text-sky-400">
-                            <span class="flex items-center gap-1"><i class="fa-solid fa-caret-up text-[9px]"></i> TP3</span>
-                            <span id="mapTP3" class="font-bold">3974</span>
+                            <span>TP3</span><span id="mapTP3" class="font-bold">--</span>
                         </div>
                         <div class="flex justify-between items-center text-emerald-400">
-                            <span class="ml-3">TP2</span>
-                            <span id="mapTP2" class="font-bold">3971</span>
+                            <span>TP2</span><span id="mapTP2" class="font-bold">--</span>
                         </div>
                         <div class="flex justify-between items-center text-emerald-400">
-                            <span class="ml-3">TP1</span>
-                            <span id="mapTP1" class="font-bold">3969</span>
+                            <span>TP1</span><span id="mapTP1" class="font-bold">--</span>
                         </div>
                         <div class="flex justify-between items-center bg-panelborder/50 px-2 py-1 rounded text-white font-bold">
-                            <span class="flex items-center gap-1 text-yellow-400"><i class="fa-solid fa-bolt text-[9px]"></i> LIVE PRICE</span>
-                            <span id="mapLivePrice" class="bg-white text-darkbg px-1.5 py-0.5 rounded text-[9px]">3966.30</span>
+                            <span class="text-yellow-400">LIVE PRICE</span>
+                            <span id="mapLivePrice" class="bg-white text-darkbg px-1.5 py-0.5 rounded text-[9px]">--</span>
                         </div>
                         <div class="flex justify-between items-center text-red-400">
-                            <span class="flex items-center gap-1"><i class="fa-solid fa-caret-down text-[9px]"></i> SL</span>
-                            <span id="mapSL" class="font-bold">3962</span>
+                            <span>SL</span><span id="mapSL" class="font-bold">--</span>
                         </div>
                     </div>
                 </div>
 
-                <!-- Alasan Analisis -->
+                <!-- Analysis Reason -->
                 <div class="bg-darkbg border border-panelborder rounded-lg p-2.5 text-[10px] text-gray-300 leading-relaxed">
                     <p class="font-bold text-gray-400 mb-1">ANALYSIS REASON:</p>
                     <span id="cardReason">---</span>
@@ -191,7 +178,7 @@
             </div>
         </div>
 
-        <!-- BAGIAN PALING BAWAH: Live Market Ticker -->
+        <!-- BAGIAN PALING BAWAH: Live Market Ticker (Menampilkan Semua Pair Pilihan) -->
         <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md">
             <div class="flex justify-between items-center pb-1.5 mb-1.5 border-b border-panelborder">
                 <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
@@ -200,43 +187,71 @@
                 <span id="livePulse" class="text-[8px] text-emerald-400 font-mono animate-pulse">● Live Stream</span>
             </div>
 
-            <!-- List Ticker Vertikal Ringkas -->
-            <div id="tickerListContainer" class="space-y-1 max-h-[180px] overflow-y-auto pr-1">
+            <!-- List Ticker Lengkap Semua Pair -->
+            <div id="tickerListContainer" class="space-y-1 max-h-[190px] overflow-y-auto pr-1">
                 
-                <!-- BTCUSDT -->
-                <div onclick="selectTicker('binance|BTCUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1.5 rounded flex items-center justify-between cursor-pointer transition">
-                    <div class="flex items-center gap-1.5">
-                        <span class="font-bold text-[11px] text-white">BTCUSDT</span>
-                        <span class="text-[7px] bg-emerald-500/20 text-emerald-400 px-1 rounded">10x</span>
-                    </div>
-                    <div class="text-right font-mono">
-                        <div id="price-BTCUSDT" class="text-[11px] font-bold text-white">--.--</div>
-                        <div id="time-BTCUSDT" class="text-[7px] text-gray-500">Connecting...</div>
-                    </div>
+                <!-- Crypto -->
+                <div onclick="selectTicker('binance|BTCUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">BTCUSDT <span class="text-[7px] text-emerald-400">Binance</span></span>
+                    <span id="price-BTCUSDT" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+                <div onclick="selectTicker('binance|ETHUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">ETHUSDT <span class="text-[7px] text-emerald-400">Binance</span></span>
+                    <span id="price-ETHUSDT" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+                <div onclick="selectTicker('binance|SOLUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">SOLUSDT <span class="text-[7px] text-emerald-400">Binance</span></span>
+                    <span id="price-SOLUSDT" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+                <div onclick="selectTicker('binance|XRPUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">XRPUSDT <span class="text-[7px] text-emerald-400">Binance</span></span>
+                    <span id="price-XRPUSDT" class="text-[10px] font-mono font-bold text-white">--.--</span>
                 </div>
 
-                <!-- XAUUSD (Gold) -->
-                <div onclick="selectTicker('veranta|XAUUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1.5 rounded flex items-center justify-between cursor-pointer transition">
-                    <div class="flex items-center gap-1.5">
-                        <span class="font-bold text-[11px] text-white">XAUUSD</span>
-                        <span class="text-[7px] bg-yellow-500/20 text-yellow-400 px-1 rounded">Gold</span>
-                    </div>
-                    <div class="text-right font-mono">
-                        <div id="price-XAUUSD" class="text-[11px] font-bold text-white">--.--</div>
-                        <div id="time-XAUUSD" class="text-[7px] text-gray-500">Connecting...</div>
-                    </div>
+                <!-- Gold & Forex -->
+                <div onclick="selectTicker('veranta|XAUUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">XAUUSD <span class="text-[7px] text-yellow-400">Veranta (Gold)</span></span>
+                    <span id="price-XAUUSD" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+                <div onclick="selectTicker('veranta|XAGUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">XAGUSD <span class="text-[7px] text-yellow-400">Veranta (Silver)</span></span>
+                    <span id="price-XAGUSD" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+                <div onclick="selectTicker('veranta|EURUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">EURUSD <span class="text-[7px] text-blue-400">Veranta (Forex)</span></span>
+                    <span id="price-EURUSD" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+                <div onclick="selectTicker('veranta|USDJPY')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">USDJPY <span class="text-[7px] text-blue-400">Veranta (Forex)</span></span>
+                    <span id="price-USDJPY" class="text-[10px] font-mono font-bold text-white">--.--</span>
                 </div>
 
-                <!-- EURUSD -->
-                <div onclick="selectTicker('veranta|EURUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1.5 rounded flex items-center justify-between cursor-pointer transition">
-                    <div class="flex items-center gap-1.5">
-                        <span class="font-bold text-[11px] text-white">EURUSD</span>
-                        <span class="text-[7px] bg-blue-500/20 text-blue-400 px-1 rounded">50x</span>
-                    </div>
-                    <div class="text-right font-mono">
-                        <div id="price-EURUSD" class="text-[11px] font-bold text-white">--.--</div>
-                        <div id="time-EURUSD" class="text-[7px] text-gray-500">Connecting...</div>
-                    </div>
+                <!-- Commodities & Indices -->
+                <div onclick="selectTicker('hyperliquid|xyz:BRENTOIL')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">xyz:BRENTOIL <span class="text-[7px] text-orange-400">Hyperliquid</span></span>
+                    <span id="price-xyz:BRENTOIL" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+                <div onclick="selectTicker('ostium|DJI')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">DJI <span class="text-[7px] text-purple-400">Ostium (Indice)</span></span>
+                    <span id="price-DJI" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+                <div onclick="selectTicker('hyperliquid|xyz:SP500')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">xyz:SP500 <span class="text-[7px] text-purple-400">Hyperliquid</span></span>
+                    <span id="price-xyz:SP500" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+
+                <!-- Stocks -->
+                <div onclick="selectTicker('hyperliquid|xyz:AAPL')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">xyz:AAPL <span class="text-[7px] text-red-400">Hyperliquid</span></span>
+                    <span id="price-xyz:AAPL" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+                <div onclick="selectTicker('binance|NVDAUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">NVDAUSDT <span class="text-[7px] text-red-400">Binance</span></span>
+                    <span id="price-NVDAUSDT" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+                <div onclick="selectTicker('binance|TSLAUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">TSLAUSDT <span class="text-[7px] text-red-400">Binance</span></span>
+                    <span id="price-TSLAUSDT" class="text-[10px] font-mono font-bold text-white">--.--</span>
                 </div>
 
             </div>
@@ -259,7 +274,7 @@
         }
 
         // =======================================================
-        // WEBSOCKET MULTI-ASSET STREAM
+        // WEBSOCKET MULTI-ASSET STREAM (MENCAKUP SEMUA SYMBOL)
         // =======================================================
         let ws;
         let pingInterval;
@@ -280,8 +295,8 @@
                         id: 1,
                         channel: "ticks",
                         payload: {
-                            symbols: ["BTCUSDT", "XAUUSD", "EURUSD"],
-                            providers: ["binance", "veranta"]
+                            symbols: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "XAUUSD", "XAGUSD", "EURUSD", "USDJPY", "xyz:BRENTOIL", "DJI", "xyz:SP500", "xyz:AAPL", "NVDAUSDT", "TSLAUSDT"],
+                            providers: ["binance", "veranta", "ostium", "hyperliquid"]
                         }
                     };
                     ws.send(JSON.stringify(subFrame));
@@ -302,15 +317,9 @@
                                 if (ev.symbol && ev.price) {
                                     const symbolKey = ev.symbol;
                                     const priceEl = document.getElementById(`price-${symbolKey}`);
-                                    const timeEl = document.getElementById(`time-${symbolKey}`);
-
                                     if (priceEl) {
                                         const numPrice = parseFloat(ev.price);
                                         priceEl.textContent = numPrice.toLocaleString('en-US', { minimumFractionDigits: 2 });
-                                    }
-                                    if (timeEl && ev.time) {
-                                        const t = new Date(ev.time);
-                                        timeEl.textContent = t.toLocaleTimeString();
                                     }
                                 }
                             });
@@ -338,7 +347,7 @@
         }
 
         // ==========================================
-        // RENDER SIGNAL CARD DISPLAY
+        // GENERATE AI SIGNAL DENGAN VALIDASI HARGA LIVE
         // ==========================================
         async function generateAISignal() {
             const marketId = document.getElementById('marketSelect').value;
@@ -346,7 +355,13 @@
             
             const symbolKey = marketId.includes('|') ? marketId.split('|')[1] : marketId;
             const priceEl = document.getElementById(`price-${symbolKey}`);
-            const currentPrice = priceEl ? priceEl.textContent : "Live Price";
+            let currentPrice = priceEl ? priceEl.textContent.trim() : "--.--";
+
+            // Validasi jika harga belum konek / masih "--.--"
+            if (currentPrice === "--.--" || currentPrice === "") {
+                alert("Tunggu sebentar hingga harga live pada pair tersebut tersambung (angka harga muncul di list bawah) sebelum generate sinyal!");
+                return;
+            }
 
             const btn = document.getElementById('signalBtn');
             const standbyView = document.getElementById('standbyView');
@@ -365,17 +380,16 @@
                 const rawData = await response.json();
                 if (!response.ok) throw new Error(rawData.error || `HTTP Error ${response.status}`);
 
-                // Parse AI JSON Output
                 const contentText = rawData.choices[0].message.content;
                 let data;
                 try {
                     const cleanJson = contentText.substring(contentText.indexOf('{'), contentText.lastIndexOf('}') + 1);
                     data = JSON.parse(cleanJson);
                 } catch (e) {
-                    throw new Error("Gagal membaca format JSON sinyal");
+                    throw new Error("Respon AI tidak valid. Coba klik sekali lagi.");
                 }
 
-                // Render Data Ke UI Card
+                // Render UI Card
                 document.getElementById('cardMarketTitle').textContent = `${symbolKey} SPOT (Live AI)`;
                 document.getElementById('cardLivePriceTop').textContent = `$${data.current_price || currentPrice}`;
                 
@@ -412,7 +426,6 @@
 
                 document.getElementById('cardReason').textContent = data.reason;
 
-                // Tampilkan Kartu
                 standbyView.classList.add('hidden');
                 activeCard.classList.remove('hidden');
 
