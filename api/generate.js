@@ -34,7 +34,7 @@ const KIND_NAME = { OB: 'Order Block', FVG: 'FVG', OTE: 'OTE 62-79%' };
 const ROLE_W = { htf: 3, mtf: 2, ltf: 1 };
 
 // Harus sama dengan STYLE_TF di index.html
-// kind: 'scalp'    = entry market searah struktur MTF, SL swing dijepit rentang pip, TP murni RR 1:1 / 1:1.5 / 1:2
+// kind: 'scalp'    = entry market searah struktur MTF, SL swing dijepit rentang pip, TP murni RR 1:1.5 / 1:2 / 1:3
 //       'day'      = zona terbaik (skor), dekat harga diutamakan, TP1 minimal DAY_MIN_TP1_PIPS
 //       'intraday' = zona terbaik (skor probabilitas), tanpa syarat fresh
 //       'zone'     = Swing: zona fresh (perilaku lama)
@@ -44,7 +44,7 @@ const STYLES = {
     mode: 'MARKET',
     kind: 'scalp',
     tf: { htf: '15m', mtf: '5m' },
-    rr: [1.0, 1.5, 2.0],
+    rr: [1.5, 2.0, 3.0],
   },
   'Day Trading': {
     label: 'Day Trading (HTF: H1 | MTF: M30 | LTF: M5)',
@@ -233,7 +233,7 @@ function impulseZones(candles, isBuy, a) {
 // Hit & run: entry market searah struktur MTF.
 // SL = swing terdekat + buffer (atau ekstrem 12 candle jika swing tidak ada).
 // Jarak SL dijepit ke rentang pip per pair: minimal slFloor, maksimal slCap.
-// TP dihitung dari jarak SL (RR 1:1, 1:1.5, 1:2) di handler.
+// TP dihitung dari jarak SL (RR 1:1.5, 1:2, 1:3) di handler.
 function scalpPlan(candles, dir, price, a, slFloor, slCap) {
   const sw = swings(candles, 2);
   const recent = candles.slice(-12);
@@ -493,8 +493,8 @@ function buildReason({ lang, style, dir, plan, dec, htfTxt, meta, slPips, minTp1
   if (style.kind === 'scalp') {
     const body = T(
       lang,
-      `Entry market di ${f(plan.entry)} searah struktur MTF. SL ${slPips} pip, TP1 ${minTp1Pips} pip (1:1), TP2 1:1.5, TP3 1:2.`,
-      `Market entry at ${f(plan.entry)} with MTF structure. SL ${slPips} pips, TP1 ${minTp1Pips} pips (1:1), TP2 1:1.5, TP3 1:2.`
+      `Entry market di ${f(plan.entry)} searah struktur MTF. SL ${slPips} pip, TP1 ${minTp1Pips} pip (1:1.5), TP2 1:2, TP3 1:3.`,
+      `Market entry at ${f(plan.entry)} with MTF structure. SL ${slPips} pips, TP1 ${minTp1Pips} pips (1:1.5), TP2 1:2, TP3 1:3.`
     );
     return `${head} ${body} ${tail}`;
   }
