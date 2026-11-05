@@ -9,12 +9,15 @@ const DECIMALS = { XAUUSD: 2, XAGUSD: 3, EURUSD: 5, USDJPY: 3, GBPUSD: 5, BTCUSD
 // Ukuran 1 pip per simbol. Harus sama dengan MARKETS.pip di index.html
 const PIP = { XAUUSD: 0.1, XAGUSD: 0.01, EURUSD: 0.0001, USDJPY: 0.01, GBPUSD: 0.0001, BTCUSDT: 1, ETHUSDT: 0.1, SOLUSDT: 0.01, XRPUSDT: 0.0001, DJI: 1, DAX: 1 };
 
-// Scalping: jarak SL MINIMUM (pip dari entry). SL tidak boleh lebih rapat dari ini.
+// Scalping (hit & run): rentang jarak SL dalam pip [min, max] dari entry.
+// SL mengikuti swing struktur, lalu dijepit ke rentang ini. Samakan min & max untuk SL fixed.
+// Angka selain XAUUSD adalah perkiraan, sesuaikan dengan spread broker.
 const SCALP_SL_PIPS = {
-  XAUUSD: 30, XAGUSD: 30,
-  EURUSD: 25, USDJPY: 25, GBPUSD: 25,
-  BTCUSDT: 250, ETHUSDT: 25, SOLUSDT: 100, XRPUSDT: 250,
-  DJI: 50, DAX: 50,
+  XAUUSD: [20, 30], XAGUSD: [25, 40],
+  EURUSD: [10, 15], GBPUSD: [12, 18], USDJPY: [10, 15],
+  BTCUSDT: [150, 250], ETHUSDT: [60, 100],
+  SOLUSDT: [40, 70], XRPUSDT: [50, 80],
+  DJI: [40, 70], DAX: [40, 70],
 };
 
 // Minimal jarak TP1 (pip) untuk Day Trading
@@ -31,7 +34,7 @@ const KIND_NAME = { OB: 'Order Block', FVG: 'FVG', OTE: 'OTE 62-79%' };
 const ROLE_W = { htf: 3, mtf: 2, ltf: 1 };
 
 // Harus sama dengan STYLE_TF di index.html
-// kind: 'scalp'    = entry market searah MTF, SL fleksibel (swing) dibatasi min & max
+// kind: 'scalp'    = entry market searah struktur MTF, SL swing dijepit rentang pip, TP murni RR 1:1 / 1:1.5 / 1:2
 //       'day'      = zona terbaik (skor), dekat harga diutamakan, TP1 minimal DAY_MIN_TP1_PIPS
 //       'intraday' = zona terbaik (skor probabilitas), tanpa syarat fresh
 //       'zone'     = Swing: zona fresh (perilaku lama)
@@ -41,7 +44,7 @@ const STYLES = {
     mode: 'MARKET',
     kind: 'scalp',
     tf: { htf: '15m', mtf: '5m' },
-    rr: [1.5, 2.5, 3.5],
+    rr: [1.0, 1.5, 2.0],
   },
   'Day Trading': {
     label: 'Day Trading (HTF: H1 | MTF: M30 | LTF: M5)',
@@ -69,8 +72,6 @@ const STYLES = {
 };
 
 const SL_BUFFER = 0.2;                     // buffer SL dalam ATR
-const SCALP_MAX_ATR = 1.5;                 // scalping: batas SL maks = 1.5 ATR MTF...
-const SCALP_CAP_MULT = 2;                  // ...atau 2x batas minimum, mana yang lebih besar
 const RISK_MIN = 0.5;                      // SL minimal 0.5 ATR
 const LIMIT_RISK_MAX = 4.0;                // swing: SL maks 4 ATR
 const ZONE_MAX_DIST = 4.0;                 // swing: zona maks 4 ATR dari harga
@@ -229,9 +230,10 @@ function impulseZones(candles, isBuy, a) {
 
 // ---------- Scalping ----------
 
-// Entry market searah arah MTF.
+// Hit & run: entry market searah struktur MTF.
 // SL = swing terdekat + buffer (atau ekstrem 12 candle jika swing tidak ada).
-// Jarak SL dijepit: minimal slFloor (tidak terlalu rapat), maksimal slCap (tidak terlalu jauh).
+// Jarak SL dijepit ke rentang pip per pair: minimal slFloor, maksimal slCap.
+// TP dihitung dari jarak SL (RR 1:1, 1:1.5, 1:2) di handler.
 function scalpPlan(candles, dir, price, a, slFloor, slCap) {
   const sw = swings(candles, 2);
   const recent = candles.slice(-12);
@@ -491,8 +493,8 @@ function buildReason({ lang, style, dir, plan, dec, htfTxt, meta, slPips, minTp1
   if (style.kind === 'scalp') {
     const body = T(
       lang,
-      `Entry market di ${f(plan.entry)}. SL ${slPips} pip dari entry, TP1 minimal ${minTp1Pips} pip.`,
-      `Market entry at ${f(plan.entry)}. SL ${slPips} pips from entry, TP1 at least ${minTp1Pips} pips.`
+      `Entry market di ${f(plan.entry)} searah struktur MTF. SL ${slPips} pip, TP1 ${minTp1Pips} pip (1:1), TP2 1:1.5, TP3 1:2.`,
+      `Market entry at ${f(plan.entry)} with MTF structure. SL ${slPips} pips, TP1 ${minTp1Pips} pips (1:1), TP2 1:1.5, TP3 1:2.`
     );
     return `${head} ${body} ${tail}`;
   }
@@ -553,8 +555,9 @@ export default async function handler(req, res) {
 
     const mtfDir = structureDir(mtfC);
     const htfDir = structureDir(htfC);
+    const isScalp = style.kind === 'scalp';
     // Scalping, Day Trading, dan Intraday selalu memberi setup. Swing tetap ketat.
-    const flexible = style.kind === 'scalp' || style.kind === 'day' || style.kind === 'intraday';
+    const flexible = isScalp || style.kind === 'day' || style.kind === 'intraday';
 
     let dir = mtfDir;
     if (dir === 0 && flexible) {
@@ -574,19 +577,14 @@ export default async function handler(req, res) {
         ? { id: 'searah', en: 'aligned' }
         : { id: 'berlawanan', en: 'opposite' };
 
-    // Scalping: SL minimum (floor) dan maksimum (cap)
-    const slFloor = style.kind === 'scalp'
-      ? (SCALP_SL_PIPS[symbol] && pip ? SCALP_SL_PIPS[symbol] * pip : RISK_MIN * refAtr)
-      : 0;
-    const slCap = style.kind === 'scalp'
-      ? Math.max(SCALP_MAX_ATR * refAtr, slFloor * SCALP_CAP_MULT)
-      : 0;
+    // Scalping: rentang SL per pair (pip -> harga). Pair tanpa tabel pakai ATR.
+    const rng = SCALP_SL_PIPS[symbol];
+    const slFloor = isScalp ? (rng && pip ? rng[0] * pip : RISK_MIN * refAtr) : 0;
+    const slCap = isScalp ? (rng && pip ? rng[1] * pip : slFloor * 1.5) : 0;
 
-    // Jarak minimal TP1 (harga)
+    // Jarak minimal TP1 (harga). Scalping: 0, TP murni dari RR agar tidak melebar.
     let minTp1Dist = 0;
-    if (style.kind === 'scalp') {
-      minTp1Dist = 1.5 * slFloor;
-    } else if (style.kind === 'day') {
+    if (style.kind === 'day') {
       minTp1Dist = DAY_MIN_TP1_PIPS[symbol] && pip ? DAY_MIN_TP1_PIPS[symbol] * pip : 1.5 * refAtr;
     }
 
@@ -597,7 +595,7 @@ export default async function handler(req, res) {
     ];
 
     let plan;
-    if (style.kind === 'scalp') {
+    if (isScalp) {
       plan = scalpPlan(mtfC, dir, price, refAtr, slFloor, slCap);
     } else if (style.kind === 'day' || style.kind === 'intraday') {
       plan = bestZonePlan(series, dir, price, refAtr, style.distW);
@@ -610,17 +608,23 @@ export default async function handler(req, res) {
     const risk = Math.abs(entry - plan.sl);
     const r = v => Number(v.toFixed(dec));
 
-    // TP: rasio RR, TP1 dipaksa minimal minTp1Dist. TP2/TP3 ikut proporsi.
+    // TP: rasio RR dari jarak SL. Day Trading: TP1 dipaksa minimal minTp1Dist, TP2/TP3 ikut proporsi.
     const tps = style.rr.map(x => entry + dir * Math.max(risk * x, minTp1Dist * (x / style.rr[0])));
 
     const meta = buildMeta({
       lang, style, dir, plan, price, pip, htfDir, mtfDir, refAtr, risk,
     });
 
+    const tp1Pips = pip
+      ? (isScalp
+          ? Math.round((risk * style.rr[0]) / pip)
+          : (minTp1Dist ? Math.round(minTp1Dist / pip) : null))
+      : null;
+
     const reason = buildReason({
       lang, style, dir, plan, dec, htfTxt, meta,
       slPips: pip ? Math.round(risk / pip) : null,
-      minTp1Pips: pip && minTp1Dist ? Math.round(minTp1Dist / pip) : null,
+      minTp1Pips: tp1Pips,
     });
 
     return res.status(200).json({
