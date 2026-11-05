@@ -1,361 +1,221 @@
+html
+
+
 <!DOCTYPE html>
-<html lang="id">
+<html lang="id" class="dark">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Alu Signal Z</title>
-<style>
-  * { box-sizing: border-box; }
-  body { margin: 0; font-family: system-ui, sans-serif; background: #0b0e14; color: #e5e7eb; min-height: 100vh; padding: 16px; }
-  .hidden { display: none !important; }
-  .wrap { max-width: 480px; margin: 0 auto; }
-  .card { background: #151924; border: 1px solid #232936; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
-  h1 { font-size: 18px; margin: 0 0 4px; color: #fff; }
-  h2 { font-size: 14px; margin: 0 0 10px; color: #fff; }
-  .muted { font-size: 12px; color: #9ca3af; }
-  label { display: block; font-size: 12px; color: #9ca3af; margin: 10px 0 4px; }
-  input, select { width: 100%; padding: 10px; background: #0b0e14; color: #fff; border: 1px solid #232936; border-radius: 8px; font-size: 14px; }
-  button { width: 100%; padding: 10px; margin-top: 10px; border: 0; border-radius: 8px; background: #2962ff; color: #fff; font-weight: bold; font-size: 14px; cursor: pointer; }
-  button:disabled { opacity: .5; cursor: wait; }
-  button.danger { background: #7f1d1d; }
-  button.small { width: auto; padding: 4px 10px; margin: 0; font-size: 12px; }
-  .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-  .client { background: #0b0e14; border: 1px solid #232936; border-radius: 8px; padding: 8px; margin-top: 6px; }
-  .status { font-size: 12px; color: #9ca3af; min-height: 16px; margin-top: 6px; }
-  #result { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 13px; line-height: 1.6; }
-  .buy { color: #38bdf8; font-weight: bold; }
-  .sell { color: #f87171; font-weight: bold; }
-  .wait { color: #facc15; font-weight: bold; }
-  .hist { font-family: ui-monospace, monospace; font-size: 12px; border-top: 1px solid #232936; padding: 6px 0; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Alu Signal Z & MyFundedPerps Live Terminal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        darkbg: '#0b0e14', cardbg: '#151924', panelborder: '#232936',
+                        accentblue: '#2962ff', accentgreen: '#00c076', accentred: '#ff3b69'
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- CONSOLE DEBUG UNTUK HP: hapus tanda komentar di 2 baris bawah jika ingin melihat console di HP -->
+    <!-- <script src="https://cdn.jsdelivr.net/npm/eruda"></script> -->
+    <!-- <script>eruda.init();</script> -->
 </head>
-<body>
+<body class="bg-darkbg text-gray-200 font-sans min-h-screen flex flex-col justify-between p-2">
 
-<!-- LOGIN -->
-<div id="authScreen" class="wrap">
-  <div class="card">
-    <h1>Welcome, Alu Signal Z</h1>
-    <p class="muted">Masukkan email atau kode akses</p>
-    <form id="authForm">
-      <label>ACCESS LOGIN</label>
-      <input id="authInput" type="text" required placeholder="nama@email.com">
-      <button type="submit">MASUK SISTEM</button>
-    </form>
-    <p class="muted" style="margin-top:14px">Bantuan admin: <a href="https://wa.me/6285817038501" style="color:#34d399">+6285817038501</a></p>
-  </div>
-</div>
+    <!-- Header Navbar -->
+    <header class="flex items-center justify-between pb-2 border-b border-panelborder max-w-md mx-auto w-full">
+        <div class="flex items-center gap-2">
+            <div class="bg-accentblue w-7 h-7 rounded-lg flex items-center justify-center text-white">
+                <i class="fa-solid fa-chart-line text-xs"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-xs text-white">Alu <span class="text-accentblue">Signal Z</span></h1>
+                <p class="text-[8px] text-gray-400">Multi-Asset Live Stream</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <span id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">WS: OFF</span>
+        </div>
+    </header>
 
-<!-- ADMIN -->
-<div id="adminScreen" class="wrap hidden">
-  <div class="card">
-    <div class="row">
-      <div>
-        <h2 style="margin:0">Dashboard Admin</h2>
-        <p class="muted" style="margin:0">Pendaftaran klien</p>
-      </div>
-      <button class="small danger" onclick="logout()">KELUAR</button>
-    </div>
-  </div>
-  <div class="card">
-    <h2>Daftarkan Klien Baru</h2>
-    <label>EMAIL KLIEN</label>
-    <input id="newEmail" type="email" placeholder="klien@email.com">
-    <label>PAKET</label>
-    <select id="newStatus">
-      <option value="trial">Trial 3 Hari</option>
-      <option value="monthly">Bulanan (30 hari)</option>
-      <option value="lifetime">Lifetime</option>
-    </select>
-    <button onclick="addClient()">SIMPAN & DAFTARKAN</button>
-  </div>
-  <div class="card">
-    <h2>Daftar Klien</h2>
-    <div id="clientList"></div>
-  </div>
-</div>
+    <!-- BAGIAN TENGAH: AI Signal Generator -->
+    <main class="max-w-md mx-auto w-full flex-1 flex flex-col gap-2 pt-2">
 
-<!-- APP -->
-<div id="appScreen" class="wrap hidden">
-  <div class="card">
-    <div class="row">
-      <div>
-        <h1>Alu <span style="color:#2962ff">Signal Z</span></h1>
-        <p class="muted" style="margin:0" id="userLabel"></p>
-      </div>
-      <button class="small danger" onclick="logout()">LOGOUT</button>
-    </div>
-  </div>
+        <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
+            <div class="flex justify-between items-center">
+                <label class="text-[9px] font-bold text-gray-400">TARGET ASET AKTIF</label>
+                <span id="selectedPairBadge" class="text-[9px] font-mono text-accentblue font-bold">hyperliquid|XAUUSD</span>
+            </div>
 
-  <div class="card">
-    <label>MARKET</label>
-    <select id="market">
-      <option value="binance|BTCUSDT">BTC/USDT (Binance)</option>
-      <option value="binance|ETHUSDT">ETH/USDT (Binance)</option>
-      <option value="binance|SOLUSDT">SOL/USDT (Binance)</option>
-      <option value="binance|XRPUSDT">XRP/USDT (Binance)</option>
-      <option value="hyperliquid|xyz:GOLD">XAUUSD / Gold (Hyperliquid)</option>
-      <option value="hyperliquid|xyz:SILVER">XAGUSD / Silver (Hyperliquid)</option>
-    </select>
+            <!-- Dropdown Multi-Asset -->
+            <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
+                <optgroup label="Gold, Silver & Forex">
+                    <option value="hyperliquid|XAUUSD">XAUUSD / Gold (Hyperliquid)</option>
+                    <option value="hyperliquid|XAGUSD">XAGUSD / Silver (Hyperliquid)</option>
+                    <option value="veranta|EURUSD">EUR/USD (Veranta)</option>
+                    <option value="veranta|USDJPY">USD/JPY (Veranta)</option>
+                </optgroup>
+                <optgroup label="Crypto">
+                    <option value="binance|BTCUSDT">BTC/USDT (Binance)</option>
+                    <option value="binance|ETHUSDT">ETH/USDT (Binance)</option>
+                    <option value="binance|SOLUSDT">SOL/USDT (Binance)</option>
+                    <option value="binance|XRPUSDT">XRP/USDT (Binance)</option>
+                </optgroup>
+                <optgroup label="Commodities & Indices">
+                    <option value="hyperliquid|xyz:BRENTOIL">Brent Oil (Hyperliquid)</option>
+                    <option value="ostium|DJI">Dow Jones / DJI (Ostium)</option>
+                    <option value="hyperliquid|xyz:SP500">S&P 500 (Hyperliquid)</option>
+                </optgroup>
+                <optgroup label="Stocks / Saham">
+                    <option value="hyperliquid|xyz:AAPL">Apple / AAPL (Hyperliquid)</option>
+                    <option value="binance|NVDAUSDT">NVIDIA / NVDA (Binance)</option>
+                    <option value="binance|TSLAUSDT">Tesla / TSLA (Binance)</option>
+                </optgroup>
+            </select>
 
-    <label>GAYA TRADING</label>
-    <select id="style">
-      <option value="Scalping">Scalping (M1 &amp; M15)</option>
-      <option value="Day Trading">Day Trading (M3 &amp; M30)</option>
-      <option value="Intraday" selected>Intraday (M5 &amp; H1)</option>
-      <option value="Swing">Swing (M15 &amp; H4)</option>
-    </select>
+            <!-- Pilihan Gaya Trading -->
+            <div>
+                <label class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
+                <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
+                    <option value="Scalping (M1 & M15)">Scalping (M1 & M15)</option>
+                    <option value="Day Trading (M3 & M30)">Day Trading (M3 & M30)</option>
+                    <option value="Intraday (M5 & H1)">Intraday (M5 & H1)</option>
+                    <option value="Swing Trading (M15 & H4/Daily)">Swing Trading (M15 & H4/Daily)</option>
+                </select>
+            </div>
 
-    <button id="btn" onclick="generate()">GENERATE AI SIGNAL</button>
-    <p class="status" id="status"></p>
-  </div>
+            <button onclick="generateAISignal()" id="signalBtn" class="w-full bg-gradient-to-r from-accentblue to-indigo-600 hover:from-blue-600 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-accentblue/20 transition active:scale-95">
+                <i class="fa-solid fa-wand-magic-sparkles"></i> GENERATE AI SIGNAL
+            </button>
+        </div>
 
-  <div class="card">
-    <div id="result">Pilih market lalu tekan GENERATE.</div>
-  </div>
+        <!-- TAMPILAN CARD KOTAK SIGNAL AI -->
+        <div id="signalContainer" class="bg-cardbg rounded-xl border border-panelborder p-3 shadow-md space-y-3">
 
-  <div class="card" id="histCard">
-    <h2>Sinyal Sesi Ini</h2>
-    <div id="histList"><p class="muted">Belum ada sinyal.</p></div>
-  </div>
-</div>
+            <div class="flex items-center justify-between border-b border-panelborder pb-2">
+                <span id="cardMarketTitle" class="text-xs font-bold text-white">SELECT PAIR SPOT</span>
+                <span id="cardLivePriceTop" class="text-xs font-mono font-bold text-accentblue">--.--</span>
+            </div>
 
-<script>
-// ================= KONFIG =================
-const MASTER_ADMIN_PASS = 'GANTI_PASSWORD_ADMIN';
-const WS_URL = 'wss://api-stream.myfundedperpetuals.com/v1/market-data';
-const CANDLE_BARS = 300;
-const CANDLE_MIN = 150;
-const STYLE_TF = {
-  'Scalping':    { htf: '15m', ltf: '1m' },
-  'Day Trading': { htf: '30m', ltf: '3m' },
-  'Intraday':    { htf: '1h',  ltf: '5m' },
-  'Swing':       { htf: '4h',  ltf: '15m' },
-};
+            <!-- Standby View -->
+            <div id="standbyView" class="py-5 text-center text-xs text-gray-400">
+                Pilih pair, pastikan harga live bergerak, lalu tekan <b>GENERATE AI SIGNAL</b>.
+            </div>
 
-// ================= UTIL =================
-const $ = id => document.getElementById(id);
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
-const getClients = () => { try { return JSON.parse(localStorage.getItem('alu_local_clients') || '[]'); } catch { return []; } };
-const saveClients = list => localStorage.setItem('alu_local_clients', JSON.stringify(list));
+            <!-- Active Card -->
+            <div id="activeSignalCard" class="hidden space-y-3">
 
-function showOnly(id) {
-  ['authScreen', 'adminScreen', 'appScreen'].forEach(s => $(s).classList.toggle('hidden', s !== id));
-}
+                <div class="bg-darkbg/80 border border-panelborder rounded-xl p-3 text-center space-y-1">
+                    <div class="flex justify-center">
+                        <span id="signalBadgeBtn" class="bg-sky-500 text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg flex items-center gap-1">
+                            <i class="fa-solid fa-caret-up"></i> BUY
+                        </span>
+                    </div>
+                    <p id="cardStyleSub" class="text-[9px] text-gray-400 pt-1">SCALPING / Just Now</p>
+                    <p class="text-[9px] font-bold text-gray-400 tracking-widest pt-1">ENTRY ZONE</p>
+                    <h2 id="cardEntryZone" class="text-xl font-black text-white font-mono tracking-tight">-- - --</h2>
+                    <div class="pt-1">
+                        <span class="inline-flex items-center gap-1.5 bg-darkbg border border-panelborder px-2.5 py-0.5 rounded-full text-[9px] text-gray-300 font-mono">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                            LIVE <span id="cardLivePriceBadge" class="font-bold text-white">--.--</span>
+                        </span>
+                    </div>
+                </div>
 
-// ================= LOGIN =================
-$('authForm').addEventListener('submit', e => {
-  e.preventDefault();
-  const val = $('authInput').value.trim();
-  if (!val) return;
+                <!-- Grid 4 Kotak SL & TP -->
+                <div class="grid grid-cols-4 gap-1.5">
+                    <div class="bg-darkbg/70 border border-red-500/30 rounded-lg p-2 text-center">
+                        <p class="text-[8px] font-bold text-red-400">SL</p>
+                        <p id="cardSL" class="text-[10px] font-extrabold text-red-400 font-mono">--</p>
+                        <p id="cardSLPips" class="text-[7px] text-red-400/80 font-mono">--</p>
+                    </div>
+                    <div class="bg-darkbg/70 border border-emerald-500/30 rounded-lg p-2 text-center">
+                        <p class="text-[8px] font-bold text-emerald-400">TP1</p>
+                        <p id="cardTP1" class="text-[10px] font-extrabold text-emerald-400 font-mono">--</p>
+                        <p id="cardTP1Pips" class="text-[7px] text-emerald-400/80 font-mono">--</p>
+                    </div>
+                    <div class="bg-darkbg/70 border border-emerald-500/30 rounded-lg p-2 text-center">
+                        <p class="text-[8px] font-bold text-emerald-400">TP2</p>
+                        <p id="cardTP2" class="text-[10px] font-extrabold text-emerald-400 font-mono">--</p>
+                        <p id="cardTP2Pips" class="text-[7px] text-emerald-400/80 font-mono">--</p>
+                    </div>
+                    <div class="bg-darkbg/70 border border-sky-500/30 rounded-lg p-2 text-center">
+                        <p class="text-[8px] font-bold text-sky-400">TP3</p>
+                        <p id="cardTP3" class="text-[10px] font-extrabold text-sky-400 font-mono">--</p>
+                        <p id="cardTP3Pips" class="text-[7px] text-sky-400/80 font-mono">--</p>
+                    </div>
+                </div>
 
-  if (val === MASTER_ADMIN_PASS) {
-    localStorage.setItem('alu_session', 'admin');
-    return showAdmin();
-  }
+                <!-- Live Price Map -->
+                <div class="bg-darkbg/80 border border-panelborder rounded-xl p-3 space-y-2">
+                    <p class="text-[9px] font-bold text-gray-400 tracking-wider">LIVE PRICE MAP</p>
+                    <div class="space-y-1.5 text-[10px] font-mono">
+                        <div class="flex justify-between items-center text-sky-400">
+                            <span>TP3</span><span id="mapTP3" class="font-bold">--</span>
+                        </div>
+                        <div class="flex justify-between items-center text-emerald-400">
+                            <span>TP2</span><span id="mapTP2" class="font-bold">--</span>
+                        </div>
+                        <div class="flex justify-between items-center text-emerald-400">
+                            <span>TP1</span><span id="mapTP1" class="font-bold">--</span>
+                        </div>
+                        <div class="flex justify-between items-center bg-panelborder/50 px-2 py-1 rounded text-white font-bold">
+                            <span class="text-yellow-400">LIVE PRICE</span>
+                            <span id="mapLivePrice" class="bg-white text-darkbg px-1.5 py-0.5 rounded text-[9px]">--</span>
+                        </div>
+                        <div class="flex justify-between items-center text-red-400">
+                            <span>SL</span><span id="mapSL" class="font-bold">--</span>
+                        </div>
+                    </div>
+                </div>
 
-  const email = val.toLowerCase();
-  const clients = getClients();
-  let client = clients.find(c => c.email === email);
-  if (!client) {
-    const ends = new Date();
-    ends.setDate(ends.getDate() + 3);
-    client = { id: 'client_' + Date.now(), email, status: 'trial', trial_ends_at: ends.toISOString() };
-    clients.push(client);
-    saveClients(clients);
-  }
-  if (Date.now() > new Date(client.trial_ends_at).getTime()) {
-    return alert('Masa akses sudah berakhir. Hubungi admin.');
-  }
-  localStorage.setItem('alu_session', 'terminal');
-  localStorage.setItem('alu_email', email);
-  showApp();
-});
+                <!-- Analysis Reason -->
+                <div class="bg-darkbg border border-panelborder rounded-lg p-2.5 text-[10px] text-gray-300 leading-relaxed">
+                    <p class="font-bold text-gray-400 mb-1">ANALYSIS REASON:</p>
+                    <span id="cardReason">---</span>
+                </div>
 
-function logout() {
-  localStorage.removeItem('alu_session');
-  localStorage.removeItem('alu_email');
-  location.reload();
-}
+            </div>
+        </div>
 
-// ================= ADMIN =================
-function showAdmin() { showOnly('adminScreen'); renderClients(); }
+        <!-- BAGIAN PALING BAWAH: Live Market Ticker -->
+        <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md">
+            <div class="flex justify-between items-center pb-1.5 mb-1.5 border-b border-panelborder">
+                <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
+                    <i class="fa-solid fa-tower-broadcast text-accentblue"></i> LIVE STREAM (MYFUNDEDPERPS)
+                </span>
+                <span id="livePulse" class="text-[8px] text-emerald-400 font-mono animate-pulse">  Live Stream</span>
+            </div>
 
-function addClient() {
-  const email = $('newEmail').value.trim().toLowerCase();
-  const status = $('newStatus').value;
-  if (!email) return alert('Masukkan email klien.');
-  const ends = new Date();
-  ends.setDate(ends.getDate() + (status === 'trial' ? 3 : status === 'monthly' ? 30 : 3650));
-  const clients = getClients();
-  clients.push({ id: 'client_' + Date.now(), email, status, trial_ends_at: ends.toISOString() });
-  saveClients(clients);
-  $('newEmail').value = '';
-  renderClients();
-}
+            <div id="tickerListContainer" class="space-y-1 max-h-[190px] overflow-y-auto pr-1">
 
-function deleteClient(id) {
-  if (!confirm('Hapus klien ini?')) return;
-  saveClients(getClients().filter(c => c.id !== id));
-  renderClients();
-}
+                <!-- Gold & Silver -->
+                <div onclick="selectTicker('hyperliquid|XAUUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">XAUUSD <span class="text-[7px] text-yellow-400">Gold (Hyperliquid)</span></span>
+                    <span id="price-XAUUSD" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+                <div onclick="selectTicker('hyperliquid|XAGUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">XAGUSD <span class="text-[7px] text-yellow-400">Silver (Hyperliquid)</span></span>
+                    <span id="price-XAGUSD" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
 
-function renderClients() {
-  const list = getClients();
-  $('clientList').innerHTML = list.length
-    ? list.map(c => `
-        <div class="client row">
-          <div>
-            <div style="font-family:ui-monospace,monospace;color:#fff">${esc(c.email)}</div>
-            <div class="muted">${esc(c.status)} · s/d ${new Date(c.trial_ends_at).toLocaleDateString('id-ID')}</div>
-          </div>
-          <button class="small danger" onclick="deleteClient('${esc(c.id)}')">Hapus</button>
-        </div>`).join('')
-    : '<p class="muted">Belum ada klien.</p>';
-}
+                <!-- Forex -->
+                <div onclick="selectTicker('veranta|EURUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">EURUSD <span class="text-[7px] text-blue-400">Veranta</span></span>
+                    <span id="price-EURUSD" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
+                <div onclick="selectTicker('veranta|USDJPY')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-white">USDJPY <span class="text-[7px] text-blue-400">Veranta</span></span>
+                    <span id="price-USDJPY" class="text-[10px] font-mono font-bold text-white">--.--</span>
+                </div>
 
-// ================= APP =================
-function showApp() {
-  $('userLabel').textContent = localStorage.getItem('alu_email') || '';
-  showOnly('appScreen');
-}
-
-let ws = null, nextId = 1;
-const pending = new Map();
-
-function connectWS() {
-  return new Promise((resolve, reject) => {
-    const sock = new WebSocket(WS_URL);
-    ws = sock;
-    const timer = setTimeout(() => reject(new Error('Koneksi stream timeout')), 10000);
-    sock.onopen = () => { clearTimeout(timer); resolve(); };
-    sock.onerror = () => { clearTimeout(timer); reject(new Error('Tidak bisa terhubung ke stream')); };
-    sock.onclose = () => {
-      if (ws === sock) ws = null;
-      for (const p of pending.values()) p.reject(new Error('Koneksi stream terputus'));
-      pending.clear();
-    };
-    sock.onmessage = e => {
-      let f; try { f = JSON.parse(e.data); } catch { return; }
-      if ((f.op === 'res' || f.op === 'err') && pending.has(f.id)) {
-        const p = pending.get(f.id);
-        pending.delete(f.id);
-        clearTimeout(p.timer);
-        if (f.op === 'res') p.resolve(f.result);
-        else p.reject(new Error(f.error?.message || JSON.stringify(f.error)));
-      }
-    };
-  });
-}
-
-function wsReq(method, payload, ms = 15000) {
-  return new Promise((resolve, reject) => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return reject(new Error('WS belum tersambung'));
-    const id = nextId++;
-    const timer = setTimeout(() => {
-      if (pending.delete(id)) reject(new Error('timeout ' + method));
-    }, ms);
-    pending.set(id, { resolve, reject, timer });
-    ws.send(JSON.stringify({ op: 'req', id, method, payload }));
-  });
-}
-
-async function getCandles(provider, symbol, interval) {
-  const rows = await wsReq('candles.history', { provider, symbol, interval, limit: CANDLE_BARS });
-  if (!Array.isArray(rows)) return [];
-  const out = [], seen = new Set();
-  for (const x of rows) {
-    if (!x || x.isFinal === false) continue; // buang candle yang belum close
-    const c = { t: Number(x.openTime), o: Number(x.open), h: Number(x.high), l: Number(x.low), c: Number(x.close) };
-    if (![c.t, c.o, c.h, c.l, c.c].every(Number.isFinite)) continue;
-    if (seen.has(c.t)) continue;
-    seen.add(c.t);
-    out.push(c);
-  }
-  return out.sort((a, b) => a.t - b.t);
-}
-
-const setStatus = msg => { $('status').textContent = msg; };
-
-async function generate() {
-  const btn = $('btn');
-  const [provider, symbol] = $('market').value.split('|');
-  const styleName = $('style').value;
-  const tf = STYLE_TF[styleName];
-
-  btn.disabled = true;
-  $('result').textContent = '';
-  try {
-    setStatus('Menghubungkan ke stream...');
-    if (!ws || ws.readyState !== WebSocket.OPEN) await connectWS();
-
-    setStatus('Mengambil candle...');
-    const [htf, ltf] = await Promise.all([
-      getCandles(provider, symbol, tf.htf),
-      getCandles(provider, symbol, tf.ltf),
-    ]);
-    if (htf.length < CANDLE_MIN || ltf.length < CANDLE_MIN) {
-      throw new Error(`Candle kurang (HTF ${htf.length}, LTF ${ltf.length}, minimal ${CANDLE_MIN}).`);
-    }
-
-    setStatus('Menganalisis...');
-    const res = await fetch('/api/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        marketId: `${provider}|${symbol}`,
-        tradingStyle: styleName,
-        currentPrice: ltf[ltf.length - 1].c,
-        lang: 'id',
-        htf,
-        ltf,
-      }),
-    });
-    const raw = await res.json();
-    if (!res.ok) throw new Error(raw.error || `HTTP ${res.status}`);
-
-    const content = raw.choices[0].message.content;
-    const data = JSON.parse(content.substring(content.indexOf('{'), content.lastIndexOf('}') + 1));
-    showResult(data, symbol, styleName);
-    setStatus('Selesai.');
-  } catch (e) {
-    $('result').textContent = 'Error: ' + e.message;
-    setStatus('');
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-function showResult(d, symbol, styleName) {
-  const el = $('result');
-  if (d.status !== 'SIGNAL') {
-    el.innerHTML = `<span class="wait">WAIT</span>\n${esc(d.reason || '')}`;
-    return;
-  }
-  const sig = String(d.signal || '').toUpperCase();
-  const cls = sig === 'BUY' ? 'buy' : 'sell';
-  el.innerHTML =
-    `<span class="${cls}">${esc(sig)}</span>  grade ${esc(d.grade ?? '-')}  score ${esc(d.score ?? '-')}\n` +
-    `Entry : ${esc(d.entry_min)} - ${esc(d.entry_max)}\n` +
-    `SL    : ${esc(d.sl)}\n` +
-    `TP1   : ${esc(d.tp1)}  (RR ${esc(d.rr_tp1 ?? '-')})\n` +
-    `TP2   : ${esc(d.tp2)}\n` +
-    `TP3   : ${esc(d.tp3)}\n\n` +
-    `${esc(d.reason || '')}`;
-
-  const h = $('histList');
-  if (h.querySelector('.muted')) h.innerHTML = '';
-  const time = new Date().toLocaleTimeString('id-ID', { hour12: false });
-  h.insertAdjacentHTML('afterbegin',
-    `<div class="hist"><span class="${cls}">${esc(sig)}</span> ${esc(symbol)} · ${esc(styleName)} · ${time} · entry ${esc(d.entry_min)}</div>`);
-}
-
-// ================= BOOT =================
-(function boot() {
-  const session = localStorage.getItem('alu_session');
-  if (session === 'admin') showAdmin();
-  else if (session === 'terminal') showApp();
-  else showOnly('authScreen');
-})();
-</script>
-</body>
-</html>
+                <!-- Crypto -->
+                <div onclick="selectTicker('binance|BTCUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
+                    <span class="font-bold text-[10px] text-whi
