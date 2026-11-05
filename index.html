@@ -39,7 +39,7 @@
                     <i class="fa-solid fa-chart-line"></i>
                 </div>
                 <h1 class="text-xl font-extrabold text-white pt-2 tracking-tight">Welcome, Alu Signal Z</h1>
-                <p class="text-[11px] text-gray-400">Silakan masukkan email atau kode akses</p>
+                <p class="text-[11px] text-gray-400">Silakan masukkan email terdaftar atau kode admin</p>
             </div>
 
             <form id="authForm" onsubmit="handleUniversalLogin(event)" class="space-y-4 pt-2">
@@ -355,12 +355,16 @@
     const readClients = () => JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]');
     const writeClients = list => localStorage.setItem(CLIENTS_KEY, JSON.stringify(list));
 
-    // Akses klien: harus sudah didaftarkan admin, dan masa berlakunya belum habis
-    function checkClientAccess(email) {
-        const c = readClients().find(x => x.email === email);
-        if (!c) return { ok: false, msg: 'Email belum terdaftar. Hubungi admin untuk didaftarkan.' };
+    // Perbaikan Akses: Normalisasi email (lowercase & trim) agar tidak gagal karena huruf kapital atau spasi
+    function checkClientAccess(inputEmail) {
+        if (!inputEmail) return { ok: false, msg: 'Email tidak boleh kosong.' };
+        const cleanEmail = inputEmail.toLowerCase().trim();
+        const clients = readClients();
+        const c = clients.find(x => x.email.toLowerCase().trim() === cleanEmail);
+        
+        if (!c) return { ok: false, msg: 'Email belum terdaftar. Silakan hubungi admin untuk pendaftaran.' };
         if (c.trial_ends_at && new Date(c.trial_ends_at) < new Date())
-            return { ok: false, msg: 'Masa akses sudah berakhir. Hubungi admin untuk perpanjangan.' };
+            return { ok: false, msg: 'Masa aktif akses email ini sudah berakhir. Hubungi admin untuk perpanjangan.' };
         return { ok: true, client: c };
     }
 
@@ -376,13 +380,12 @@
             return;
         }
 
-        // Klien -> hanya jika email sudah terdaftar
-        const email = val.toLowerCase();
-        const access = checkClientAccess(email);
+        // Klien -> verifikasi email terdaftar & aktif
+        const access = checkClientAccess(val);
         if (!access.ok) return alert(access.msg);
 
         localStorage.setItem(SESSION_TYPE_KEY, 'terminal');
-        localStorage.setItem(SESSION_EMAIL_KEY, email);
+        localStorage.setItem(SESSION_EMAIL_KEY, val.toLowerCase().trim());
         openTerminalApp();
     }
 
@@ -407,7 +410,7 @@
         if (!email) return alert('Masukkan email klien.');
 
         const clients = readClients();
-        if (clients.some(c => c.email === email)) return alert(`Email ${email} sudah terdaftar.`);
+        if (clients.some(c => c.email.toLowerCase().trim() === email)) return alert(`Email ${email} sudah terdaftar.`);
 
         const trialEnds = new Date();
         trialEnds.setDate(trialEnds.getDate() + (status === 'trial' ? 3 : 3650));
@@ -485,15 +488,14 @@
     // ================= KONFIG MARKET =================
     const WS_URL = 'wss://api-stream.myfundedperpetuals.com/v1/market-data';
     const HISTORY_MS = 10 * 60 * 1000;
-    const CHART_SPAN_MS = 3 * 60 * 1000;     // setengah kiri chart = 3 menit ke belakang
-    const ALIAS_WAIT_MS = 10000;             // alias yang belum diterima server: coba berikutnya setelah 10 detik
-    const QUIET_MS = 90000;                  // alias yang sudah diterima tapi sepi: tunggu 90 detik sebelum ganti
-    const RETRY_ALL_MS = 60000;              // semua alias gagal: ulangi dari awal setelah 60 detik
+    const CHART_SPAN_MS = 3 * 60 * 1000;
+    const ALIAS_WAIT_MS = 10000;
+    const QUIET_MS = 90000;
+    const RETRY_ALL_MS = 60000;
     const STORE_KEY = 'aluSignalZ_history_v3';
     const OFFSET_KEY = 'aluSignalZ_offsets_v1';
     const DEBUG = localStorage.getItem('alu_debug') === '1';
 
-    // coins: alias berurutan. Format "provider|simbol" jika simbol ada di provider lain.
     const MARKETS = {
         XAUUSD:  { provider: 'hyperliquid', coins: ['xyz:GOLD', 'xyz:XAU', 'GOLD', 'XAUUSD'], decimals: 2, pip: 0.1 },
         XAGUSD:  { provider: 'hyperliquid', coins: ['xyz:SILVER', 'xyz:XAG', 'SILVER', 'XAGUSD'], decimals: 3, pip: 0.01 },
@@ -508,10 +510,8 @@
         DAX:     { provider: 'ostium', coins: ['DAX', 'GER40', 'DE40'], decimals: 2, pip: 1 },
     };
 
-    // Normalisasi: "xyz:GOLD", "GOLD", "EUR/USD", "EURUSD.FX" dibandingkan dengan cara yang sama
     const norm = s => String(s ?? '').toUpperCase().replace(/^XYZ:/, '').replace(/\.[A-Z]+$/, '').replace(/[^A-Z0-9]/g, '');
 
-    // Alias yang sudah diurai menjadi { provider, coin }
     const ALIASES = {};
     for (const [key, m] of Object.entries(MARKETS)) {
         ALIASES[key] = m.coins.map(c => {
@@ -530,9 +530,9 @@
     let trades = [], activeId = null;
     const prices = {}, history = {}, rawPrices = {}, marketCandles = {};
     const symbolOf = {}, providerOf = {}, kindLock = {}, mstate = {};
-    const subOwner = new Map();      // id subscription -> key market
-    const pendingReq = new Map();    // id request -> { resolve, reject, timer }
-    const dirty = new Set();         // market yang harganya berubah sejak frame terakhir
+    const subOwner = new Map();
+    const pendingReq = new Map();
+    const dirty = new Set();
     const seenOps = new Set();
     const unmapped = new Set();
     let seq = 10;
@@ -629,14 +629,11 @@
         if (el) { el.textContent = `WS: ${text}`; el.className = `text-[8px] font-mono px-2 py-0.5 rounded border ${BADGE_STYLES[color]}`; }
     }
 
-    // Pair yang tidak punya stream aktif
     const isLive = key => prices[key] && Date.now() - prices[key].recv < 30000;
 
     // ================= STREAM =================
     const sendJSON = (sock, obj) => { if (sock && sock.readyState === WebSocket.OPEN) sock.send(JSON.stringify(obj)); };
 
-    // Satu subscription aktif per market. Ditolak server (sub_err) -> alias berikutnya.
-    // Sudah diterima (sub_ok) tapi sepi -> tetap dipakai, karena pasar memang bisa tutup.
     function subscribeMarket(sock, key, idx) {
         const list = ALIASES[key];
         const st = mstate[key] ??= { idx: 0, id: null, sentAt: 0, ok: false, exhaustedAt: 0 };
@@ -659,7 +656,6 @@
         const id = nextId();
         Object.assign(st, { idx, id, sentAt: Date.now(), exhaustedAt: 0 });
         subOwner.set(id, key);
-        if (DEBUG) console.info('[sub]', key, a.provider, a.coin);
         sendJSON(sock, { op: 'sub', id, channel: 'ticks', payload: { symbols: [a.coin], providers: [a.provider] } });
         markSrc(key, `TRY ${idx + 1}/${list.length}`, 'text-gray-500');
     }
@@ -669,11 +665,7 @@
             if (!ev || !ev.symbol) continue;
             const prov = String(ev.provider ?? '').toLowerCase();
             const key = COIN_KEY.get(`${prov}|${norm(ev.symbol)}`);
-            if (!key) {
-                const k = `${ev.provider}|${ev.symbol}`;
-                if (!unmapped.has(k)) { unmapped.add(k); console.warn('[stream] simbol belum dipetakan:', k); }
-                continue;
-            }
+            if (!key) continue;
             const p = parseFloat(ev.price ?? ev.bid ?? ev.mid);
             if (!(p > 0)) continue;
             kindLock[key] ??= ev.kind;
@@ -687,29 +679,23 @@
         }
     }
 
-    // Dipanggil tiap detik
     function watchdog() {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
         const now = Date.now();
         for (const key of Object.keys(MARKETS)) {
             const st = mstate[key];
             if (!st) continue;
-
-            // Semua alias sudah gagal: ulangi dari awal setelah jeda
             if (st.id == null) {
                 if (st.exhaustedAt && now - st.exhaustedAt > RETRY_ALL_MS) subscribeMarket(ws, key, 0);
                 continue;
             }
-
             const recv = prices[key]?.recv ?? 0;
             const gotTick = recv > st.sentAt;
-
             if (gotTick) {
                 if (now - recv > 30000) markSrc(key, 'SEPI', 'text-gray-500');
                 continue;
             }
             if (st.ok) {
-                // Diterima server tapi belum ada tick: tunggu, jangan langsung ganti alias
                 if (now - st.sentAt > QUIET_MS) subscribeMarket(ws, key, (st.idx + 1) % ALIASES[key].length);
                 else markSrc(key, 'MENUNGGU', 'text-gray-500');
                 continue;
@@ -747,7 +733,6 @@
             for (const key of Object.keys(MARKETS)) subscribeMarket(sock, key, 0);
             setTimeout(() => { if (ws === sock) refreshBias(selectedKey(), true); }, 1500);
 
-            // Heartbeat: tanpa frame masuk selama 60 detik, koneksi dianggap mati
             pingTimer = setInterval(() => {
                 if (ws !== sock) return;
                 if (Date.now() - lastIn > 60000) { sock.close(); return; }
@@ -759,8 +744,7 @@
             lastIn = Date.now();
             retryCount = 0;
             let f; try { f = JSON.parse(e.data); } catch { return; }
-            if (!seenOps.has(f.op)) { seenOps.add(f.op); console.info('[ws] pesan pertama dengan op:', f.op, f); }
-            if (DEBUG && f.op !== 'events') console.debug('[ws]', f);
+            if (!seenOps.has(f.op)) { seenOps.add(f.op); }
 
             switch (f.op) {
                 case 'events':
@@ -778,7 +762,6 @@
                     subOwner.delete(f.id);
                     const st = mstate[key];
                     if (st.id !== f.id) break;
-                    console.warn('[sub ditolak]', key, ALIASES[key][st.idx], f.error);
                     subscribeMarket(sock, key, st.idx + 1);
                     break;
                 }
@@ -826,7 +809,7 @@
         });
     }
 
-    // ================= AGREGATOR TICK (konteks SMC) =================
+    // ================= AGREGATOR TICK =================
     function processTickToCandle(symbol, price, timeframeMinutes = 1) {
         if (!price || price <= 0) return;
         const tfKey = `${timeframeMinutes}m`;
@@ -864,7 +847,6 @@
         return { recentHigh: recentHigh?.price, recentLow: recentLow?.price, hasCHoCH, chochType, liquiditySweep };
     }
 
-    // ================= HARGA =================
     function updatePrice(key, price, ev) {
         const prev = prices[key]?.price;
         const dir = prev == null ? 0 : price > prev ? 1 : price < prev ? -1 : (prices[key].dir ?? 0);
@@ -888,11 +870,6 @@
     const maxHitIndex = t => TP_KEYS.reduce((m, k, i) => (t.hits?.[k] ? i + 1 : m), 0);
     const lastHitKey = t => [...TP_KEYS].reverse().find(k => t.hits?.[k]) || null;
 
-    // Harga rekap satu trade:
-    //  - SL tanpa TP kena: harga SL
-    //  - Ada TP kena (termasuk yang akhirnya balik ke BE): harga TP terakhir yang kena
-    //  - Semua TP kena: harga TP terakhir (TP maksimal)
-    // Pip BE (entry) tidak ikut dihitung.
     function recapPrice(t) {
         if (t.status === 'CLOSED' && t.result === 'SL') return t.exitPrice;
         const k = lastHitKey(t);
@@ -907,10 +884,6 @@
         return '';
     };
 
-    // Titik kunci tampilan:
-    //  - Trade tertutup: terkunci di recapPrice dengan label hasil
-    //  - Trade berjalan dengan TP kena: terkunci di TP terakhir yang kena
-    //  - Trade berjalan tanpa TP: null (ikut harga live)
     function lockOf(t) {
         if (t.status === 'CLOSED') {
             return { price: recapPrice(t), label: resultLabel(t), closed: true };
@@ -919,15 +892,6 @@
         return k ? { price: t[k], label: k.toUpperCase(), closed: false } : null;
     }
 
-    // Pip rekap satu trade (dipakai untuk WIN/LOSE dan tampilan)
-    function tradePips(t) {
-        const lk = lockOf(t);
-        if (lk) return pipsOf(t, lk.price);
-        const live = prices[t.key]?.price;
-        return live != null ? pipsOf(t, live) : 0;
-    }
-
-    // Teks: "4100 > 4105 +50 pip TP1" (terkunci) atau "4100 > 4103 +30 pip RUNNING" (live)
     function tradeFlow(t) {
         const entry = fmt(t.key, t.entry);
         const live = prices[t.key]?.price;
@@ -1086,7 +1050,6 @@
         pipEl('cardSLPips', t.sl); pipEl('cardTP1Pips', t.tp1); pipEl('cardTP2Pips', t.tp2); pipEl('cardTP3Pips', t.tp3);
     }
 
-    // Ceklis, status, teks flow, dan harga dibaca dari data trade
     function refreshActiveUI() {
         const t = getActive();
         if (!t) return;
@@ -1159,7 +1122,6 @@
         if (!t) return;
         const arr = history[t.key];
 
-        // Pair tanpa stream: tulis status di tengah chart
         if (!arr || !arr.length) {
             ctx.font = 'bold 11px ui-monospace, monospace';
             ctx.textAlign = 'center';
@@ -1190,21 +1152,18 @@
 
         const yOf = p => PAD_T + (1 - (p - lo) / (hi - lo)) * plotH;
 
-        // Garis tengah (posisi sekarang)
         ctx.save();
         ctx.strokeStyle = 'rgba(148,163,184,0.18)';
         ctx.setLineDash([3, 4]);
         ctx.beginPath(); ctx.moveTo(cx, PAD_T); ctx.lineTo(cx, PAD_T + plotH); ctx.stroke();
         ctx.restore();
 
-        // Zona entry
         if (zMin != null && zMax != null) {
             const top = yOf(Math.max(zMin, zMax)), bot = yOf(Math.min(zMin, zMax));
             ctx.fillStyle = 'rgba(41,98,255,0.15)';
             ctx.fillRect(PAD_L, top, plotW, Math.max(bot - top, 1));
         }
 
-        // Level + label
         ctx.font = 'bold 10px ui-monospace, monospace';
         ctx.textBaseline = 'middle';
         for (const l of levels) {
@@ -1224,7 +1183,6 @@
             ctx.fillText(text, PAD_L + 4, y);
         }
 
-        // Garis harga
         if (visible.length >= 2) {
             ctx.strokeStyle = '#2962ff';
             ctx.lineWidth = 2;
@@ -1237,7 +1195,6 @@
             ctx.stroke();
         }
 
-        // Penanda hit TP
         const hits = t.hits || {};
         for (const k of TP_KEYS) {
             const h = hits[k];
@@ -1249,13 +1206,11 @@
             ctx.strokeStyle = '#0b0e14'; ctx.lineWidth = 1; ctx.stroke();
         }
 
-        // Titik harga live di tengah
         const last = arr[arr.length - 1];
         ctx.fillStyle = '#ffffff';
         ctx.beginPath(); ctx.arc(cx, yOf(last.p), 3.5, 0, Math.PI * 2); ctx.fill();
     }
 
-    // Satu loop render: ticker, kartu aktif, history (throttle), dan chart
     let lastHistPaint = 0;
     function uiFrame() {
         requestAnimationFrame(uiFrame);
@@ -1298,7 +1253,6 @@
         return values.map(v => (e = v * k + e * (1 - k)));
     }
 
-    // Skor -3..+3 dari harga vs EMA20, EMA20 vs EMA50, dan kemiringan EMA20
     function calcBias(candles) {
         if (!candles || candles.length < 60) return { bias: 'N/A', score: null };
         const closes = candles.map(c => c.c);
@@ -1328,7 +1282,7 @@
         const cached = biasCache[key];
         if (!force && cached && Date.now() - cached.at < 60000) return renderBias(key);
         if (!ws || ws.readyState !== WebSocket.OPEN || biasBusy) return;
-        if (!symbolOf[key]) return renderBias(key);   // harus ada tick dulu agar simbol pasti benar
+        if (!symbolOf[key]) return renderBias(key);
 
         biasBusy = true;
         const symbol = symbolOf[key];
@@ -1438,7 +1392,6 @@
         const type = localStorage.getItem(SESSION_TYPE_KEY);
         if (type === 'admin_reg') openRegisterDashboard();
         else if (type === 'terminal') {
-            // Sesi klien dicek ulang: jika sudah dihapus atau kedaluwarsa, kembali ke login
             const access = checkClientAccess(localStorage.getItem(SESSION_EMAIL_KEY));
             if (access.ok) openTerminalApp();
             else {
