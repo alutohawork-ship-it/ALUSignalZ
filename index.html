@@ -348,28 +348,41 @@
     const MASTER_ADMIN_PASS = 'KMZWAY87AA';
 
     // ================= LOGIN & ADMIN =================
+    const CLIENTS_KEY = 'alu_local_clients';
+    const SESSION_TYPE_KEY = 'alu_session_type';
+    const SESSION_EMAIL_KEY = 'alu_user_email';
+
+    const readClients = () => JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]');
+    const writeClients = list => localStorage.setItem(CLIENTS_KEY, JSON.stringify(list));
+
+    // Akses klien: harus sudah didaftarkan admin, dan masa berlakunya belum habis
+    function checkClientAccess(email) {
+        const c = readClients().find(x => x.email === email);
+        if (!c) return { ok: false, msg: 'Email belum terdaftar. Hubungi admin untuk didaftarkan.' };
+        if (c.trial_ends_at && new Date(c.trial_ends_at) < new Date())
+            return { ok: false, msg: 'Masa akses sudah berakhir. Hubungi admin untuk perpanjangan.' };
+        return { ok: true, client: c };
+    }
+
     function handleUniversalLogin(e) {
         e.preventDefault();
         const val = document.getElementById('authInput').value.trim();
         if (!val) return;
 
+        // Kode admin -> dashboard pendaftaran klien
         if (val === MASTER_ADMIN_PASS) {
-            localStorage.setItem('alu_session_type', 'admin_reg');
+            localStorage.setItem(SESSION_TYPE_KEY, 'admin_reg');
             openRegisterDashboard();
             return;
         }
 
+        // Klien -> hanya jika email sudah terdaftar
         const email = val.toLowerCase();
-        const clients = JSON.parse(localStorage.getItem('alu_local_clients') || '[]');
-        if (!clients.find(c => c.email === email)) {
-            const trialEnds = new Date();
-            trialEnds.setDate(trialEnds.getDate() + 3);
-            clients.push({ id: 'client_' + Date.now(), email, status: 'trial', trial_ends_at: trialEnds.toISOString() });
-            localStorage.setItem('alu_local_clients', JSON.stringify(clients));
-        }
+        const access = checkClientAccess(email);
+        if (!access.ok) return alert(access.msg);
 
-        localStorage.setItem('alu_session_type', 'terminal');
-        localStorage.setItem('alu_user_email', email);
+        localStorage.setItem(SESSION_TYPE_KEY, 'terminal');
+        localStorage.setItem(SESSION_EMAIL_KEY, email);
         openTerminalApp();
     }
 
@@ -393,12 +406,14 @@
         const status = document.getElementById('newClientStatus').value;
         if (!email) return alert('Masukkan email klien.');
 
+        const clients = readClients();
+        if (clients.some(c => c.email === email)) return alert(`Email ${email} sudah terdaftar.`);
+
         const trialEnds = new Date();
         trialEnds.setDate(trialEnds.getDate() + (status === 'trial' ? 3 : 3650));
 
-        const clients = JSON.parse(localStorage.getItem('alu_local_clients') || '[]');
         clients.push({ id: 'client_' + Date.now(), email, status, trial_ends_at: trialEnds.toISOString() });
-        localStorage.setItem('alu_local_clients', JSON.stringify(clients));
+        writeClients(clients);
 
         alert(`Berhasil mendaftarkan klien: ${email}`);
         document.getElementById('newClientEmail').value = '';
@@ -407,32 +422,35 @@
 
     function loadAdminClientList() {
         const box = document.getElementById('adminClientTableList');
-        const clients = JSON.parse(localStorage.getItem('alu_local_clients') || '[]');
+        const clients = readClients();
         if (!clients.length) {
             box.innerHTML = '<p class="text-[10px] text-gray-500 text-center py-2">Belum ada klien terdaftar.</p>';
             return;
         }
-        box.innerHTML = clients.map(d => `
-            <div class="bg-darkbg border border-panelborder p-2 rounded flex justify-between items-center text-xs">
-                <div>
-                    <p class="font-bold text-white font-mono">${d.email}</p>
-                    <p class="text-[9px] text-yellow-400 uppercase">Status: ${d.status}</p>
-                </div>
-                <button onclick="deleteClient('${d.id}')" class="text-red-400 hover:text-red-300 text-[10px] px-2 py-1"><i class="fa-solid fa-trash"></i></button>
-            </div>
-        `).join('');
+        box.innerHTML = clients.map(d => {
+            const expired = d.trial_ends_at && new Date(d.trial_ends_at) < new Date();
+            return `
+                <div class="bg-darkbg border border-panelborder p-2 rounded flex justify-between items-center text-xs">
+                    <div>
+                        <p class="font-bold text-white font-mono">${d.email}</p>
+                        <p class="text-[9px] uppercase ${expired ? 'text-red-400' : 'text-yellow-400'}">
+                            Status: ${d.status}${expired ? ' (berakhir)' : ''}
+                        </p>
+                    </div>
+                    <button onclick="deleteClient('${d.id}')" class="text-red-400 hover:text-red-300 text-[10px] px-2 py-1"><i class="fa-solid fa-trash"></i></button>
+                </div>`;
+        }).join('');
     }
 
     function deleteClient(id) {
-        if (!confirm('Hapus klien ini dari daftar?')) return;
-        const clients = JSON.parse(localStorage.getItem('alu_local_clients') || '[]').filter(c => c.id !== id);
-        localStorage.setItem('alu_local_clients', JSON.stringify(clients));
+        if (!confirm('Hapus klien ini dari daftar? Klien tidak akan bisa login lagi.')) return;
+        writeClients(readClients().filter(c => c.id !== id));
         loadAdminClientList();
     }
 
     function logout() {
-        localStorage.removeItem('alu_session_type');
-        localStorage.removeItem('alu_user_email');
+        localStorage.removeItem(SESSION_TYPE_KEY);
+        localStorage.removeItem(SESSION_EMAIL_KEY);
         window.location.reload();
     }
 
@@ -1417,9 +1435,17 @@
 
     // ================= BOOT =================
     window.onload = () => {
-        const type = localStorage.getItem('alu_session_type');
+        const type = localStorage.getItem(SESSION_TYPE_KEY);
         if (type === 'admin_reg') openRegisterDashboard();
-        else if (type === 'terminal') openTerminalApp();
+        else if (type === 'terminal') {
+            // Sesi klien dicek ulang: jika sudah dihapus atau kedaluwarsa, kembali ke login
+            const access = checkClientAccess(localStorage.getItem(SESSION_EMAIL_KEY));
+            if (access.ok) openTerminalApp();
+            else {
+                localStorage.removeItem(SESSION_TYPE_KEY);
+                localStorage.removeItem(SESSION_EMAIL_KEY);
+            }
+        }
 
         buildTicker();
         updateCalibInfo();
