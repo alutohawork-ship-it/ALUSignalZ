@@ -345,48 +345,74 @@
 
     <!-- ================= SCRIPT ================= -->
     <script>
-    const MASTER_ADMIN_PASS = 'KMZWAY87AA';
-
-    // ================= LOGIN & ADMIN =================
-    const CLIENTS_KEY = 'alu_local_clients';
+    // ================= LOGIN & ADMIN (server-side via /api) =================
     const SESSION_TYPE_KEY = 'alu_session_type';
     const SESSION_EMAIL_KEY = 'alu_user_email';
+    const SESSION_ADMIN_KEY = 'alu_admin_code';
 
-    const readClients = () => JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]');
-    const writeClients = list => localStorage.setItem(CLIENTS_KEY, JSON.stringify(list));
+    const JSON_HEADERS = { 'Content-Type': 'application/json' };
+    const adminHeaders = () => ({ ...JSON_HEADERS, 'x-admin-code': localStorage.getItem(SESSION_ADMIN_KEY) || '' });
 
-    // Perbaikan Akses: Normalisasi email (lowercase & trim) agar tidak gagal karena huruf kapital atau spasi
-    function checkClientAccess(inputEmail) {
-        if (!inputEmail) return { ok: false, msg: 'Email tidak boleh kosong.' };
-        const cleanEmail = inputEmail.toLowerCase().trim();
-        const clients = readClients();
-        const c = clients.find(x => x.email.toLowerCase().trim() === cleanEmail);
-        
-        if (!c) return { ok: false, msg: 'Email belum terdaftar. Silakan hubungi admin untuk pendaftaran.' };
-        if (c.trial_ends_at && new Date(c.trial_ends_at) < new Date())
-            return { ok: false, msg: 'Masa aktif akses email ini sudah berakhir. Hubungi admin untuk perpanjangan.' };
-        return { ok: true, client: c };
+    async function api(path, opts = {}) {
+        try {
+            const res = await fetch(path, opts);
+            const data = await res.json().catch(() => ({}));
+            return { ok: res.ok, data };
+        } catch {
+            return { ok: false, network: true, data: { msg: 'Tidak bisa terhubung ke server. Cek koneksi internet kamu.' } };
+        }
     }
 
-    function handleUniversalLogin(e) {
+    const errorOf = (r, fallback) => r.data?.msg || r.data?.error || fallback;
+    const verifyLogin = value => api('/api/login', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ value }) });
+
+    function clearSession() {
+        localStorage.removeItem(SESSION_TYPE_KEY);
+        localStorage.removeItem(SESSION_EMAIL_KEY);
+        localStorage.removeItem(SESSION_ADMIN_KEY);
+    }
+
+    async function handleUniversalLogin(e) {
         e.preventDefault();
         const val = document.getElementById('authInput').value.trim();
         if (!val) return;
 
-        // Kode admin -> dashboard pendaftaran klien
-        if (val === MASTER_ADMIN_PASS) {
+        const r = await verifyLogin(val);
+        if (!r.data.ok) return alert(errorOf(r, 'Login gagal.'));
+
+        if (r.data.role === 'admin') {
             localStorage.setItem(SESSION_TYPE_KEY, 'admin_reg');
-            openRegisterDashboard();
-            return;
+            localStorage.setItem(SESSION_ADMIN_KEY, val);
+            return openRegisterDashboard();
         }
 
-        // Klien -> verifikasi email terdaftar & aktif
-        const access = checkClientAccess(val);
-        if (!access.ok) return alert(access.msg);
-
         localStorage.setItem(SESSION_TYPE_KEY, 'terminal');
-        localStorage.setItem(SESSION_EMAIL_KEY, val.toLowerCase().trim());
+        localStorage.setItem(SESSION_EMAIL_KEY, r.data.email);
         openTerminalApp();
+    }
+
+    async function checkSession() {
+        const type = localStorage.getItem(SESSION_TYPE_KEY);
+        if (type !== 'admin_reg' && type !== 'terminal') return;
+
+        const credential = type === 'admin_reg'
+            ? localStorage.getItem(SESSION_ADMIN_KEY)
+            : localStorage.getItem(SESSION_EMAIL_KEY);
+        const r = await verifyLogin(credential || '');
+
+        // Koneksi putus: jangan hapus sesi, cukup beri tahu
+        if (r.network) return alert(r.data.msg);
+
+        const valid = type === 'admin_reg' ? r.data.role === 'admin' : r.data.role === 'client';
+        if (!valid) {
+            clearSession();
+            return alert(type === 'admin_reg'
+                ? 'Sesi admin berakhir. Silakan login ulang dengan kode admin.'
+                : (r.data.msg || 'Sesi berakhir, silakan login ulang.'));
+        }
+
+        if (type === 'admin_reg') openRegisterDashboard();
+        else openTerminalApp();
     }
 
     function openRegisterDashboard() {
@@ -404,40 +430,44 @@
         mainApp.classList.add('flex');
     }
 
-    function registerNewClientByAdmin() {
+    async function registerNewClientByAdmin() {
         const email = document.getElementById('newClientEmail').value.trim().toLowerCase();
         const status = document.getElementById('newClientStatus').value;
         if (!email) return alert('Masukkan email klien.');
 
-        const clients = readClients();
-        if (clients.some(c => c.email.toLowerCase().trim() === email)) return alert(`Email ${email} sudah terdaftar.`);
-
-        const trialEnds = new Date();
-        trialEnds.setDate(trialEnds.getDate() + (status === 'trial' ? 3 : 3650));
-
-        clients.push({ id: 'client_' + Date.now(), email, status, trial_ends_at: trialEnds.toISOString() });
-        writeClients(clients);
+        const r = await api('/api/clients', {
+            method: 'POST', headers: adminHeaders(), body: JSON.stringify({ email, status })
+        });
+        if (!r.ok) return alert(errorOf(r, 'Gagal mendaftarkan klien.'));
 
         alert(`Berhasil mendaftarkan klien: ${email}`);
         document.getElementById('newClientEmail').value = '';
         loadAdminClientList();
     }
 
-    function loadAdminClientList() {
+    async function loadAdminClientList() {
         const box = document.getElementById('adminClientTableList');
-        const clients = readClients();
+        box.innerHTML = '<p class="text-[10px] text-gray-500 text-center py-2">Memuat data klien...</p>';
+
+        const r = await api('/api/clients', { headers: adminHeaders() });
+        if (!r.ok) {
+            box.innerHTML = `<p class="text-[10px] text-red-400 text-center py-2">${errorOf(r, 'Gagal memuat data klien.')}</p>`;
+            return;
+        }
+
+        const clients = r.data;
         if (!clients.length) {
             box.innerHTML = '<p class="text-[10px] text-gray-500 text-center py-2">Belum ada klien terdaftar.</p>';
             return;
         }
         box.innerHTML = clients.map(d => {
-            const expired = d.trial_ends_at && new Date(d.trial_ends_at) < new Date();
+            const expired = new Date(d.expires_at) < new Date();
             return `
                 <div class="bg-darkbg border border-panelborder p-2 rounded flex justify-between items-center text-xs">
                     <div>
                         <p class="font-bold text-white font-mono">${d.email}</p>
                         <p class="text-[9px] uppercase ${expired ? 'text-red-400' : 'text-yellow-400'}">
-                            Status: ${d.status}${expired ? ' (berakhir)' : ''}
+                            Status: ${d.status}${expired ? ' (berakhir)' : ''} · s/d ${new Date(d.expires_at).toLocaleDateString('id-ID')}
                         </p>
                     </div>
                     <button onclick="deleteClient('${d.id}')" class="text-red-400 hover:text-red-300 text-[10px] px-2 py-1"><i class="fa-solid fa-trash"></i></button>
@@ -445,15 +475,15 @@
         }).join('');
     }
 
-    function deleteClient(id) {
+    async function deleteClient(id) {
         if (!confirm('Hapus klien ini dari daftar? Klien tidak akan bisa login lagi.')) return;
-        writeClients(readClients().filter(c => c.id !== id));
+        const r = await api(`/api/clients?id=${encodeURIComponent(id)}`, { method: 'DELETE', headers: adminHeaders() });
+        if (!r.ok) alert(errorOf(r, 'Gagal menghapus klien.'));
         loadAdminClientList();
     }
 
     function logout() {
-        localStorage.removeItem(SESSION_TYPE_KEY);
-        localStorage.removeItem(SESSION_EMAIL_KEY);
+        clearSession();
         window.location.reload();
     }
 
@@ -1389,16 +1419,7 @@
 
     // ================= BOOT =================
     window.onload = () => {
-        const type = localStorage.getItem(SESSION_TYPE_KEY);
-        if (type === 'admin_reg') openRegisterDashboard();
-        else if (type === 'terminal') {
-            const access = checkClientAccess(localStorage.getItem(SESSION_EMAIL_KEY));
-            if (access.ok) openTerminalApp();
-            else {
-                localStorage.removeItem(SESSION_TYPE_KEY);
-                localStorage.removeItem(SESSION_EMAIL_KEY);
-            }
-        }
+        checkSession();
 
         buildTicker();
         updateCalibInfo();
