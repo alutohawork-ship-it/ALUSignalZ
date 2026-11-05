@@ -474,6 +474,7 @@
     const CHART_SPAN_MS = 3 * 60 * 1000;     // setengah kiri chart = 3 menit ke belakang
     const ALIAS_WAIT_MS = 10000;             // alias yang belum diterima server: coba berikutnya setelah 10 detik
     const QUIET_MS = 90000;                  // alias yang sudah diterima tapi sepi: tunggu 90 detik sebelum ganti
+    const RETRY_ALL_MS = 60000;              // semua alias gagal: ulangi dari awal setelah 60 detik
     const STORE_KEY = 'aluSignalZ_history_v3';
     const OFFSET_KEY = 'aluSignalZ_offsets_v1';
     const DEBUG = localStorage.getItem('alu_debug') === '1';
@@ -618,6 +619,9 @@
         if (el) { el.textContent = `WS: ${text}`; el.className = `text-[8px] font-mono px-2 py-0.5 rounded border ${BADGE_STYLES[color]}`; }
     }
 
+    // Pair yang tidak punya stream aktif
+    const isLive = key => prices[key] && Date.now() - prices[key].recv < 30000;
+
     // ================= STREAM =================
     const sendJSON = (sock, obj) => { if (sock && sock.readyState === WebSocket.OPEN) sock.send(JSON.stringify(obj)); };
 
@@ -625,7 +629,7 @@
     // Sudah diterima (sub_ok) tapi sepi -> tetap dipakai, karena pasar memang bisa tutup.
     function subscribeMarket(sock, key, idx) {
         const list = ALIASES[key];
-        const st = mstate[key] ??= { idx: 0, id: null, sentAt: 0, ok: false };
+        const st = mstate[key] ??= { idx: 0, id: null, sentAt: 0, ok: false, exhaustedAt: 0 };
 
         if (st.id != null) {
             sendJSON(sock, { op: 'unsub', id: st.id });
@@ -635,14 +639,15 @@
         st.ok = false;
 
         if (idx >= list.length) {
-            st.idx = idx;
-            markSrc(key, 'NO DATA', 'text-red-400');
+            st.idx = 0;
+            st.exhaustedAt = Date.now();
+            markSrc(key, 'TIDAK TERSAMBUNG', 'text-red-400');
             return;
         }
 
         const a = list[idx];
         const id = nextId();
-        Object.assign(st, { idx, id, sentAt: Date.now() });
+        Object.assign(st, { idx, id, sentAt: Date.now(), exhaustedAt: 0 });
         subOwner.set(id, key);
         if (DEBUG) console.info('[sub]', key, a.provider, a.coin);
         sendJSON(sock, { op: 'sub', id, channel: 'ticks', payload: { symbols: [a.coin], providers: [a.provider] } });
@@ -678,18 +683,25 @@
         const now = Date.now();
         for (const key of Object.keys(MARKETS)) {
             const st = mstate[key];
-            if (!st || st.id == null) continue;
+            if (!st) continue;
+
+            // Semua alias sudah gagal: ulangi dari awal setelah jeda
+            if (st.id == null) {
+                if (st.exhaustedAt && now - st.exhaustedAt > RETRY_ALL_MS) subscribeMarket(ws, key, 0);
+                continue;
+            }
+
             const recv = prices[key]?.recv ?? 0;
             const gotTick = recv > st.sentAt;
 
             if (gotTick) {
-                if (now - recv > 30000) markSrc(key, 'IDLE', 'text-gray-500');
+                if (now - recv > 30000) markSrc(key, 'SEPI', 'text-gray-500');
                 continue;
             }
             if (st.ok) {
                 // Diterima server tapi belum ada tick: tunggu, jangan langsung ganti alias
                 if (now - st.sentAt > QUIET_MS) subscribeMarket(ws, key, (st.idx + 1) % ALIASES[key].length);
-                else markSrc(key, 'WAIT', 'text-gray-500');
+                else markSrc(key, 'MENUNGGU', 'text-gray-500');
                 continue;
             }
             if (now - st.sentAt < ALIAS_WAIT_MS) continue;
@@ -864,14 +876,18 @@
     const definedTps = t => TP_KEYS.filter(k => t[k] != null);
     const hitList = t => TP_KEYS.filter(k => t.hits?.[k]);
     const maxHitIndex = t => TP_KEYS.reduce((m, k, i) => (t.hits?.[k] ? i + 1 : m), 0);
+    const lastHitKey = t => [...TP_KEYS].reverse().find(k => t.hits?.[k]) || null;
 
-    // Pip untuk statistik WIN/LOSE: dibagi rata ke tiap TP yang didefinisikan.
-    // Leg yang sudah kena dihitung di harga TP, leg lain di finalPrice.
-    function computePips(t, finalPrice) {
-        const keys = definedTps(t);
-        if (!keys.length || finalPrice == null) return 0;
-        const w = 1 / keys.length;
-        return keys.reduce((s, k) => s + w * pipsOf(t, t.hits?.[k] ? t[k] : finalPrice), 0);
+    // Harga rekap satu trade:
+    //  - SL tanpa TP kena: harga SL
+    //  - Ada TP kena (termasuk yang akhirnya balik ke BE): harga TP terakhir yang kena
+    //  - Semua TP kena: harga TP terakhir (TP maksimal)
+    // Pip BE (entry) tidak ikut dihitung.
+    function recapPrice(t) {
+        if (t.status === 'CLOSED' && t.result === 'SL') return t.exitPrice;
+        const k = lastHitKey(t);
+        if (k) return t[k];
+        return t.status === 'CLOSED' ? t.exitPrice : null;
     }
 
     const resultLabel = t => {
@@ -882,15 +898,23 @@
     };
 
     // Titik kunci tampilan:
-    //  - Sudah TP/SL/BE: terkunci di harga exit
-    //  - TP sudah kena tapi masih berjalan: terkunci di TP terakhir yang kena
-    //  - Belum ada TP: ikut harga live
+    //  - Trade tertutup: terkunci di recapPrice dengan label hasil
+    //  - Trade berjalan dengan TP kena: terkunci di TP terakhir yang kena
+    //  - Trade berjalan tanpa TP: null (ikut harga live)
     function lockOf(t) {
         if (t.status === 'CLOSED') {
-            return { price: t.exitPrice, label: resultLabel(t), closed: true };
+            return { price: recapPrice(t), label: resultLabel(t), closed: true };
         }
-        const k = [...TP_KEYS].reverse().find(k => t.hits?.[k]);
+        const k = lastHitKey(t);
         return k ? { price: t[k], label: k.toUpperCase(), closed: false } : null;
+    }
+
+    // Pip rekap satu trade (dipakai untuk WIN/LOSE dan tampilan)
+    function tradePips(t) {
+        const lk = lockOf(t);
+        if (lk) return pipsOf(t, lk.price);
+        const live = prices[t.key]?.price;
+        return live != null ? pipsOf(t, live) : 0;
     }
 
     // Teks: "4100 > 4105 +50 pip TP1" (terkunci) atau "4100 > 4103 +30 pip RUNNING" (live)
@@ -900,7 +924,7 @@
         const lk = lockOf(t);
         const line = (price, label) => `${entry} > ${fmt(t.key, price)} ${fmtPips(pipsOf(t, price))} ${label}`;
 
-        if (lk) {
+        if (lk && lk.price != null) {
             const liveTxt = !lk.closed && live != null ? `live ${entry} > ${fmt(t.key, live)} ${fmtPips(pipsOf(t, live))}` : '';
             return { main: line(lk.price, lk.label), sub: liveTxt, pips: pipsOf(t, lk.price) };
         }
@@ -916,7 +940,7 @@
         }
         if (t.status === 'CLOSED' && t.exitPrice != null) {
             t.maxTp = maxHitIndex(t);
-            t.pips = computePips(t, t.exitPrice);
+            t.pips = pipsOf(t, recapPrice(t));
         }
         return t;
     }
@@ -968,7 +992,7 @@
 
     function closeTrade(t, result, exitPrice) {
         Object.assign(t, { status: 'CLOSED', result, exitPrice, closedAt: Date.now(), maxTp: maxHitIndex(t) });
-        t.pips = computePips(t, exitPrice);
+        t.pips = pipsOf(t, recapPrice(t));
     }
 
     function clearHistory() {
@@ -1124,7 +1148,17 @@
         const t = getActive();
         if (!t) return;
         const arr = history[t.key];
-        if (!arr || !arr.length) return;
+
+        // Pair tanpa stream: tulis status di tengah chart
+        if (!arr || !arr.length) {
+            ctx.font = 'bold 11px ui-monospace, monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = '#f87171';
+            ctx.fillText(prices[t.key] ? 'MENUNGGU TICK' : 'TIDAK TERSAMBUNG', r.width / 2, r.height / 2);
+            ctx.textAlign = 'left';
+            return;
+        }
 
         const PAD_L = 4, PAD_R = 4, PAD_T = 6, PAD_B = 6;
         const plotW = r.width - PAD_L - PAD_R, plotH = r.height - PAD_T - PAD_B;
@@ -1328,7 +1362,7 @@
               </div>`;
         }).join('');
 
-        if (!rows) { info.textContent = symbolOf[key] ? 'memuat bias...' : 'menunggu harga live...'; return; }
+        if (!rows) { info.textContent = symbolOf[key] ? 'memuat bias...' : 'TIDAK TERSAMBUNG / menunggu harga live...'; return; }
         const vals = Object.values(rows).map(r => r.bias);
         const bull = vals.filter(v => v === 'BULLISH').length;
         const bear = vals.filter(v => v === 'BEARISH').length;
@@ -1343,7 +1377,9 @@
         const tradingStyle = document.getElementById('tradingStyleSelect').value;
         const symbolKey = marketId.split('|').pop();
         const live = prices[symbolKey];
-        if (!live) return alert('Harga live belum tersambung. Pilih pair lain atau tunggu sejenak.');
+        if (!live || !isLive(symbolKey)) {
+            return alert(`${displayName(symbolKey)} TIDAK TERSAMBUNG ke stream. Pilih pair lain atau tunggu harga masuk.`);
+        }
 
         const btn = document.getElementById('signalBtn');
         btn.disabled = true;
