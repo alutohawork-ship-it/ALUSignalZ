@@ -6,46 +6,57 @@ const KV_KEY = 'alu_clients';
 
 const DECIMALS = { XAUUSD: 2, XAGUSD: 3, EURUSD: 5, USDJPY: 3, GBPUSD: 5, BTCUSDT: 2, ETHUSDT: 2, SOLUSDT: 2, XRPUSDT: 4, DJI: 2, DAX: 2 };
 
+// Ukuran 1 pip per simbol. Harus sama dengan MARKETS.pip di index.html
+const PIP = { XAUUSD: 0.1, XAGUSD: 0.01, EURUSD: 0.0001, USDJPY: 0.01, GBPUSD: 0.0001, BTCUSDT: 1, ETHUSDT: 0.1, SOLUSDT: 0.01, XRPUSDT: 0.0001, DJI: 1, DAX: 1 };
+
+// Minimal jarak TP1 untuk Day Trading (dalam pip). Simbol yang tidak ada di sini memakai 1.5 x ATR MTF.
+const DAY_MIN_TP1_PIPS = { XAUUSD: 80 };
+
 const TF_MS = { '1m': 60000, '5m': 300000, '15m': 900000, '30m': 1800000, '1h': 3600000, '4h': 14400000, '1d': 86400000 };
 const TF_LABEL = { '5m': 'M5', '15m': 'M15', '30m': 'M30', '1h': 'H1', '4h': 'H4', '1d': 'D1' };
-const ROLE_LABEL = { htf: 'HTF', mtf: 'MTF', ltf: 'LTF' };
 
 // Harus sama dengan STYLE_TF di index.html
+// kind: 'scalp' = entry market searah struktur MTF, SL di swing terdekat
+//       'day'   = entry market, SL di zona FVG/OB terdekat, TP1 minimal pip tertentu
+//       'zone'  = entry limit di zona fresh (perilaku lama)
 const STYLES = {
   'Scalping': {
     label: 'Scalping (HTF: M15 | MTF: M5 | LTF: M1/M3)',
-    mode: 'REACTIVE',
+    mode: 'MARKET',
+    kind: 'scalp',
     tf: { htf: '15m', mtf: '5m' },
     rr: [1.0, 1.8, 2.8],
   },
   'Day Trading': {
     label: 'Day Trading (HTF: H1 | MTF: M30 | LTF: M5)',
-    mode: 'LIMIT',
+    mode: 'MARKET',
+    kind: 'day',
     tf: { htf: '1h', mtf: '30m', ltf: '5m' },
     rr: [1.3, 2.5, 4.0],
   },
   'Intraday': {
     label: 'Intraday (HTF: H4 | MTF: H1 | LTF: M15+M5)',
     mode: 'LIMIT',
+    kind: 'zone',
     tf: { htf: '4h', mtf: '1h', ltf: '15m' },
     rr: [1.5, 3.0, 5.5],
   },
   'Swing': {
     label: 'Swing Trading (HTF: D1 | MTF: H4 | LTF: H1)',
     mode: 'LIMIT',
+    kind: 'zone',
     tf: { htf: '1d', mtf: '4h', ltf: '1h' },
     rr: [2.0, 4.5, 8.5],
   },
 };
 
 const SL_BUFFER = 0.2;                     // buffer SL dalam ATR
-const CHASE_MAX = 1.0;                     // scalping anti-FOMO: maks jarak harga dari level trigger (ATR)
 const RISK_MAX = 3.0;                      // scalping: SL maks 3 ATR
-const RISK_MIN = 0.5;                      // SL minimal 0.5 ATR timeframe zona
+const RISK_MIN = 0.5;                      // SL minimal 0.5 ATR
 const LIMIT_RISK_MAX = 4.0;                // zona: SL maks 4 ATR
 const ZONE_MAX_DIST = 4.0;                 // zona maks 4 ATR dari harga
 const IMPULSE_MAX_AGE = 80;                // impuls harus masih baru (dalam candle)
-const HOLD_ATR_MIN = 0.5;                  // SL minimal 0.5 ATR timeframe MTF, supaya trade punya ruang bergerak
+const HOLD_ATR_MIN = 0.5;                  // SL minimal 0.5 ATR timeframe MTF
 const EXPIRE_BARS = 6;                     // pending batal setelah 6 candle timeframe zona
 const EXPIRE_MIN_MS = 60 * 60 * 1000;      // minimal 1 jam
 const EXPIRE_MAX_MS = 48 * 60 * 60 * 1000; // maksimal 48 jam
@@ -142,51 +153,87 @@ function structureDir(candles) {
 
 // ---------- Rencana entry ----------
 
-// Scalping: entry market mengikuti reaksi (sweep + reclaim, atau break struktur terbaru)
-function reactivePlan(candles, dir, price, a) {
-  const sw = swings(candles.slice(0, -3), 2);
-  const recent = candles.slice(-3);
-  const sh = lastSwing(sw, 'H');
-  const sl0 = lastSwing(sw, 'L');
-  if (!sh || !sl0) return { err: 'Swing high atau low belum terbentuk.' };
+// Scalping: entry market langsung searah struktur MTF, tanpa menunggu trigger.
+// SL di swing terdekat, dibatasi antara RISK_MIN dan RISK_MAX (ATR).
+function scalpPlan(candles, dir, price, a) {
+  const sw = swings(candles, 2);
+  const recent = candles.slice(-10);
+  let sl;
 
-  let trigger, level, stop;
   if (dir === 1) {
-    const sweep = recent.some(c => c.l < sl0.price) && price > sl0.price;
-    const bos = recent.some(c => c.c > sh.price);
-    if (!sweep && !bos) return { err: 'Belum ada trigger: sweep low atau break high terbaru.' };
-    trigger = sweep ? 'sweep' : 'bos';
-    level = sweep ? sl0.price : sh.price;
-    if (price - level > CHASE_MAX * a) return { err: 'Harga sudah lari dari level trigger. Tunggu pullback (anti-FOMO).' };
-    stop = (sweep ? Math.min(...recent.map(c => c.l)) : sl0.price) - SL_BUFFER * a;
-    if (!(stop < price)) return { err: 'SL tidak valid untuk entry market.' };
-    if (price - stop > RISK_MAX * a) return { err: 'SL terlalu jauh untuk entry market.' };
-    if (price - stop < RISK_MIN * a) stop = price - RISK_MIN * a;
+    const sl0 = lastSwing(sw, 'L');
+    const base = sl0 && sl0.price < price ? sl0.price : Math.min(...recent.map(c => c.l));
+    sl = base - SL_BUFFER * a;
+    if (price - sl > RISK_MAX * a) sl = price - RISK_MAX * a;
+    if (price - sl < RISK_MIN * a) sl = price - RISK_MIN * a;
   } else {
-    const sweep = recent.some(c => c.h > sh.price) && price < sh.price;
-    const bos = recent.some(c => c.c < sl0.price);
-    if (!sweep && !bos) return { err: 'Belum ada trigger: sweep high atau break low terbaru.' };
-    trigger = sweep ? 'sweep' : 'bos';
-    level = sweep ? sh.price : sl0.price;
-    if (level - price > CHASE_MAX * a) return { err: 'Harga sudah lari dari level trigger. Tunggu pullback (anti-FOMO).' };
-    stop = (sweep ? Math.max(...recent.map(c => c.h)) : sh.price) + SL_BUFFER * a;
-    if (!(stop > price)) return { err: 'SL tidak valid untuk entry market.' };
-    if (stop - price > RISK_MAX * a) return { err: 'SL terlalu jauh untuk entry market.' };
-    if (stop - price < RISK_MIN * a) stop = price + RISK_MIN * a;
+    const sh0 = lastSwing(sw, 'H');
+    const base = sh0 && sh0.price > price ? sh0.price : Math.max(...recent.map(c => c.h));
+    sl = base + SL_BUFFER * a;
+    if (sl - price > RISK_MAX * a) sl = price + RISK_MAX * a;
+    if (sl - price < RISK_MIN * a) sl = price + RISK_MIN * a;
   }
 
   return {
     status: 'RUNNING',
     entry: price,
-    sl: stop,
+    sl,
     zone: { min: price - 0.1 * a, max: price + 0.1 * a },
-    trigger,
+    trigger: 'market',
+  };
+}
+
+// Day Trading: entry market, SL di bawah/atas zona FVG/OB TERDEKAT dari harga.
+// Zona dicari dari HTF, MTF, dan LTF sekaligus, lalu dipilih yang paling dekat.
+function dayPlan(series, dir, price, refAtr, minTp1Dist) {
+  const pool = [];
+  for (const s of series) {
+    if (!s.candles || s.candles.length < MIN_CANDLES) continue;
+    const a = atr(s.candles, 14);
+    if (!(a > 0)) continue;
+    const r = freshZonePlan(s.candles, dir, price, a, refAtr, { all: true });
+    if (r.err) continue;
+    for (const p of r.candidates) {
+      const mid = (p.zone.min + p.zone.max) / 2;
+      pool.push({ ...p, zoneRole: s.role, zoneTf: s.tf, dist: Math.abs(price - mid) });
+    }
+  }
+  if (!pool.length) return { err: 'Tidak ada zona FVG atau Order Block yang fresh di HTF, MTF, maupun LTF.' };
+
+  pool.sort((x, y) => x.dist - y.dist);
+  const z = pool[0];
+  const isBuy = dir === 1;
+
+  let sl = isBuy ? z.zone.min - SL_BUFFER * z.atr : z.zone.max + SL_BUFFER * z.atr;
+  let risk = Math.abs(price - sl);
+  const minRisk = RISK_MIN * refAtr;
+  const maxRisk = LIMIT_RISK_MAX * Math.max(z.atr, refAtr);
+
+  if (risk < minRisk) {
+    sl = isBuy ? price - minRisk : price + minRisk;
+    risk = minRisk;
+  }
+  if (risk > maxRisk) return { err: 'Zona terdekat terlalu jauh untuk dijadikan SL.' };
+  if (!(isBuy ? sl < price : sl > price)) return { err: 'SL tidak valid untuk entry market.' };
+
+  return {
+    status: 'RUNNING',
+    entry: price,
+    sl,
+    zone: { min: z.zone.min, max: z.zone.max },
+    zoneType: z.zoneType,
+    zoneRole: z.zoneRole,
+    zoneTf: z.zoneTf,
+    impulse: z.impulse,
+    minTp1Dist,
+    trigger: 'zona',
   };
 }
 
 // Zona fresh (FVG atau Order Block) di impuls terakhir pada satu timeframe.
 // a = ATR timeframe zona, refAtr = ATR timeframe MTF.
-function freshZonePlan(candles, dir, price, a, refAtr) {
+// opts.all = true -> kembalikan semua kandidat (dipakai Day Trading).
+function freshZonePlan(candles, dir, price, a, refAtr, opts = {}) {
   const n = candles.length;
   const isBuy = dir === 1;
   const sw = swings(candles, 2);
@@ -247,16 +294,12 @@ function freshZonePlan(candles, dir, price, a, refAtr) {
   const maxRisk = LIMIT_RISK_MAX * Math.max(a, refAtr);
 
   const isFresh = z => {
-    // Harga sudah menembus zona
     if (isBuy ? price < z.lo : price > z.hi) return false;
-    // Zona pernah tersentuh sejak terbentuk
     for (let m = z.from + 1; m <= n - 2; m++) {
       if (isBuy ? candles[m].l <= z.hi : candles[m].h >= z.lo) return false;
     }
     const inside = price >= z.lo && price <= z.hi;
-    // Candle terakhir sudah menyentuh zona lalu memantul
     if (!inside && (isBuy ? last.l <= z.hi : last.h >= z.lo)) return false;
-    // Zona terlalu jauh dari harga
     const dist = isBuy ? price - z.hi : z.lo - price;
     if (!inside && dist > maxDist) return false;
     return true;
@@ -282,18 +325,21 @@ function freshZonePlan(candles, dir, price, a, refAtr) {
 
   if (!candidates.length) return { err: 'Tidak ada zona fresh di timeframe ini.' };
 
-  const p = candidates[0];
-  return {
+  const toPlan = p => ({
     status: p.inZone ? 'RUNNING' : 'PENDING',
     entry: p.entry,
     sl: p.sl,
     zone: { min: p.z.lo, max: p.z.hi },
     zoneType: p.z.type,
     impulse: { low: Math.min(S.price, E.price), high: Math.max(S.price, E.price) },
-  };
+    atr: a,
+  });
+
+  if (opts.all) return { candidates: candidates.map(toPlan) };
+  return toPlan(candidates[0]);
 }
 
-// Cari zona fresh berurutan: HTF dulu, lalu MTF, lalu LTF
+// Intraday & Swing: cari zona fresh berurutan HTF -> MTF -> LTF (perilaku lama)
 function findZone(series, dir, price, refAtr) {
   for (const s of series) {
     if (!s.tf || !s.candles || s.candles.length < MIN_CANDLES) continue;
@@ -320,23 +366,36 @@ function durText(ms, lang) {
   return T(lang, `${m} menit`, `${m} minute${m === 1 ? '' : 's'}`);
 }
 
-function buildReason({ lang, style, dir, plan, htfAligned, dec }) {
+function buildReason({ lang, style, dir, plan, htfAligned, dec, minTp1Pips }) {
   const f = v => v.toFixed(dec);
   const d = dir === 1 ? 'BUY' : 'SELL';
   const htf = htfAligned ? T(lang, 'searah', 'aligned') : T(lang, 'belum jelas', 'unclear');
   const head = `${d} · ${style.label}.`;
 
-  if (style.mode === 'REACTIVE') {
-    const trig = plan.trigger === 'sweep'
-      ? T(lang, 'sweep likuiditas lalu reclaim', 'liquidity sweep and reclaim')
-      : T(lang, 'break struktur terbaru', 'fresh structure break');
+  if (style.kind === 'scalp') {
     return `${head} ` + T(
       lang,
-      `Entry market di ${f(plan.entry)} setelah ${trig}. Anti-FOMO aktif: harga tidak lebih dari 1 ATR dari level trigger. HTF ${htf}.`,
-      `Market entry at ${f(plan.entry)} after ${trig}. Anti-chase active: price within 1 ATR of the trigger level. HTF ${htf}.`
+      `Entry market di ${f(plan.entry)} searah struktur MTF. SL di swing terdekat, maks ${RISK_MAX} ATR. HTF ${htf}.`,
+      `Market entry at ${f(plan.entry)} following MTF structure. SL at nearest swing, max ${RISK_MAX} ATR. HTF ${htf}.`
     );
   }
 
+  if (style.kind === 'day') {
+    const tfTxt = TF_LABEL[plan.zoneTf];
+    const zName = plan.zoneType === 'FVG' ? 'FVG' : 'Order Block';
+    const zone = `${f(plan.zone.min)} – ${f(plan.zone.max)}`;
+    const fbId = plan.zoneRole === 'mtf' ? 'Zona terdekat diambil dari MTF. '
+      : plan.zoneRole === 'ltf' ? 'Zona terdekat diambil dari LTF. ' : '';
+    const fbEn = plan.zoneRole === 'mtf' ? 'Nearest zone taken from MTF. '
+      : plan.zoneRole === 'ltf' ? 'Nearest zone taken from LTF. ' : '';
+    return `${head} ` + T(
+      lang,
+      `${fbId}Entry market di ${f(plan.entry)}, SL di bawah/atas ${zName} ${tfTxt} ${zone}. TP1 minimal ${minTp1Pips} pip. HTF ${htf}.`,
+      `${fbEn}Market entry at ${f(plan.entry)}, SL beyond ${zName} ${tfTxt} ${zone}. TP1 at least ${minTp1Pips} pips. HTF ${htf}.`
+    );
+  }
+
+  // Intraday & Swing (perilaku lama)
   const tfTxt = TF_LABEL[plan.zoneTf];
   const zName = plan.zoneType === 'FVG' ? 'FVG' : 'Order Block';
   const zone = `${f(plan.zone.min)} – ${f(plan.zone.max)}`;
@@ -406,9 +465,21 @@ export default async function handler(req, res) {
       return none(T(lang, 'Arah HTF berlawanan dengan arah entry. Tidak ada sinyal.', 'HTF direction conflicts with entry. No signal.'));
     }
 
+    // Jarak minimal TP1 (harga) untuk Day Trading
+    const pip = PIP[symbol];
+    const minTp1Dist = style.kind !== 'day'
+      ? 0
+      : (DAY_MIN_TP1_PIPS[symbol] && pip ? DAY_MIN_TP1_PIPS[symbol] * pip : 1.5 * refAtr);
+
     let plan;
-    if (style.mode === 'REACTIVE') {
-      plan = reactivePlan(mtfC, dir, price, refAtr);
+    if (style.kind === 'scalp') {
+      plan = scalpPlan(mtfC, dir, price, refAtr);
+    } else if (style.kind === 'day') {
+      plan = dayPlan([
+        { role: 'htf', tf: style.tf.htf, candles: htfC },
+        { role: 'mtf', tf: style.tf.mtf, candles: mtfC },
+        { role: 'ltf', tf: style.tf.ltf, candles: ltfC },
+      ], dir, price, refAtr, minTp1Dist);
     } else {
       plan = findZone([
         { role: 'htf', tf: style.tf.htf, candles: htfC },
@@ -421,11 +492,14 @@ export default async function handler(req, res) {
     const entry = plan.entry;
     const risk = Math.abs(entry - plan.sl);
     const r = v => Number(v.toFixed(dec));
-    const tps = style.rr.map(x => entry + dir * risk * x);
+
+    // TP: rasio RR biasa, tapi TP1 dipaksa minimal minTp1Dist (Day Trading). TP2/TP3 ikut proporsi.
+    const tps = style.rr.map(x => entry + dir * Math.max(risk * x, minTp1Dist * (x / style.rr[0])));
 
     const reason = buildReason({
       lang, style, dir, plan, dec,
       htfAligned: htfDir === dir,
+      minTp1Pips: pip ? Math.round(minTp1Dist / pip) : null,
     });
 
     return res.status(200).json({
