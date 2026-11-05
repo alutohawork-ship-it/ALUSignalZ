@@ -1,6 +1,6 @@
 const KEY = 'alu_clients';
+const STATUS_DAYS = { trial: 3, monthly: 30, lifetime: 3650 };
 
-// Panggil Upstash REST API langsung, tanpa npm package
 async function kv(command) {
   const r = await fetch(process.env.KV_REST_API_URL, {
     method: 'POST',
@@ -20,34 +20,51 @@ async function readClients() {
   return raw ? JSON.parse(raw) : [];
 }
 
+async function writeClients(list) {
+  await kv(['SET', KEY, JSON.stringify(list)]);
+}
+
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ ok: false, msg: 'Method not allowed' });
-  }
-
   try {
-    const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
-    const input = String(body.value || '').trim();
-    if (!input) return res.status(200).json({ ok: false, msg: 'Input tidak boleh kosong.' });
-
     const adminCode = process.env.ADMIN_CODE;
-    if (adminCode && input === adminCode) {
-      return res.status(200).json({ ok: true, role: 'admin' });
+    if (!adminCode || req.headers['x-admin-code'] !== adminCode) {
+      return res.status(401).json({ error: 'Kode admin salah.' });
     }
 
-    const email = input.toLowerCase();
-    const clients = await readClients();
-    const c = clients.find(x => x.email === email);
+    if (req.method === 'GET') {
+      return res.status(200).json(await readClients());
+    }
 
-    if (!c) {
-      return res.status(200).json({ ok: false, msg: 'Email belum terdaftar. Silakan hubungi admin untuk pendaftaran.' });
+    if (req.method === 'POST') {
+      const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+      const email = String(body.email || '').trim().toLowerCase();
+      const status = body.status;
+      if (!email) return res.status(400).json({ error: 'Email kosong.' });
+      if (!Object.keys(STATUS_DAYS).includes(status)) {
+        return res.status(400).json({ error: 'Status tidak valid.' });
+      }
+
+      const clients = await readClients();
+      if (clients.some(c => c.email === email)) {
+        return res.status(409).json({ error: `Email ${email} sudah terdaftar.` });
+      }
+
+      const expires_at = new Date(Date.now() + STATUS_DAYS[status] * 86400000).toISOString();
+      clients.push({ id: 'client_' + Date.now(), email, status, expires_at });
+      await writeClients(clients);
+      return res.status(200).json({ ok: true });
     }
-    if (new Date(c.expires_at) < new Date()) {
-      return res.status(200).json({ ok: false, msg: 'Masa aktif akses email ini sudah berakhir. Hubungi admin untuk perpanjangan.' });
+
+    if (req.method === 'DELETE') {
+      const id = new URL(req.url, 'http://localhost').searchParams.get('id');
+      const clients = (await readClients()).filter(c => c.id !== id);
+      await writeClients(clients);
+      return res.status(200).json({ ok: true });
     }
-    return res.status(200).json({ ok: true, role: 'client', email });
+
+    return res.status(405).json({ error: 'Method not allowed' });
   } catch (err) {
-    console.error('login error:', err);
-    return res.status(500).json({ ok: false, msg: 'Server error: ' + err.message });
+    console.error('clients error:', err);
+    return res.status(500).json({ error: 'Server error: ' + err.message });
   }
 }
