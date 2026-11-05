@@ -1,12 +1,9 @@
-html
-
-
 <!DOCTYPE html>
 <html lang="id" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Alu Signal Z & MyFundedPerps Live Terminal</title>
+    <title>Alu Signal Z & Terminal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -23,199 +20,160 @@ html
     </script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
-    <!-- CONSOLE DEBUG UNTUK HP: hapus tanda komentar di 2 baris bawah jika ingin melihat console di HP -->
-    <!-- <script src="https://cdn.jsdelivr.net/npm/eruda"></script> -->
-    <!-- <script>eruda.init();</script> -->
+    <style>
+        .lvl-box { position: relative; transition: all .25s ease; }
+        .tp-hit { background: rgba(16,185,129,.18) !important; border-color: #34d399 !important; box-shadow: 0 0 0 1px #34d399, 0 0 14px rgba(52,211,153,.35); }
+        .sl-hit { background: rgba(239,68,68,.18) !important; border-color: #f87171 !important; box-shadow: 0 0 0 1px #f87171, 0 0 14px rgba(248,113,113,.35); }
+        .hit-badge { position: absolute; top: -6px; right: -6px; width: 16px; height: 16px; border-radius: 9999px; display: none; align-items: center; justify-content: center; font-size: 9px; color: #0b0e14; z-index: 5; }
+        .hit-badge.show { display: flex; animation: pop .45s ease-out; }
+        @keyframes pop { 0% { transform: scale(0); } 60% { transform: scale(1.4); } 100% { transform: scale(1); } }
+        input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    </style>
 </head>
 <body class="bg-darkbg text-gray-200 font-sans min-h-screen flex flex-col justify-between p-2">
 
-    <!-- Header Navbar -->
-    <header class="flex items-center justify-between pb-2 border-b border-panelborder max-w-md mx-auto w-full">
-        <div class="flex items-center gap-2">
-            <div class="bg-accentblue w-7 h-7 rounded-lg flex items-center justify-center text-white">
-                <i class="fa-solid fa-chart-line text-xs"></i>
+    <div id="toast" class="hidden fixed top-3 left-1/2 -translate-x-1/2 z-50 px-3 py-2 rounded-lg text-[10px] font-bold font-mono shadow-xl border"></div>
+
+    <!-- ================= LOGIN ================= -->
+    <div id="authScreen" class="fixed inset-0 z-50 bg-darkbg/95 backdrop-blur-md flex flex-col items-center justify-center p-4">
+        <div class="bg-cardbg border border-panelborder rounded-2xl p-6 max-w-sm w-full space-y-5 shadow-2xl">
+            <div class="text-center space-y-1">
+                <div class="bg-accentblue w-12 h-12 rounded-xl flex items-center justify-center text-white mx-auto text-xl shadow-lg shadow-accentblue/30">
+                    <i class="fa-solid fa-chart-line"></i>
+                </div>
+                <h1 class="text-xl font-extrabold text-white pt-2 tracking-tight">Welcome, Alu Signal Z</h1>
+                <p class="text-[11px] text-gray-400">Silakan masukkan email atau kode akses</p>
             </div>
-            <div>
-                <h1 class="font-bold text-xs text-white">Alu <span class="text-accentblue">Signal Z</span></h1>
-                <p class="text-[8px] text-gray-400">Multi-Asset Live Stream</p>
+            <form id="authForm" onsubmit="handleUniversalLogin(event)" class="space-y-4 pt-2">
+                <div>
+                    <label class="text-[10px] font-bold text-gray-400 block mb-1 tracking-wider">ACCESS LOGIN</label>
+                    <input type="text" id="authInput" required class="w-full bg-darkbg border border-panelborder rounded-xl p-3 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="nama@email.com">
+                </div>
+                <button type="submit" class="w-full bg-accentblue hover:bg-blue-600 text-white font-bold py-3 rounded-xl text-xs transition shadow-lg shadow-accentblue/20 flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-right-to-bracket"></i> MASUK SISTEM
+                </button>
+            </form>
+            <div class="pt-4 border-t border-panelborder/60 text-center space-y-1.5">
+                <p class="text-[10px] text-gray-400 font-medium">Bantuan & Informasi Admin:</p>
+                <a href="https://wa.me/6285817038501?text=Halo%20Admin%20Alu%20Signal%20Z,%20saya%20ingin%20bertanya" target="_blank" class="inline-flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-full text-xs font-bold font-mono transition">
+                    <i class="fa-brands fa-whatsapp text-sm text-emerald-400"></i> +6285817038501
+                </a>
             </div>
         </div>
-        <div class="flex items-center gap-2">
-            <span id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">WS: OFF</span>
-        </div>
-    </header>
+    </div>
 
-    <!-- BAGIAN TENGAH: AI Signal Generator -->
-    <main class="max-w-md mx-auto w-full flex-1 flex flex-col gap-2 pt-2">
-
-        <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
-            <div class="flex justify-between items-center">
-                <label class="text-[9px] font-bold text-gray-400">TARGET ASET AKTIF</label>
-                <span id="selectedPairBadge" class="text-[9px] font-mono text-accentblue font-bold">hyperliquid|XAUUSD</span>
+    <!-- ================= DASHBOARD ADMIN ================= -->
+    <div id="registerDashboard" class="hidden fixed inset-0 z-40 bg-darkbg overflow-y-auto p-4 flex flex-col justify-between">
+        <div class="max-w-md mx-auto w-full space-y-4 pt-6">
+            <div class="flex justify-between items-center border-b border-panelborder pb-3">
+                <div class="flex items-center gap-2">
+                    <div class="bg-yellow-500 w-8 h-8 rounded-lg flex items-center justify-center text-darkbg font-bold"><i class="fa-solid fa-user-plus"></i></div>
+                    <div>
+                        <h2 class="text-sm font-extrabold text-white">Dashboard Pendaftaran Klien</h2>
+                        <p class="text-[9px] text-yellow-400">Akses Khusus Admin</p>
+                    </div>
+                </div>
+                <button onclick="logout()" class="text-[9px] font-mono font-bold px-2.5 py-1 rounded bg-red-500/20 text-red-400 border border-red-500/40">KELUAR</button>
             </div>
+            <div class="bg-cardbg border border-panelborder rounded-xl p-4 space-y-3 shadow-lg">
+                <h3 class="text-xs font-bold text-white flex items-center gap-1.5"><i class="fa-solid fa-id-card text-accentblue"></i> Daftarkan Email Klien Baru</h3>
+                <div class="space-y-2">
+                    <div>
+                        <label class="text-[9px] font-bold text-gray-400 block mb-1">EMAIL KLIEN</label>
+                        <input type="email" id="newClientEmail" class="w-full bg-darkbg border border-panelborder rounded-lg p-2.5 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="klien@email.com">
+                    </div>
+                    <div>
+                        <label class="text-[9px] font-bold text-gray-400 block mb-1">PAKET / STATUS</label>
+                        <select id="newClientStatus" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2.5 rounded-lg focus:outline-none">
+                            <option value="trial">Trial 3 Hari</option>
+                            <option value="monthly">Langganan Bulanan (Monthly)</option>
+                            <option value="lifetime">Akses Selamanya (Lifetime)</option>
+                        </select>
+                    </div>
+                    <button onclick="registerNewClientByAdmin()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg text-xs transition shadow-md">+ SIMPAN & DAFTARKAN KLIEN</button>
+                </div>
+            </div>
+            <div class="bg-cardbg border border-panelborder rounded-xl p-4 space-y-2 shadow-lg">
+                <div class="flex justify-between items-center border-b border-panelborder pb-2">
+                    <span class="text-xs font-bold text-gray-300">Daftar Klien Terdaftar</span>
+                    <button onclick="loadAdminClientList()" class="text-[9px] text-accentblue hover:underline"><i class="fa-solid fa-rotate"></i> Refresh</button>
+                </div>
+                <div id="adminClientTableList" class="space-y-1.5 max-h-[300px] overflow-y-auto pr-1"></div>
+            </div>
+        </div>
+        <footer class="text-center py-3 text-[9px] text-gray-500">Alu Signal Z Admin Control Panel</footer>
+    </div>
 
-            <!-- Dropdown Multi-Asset -->
-            <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                <optgroup label="Gold, Silver & Forex">
-                    <option value="hyperliquid|XAUUSD">XAUUSD / Gold (Hyperliquid)</option>
-                    <option value="hyperliquid|XAGUSD">XAGUSD / Silver (Hyperliquid)</option>
-                    <option value="veranta|EURUSD">EUR/USD (Veranta)</option>
-                    <option value="veranta|USDJPY">USD/JPY (Veranta)</option>
-                </optgroup>
-                <optgroup label="Crypto">
-                    <option value="binance|BTCUSDT">BTC/USDT (Binance)</option>
-                    <option value="binance|ETHUSDT">ETH/USDT (Binance)</option>
-                    <option value="binance|SOLUSDT">SOL/USDT (Binance)</option>
-                    <option value="binance|XRPUSDT">XRP/USDT (Binance)</option>
-                </optgroup>
-                <optgroup label="Commodities & Indices">
-                    <option value="hyperliquid|xyz:BRENTOIL">Brent Oil (Hyperliquid)</option>
-                    <option value="ostium|DJI">Dow Jones / DJI (Ostium)</option>
-                    <option value="hyperliquid|xyz:SP500">S&P 500 (Hyperliquid)</option>
-                </optgroup>
-                <optgroup label="Stocks / Saham">
-                    <option value="hyperliquid|xyz:AAPL">Apple / AAPL (Hyperliquid)</option>
-                    <option value="binance|NVDAUSDT">NVIDIA / NVDA (Binance)</option>
-                    <option value="binance|TSLAUSDT">Tesla / TSLA (Binance)</option>
-                </optgroup>
-            </select>
+    <!-- ================= TERMINAL ================= -->
+    <div id="mainApp" class="hidden flex-col justify-between min-h-screen">
+        <header class="flex items-center justify-between pb-2 border-b border-panelborder max-w-md mx-auto w-full">
+            <div class="flex items-center gap-2">
+                <div class="bg-accentblue w-7 h-7 rounded-lg flex items-center justify-center text-white"><i class="fa-solid fa-chart-line text-xs"></i></div>
+                <div>
+                    <h1 class="font-bold text-xs text-white">Alu <span class="text-accentblue">Signal Z</span></h1>
+                    <p id="txtSubHeader" class="text-[8px] text-gray-400">Multi-Asset Live Stream</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <button onclick="logout()" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">LOGOUT</button>
+                <button onclick="toggleLang()" id="langBtn" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-panelborder text-gray-300 border border-panelborder hover:border-accentblue">ID 🌐</button>
+                <span id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">WS: OFF</span>
+            </div>
+        </header>
 
-            <!-- Pilihan Gaya Trading -->
-            <div>
-                <label class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
-                <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                    <option value="Scalping (M1 & M15)">Scalping (M1 & M15)</option>
-                    <option value="Day Trading (M3 & M30)">Day Trading (M3 & M30)</option>
-                    <option value="Intraday (M5 & H1)">Intraday (M5 & H1)</option>
-                    <option value="Swing Trading (M15 & H4/Daily)">Swing Trading (M15 & H4/Daily)</option>
+        <main class="max-w-md mx-auto w-full flex-1 flex flex-col gap-2 pt-2">
+            <!-- Generator -->
+            <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
+                <div class="flex justify-between items-center">
+                    <label id="lblTargetAsset" class="text-[9px] font-bold text-gray-400">TARGET ASET AKTIF</label>
+                    <span id="selectedPairBadge" class="text-[9px] font-mono text-accentblue font-bold">hyperliquid|XAUUSD</span>
+                </div>
+                <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
+                    <optgroup label="Gold, Silver & Forex">
+                        <option value="hyperliquid|XAUUSD">XAUUSD / Gold (Hyperliquid)</option>
+                        <option value="hyperliquid|XAGUSD">XAGUSD / Silver (Hyperliquid)</option>
+                        <option value="veranta|EURUSD">EUR/USD (Veranta)</option>
+                        <option value="veranta|USDJPY">USD/JPY (Veranta)</option>
+                        <option value="veranta|GBPUSD">GBP/USD (Veranta)</option>
+                        <option value="veranta|GBPJPY">GBP/JPY (Veranta)</option>
+                    </optgroup>
+                    <optgroup label="Indices / Indeks Global">
+                        <option value="ostium|DJI">Dow Jones / US30 (Ostium)</option>
+                        <option value="hyperliquid|xyz:SP500">S&P 500 / US500 (Hyperliquid)</option>
+                        <option value="hyperliquid|xyz:NAS100">Nasdaq 100 / US100 (Hyperliquid)</option>
+                        <option value="ostium|NIKKEI">Nikkei 225 / Jepang (Ostium)</option>
+                        <option value="ostium|DAX">DAX 40 / Eropa (Ostium)</option>
+                    </optgroup>
+                    <optgroup label="Crypto">
+                        <option value="binance|BTCUSDT">BTC/USDT (Binance)</option>
+                        <option value="binance|ETHUSDT">ETH/USDT (Binance)</option>
+                        <option value="binance|SOLUSDT">SOL/USDT (Binance)</option>
+                        <option value="binance|XRPUSDT">XRP/USDT (Binance)</option>
+                    </optgroup>
                 </select>
+
+                <div class="flex items-center gap-1.5">
+                    <input id="calibInput" type="number" step="any" inputmode="decimal" placeholder="Harga Bid di MT (opsional)"
+                           class="flex-1 min-w-0 bg-darkbg border border-panelborder text-[10px] font-mono text-white px-2 py-1.5 rounded-lg focus:outline-none">
+                    <button onclick="calibrate()" id="calibBtn" class="text-[9px] font-bold px-2 py-1.5 rounded-lg bg-accentblue/20 text-accentblue border border-accentblue/40">KALIBRASI</button>
+                    <button onclick="resetCalib()" class="text-[9px] font-bold px-2 py-1.5 rounded-lg bg-panelborder text-gray-300 border border-panelborder">RESET</button>
+                </div>
+                <p id="calibInfo" class="text-[8px] font-mono text-gray-500">Offset: 0</p>
+
+                <div>
+                    <label id="lblTradingStyle" class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
+                    <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
+                        <option value="Scalping (M1 & M15)">Scalping (M1 & M15)</option>
+                        <option value="Day Trading (M3 & M30)">Day Trading (M3 & M30)</option>
+                        <option value="Intraday (M5 & H1)">Intraday (M5 & H1)</option>
+                        <option value="Swing Trading (M15 & H4/Daily)">Swing Trading (M15 & H4/Daily)</option>
+                    </select>
+                </div>
+
+                <button onclick="generateAISignal()" id="signalBtn" class="w-full bg-gradient-to-r from-accentblue to-indigo-600 hover:from-blue-600 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-accentblue/20 transition active:scale-95">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnGenText">GENERATE AI SIGNAL</span>
+                </button>
             </div>
 
-            <button onclick="generateAISignal()" id="signalBtn" class="w-full bg-gradient-to-r from-accentblue to-indigo-600 hover:from-blue-600 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-accentblue/20 transition active:scale-95">
-                <i class="fa-solid fa-wand-magic-sparkles"></i> GENERATE AI SIGNAL
-            </button>
-        </div>
-
-        <!-- TAMPILAN CARD KOTAK SIGNAL AI -->
-        <div id="signalContainer" class="bg-cardbg rounded-xl border border-panelborder p-3 shadow-md space-y-3">
-
-            <div class="flex items-center justify-between border-b border-panelborder pb-2">
-                <span id="cardMarketTitle" class="text-xs font-bold text-white">SELECT PAIR SPOT</span>
-                <span id="cardLivePriceTop" class="text-xs font-mono font-bold text-accentblue">--.--</span>
-            </div>
-
-            <!-- Standby View -->
-            <div id="standbyView" class="py-5 text-center text-xs text-gray-400">
-                Pilih pair, pastikan harga live bergerak, lalu tekan <b>GENERATE AI SIGNAL</b>.
-            </div>
-
-            <!-- Active Card -->
-            <div id="activeSignalCard" class="hidden space-y-3">
-
-                <div class="bg-darkbg/80 border border-panelborder rounded-xl p-3 text-center space-y-1">
-                    <div class="flex justify-center">
-                        <span id="signalBadgeBtn" class="bg-sky-500 text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg flex items-center gap-1">
-                            <i class="fa-solid fa-caret-up"></i> BUY
-                        </span>
-                    </div>
-                    <p id="cardStyleSub" class="text-[9px] text-gray-400 pt-1">SCALPING / Just Now</p>
-                    <p class="text-[9px] font-bold text-gray-400 tracking-widest pt-1">ENTRY ZONE</p>
-                    <h2 id="cardEntryZone" class="text-xl font-black text-white font-mono tracking-tight">-- - --</h2>
-                    <div class="pt-1">
-                        <span class="inline-flex items-center gap-1.5 bg-darkbg border border-panelborder px-2.5 py-0.5 rounded-full text-[9px] text-gray-300 font-mono">
-                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                            LIVE <span id="cardLivePriceBadge" class="font-bold text-white">--.--</span>
-                        </span>
-                    </div>
-                </div>
-
-                <!-- Grid 4 Kotak SL & TP -->
-                <div class="grid grid-cols-4 gap-1.5">
-                    <div class="bg-darkbg/70 border border-red-500/30 rounded-lg p-2 text-center">
-                        <p class="text-[8px] font-bold text-red-400">SL</p>
-                        <p id="cardSL" class="text-[10px] font-extrabold text-red-400 font-mono">--</p>
-                        <p id="cardSLPips" class="text-[7px] text-red-400/80 font-mono">--</p>
-                    </div>
-                    <div class="bg-darkbg/70 border border-emerald-500/30 rounded-lg p-2 text-center">
-                        <p class="text-[8px] font-bold text-emerald-400">TP1</p>
-                        <p id="cardTP1" class="text-[10px] font-extrabold text-emerald-400 font-mono">--</p>
-                        <p id="cardTP1Pips" class="text-[7px] text-emerald-400/80 font-mono">--</p>
-                    </div>
-                    <div class="bg-darkbg/70 border border-emerald-500/30 rounded-lg p-2 text-center">
-                        <p class="text-[8px] font-bold text-emerald-400">TP2</p>
-                        <p id="cardTP2" class="text-[10px] font-extrabold text-emerald-400 font-mono">--</p>
-                        <p id="cardTP2Pips" class="text-[7px] text-emerald-400/80 font-mono">--</p>
-                    </div>
-                    <div class="bg-darkbg/70 border border-sky-500/30 rounded-lg p-2 text-center">
-                        <p class="text-[8px] font-bold text-sky-400">TP3</p>
-                        <p id="cardTP3" class="text-[10px] font-extrabold text-sky-400 font-mono">--</p>
-                        <p id="cardTP3Pips" class="text-[7px] text-sky-400/80 font-mono">--</p>
-                    </div>
-                </div>
-
-                <!-- Live Price Map -->
-                <div class="bg-darkbg/80 border border-panelborder rounded-xl p-3 space-y-2">
-                    <p class="text-[9px] font-bold text-gray-400 tracking-wider">LIVE PRICE MAP</p>
-                    <div class="space-y-1.5 text-[10px] font-mono">
-                        <div class="flex justify-between items-center text-sky-400">
-                            <span>TP3</span><span id="mapTP3" class="font-bold">--</span>
-                        </div>
-                        <div class="flex justify-between items-center text-emerald-400">
-                            <span>TP2</span><span id="mapTP2" class="font-bold">--</span>
-                        </div>
-                        <div class="flex justify-between items-center text-emerald-400">
-                            <span>TP1</span><span id="mapTP1" class="font-bold">--</span>
-                        </div>
-                        <div class="flex justify-between items-center bg-panelborder/50 px-2 py-1 rounded text-white font-bold">
-                            <span class="text-yellow-400">LIVE PRICE</span>
-                            <span id="mapLivePrice" class="bg-white text-darkbg px-1.5 py-0.5 rounded text-[9px]">--</span>
-                        </div>
-                        <div class="flex justify-between items-center text-red-400">
-                            <span>SL</span><span id="mapSL" class="font-bold">--</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Analysis Reason -->
-                <div class="bg-darkbg border border-panelborder rounded-lg p-2.5 text-[10px] text-gray-300 leading-relaxed">
-                    <p class="font-bold text-gray-400 mb-1">ANALYSIS REASON:</p>
-                    <span id="cardReason">---</span>
-                </div>
-
-            </div>
-        </div>
-
-        <!-- BAGIAN PALING BAWAH: Live Market Ticker -->
-        <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md">
-            <div class="flex justify-between items-center pb-1.5 mb-1.5 border-b border-panelborder">
-                <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
-                    <i class="fa-solid fa-tower-broadcast text-accentblue"></i> LIVE STREAM (MYFUNDEDPERPS)
-                </span>
-                <span id="livePulse" class="text-[8px] text-emerald-400 font-mono animate-pulse">  Live Stream</span>
-            </div>
-
-            <div id="tickerListContainer" class="space-y-1 max-h-[190px] overflow-y-auto pr-1">
-
-                <!-- Gold & Silver -->
-                <div onclick="selectTicker('hyperliquid|XAUUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">XAUUSD <span class="text-[7px] text-yellow-400">Gold (Hyperliquid)</span></span>
-                    <span id="price-XAUUSD" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-                <div onclick="selectTicker('hyperliquid|XAGUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">XAGUSD <span class="text-[7px] text-yellow-400">Silver (Hyperliquid)</span></span>
-                    <span id="price-XAGUSD" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-
-                <!-- Forex -->
-                <div onclick="selectTicker('veranta|EURUSD')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">EURUSD <span class="text-[7px] text-blue-400">Veranta</span></span>
-                    <span id="price-EURUSD" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-                <div onclick="selectTicker('veranta|USDJPY')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-white">USDJPY <span class="text-[7px] text-blue-400">Veranta</span></span>
-                    <span id="price-USDJPY" class="text-[10px] font-mono font-bold text-white">--.--</span>
-                </div>
-
-                <!-- Crypto -->
-                <div onclick="selectTicker('binance|BTCUSDT')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                    <span class="font-bold text-[10px] text-whi
+            <!-- Kartu signal -->
+            <div id="signalContainer" class="bg-cardbg rounded-xl border border-panelborde
