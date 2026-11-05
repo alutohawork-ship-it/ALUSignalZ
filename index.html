@@ -32,8 +32,6 @@
 </head>
 <body class="bg-darkbg text-gray-200 font-sans min-h-screen flex flex-col justify-between p-2">
 
-    <div id="toast" class="hidden fixed top-3 left-1/2 -translate-x-1/2 z-50 px-3 py-2 rounded-lg text-[10px] font-bold font-mono shadow-xl border"></div>
-
     <!-- ================= HALAMAN LOGIN (KODE ADMIN / EMAIL) ================= -->
     <div id="authScreen" class="fixed inset-0 z-50 bg-darkbg/95 backdrop-blur-md flex flex-col items-center justify-center p-4">
         <div class="bg-cardbg border border-panelborder rounded-2xl p-6 max-w-sm w-full space-y-5 shadow-2xl">
@@ -335,7 +333,7 @@
         </footer>
     </div>
 
-    <!-- ================= SCRIPT LOGIKA LENGKAP & STABIL ================= -->
+    <!-- ================= SCRIPT LOGIKA STABIL & CHART MAP PERBAIKAN ================= -->
     <script>
     const MASTER_ADMIN_PASS = 'KMZWAY87AA';
 
@@ -513,16 +511,16 @@
         if (!marketCandles[symbol]) marketCandles[symbol] = {};
         if (!marketCandles[symbol][tfKey]) marketCandles[symbol][tfKey] = [];
 
-        const history = marketCandles[symbol][tfKey];
+        const historyArr = marketCandles[symbol][tfKey];
         const intervalMs = timeframeMinutes * 60 * 1000;
         const now = Date.now();
         const candleTime = Math.floor(now / intervalMs) * intervalMs;
 
-        let current = history[history.length - 1];
+        let current = historyArr[historyArr.length - 1];
         if (!current || current.time !== candleTime) {
             current = { time: candleTime, open: price, high: price, low: price, close: price };
-            history.push(current);
-            if (history.length > 100) history.shift(); 
+            historyArr.push(current);
+            if (historyArr.length > 100) historyArr.shift(); 
         } else {
             if (price > current.high) current.high = price;
             if (price < current.low) current.low = price;
@@ -629,7 +627,6 @@
       const prev = prices[key]?.price;
       prices[key] = { price, recv: Date.now(), kind: ev.kind, provider: ev.provider };
       
-      // Agregasi Tick ke Candle OHLC di memori secara real-time
       processTickToCandle(key, price, 1);
       processTickToCandle(key, price, 5);
       processTickToCandle(key, price, 15);
@@ -638,6 +635,15 @@
       const txt = fmt(key, price);
       const el = document.getElementById(`price-${key}`);
       if (el) { el.textContent = txt; setColor(el, prev == null || price === prev ? 'text-white' : price > prev ? 'text-emerald-400' : 'text-red-400'); }
+      
+      const topEl = document.getElementById('cardLivePriceTop');
+      const badgeEl = document.getElementById('cardLivePriceBadge');
+      const active = getActive();
+      if (active && active.key === key) {
+          if (topEl) topEl.textContent = txt;
+          if (badgeEl) badgeEl.textContent = txt;
+      }
+
       processTick(key, price);
     }
 
@@ -773,15 +779,47 @@
       });
     }
 
+    // ==========================================
+    // PERBAIKAN RENDER CHART LIVE PRICE MAP
+    // ==========================================
     const cv = document.getElementById('priceChart');
     const ctx = cv ? cv.getContext('2d') : null;
+
     function chartLoop() {
-      requestAnimationFrame(chartLoop);
-      if (!cv || !ctx) return;
-      const r = cv.getBoundingClientRect();
-      if (!r.width || !r.height) return;
-      cv.width = r.width; cv.height = r.height;
-      ctx.clearRect(0, 0, r.width, r.height);
+        requestAnimationFrame(chartLoop);
+        if (!cv || !ctx) return;
+        const r = cv.getBoundingClientRect();
+        if (!r.width || !r.height) return;
+        
+        if (cv.width !== r.width || cv.height !== r.height) {
+            cv.width = r.width;
+            cv.height = r.height;
+        }
+
+        ctx.clearRect(0, 0, cv.width, cv.height);
+
+        const t = getActive();
+        if (!t) return;
+
+        const arr = history[t.key];
+        if (!arr || arr.length < 2) return;
+
+        const pricesArr = arr.map(x => x.p);
+        let minP = Math.min(...pricesArr);
+        let maxP = Math.max(...pricesArr);
+        const range = maxP - minP || 1;
+
+        ctx.strokeStyle = '#2962ff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+
+        arr.forEach((pt, i) => {
+            const x = (i / (arr.length - 1)) * cv.width;
+            const y = cv.height - ((pt.p - minP) / range) * (cv.height - 30) - 15;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
     }
 
     async function generateAISignal() {
@@ -828,7 +866,10 @@
     }
 
     function connect() {
-        if (ws) ws.close();
+        if (ws) {
+            ws.onclose = null;
+            ws.close();
+        }
         setWsStatus('CONNECTING', 'yellow');
         ws = new WebSocket(WS_URL);
 
