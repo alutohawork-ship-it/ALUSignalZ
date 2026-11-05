@@ -333,10 +333,11 @@
         </footer>
     </div>
 
-    <!-- ================= SCRIPT LOGIKA STABIL & CHART MAP PERBAIKAN ================= -->
+    <!-- ================= SCRIPT ================= -->
     <script>
     const MASTER_ADMIN_PASS = 'KMZWAY87AA';
 
+    // ================= LOGIN & ADMIN =================
     function handleUniversalLogin(e) {
         e.preventDefault();
         const val = document.getElementById('authInput').value.trim();
@@ -350,7 +351,7 @@
 
         const email = val.toLowerCase();
         let clients = JSON.parse(localStorage.getItem('alu_local_clients') || '[]');
-        
+
         let found = clients.find(c => c.email === email);
         if (!found) {
             const trialEnds = new Date();
@@ -368,8 +369,7 @@
     function openRegisterDashboard() {
         document.getElementById('authScreen').classList.add('hidden');
         document.getElementById('mainApp').classList.add('hidden');
-        const regDash = document.getElementById('registerDashboard');
-        regDash.classList.remove('hidden');
+        document.getElementById('registerDashboard').classList.remove('hidden');
         loadAdminClientList();
     }
 
@@ -437,20 +437,7 @@
         window.location.reload();
     }
 
-    window.onload = () => {
-        const type = localStorage.getItem('alu_session_type');
-        if (type === 'admin_reg') openRegisterDashboard();
-        else if (type === 'terminal') openTerminalApp();
-        
-        buildTicker();
-        updateCalibInfo();
-        renderHistory();
-        if (trades.length) viewTrade(trades[trades.length - 1].id, false);
-        requestAnimationFrame(chartLoop);
-        connectHL();
-        connect();
-    };
-
+    // ================= BAHASA =================
     let currentLang = 'id';
     const DICT = {
         id: { subHeader: "Pure SMC 3-Layer Terminal", targetAsset: "TARGET ASET AKTIF", tradingStyle: "GAYA TRADING / STRATEGI", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE (SBR/RBS / OB)", priceMap: "LIVE PRICE MAP", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", optToday: "Hari ini", optAll: "Semua", win: "WIN", lose: "LOSE", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "Belum ada history.", running: "berjalan", liveStream: "LIVE MARKET STREAM", calibPh: "Harga Bid di MT (opsional)", calibBtn: "KALIBRASI" },
@@ -478,8 +465,8 @@
         refreshActiveUI();
     }
 
+    // ================= KONFIG MARKET =================
     const WS_URL = 'wss://api-stream.myfundedperpetuals.com/v1/market-data';
-    const HL_WS = 'wss://api.hyperliquid.xyz/ws';
     const HISTORY_MS = 10 * 60 * 1000;
     const STORE_KEY = 'aluSignalZ_history_v3';
     const PERP = ['mid', 'last', 'mark'], FX = ['mid', 'last', 'mark'], SPOT = ['last', 'mid', 'mark'];
@@ -500,10 +487,8 @@
       DAX:      { provider: 'ostium', coins: ['DAX', 'GER40', 'DE40'], match: ['DAX', 'GER40'], kinds: PERP, decimals: 2, pip: 1 },
     };
 
-    // ==========================================================
-    // MODULE: TICK-TO-CANDLE AGGREGATOR & SMC STRUCTURE MAPPER
-    // ==========================================================
-    const marketCandles = {}; 
+    // ================= AGREGATOR TICK & STRUKTUR SMC =================
+    const marketCandles = {};
 
     function processTickToCandle(symbol, price, timeframeMinutes = 1) {
         if (!price || price <= 0) return;
@@ -513,14 +498,13 @@
 
         const historyArr = marketCandles[symbol][tfKey];
         const intervalMs = timeframeMinutes * 60 * 1000;
-        const now = Date.now();
-        const candleTime = Math.floor(now / intervalMs) * intervalMs;
+        const candleTime = Math.floor(Date.now() / intervalMs) * intervalMs;
 
         let current = historyArr[historyArr.length - 1];
         if (!current || current.time !== candleTime) {
             current = { time: candleTime, open: price, high: price, low: price, close: price };
             historyArr.push(current);
-            if (historyArr.length > 100) historyArr.shift(); 
+            if (historyArr.length > 100) historyArr.shift();
         } else {
             if (price > current.high) current.high = price;
             if (price < current.low) current.low = price;
@@ -550,6 +534,7 @@
         return { recentHigh: recentHigh?.price, recentLow: recentLow?.price, hasCHoCH, chochType, liquiditySweep };
     }
 
+    // ================= STATE =================
     let ws = null, reconnectTimer = null;
     let trades = loadTrades(), activeId = null, transientView = null;
     const prices = {}, history = {}, rawPrices = {};
@@ -562,6 +547,14 @@
     const offsets = (() => { try { return JSON.parse(localStorage.getItem(OFFSET_KEY)) || {}; } catch { return {}; } })();
     const selectedKey = () => document.getElementById('marketSelect').value.split('|').pop();
 
+    function pushHistory(key, p) {
+      const arr = history[key] ??= [];
+      const t = Date.now();
+      arr.push({ t, p });
+      while (arr.length && t - arr[0].t > HISTORY_MS) arr.shift();
+    }
+
+    // ================= KALIBRASI =================
     function updateCalibInfo() {
       const key = selectedKey(), off = offsets[key] || 0;
       document.getElementById('calibInfo').textContent = `Offset ${displayName(key)}: ${off >= 0 ? '+' : ''}${off.toFixed(MARKETS[key]?.decimals ?? 2)}`;
@@ -583,6 +576,7 @@
       updateCalibInfo();
     }
 
+    // ================= TICKER & UI =================
     const PROV_COLOR = { hyperliquid: 'text-yellow-400', veranta: 'text-blue-400', ostium: 'text-orange-400', binance: 'text-emerald-400' };
     function buildTicker() {
       const opts = [...document.querySelectorAll('#marketSelect option')];
@@ -616,17 +610,11 @@
     const COLORS = ['text-white', 'text-emerald-400', 'text-red-400', 'text-gray-500', 'text-red-600', 'text-gray-400', 'text-yellow-400'];
     function setColor(el, c) { el.classList.remove(...COLORS); el.classList.add(c); }
 
-    function pushHistory(key, p) {
-      const arr = history[key] ??= [];
-      const t = Date.now();
-      arr.push({ t, p });
-      while (arr.length && t - arr[0].t > HISTORY_MS) arr.shift();
-    }
-
+    // ================= HARGA =================
     function updatePrice(key, price, ev) {
       const prev = prices[key]?.price;
       prices[key] = { price, recv: Date.now(), kind: ev.kind, provider: ev.provider };
-      
+
       processTickToCandle(key, price, 1);
       processTickToCandle(key, price, 5);
       processTickToCandle(key, price, 15);
@@ -635,7 +623,7 @@
       const txt = fmt(key, price);
       const el = document.getElementById(`price-${key}`);
       if (el) { el.textContent = txt; setColor(el, prev == null || price === prev ? 'text-white' : price > prev ? 'text-emerald-400' : 'text-red-400'); }
-      
+
       const topEl = document.getElementById('cardLivePriceTop');
       const badgeEl = document.getElementById('cardLivePriceBadge');
       const active = getActive();
@@ -647,36 +635,7 @@
       processTick(key, price);
     }
 
-    let hlWs = null, hlPing = null;
-    function hlTargets() {
-      const map = new Map();
-      for (const [key, m] of Object.entries(MARKETS)) if (m.provider === 'hyperliquid') m.coins.forEach(c => map.set(c, key));
-      return map;
-    }
-    function connectHL() {
-      const targets = hlTargets();
-      if (!targets.size) return;
-      hlWs = new WebSocket(HL_WS);
-      hlWs.onopen = () => {
-        for (const coin of targets.keys()) hlWs.send(JSON.stringify({ method: 'subscribe', subscription: { type: 'bbo', coin } }));
-        hlPing = setInterval(() => { if (hlWs.readyState === WebSocket.OPEN) hlWs.send('{"method":"ping"}'); }, 25000);
-      };
-      hlWs.onmessage = e => {
-        let msg; try { msg = JSON.parse(e.data); } catch { return; }
-        if (msg.channel === 'bbo') {
-          const d = msg.data, key = targets.get(d?.coin);
-          if (!key) return;
-          const [b] = d.bbo || [];
-          const bid = +b?.px;
-          if (bid > 0) {
-            rawPrices[key] = bid;
-            updatePrice(key, bid + (offsets[key] || 0), { provider: 'hyperliquid', symbol: d.coin, kind: 'bid' });
-          }
-        }
-      };
-      hlWs.onclose = () => { clearInterval(hlPing); setTimeout(connectHL, 5000); };
-    }
-
+    // ================= TRADE & HISTORY =================
     function loadTrades() {
       try { return JSON.parse(localStorage.getItem(STORE_KEY)) || []; } catch { return []; }
     }
@@ -721,6 +680,17 @@
       t.pips = result === 'SL' ? pipsOf(t, t.sl) : result === 'TP' ? pipsOf(t, t[['tp3', 'tp2', 'tp1'].find(k => t[k] != null)]) : 0;
     }
 
+    function clearHistory() {
+      if (!confirm('Hapus semua history?')) return;
+      trades = [];
+      activeId = null;
+      transientView = null;
+      saveTrades();
+      document.getElementById('standbyView')?.classList.remove('hidden');
+      document.getElementById('activeSignalCard')?.classList.add('hidden');
+      renderHistory();
+    }
+
     function renderHistory() {
       const filter = document.getElementById('histFilter')?.value || 'today';
       const today = new Date().toDateString();
@@ -729,21 +699,24 @@
       const winPips = wins.reduce((s, t) => s + t.pips, 0), losePips = losses.reduce((s, t) => s + t.pips, 0);
       const total = winPips + losePips;
       const ratio = wins.length + losses.length ? wins.length / (wins.length + losses.length) * 100 : 0;
+      const running = trades.filter(t => t.status !== 'CLOSED').length;
 
       const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
       set('sumWin', fmtPips(winPips)); set('sumWinCount', `${wins.length} trade`);
       set('sumLose', fmtPips(losePips)); set('sumLoseCount', `${losses.length} trade`);
       set('sumTotal', fmtPips(total)); set('sumRatio', `${ratio.toFixed(1)}%`);
+      set('sumRatioSub', `${wins.length}W / ${losses.length}L`);
+      set('sumOpen', `${running} ${DICT[currentLang].running}`);
 
       const box = document.getElementById('historyList');
       if (!box) return;
-      if (!trades.length) { box.innerHTML = '<p class="text-center text-[10px] text-gray-500 py-3">Belum ada history.</p>'; return; }
+      if (!trades.length) { box.innerHTML = `<p class="text-center text-[10px] text-gray-500 py-3">${DICT[currentLang].noHistory}</p>`; return; }
 
-      box.innerHTML = trades.map(t => `
+      box.innerHTML = trades.slice().reverse().map(t => `
         <div onclick="viewTrade('${t.id}')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1.5 rounded cursor-pointer space-y-0.5">
           <div class="flex justify-between items-center text-[10px] font-bold">
             <span class="text-white">${t.no}. ${displayName(t.key)} <span class="text-[8px] text-gray-400">${t.style}</span></span>
-            <span class="font-mono ${t.pips > 0 ? 'text-emerald-400' : 'text-red-400'}">${t.status === 'CLOSED' ? resultLabel(t) + ' ' + fmtPips(t.pips) : 'RUNNING'}</span>
+            <span class="font-mono ${t.pips > 0 ? 'text-emerald-400' : t.pips < 0 ? 'text-red-400' : 'text-gray-400'}">${t.status === 'CLOSED' ? resultLabel(t) + ' ' + fmtPips(t.pips) : 'RUNNING'}</span>
           </div>
         </div>`).join('');
     }
@@ -763,8 +736,18 @@
       set('cardEntryZone', `${c.entry_min ?? '--'} - ${c.entry_max ?? '--'}`);
       set('cardSL', c.sl); set('cardTP1', c.tp1); set('cardTP2', c.tp2); set('cardTP3', c.tp3);
       set('cardReason', c.reason);
+      const sig = t.signal || '';
+      const badge = document.getElementById('signalBadgeBtn');
+      if (badge) {
+        badge.className = `${sig === 'BUY' ? 'bg-sky-500' : 'bg-red-500'} text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg flex items-center gap-1`;
+        badge.innerHTML = `<i class="fa-solid ${sig === 'BUY' ? 'fa-caret-up' : 'fa-caret-down'}"></i> ${sig}`;
+      }
+      set('cardStyleSub', `${t.style} / ${new Date(t.createdAt).toLocaleTimeString('id-ID', { hour12: false })}`);
       document.getElementById('standbyView')?.classList.add('hidden');
       document.getElementById('activeSignalCard')?.classList.remove('hidden');
+
+      const pipEl = (id, price) => { const e = document.getElementById(id); if (e) e.textContent = price != null ? fmtPips(pipsOf(t, price)) : '--'; };
+      pipEl('cardSLPips', t.sl); pipEl('cardTP1Pips', t.tp1); pipEl('cardTP2Pips', t.tp2); pipEl('cardTP3Pips', t.tp3);
     }
 
     function refreshActiveUI() {
@@ -777,51 +760,118 @@
         box.classList.remove('tp-hit', 'sl-hit'); chk.classList.remove('show');
         if (hits[k] || (k === 'sl' && t.result === 'SL')) { box.classList.add(k === 'sl' ? 'sl-hit' : 'tp-hit'); chk.classList.add('show'); }
       });
+
+      const st = document.getElementById('tradeStatus');
+      if (st) {
+        const closed = t.status === 'CLOSED';
+        st.textContent = closed ? (t.result === 'SL' ? 'SL' : resultLabel(t)) : t.status === 'BE' ? 'BE' : 'RUNNING';
+        st.className = `text-[8px] font-mono font-bold px-2 py-0.5 rounded border ${closed ? (t.pips >= 0 ? BADGE_STYLES.green : BADGE_STYLES.red) : BADGE_STYLES.blue}`;
+      }
+      const pnlEl = document.getElementById('tradePnl');
+      const live = prices[t.key];
+      if (pnlEl) {
+        if (t.status === 'CLOSED') { pnlEl.textContent = fmtPips(t.pips); pnlEl.className = `text-[9px] font-mono font-bold ${t.pips >= 0 ? 'text-emerald-400' : 'text-red-400'}`; }
+        else if (live) { const p = pipsOf(t, live.price); pnlEl.textContent = fmtPips(p); pnlEl.className = `text-[9px] font-mono font-bold ${p >= 0 ? 'text-emerald-400' : 'text-red-400'}`; }
+      }
     }
 
-    // ==========================================
-    // PERBAIKAN RENDER CHART LIVE PRICE MAP
-    // ==========================================
+    // ================= CHART: HARGA + ENTRY/SL/TP =================
     const cv = document.getElementById('priceChart');
     const ctx = cv ? cv.getContext('2d') : null;
 
-    function chartLoop() {
-        requestAnimationFrame(chartLoop);
-        if (!cv || !ctx) return;
-        const r = cv.getBoundingClientRect();
-        if (!r.width || !r.height) return;
-        
-        if (cv.width !== r.width || cv.height !== r.height) {
-            cv.width = r.width;
-            cv.height = r.height;
-        }
-
-        ctx.clearRect(0, 0, cv.width, cv.height);
-
-        const t = getActive();
-        if (!t) return;
-
-        const arr = history[t.key];
-        if (!arr || arr.length < 2) return;
-
-        const pricesArr = arr.map(x => x.p);
-        let minP = Math.min(...pricesArr);
-        let maxP = Math.max(...pricesArr);
-        const range = maxP - minP || 1;
-
-        ctx.strokeStyle = '#2962ff';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-
-        arr.forEach((pt, i) => {
-            const x = (i / (arr.length - 1)) * cv.width;
-            const y = cv.height - ((pt.p - minP) / range) * (cv.height - 30) - 15;
-            if (i === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-        });
-        ctx.stroke();
+    function chartLevels(t) {
+      const hits = t.hits || {};
+      return [
+        { label: 'ENTRY', value: t.entry, color: '#60a5fa', dash: [],     hit: false },
+        { label: 'SL',    value: t.sl,    color: '#f87171', dash: [6, 4], hit: t.result === 'SL' },
+        { label: 'TP1',   value: t.tp1,   color: '#34d399', dash: [6, 4], hit: !!hits.tp1 },
+        { label: 'TP2',   value: t.tp2,   color: '#34d399', dash: [6, 4], hit: !!hits.tp2 },
+        { label: 'TP3',   value: t.tp3,   color: '#38bdf8', dash: [6, 4], hit: !!hits.tp3 },
+      ].filter(l => l.value != null && Number.isFinite(l.value));
     }
 
+    function chartLoop() {
+      requestAnimationFrame(chartLoop);
+      if (!cv || !ctx) return;
+      const r = cv.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+
+      const dpr = window.devicePixelRatio || 1;
+      const W = Math.round(r.width * dpr), H = Math.round(r.height * dpr);
+      if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, r.width, r.height);
+
+      const t = getActive();
+      if (!t) return;
+      const arr = history[t.key];
+      if (!arr || arr.length < 2) return;
+
+      const levels = chartLevels(t);
+      const zMin = parseLevel(t.card?.entry_min), zMax = parseLevel(t.card?.entry_max);
+      const vals = arr.map(x => x.p);
+
+      // Skala Y mencakup harga DAN semua level
+      let lo = Math.min(...vals), hi = Math.max(...vals);
+      for (const l of levels) { lo = Math.min(lo, l.value); hi = Math.max(hi, l.value); }
+      if (zMin != null && zMax != null) { lo = Math.min(lo, zMin, zMax); hi = Math.max(hi, zMin, zMax); }
+      if (hi - lo <= 0) { const d = Math.abs(hi) * 0.001 || 1; lo -= d; hi += d; }
+      const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+
+      const PAD_L = 4, PAD_R = 4, PAD_T = 6, PAD_B = 6;
+      const plotW = r.width - PAD_L - PAD_R, plotH = r.height - PAD_T - PAD_B;
+      const yOf = p => PAD_T + (1 - (p - lo) / (hi - lo)) * plotH;
+      const xOf = i => PAD_L + (i / (arr.length - 1)) * plotW;
+
+      // Zona entry (band)
+      if (zMin != null && zMax != null) {
+        const top = yOf(Math.max(zMin, zMax)), bot = yOf(Math.min(zMin, zMax));
+        ctx.fillStyle = 'rgba(41,98,255,0.15)';
+        ctx.fillRect(PAD_L, top, plotW, Math.max(bot - top, 1));
+      }
+
+      // Garis level + label
+      ctx.font = 'bold 10px ui-monospace, monospace';
+      ctx.textBaseline = 'middle';
+      for (const l of levels) {
+        const y = yOf(l.value);
+        ctx.save();
+        ctx.strokeStyle = l.color;
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash(l.dash);
+        ctx.beginPath();
+        ctx.moveTo(PAD_L, y);
+        ctx.lineTo(PAD_L + plotW, y);
+        ctx.stroke();
+        ctx.restore();
+
+        const text = `${l.label} ${fmt(t.key, l.value)}${l.hit ? ' ✓' : ''}`;
+        const tw = ctx.measureText(text).width;
+        ctx.fillStyle = 'rgba(11,14,20,0.85)';
+        ctx.fillRect(PAD_L, y - 7, tw + 8, 14);
+        ctx.fillStyle = l.color;
+        ctx.fillText(text, PAD_L + 4, y);
+      }
+
+      // Garis harga (di atas level)
+      ctx.strokeStyle = '#2962ff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      arr.forEach((pt, i) => {
+        const x = xOf(i), y = yOf(pt.p);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      // Titik harga terakhir
+      const last = arr[arr.length - 1];
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(xOf(arr.length - 1), yOf(last.p), 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ================= AI SIGNAL =================
     async function generateAISignal() {
       const marketId = document.getElementById('marketSelect').value;
       const tradingStyle = document.getElementById('tradingStyleSelect').value;
@@ -842,6 +892,7 @@
           body: JSON.stringify({ marketId, tradingStyle, currentPrice: live.price, priceKind: live.kind, smcStructure, lang: currentLang })
         });
         const raw = await res.json();
+        if (!res.ok) throw new Error(raw.error || `HTTP ${res.status}`);
         const content = raw.choices[0].message.content;
         const data = JSON.parse(content.substring(content.indexOf('{'), content.lastIndexOf('}') + 1));
 
@@ -856,58 +907,136 @@
         };
 
         trades.push(t); activeId = t.id;
-        saveTrades(); renderSignalCard(t); renderHistory();
+        saveTrades(); renderSignalCard(t); renderHistory(); refreshActiveUI();
       } catch (e) {
         alert('Gagal generate sinyal: ' + e.message);
       } finally {
         btn.disabled = false;
-        btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> GENERATE PURE SMC SIGNAL`;
+        btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnGenText">${DICT[currentLang].genBtn}</span>`;
       }
     }
 
-    function connect() {
-        if (ws) {
-            ws.onclose = null;
-            ws.close();
-        }
-        setWsStatus('CONNECTING', 'yellow');
-        ws = new WebSocket(WS_URL);
+    // ================= STREAM (PERBAIKAN) =================
+    let subSeq = 10, pingTimer = null, lastIn = 0, retryCount = 0;
+    const subById = new Map();   // id -> { key, provider, coin, sub }
+    const kindLock = {};         // key -> kind tick pertama yang diterima
+    const PROVIDERS = [...new Set(Object.values(MARKETS).map(m => m.provider))];
+    const COIN_KEY = new Map();  // "provider|coin" -> key market
+    for (const [key, m] of Object.entries(MARKETS))
+      for (const coin of m.coins) COIN_KEY.set(`${m.provider}|${coin}`, key);
 
-        ws.onopen = () => {
-            setWsStatus('CONNECTED', 'green');
-            const providers = [...new Set(Object.values(MARKETS).map(m => m.provider))];
-            ws.send(JSON.stringify({ op: 'sub', id: 1, channel: 'status', payload: { providers } }));
-            for (const [key, m] of Object.entries(MARKETS)) {
-                m.coins.forEach(coin => {
-                    ws.send(JSON.stringify({ op: 'sub', id: 2, channel: 'ticks', payload: { symbols: [coin], providers: [m.provider] } }));
-                });
-            }
-        };
-
-        ws.onmessage = e => {
-            let f; try { f = JSON.parse(e.data); } catch { return; }
-            if (f.op === 'events') {
-                (f.events || []).forEach(ev => {
-                    for (const [k, m] of Object.entries(MARKETS)) {
-                        if (String(m.provider).toLowerCase() === String(ev.provider).toLowerCase() && m.coins.includes(ev.symbol)) {
-                            const p = parseFloat(ev.bid || ev.price);
-                            if (p > 0) {
-                                rawPrices[k] = p;
-                                updatePrice(k, p + (offsets[k] || 0), ev);
-                            }
-                        }
-                    }
-                });
-            }
-        };
-
-        ws.onerror = () => setWsStatus('ERROR', 'red');
-        ws.onclose = () => {
-            setWsStatus('DISCONNECTED', 'red');
-            clearTimeout(reconnectTimer);
-            reconnectTimer = setTimeout(connect, 3000);
-        };
+    function sendJSON(sock, obj) {
+      if (sock.readyState === WebSocket.OPEN) sock.send(JSON.stringify(obj));
     }
+
+    function subscribeCoin(sock, id, s) {
+      sendJSON(sock, { op: 'sub', id, channel: 'ticks', payload: { symbols: [s.coin], providers: [s.provider] } });
+    }
+
+    function handleTickEvent(ev) {
+      const key = COIN_KEY.get(`${ev.provider}|${ev.symbol}`);
+      const p = parseFloat(ev.price);
+      if (!key || !(p > 0)) return;
+      kindLock[key] ??= ev.kind;          // jangan campur mark dengan mid/last
+      if (ev.kind !== kindLock[key]) return;
+      rawPrices[key] = p;
+      updatePrice(key, p + (offsets[key] || 0), ev);
+    }
+
+    function scheduleReconnect() {
+      clearTimeout(reconnectTimer);
+      const base = Math.min(30000, 1000 * 2 ** Math.min(retryCount, 5));
+      const delay = base * (0.5 + Math.random() * 0.5);   // backoff + jitter
+      retryCount++;
+      reconnectTimer = setTimeout(connect, delay);
+    }
+
+    function connect() {
+      clearTimeout(reconnectTimer);
+      clearInterval(pingTimer);
+      if (ws) { const old = ws; ws = null; old.onclose = null; old.onmessage = null; old.close(); }
+      subById.clear();
+      setWsStatus('CONNECTING', 'yellow');
+
+      const sock = new WebSocket(WS_URL);
+      ws = sock;
+
+      sock.onopen = () => {
+        retryCount = 0;
+        lastIn = Date.now();
+        setWsStatus('CONNECTED', 'green');
+        sendJSON(sock, { op: 'sub', id: 1, channel: 'status', payload: { providers: PROVIDERS } });
+
+        // Satu subscription per coin, ID unik. Coin yang ditolak tidak menggagalkan yang lain.
+        for (const [key, m] of Object.entries(MARKETS)) {
+          for (const coin of m.coins) {
+            const id = subSeq++;
+            const s = { key, provider: m.provider, coin };
+            subById.set(id, s);
+            subscribeCoin(sock, id, s);
+          }
+        }
+
+        // Heartbeat aplikasi. Jika tidak ada frame masuk selama 60 detik, paksa reconnect.
+        pingTimer = setInterval(() => {
+          if (ws !== sock) return;
+          if (Date.now() - lastIn > 60000) return sock.close();
+          sendJSON(sock, { op: 'req', id: subSeq++, method: 'ping' });
+        }, 25000);
+      };
+
+      sock.onmessage = e => {
+        lastIn = Date.now();
+        let f; try { f = JSON.parse(e.data); } catch { return; }
+        switch (f.op) {
+          case 'events':
+            (f.events || []).forEach(handleTickEvent);
+            break;
+          case 'sub_ok': {
+            const s = subById.get(f.id);
+            if (s) s.sub = f.sub;
+            break;
+          }
+          case 'sub_err': {
+            const s = subById.get(f.id);
+            console.warn('Subscription ditolak:', s?.provider, s?.coin, f.error);
+            subById.delete(f.id);
+            break;
+          }
+          case 'end': {
+            const s = subById.get(f.id);
+            if (s) subscribeCoin(sock, f.id, s);
+            break;
+          }
+          case 'draining':
+            setWsStatus('RECONNECTING', 'yellow');
+            setTimeout(connect, 300);
+            break;
+        }
+      };
+
+      sock.onerror = () => setWsStatus('ERROR', 'red');
+      sock.onclose = () => {
+        if (ws !== sock) return;
+        clearInterval(pingTimer);
+        setWsStatus('DISCONNECTED', 'red');
+        scheduleReconnect();
+      };
+    }
+
+    // ================= BOOT =================
+    window.onload = () => {
+        const type = localStorage.getItem('alu_session_type');
+        if (type === 'admin_reg') openRegisterDashboard();
+        else if (type === 'terminal') openTerminalApp();
+
+        buildTicker();
+        updateCalibInfo();
+        renderHistory();
+        if (trades.length) viewTrade(trades[trades.length - 1].id);
+        requestAnimationFrame(chartLoop);
+        connect();
+    };
     </script>
 </body>
 </html>
