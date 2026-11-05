@@ -1374,6 +1374,29 @@
     }
 
     // ================= AI SIGNAL =================
+    // Harus sama dengan STYLES di api/generate.js
+    const STYLE_TF = {
+        'Scalping':    { htf: '15m', mtf: '5m' },
+        'Day Trading': { htf: '1h',  mtf: '30m', ltf: '5m' },
+        'Intraday':    { htf: '4h',  mtf: '1h',  ltf: '15m' },
+        'Swing':       { htf: '1d',  mtf: '4h',  ltf: '1h' },
+    };
+    const CANDLE_CACHE = {};
+
+    async function loadCandles(key, interval) {
+        const ck = `${key}|${interval}`;
+        const hit = CANDLE_CACHE[ck];
+        if (hit && Date.now() - hit.at < 60000) return hit.rows;
+        const provider = providerOf[key] || ALIASES[key][0].provider;
+        const rows = await fetchCandles(provider, symbolOf[key], interval);
+        if (!rows.length) throw new Error(`data candle ${interval} kosong`);
+        CANDLE_CACHE[ck] = { at: Date.now(), rows };
+        return rows;
+    }
+
+    // Candle historis itu harga mentah. Tambahkan offset kalibrasi supaya sebanding dengan harga live.
+    const shiftCandles = (rows, off) => rows.map(c => ({ t: c.t, o: c.o + off, h: c.h + off, l: c.l + off, c: c.c + off }));
+
     async function generateAISignal() {
         const marketId = document.getElementById('marketSelect').value;
         const tradingStyle = document.getElementById('tradingStyleSelect').value;
@@ -1383,32 +1406,55 @@
             return alert(`${displayName(symbolKey)} TIDAK TERSAMBUNG ke stream. Pilih pair lain atau tunggu harga masuk.`);
         }
 
+        const email = localStorage.getItem(SESSION_EMAIL_KEY);
+        if (!email) return alert('Sesi tidak ditemukan. Silakan login ulang.');
+
         const btn = document.getElementById('signalBtn');
         btn.disabled = true;
         btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> Menganalisis Struktur SMC...`;
 
         try {
-            const candlesM15 = marketCandles[symbolKey]?.['15m'] || [];
-            const smcStructure = analyzeSMCStructure(candlesM15);
+            const tf = STYLE_TF[tradingStyle];
+            if (!tf) throw new Error('gaya trading tidak dikenal');
+
+            const off = offsets[symbolKey] || 0;
+            const [htfRows, mtfRows, ltfRows] = await Promise.all([
+                loadCandles(symbolKey, tf.htf),
+                loadCandles(symbolKey, tf.mtf),
+                tf.ltf ? loadCandles(symbolKey, tf.ltf).catch(() => []) : Promise.resolve([]),
+            ]);
 
             const res = await fetch('/api/generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ marketId, tradingStyle, currentPrice: live.price, priceKind: live.kind, smcStructure, lang: currentLang })
+                body: JSON.stringify({
+                    email,
+                    marketId,
+                    tradingStyle,
+                    currentPrice: live.price,
+                    lang: currentLang,
+                    candles: {
+                        htf: shiftCandles(htfRows, off).slice(-200),
+                        mtf: shiftCandles(mtfRows, off).slice(-200),
+                        ltf: shiftCandles(ltfRows, off).slice(-200),
+                    },
+                }),
             });
-            const raw = await res.json();
-            if (!res.ok) throw new Error(raw.error || `HTTP ${res.status}`);
-            const content = raw.choices[0].message.content;
-            const data = JSON.parse(content.substring(content.indexOf('{'), content.lastIndexOf('}') + 1));
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
 
-            const signal = String(data.signal || '').toUpperCase();
+            if (!data.signal) return alert('Belum ada setup valid.\n\n' + (data.reason || ''));
+
+            const s = data.signal;
             const t = {
                 id: Date.now().toString(36), key: symbolKey, style: tradingStyle,
-                signal, dir: signal === 'BUY' ? 1 : -1,
-                entry: live.price, sl: parseLevel(data.sl),
-                tp1: parseLevel(data.tp1), tp2: parseLevel(data.tp2), tp3: parseLevel(data.tp3),
-                createdAt: Date.now(), status: 'RUNNING', hits: {},
-                card: data, no: nextNo()
+                signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
+                mode: s.mode, status: s.status,
+                entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
+                zone: s.zone,
+                expiresAt: s.expireMs ? Date.now() + s.expireMs : null,
+                createdAt: Date.now(), hits: {},
+                card: { reason: s.reason }, no: nextNo(),
             };
 
             trades.push(t);
