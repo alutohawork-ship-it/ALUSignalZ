@@ -356,8 +356,16 @@
     async function api(path, opts = {}) {
         try {
             const res = await fetch(path, opts);
-            const data = await res.json().catch(() => ({}));
-            return { ok: res.ok, data };
+            const text = await res.text();
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch {
+                const title = (text.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1];
+                const snippet = (title || text.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim().slice(0, 120);
+                data = { msg: `Server tidak mengirim JSON (HTTP ${res.status}). Isi: ${snippet}` };
+            }
+            return { ok: res.ok, status: res.status, data };
         } catch {
             return { ok: false, network: true, data: { msg: 'Tidak bisa terhubung ke server. Cek koneksi internet kamu.' } };
         }
@@ -378,7 +386,7 @@
         if (!val) return;
 
         const r = await verifyLogin(val);
-        if (!r.data.ok) return alert(errorOf(r, 'Login gagal.'));
+        if (!r.data.ok) return alert(errorOf(r, `Login gagal (HTTP ${r.status}).`));
 
         if (r.data.role === 'admin') {
             localStorage.setItem(SESSION_TYPE_KEY, 'admin_reg');
