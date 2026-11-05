@@ -150,13 +150,9 @@
                             <option value="veranta|EURUSD">EUR/USD (Veranta)</option>
                             <option value="veranta|USDJPY">USD/JPY (Veranta)</option>
                             <option value="veranta|GBPUSD">GBP/USD (Veranta)</option>
-                            <option value="veranta|GBPJPY">GBP/JPY (Veranta)</option>
                         </optgroup>
                         <optgroup label="Indices / Indeks Global">
                             <option value="ostium|DJI">Dow Jones / US30 (Ostium)</option>
-                            <option value="hyperliquid|SP500">S&P 500 / US500 (Hyperliquid)</option>
-                            <option value="hyperliquid|NAS100">Nasdaq 100 / US100 (Hyperliquid)</option>
-                            <option value="ostium|NIKKEI">Nikkei 225 / Jepang (Ostium)</option>
                             <option value="ostium|DAX">DAX 40 / Eropa (Ostium)</option>
                         </optgroup>
                         <optgroup label="Crypto">
@@ -483,18 +479,14 @@
     const MARKETS = {
         XAUUSD:  { provider: 'hyperliquid', coins: ['xyz:GOLD', 'xyz:XAU', 'GOLD', 'XAUUSD'], decimals: 2, pip: 0.1 },
         XAGUSD:  { provider: 'hyperliquid', coins: ['xyz:SILVER', 'xyz:XAG', 'SILVER', 'XAGUSD'], decimals: 3, pip: 0.01 },
-        SP500:   { provider: 'hyperliquid', coins: ['xyz:SP500', 'xyz:US500', 'xyz:SPX', 'SP500', 'US500', 'SPX500'], decimals: 2, pip: 1 },
-        NAS100:  { provider: 'hyperliquid', coins: ['xyz:XYZ100', 'xyz:NAS100', 'xyz:US100', 'xyz:USTECH', 'NAS100', 'US100', 'USTEC', 'NDX'], decimals: 2, pip: 1 },
         EURUSD:  { provider: 'veranta', coins: ['EURUSD', 'EUR/USD', 'EURUSD.FX'], decimals: 5, pip: 0.0001 },
         USDJPY:  { provider: 'veranta', coins: ['USDJPY', 'USD/JPY', 'USDJPY.FX'], decimals: 3, pip: 0.01 },
         GBPUSD:  { provider: 'veranta', coins: ['GBPUSD', 'GBP/USD', 'GBPUSD.FX'], decimals: 5, pip: 0.0001 },
-        GBPJPY:  { provider: 'veranta', coins: ['GBPJPY', 'GBP/JPY', 'GBPJPY.FX', 'GBPJPY.s', 'hyperliquid|xyz:GBPJPY'], decimals: 3, pip: 0.01 },
         BTCUSDT: { provider: 'binance', coins: ['BTCUSDT'], decimals: 2, pip: 1 },
         ETHUSDT: { provider: 'binance', coins: ['ETHUSDT'], decimals: 2, pip: 0.1 },
         SOLUSDT: { provider: 'binance', coins: ['SOLUSDT'], decimals: 2, pip: 0.01 },
         XRPUSDT: { provider: 'binance', coins: ['XRPUSDT'], decimals: 4, pip: 0.0001 },
         DJI:     { provider: 'ostium', coins: ['DJI', 'DJIUSD', 'DJI-USD', 'US30'], decimals: 2, pip: 1 },
-        NIKKEI:  { provider: 'ostium', coins: ['NIK225', 'NIKKEI', 'NIKKEI225', 'JP225', 'JPN225', 'N225', 'hyperliquid|xyz:JP225', 'hyperliquid|xyz:NIKKEI'], decimals: 2, pip: 1 },
         DAX:     { provider: 'ostium', coins: ['DAX', 'GER40', 'DE40'], decimals: 2, pip: 1 },
     };
 
