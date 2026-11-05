@@ -1156,6 +1156,48 @@ function chartLoop(ts) {
 }
 
 // ======================= GENERATE SIGNAL =======================
+const STYLE_TF = [
+    { name: 'Scalping', htf: '15m', ltf: '1m' },
+    { name: 'Day Trading', htf: '30m', ltf: '3m' },
+    { name: 'Intraday', htf: '1h', ltf: '5m' },
+    { name: 'Swing', htf: '4h', ltf: '15m' },
+];
+const TF_MS = { '1m': 60e3, '3m': 180e3, '5m': 300e3, '15m': 900e3, '30m': 1800e3, '1h': 3600e3, '4h': 14400e3 };
+const CANDLE_BARS = 300, CANDLE_MIN = 150;
+
+async function fetchHLCandles(coin, interval) {
+    const endTime = Date.now();
+    const r = await fetchT(HL_INFO, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'candleSnapshot', req: { coin, interval, startTime: endTime - CANDLE_BARS * TF_MS[interval], endTime } }),
+    }, 8000);
+    if (!r.ok) return [];
+    const rows = await r.json();
+    return Array.isArray(rows) ? rows : [];
+}
+
+async function fetchBinanceCandles(symbol, interval) {
+    const r = await fetchT(`https://data-api.binance.vision/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${CANDLE_BARS}`, {}, 8000);
+    if (!r.ok) return [];
+    const rows = await r.json();
+    return Array.isArray(rows) ? rows.map(k => ({ t: k[0], o: k[1], h: k[2], l: k[3], c: k[4] })) : [];
+}
+
+// Hyperliquid: coba nama coin satu per satu sampai ada data
+// Binance: pakai pair utama. FX (Veranta) dan indeks Ostium belum punya sumber candle di aplikasi ini.
+async function fetchCandles(key, interval) {
+    const m = MARKETS[key];
+    if (m.provider === 'binance') return fetchBinanceCandles(m.coins[0], interval);
+    if (m.provider === 'hyperliquid') {
+        for (const coin of m.coins) {
+            let rows = [];
+            try { rows = await fetchHLCandles(coin, interval); } catch {}
+            if (rows.length >= CANDLE_MIN) return rows;
+        }
+    }
+    return [];
+}
+
 async function generateAISignal() {
     const marketId = document.getElementById('marketSelect').value;
     const tradingStyle = document.getElementById('tradingStyleSelect').value;
@@ -1163,31 +1205,50 @@ async function generateAISignal() {
     const live = prices[symbolKey];
     if (!live) return alert(currentLang === 'id' ? 'Harga live belum tersambung. Tunggu sebentar.' : 'Live price not connected yet.');
 
+    const style = STYLE_TF.find(s => tradingStyle.includes(s.name));
+    if (!style) return alert('Gaya trading tidak dikenal.');
+
     const btn = document.getElementById('signalBtn');
     btn.disabled = true;
     btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> ${DICT[currentLang].eval}`;
     try {
+        const [htf, ltf] = await Promise.all([
+            fetchCandles(symbolKey, style.htf),
+            fetchCandles(symbolKey, style.ltf),
+        ]);
+        if (htf.length < CANDLE_MIN || ltf.length < CANDLE_MIN) {
+            throw new Error(`data candle ${displayName(symbolKey)} tidak tersedia (HTF ${htf.length}, LTF ${ltf.length} candle).`);
+        }
+
         const res = await fetch('/api/generate', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ marketId, tradingStyle, currentPrice: live.price, priceKind: live.via, lang: currentLang }),
+            body: JSON.stringify({ marketId, tradingStyle, currentPrice: live.price, priceKind: live.via, lang: currentLang, htf, ltf }),
         });
         const raw = await res.json();
         if (!res.ok) throw new Error(raw.error || `HTTP ${res.status}`);
         const content = raw.choices[0].message.content;
         const data = JSON.parse(content.substring(content.indexOf('{'), content.lastIndexOf('}') + 1));
 
-        const signal = String(data.signal || '').toUpperCase();
+        if (data.status !== 'SIGNAL') {
+            toast(`Tidak ada setup: ${data.reason || ''}`, 'yellow');
+            return;
+        }
+
+        // Level dari engine memakai harga candle mentah. Tambahkan offset kalibrasi agar sejajar dengan harga di layar.
+        const off = offsets[symbolKey] || 0;
+        const shift = v => { const x = parseLevel(v); return x == null ? null : x + off; };
+        const signal = String(data.signal).toUpperCase();
         const dir = signal === 'BUY' ? 1 : -1;
-        const emin = parseLevel(data.entry_min), emax = parseLevel(data.entry_max);
+        const emin = shift(data.entry_min), emax = shift(data.entry_max);
         const entry = emin != null && emax != null ? (emin + emax) / 2 : live.price;
 
         const t = {
             id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
             no: nextNo(), key: symbolKey, style: tradingStyle.split(' (')[0],
             signal, dir, entry, emin, emax,
-            sl: parseLevel(data.sl), tp1: parseLevel(data.tp1), tp2: parseLevel(data.tp2), tp3: parseLevel(data.tp3),
+            sl: shift(data.sl), tp1: shift(data.tp1), tp2: shift(data.tp2), tp3: shift(data.tp3),
             createdAt: Date.now(), status: 'RUNNING', hits: {}, markers: [],
-            card: { entry_min: data.entry_min, entry_max: data.entry_max, sl: data.sl, tp1: data.tp1, tp2: data.tp2, tp3: data.tp3, reason: data.reason },
+            card: { reason: data.reason },
         };
         const valid = t.sl != null && t.tp1 != null && (t.entry - t.sl) * dir > 0 && (t.tp1 - t.entry) * dir > 0;
         if (valid) {
