@@ -6,24 +6,50 @@ const KV_KEY = 'alu_clients';
 
 const DECIMALS = { XAUUSD: 2, XAGUSD: 3, EURUSD: 5, USDJPY: 3, GBPUSD: 5, BTCUSDT: 2, ETHUSDT: 2, SOLUSDT: 2, XRPUSDT: 4, DJI: 2, DAX: 2 };
 
-const TF_MS = { '5m': 300000, '15m': 900000, '30m': 1800000, '1h': 3600000, '4h': 14400000, '1d': 86400000 };
+const TF_MS = { '1m': 60000, '5m': 300000, '15m': 900000, '30m': 1800000, '1h': 3600000, '4h': 14400000, '1d': 86400000 };
 const TF_LABEL = { '5m': 'M5', '15m': 'M15', '30m': 'M30', '1h': 'H1', '4h': 'H4', '1d': 'D1' };
+const ROLE_LABEL = { htf: 'HTF', mtf: 'MTF', ltf: 'LTF' };
 
 // Harus sama dengan STYLE_TF di index.html
 const STYLES = {
-  'Scalping':    { label: 'Scalping (HTF: M15 | MTF: M5 | LTF: M1/M3)', entry: '5m',  htf: '15m', mode: 'REACTIVE', expireBars: 0, rr: [1.0, 1.8, 2.8] },
-  'Day Trading': { label: 'Day Trading (HTF: H1 | MTF: M30 | LTF: M5)', entry: '30m', htf: '1h',  mode: 'LIMIT',    expireBars: 8, rr: [1.3, 2.5, 4.0] },
-  'Intraday':    { label: 'Intraday (HTF: H4 | MTF: H1 | LTF: M15+M5)', entry: '1h',  htf: '4h',  mode: 'LIMIT',    expireBars: 6, rr: [1.5, 3.0, 5.5] },
-  'Swing':       { label: 'Swing Trading (HTF: W1 | MTF: H4 | LTF: H1+M15)', entry: '4h', htf: '1d', mode: 'LIMIT', expireBars: 6, rr: [2.0, 4.5, 8.5] },
+  'Scalping': {
+    label: 'Scalping (HTF: M15 | MTF: M5 | LTF: M1/M3)',
+    mode: 'REACTIVE',
+    tf: { htf: '15m', mtf: '5m' },
+    rr: [1.0, 1.8, 2.8],
+  },
+  'Day Trading': {
+    label: 'Day Trading (HTF: H1 | MTF: M30 | LTF: M5)',
+    mode: 'LIMIT',
+    tf: { htf: '1h', mtf: '30m', ltf: '5m' },
+    rr: [1.3, 2.5, 4.0],
+  },
+  'Intraday': {
+    label: 'Intraday (HTF: H4 | MTF: H1 | LTF: M15+M5)',
+    mode: 'LIMIT',
+    tf: { htf: '4h', mtf: '1h', ltf: '15m' },
+    rr: [1.5, 3.0, 5.5],
+  },
+  'Swing': {
+    label: 'Swing Trading (HTF: D1 | MTF: H4 | LTF: H1)',
+    mode: 'LIMIT',
+    tf: { htf: '1d', mtf: '4h', ltf: '1h' },
+    rr: [2.0, 4.5, 8.5],
+  },
 };
 
-const SL_BUFFER = 0.2;       // buffer SL dalam ATR
-const CHASE_MAX = 1.0;       // scalping anti-FOMO: maks jarak harga dari level trigger (ATR)
-const RISK_MAX = 3.0;        // scalping: SL maks 3 ATR
-const RISK_MIN = 0.5;        // SL minimal 0.5 ATR
-const LIMIT_RISK_MAX = 4.0;  // zona fresh: SL maks 4 ATR dari entry
-const ZONE_MAX_DIST = 4.0;   // zona fresh maks 4 ATR dari harga
-const IMPULSE_MAX_AGE = 80;  // impuls harus masih baru (dalam candle)
+const SL_BUFFER = 0.2;                     // buffer SL dalam ATR
+const CHASE_MAX = 1.0;                     // scalping anti-FOMO: maks jarak harga dari level trigger (ATR)
+const RISK_MAX = 3.0;                      // scalping: SL maks 3 ATR
+const RISK_MIN = 0.5;                      // SL minimal 0.5 ATR timeframe zona
+const LIMIT_RISK_MAX = 4.0;                // zona: SL maks 4 ATR
+const ZONE_MAX_DIST = 4.0;                 // zona maks 4 ATR dari harga
+const IMPULSE_MAX_AGE = 80;                // impuls harus masih baru (dalam candle)
+const HOLD_ATR_MIN = 0.5;                  // SL minimal 0.5 ATR timeframe MTF, supaya trade punya ruang bergerak
+const EXPIRE_BARS = 6;                     // pending batal setelah 6 candle timeframe zona
+const EXPIRE_MIN_MS = 60 * 60 * 1000;      // minimal 1 jam
+const EXPIRE_MAX_MS = 48 * 60 * 60 * 1000; // maksimal 48 jam
+const MIN_CANDLES = 20;
 
 const T = (lang, id, en) => (lang === 'en' ? en : id);
 
@@ -43,12 +69,18 @@ async function kv(command) {
   return data.result;
 }
 
-async function isActiveClient(email) {
-  if (!email) return false;
+async function checkAccess(email) {
+  if (!email) return { ok: false, msg: 'Sesi tidak punya email. Silakan logout lalu login ulang.' };
   const raw = await kv(['GET', KV_KEY]);
   const clients = raw ? JSON.parse(raw) : [];
   const c = clients.find(x => x.email === email);
-  return !!c && new Date(c.expires_at) > new Date();
+  if (!c) {
+    return { ok: false, msg: 'Email ini tidak ada di daftar klien. Kalau baru dihapus admin, logout lalu login ulang.' };
+  }
+  if (new Date(c.expires_at) <= new Date()) {
+    return { ok: false, msg: `Masa aktif habis pada ${String(c.expires_at).slice(0, 10)}. Hubungi admin untuk perpanjangan.` };
+  }
+  return { ok: true };
 }
 
 // ---------- Helper candle ----------
@@ -152,19 +184,18 @@ function reactivePlan(candles, dir, price, a) {
   };
 }
 
-// Day, Intraday, Swing: entry di zona FVG atau Order Block yang masih fresh
-// dalam impuls terakhir. Zona fresh = belum pernah tersentuh harga sejak terbentuk.
-function freshZonePlan(candles, dir, price, a) {
+// Zona fresh (FVG atau Order Block) di impuls terakhir pada satu timeframe.
+// a = ATR timeframe zona, refAtr = ATR timeframe MTF.
+function freshZonePlan(candles, dir, price, a, refAtr) {
   const n = candles.length;
   const isBuy = dir === 1;
   const sw = swings(candles, 2);
 
   // Impuls terakhir: BUY = swing low -> swing high, SELL = swing high -> swing low
-  let S, E;
+  let S = null, E;
   if (isBuy) {
     E = lastSwing(sw, 'H');
     if (!E) return { err: 'Swing high belum terbentuk.' };
-    S = null;
     for (let k = sw.length - 1; k >= 0; k--) {
       if (sw[k].type === 'L' && sw[k].i < E.i) { S = sw[k]; break; }
     }
@@ -172,21 +203,20 @@ function freshZonePlan(candles, dir, price, a) {
   } else {
     E = lastSwing(sw, 'L');
     if (!E) return { err: 'Swing low belum terbentuk.' };
-    S = null;
     for (let k = sw.length - 1; k >= 0; k--) {
       if (sw[k].type === 'H' && sw[k].i < E.i) { S = sw[k]; break; }
     }
     if (!S) return { err: 'Swing high impuls belum terbentuk.' };
   }
 
-  if (n - 1 - S.i > IMPULSE_MAX_AGE) return { err: 'Impuls terlalu lama. Tidak ada zona valid.' };
+  if (n - 1 - S.i > IMPULSE_MAX_AGE) return { err: 'Impuls terlalu lama.' };
   if (Math.abs(E.price - S.price) < a) return { err: 'Impuls terlalu kecil.' };
 
-  // Pullback harus belum menembus awal impuls, dan belum membuat extreme baru
+  // Pullback belum menembus awal impuls dan belum membuat extreme baru
   for (let i = E.i + 1; i < n; i++) {
     const c = candles[i];
-    if (isBuy ? c.l < S.price : c.h > S.price) return { err: 'Struktur sudah patah. Tidak ada zona valid.' };
-    if (isBuy ? c.h > E.price : c.l < E.price) return { err: 'Harga masih membuat extreme baru. Tunggu pullback.' };
+    if (isBuy ? c.l < S.price : c.h > S.price) return { err: 'Struktur sudah patah.' };
+    if (isBuy ? c.h > E.price : c.l < E.price) return { err: 'Masih membuat extreme baru, tunggu pullback.' };
   }
 
   // Kandidat zona di dalam impuls: FVG dan Order Block terakhir
@@ -212,6 +242,9 @@ function freshZonePlan(candles, dir, price, a) {
   }
 
   const last = candles[n - 1];
+  const maxDist = ZONE_MAX_DIST * a;
+  const minRisk = Math.max(RISK_MIN * a, HOLD_ATR_MIN * refAtr);
+  const maxRisk = LIMIT_RISK_MAX * Math.max(a, refAtr);
 
   const isFresh = z => {
     // Harga sudah menembus zona
@@ -225,7 +258,7 @@ function freshZonePlan(candles, dir, price, a) {
     if (!inside && (isBuy ? last.l <= z.hi : last.h >= z.lo)) return false;
     // Zona terlalu jauh dari harga
     const dist = isBuy ? price - z.hi : z.lo - price;
-    if (!inside && dist > ZONE_MAX_DIST * a) return false;
+    if (!inside && dist > maxDist) return false;
     return true;
   };
 
@@ -234,9 +267,9 @@ function freshZonePlan(candles, dir, price, a) {
     const entry = inZone ? price : (z.lo + z.hi) / 2;
     let sl = isBuy ? z.lo - SL_BUFFER * a : z.hi + SL_BUFFER * a;
     let risk = Math.abs(entry - sl);
-    if (risk < RISK_MIN * a) {
-      sl = isBuy ? entry - RISK_MIN * a : entry + RISK_MIN * a;
-      risk = RISK_MIN * a;
+    if (risk < minRisk) {
+      sl = isBuy ? entry - minRisk : entry + minRisk;
+      risk = minRisk;
     }
     return { z, inZone, entry, sl, risk };
   };
@@ -244,12 +277,10 @@ function freshZonePlan(candles, dir, price, a) {
   const candidates = zones
     .filter(isFresh)
     .map(build)
-    .filter(p => p.risk <= LIMIT_RISK_MAX * a)
+    .filter(p => p.risk <= maxRisk)
     .sort((x, y) => y.z.from - x.z.from);
 
-  if (!candidates.length) {
-    return { err: 'Tidak ada FVG atau Order Block yang masih fresh di impuls terakhir. Tidak ada sinyal.' };
-  }
+  if (!candidates.length) return { err: 'Tidak ada zona fresh di timeframe ini.' };
 
   const p = candidates[0];
   return {
@@ -262,7 +293,34 @@ function freshZonePlan(candles, dir, price, a) {
   };
 }
 
-function buildReason({ lang, style, dir, plan, htfAligned, dec, entryTf }) {
+// Cari zona fresh berurutan: HTF dulu, lalu MTF, lalu LTF
+function findZone(series, dir, price, refAtr) {
+  for (const s of series) {
+    if (!s.tf || !s.candles || s.candles.length < MIN_CANDLES) continue;
+    const a = atr(s.candles, 14);
+    if (!(a > 0)) continue;
+    const plan = freshZonePlan(s.candles, dir, price, a, refAtr);
+    if (plan.err) continue;
+    return {
+      ...plan,
+      zoneRole: s.role,
+      zoneTf: s.tf,
+      expireMs: Math.min(Math.max(EXPIRE_BARS * TF_MS[s.tf], EXPIRE_MIN_MS), EXPIRE_MAX_MS),
+    };
+  }
+  return { err: 'Tidak ada zona FVG atau Order Block yang fresh di HTF, MTF, maupun LTF. Tidak ada sinyal.' };
+}
+
+function durText(ms, lang) {
+  const m = Math.round(ms / 60000);
+  if (m >= 60) {
+    const h = Math.round((m / 60) * 10) / 10;
+    return T(lang, `${h} jam`, `${h} hour${h === 1 ? '' : 's'}`);
+  }
+  return T(lang, `${m} menit`, `${m} minute${m === 1 ? '' : 's'}`);
+}
+
+function buildReason({ lang, style, dir, plan, htfAligned, dec }) {
   const f = v => v.toFixed(dec);
   const d = dir === 1 ? 'BUY' : 'SELL';
   const htf = htfAligned ? T(lang, 'searah', 'aligned') : T(lang, 'belum jelas', 'unclear');
@@ -279,20 +337,29 @@ function buildReason({ lang, style, dir, plan, htfAligned, dec, entryTf }) {
     );
   }
 
-  const tfTxt = TF_LABEL[entryTf];
+  const tfTxt = TF_LABEL[plan.zoneTf];
   const zName = plan.zoneType === 'FVG' ? 'FVG' : 'Order Block';
   const zone = `${f(plan.zone.min)} – ${f(plan.zone.max)}`;
+
+  const fbId = plan.zoneRole === 'mtf' ? 'HTF belum punya zona fresh, zona diambil dari MTF. '
+    : plan.zoneRole === 'ltf' ? 'HTF dan MTF belum punya zona fresh, zona diambil dari LTF. '
+    : '';
+  const fbEn = plan.zoneRole === 'mtf' ? 'No fresh HTF zone, zone taken from MTF. '
+    : plan.zoneRole === 'ltf' ? 'No fresh HTF or MTF zone, zone taken from LTF. '
+    : '';
+
   const action = plan.status === 'RUNNING'
     ? T(lang, `Harga sudah di dalam zona, entry langsung di ${f(plan.entry)}.`, `Price already inside the zone, entry at ${f(plan.entry)}.`)
     : T(
         lang,
-        `Entry pending di tengah zona ${f(plan.entry)}, batal jika SL tersentuh atau belum terisi dalam ${style.expireBars} candle ${tfTxt}.`,
-        `Pending entry at zone midpoint ${f(plan.entry)}, cancelled if SL is hit or not filled within ${style.expireBars} ${tfTxt} candles.`
+        `Entry pending di tengah zona ${f(plan.entry)}, batal jika SL tersentuh atau belum terisi dalam ${durText(plan.expireMs, lang)}.`,
+        `Pending entry at zone midpoint ${f(plan.entry)}, cancelled if SL is hit or not filled within ${durText(plan.expireMs, lang)}.`
       );
+
   return `${head} ` + T(
     lang,
-    `Zona fresh ${zName} ${zone} di impuls ${f(plan.impulse.low)} → ${f(plan.impulse.high)}. ${action} HTF ${htf}.`,
-    `Fresh ${zName} zone ${zone} within impulse ${f(plan.impulse.low)} → ${f(plan.impulse.high)}. ${action} HTF ${htf}.`
+    `${fbId}Zona fresh ${zName} ${tfTxt} ${zone} di impuls ${f(plan.impulse.low)} → ${f(plan.impulse.high)}. ${action} HTF ${htf}.`,
+    `${fbEn}Fresh ${zName} ${tfTxt} zone ${zone} within impulse ${f(plan.impulse.low)} → ${f(plan.impulse.high)}. ${action} HTF ${htf}.`
   );
 }
 
@@ -310,26 +377,28 @@ export default async function handler(req, res) {
     const dec = DECIMALS[symbol] ?? 4;
     const price = Number(body.currentPrice);
 
-    if (!(await isActiveClient(email))) {
-      return res.status(403).json({ error: 'Akses tidak aktif atau email belum terdaftar. Hubungi admin.' });
-    }
+    const access = await checkAccess(email);
+    if (!access.ok) return res.status(403).json({ error: access.msg });
     if (!style) return res.status(400).json({ error: 'Gaya trading tidak dikenal.' });
     if (!(price > 0)) return res.status(400).json({ error: 'Harga live belum tersedia.' });
 
-    const entryC = cleanCandles(body.candles?.entry);
-    const htfC = cleanCandles(body.candles?.htf);
-    if (entryC.length < 30 || htfC.length < 20) {
+    const cnd = body.candles || {};
+    const htfC = cleanCandles(cnd.htf);
+    const mtfC = cleanCandles(cnd.mtf ?? cnd.entry);
+    const ltfC = cleanCandles(cnd.ltf);
+    if (mtfC.length < 30 || htfC.length < 20) {
       return res.status(422).json({ error: 'Data candle belum cukup. Tunggu beberapa menit lalu coba lagi.' });
     }
 
     const none = reason => res.status(200).json({ ok: true, signal: null, reason });
 
-    const a = atr(entryC, 14);
-    if (!(a > 0)) return none('Data volatilitas tidak valid.');
+    const refAtr = atr(mtfC, 14);
+    if (!(refAtr > 0)) return none('Data volatilitas tidak valid.');
 
-    const dir = structureDir(entryC);
+    // Arah ditentukan dari struktur MTF
+    const dir = structureDir(mtfC);
     if (dir === 0) {
-      return none(T(lang, 'Struktur belum jelas di timeframe entry. Tidak ada sinyal.', 'Structure is unclear on the entry timeframe. No signal.'));
+      return none(T(lang, 'Struktur belum jelas di timeframe MTF. Tidak ada sinyal.', 'Structure is unclear on the MTF. No signal.'));
     }
 
     const htfDir = structureDir(htfC);
@@ -337,9 +406,16 @@ export default async function handler(req, res) {
       return none(T(lang, 'Arah HTF berlawanan dengan arah entry. Tidak ada sinyal.', 'HTF direction conflicts with entry. No signal.'));
     }
 
-    const plan = style.mode === 'REACTIVE'
-      ? reactivePlan(entryC, dir, price, a)
-      : freshZonePlan(entryC, dir, price, a);
+    let plan;
+    if (style.mode === 'REACTIVE') {
+      plan = reactivePlan(mtfC, dir, price, refAtr);
+    } else {
+      plan = findZone([
+        { role: 'htf', tf: style.tf.htf, candles: htfC },
+        { role: 'mtf', tf: style.tf.mtf, candles: mtfC },
+        { role: 'ltf', tf: style.tf.ltf, candles: ltfC },
+      ], dir, price, refAtr);
+    }
     if (plan.err) return none(plan.err);
 
     const entry = plan.entry;
@@ -350,7 +426,6 @@ export default async function handler(req, res) {
     const reason = buildReason({
       lang, style, dir, plan, dec,
       htfAligned: htfDir === dir,
-      entryTf: style.entry,
     });
 
     return res.status(200).json({
@@ -365,7 +440,8 @@ export default async function handler(req, res) {
         tp2: r(tps[1]),
         tp3: r(tps[2]),
         zone: plan.zone ? { min: r(plan.zone.min), max: r(plan.zone.max) } : null,
-        expireMs: style.mode === 'LIMIT' ? style.expireBars * TF_MS[style.entry] : 0,
+        zoneTf: plan.zoneTf || null,
+        expireMs: plan.expireMs || 0,
         reason,
       },
     });
