@@ -259,13 +259,12 @@
                         </div>
 
                         <div class="bg-darkbg/80 border border-panelborder rounded-xl p-2.5 space-y-2">
-                            <div class="flex flex-wrap justify-between items-center gap-1">
+                            <div class="flex flex-wrap justify-between items-start gap-1">
                                 <p id="lblPriceMap" class="text-[9px] font-bold text-gray-400 tracking-wider">LIVE PRICE MAP</p>
-                                <div class="flex items-center gap-1.5 min-w-0">
-                                    <span id="tradePnl" class="text-[9px] font-mono font-bold text-gray-400">--</span>
-                                    <span id="tradeStatus" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40">RUNNING</span>
-                                </div>
+                                <span id="tradeStatus" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40 whitespace-nowrap">RUNNING</span>
                             </div>
+                            <p id="tradePnl" class="text-[10px] font-mono font-bold text-gray-400">--</p>
+                            <p id="tradeLive" class="text-[8px] font-mono text-gray-400"></p>
                             <div class="relative w-full h-[200px] sm:h-[280px] lg:h-[300px]">
                                 <canvas id="priceChart" class="absolute inset-0 w-full h-full"></canvas>
                             </div>
@@ -473,39 +472,53 @@
     const WS_URL = 'wss://api-stream.myfundedperpetuals.com/v1/market-data';
     const HISTORY_MS = 10 * 60 * 1000;
     const CHART_SPAN_MS = 3 * 60 * 1000;     // setengah kiri chart = 3 menit ke belakang
-    const ALIAS_WAIT_MS = 10000;             // tunggu tick sebelum mencoba alias berikutnya
+    const ALIAS_WAIT_MS = 10000;             // alias yang belum diterima server: coba berikutnya setelah 10 detik
+    const QUIET_MS = 90000;                  // alias yang sudah diterima tapi sepi: tunggu 90 detik sebelum ganti
     const STORE_KEY = 'aluSignalZ_history_v3';
     const OFFSET_KEY = 'aluSignalZ_offsets_v1';
     const DEBUG = localStorage.getItem('alu_debug') === '1';
 
-    // coins = alias yang dicoba berurutan. Alias yang ditolak/tanpa tick otomatis diganti.
+    // coins: alias berurutan. Format "provider|simbol" jika simbol ada di provider lain.
     const MARKETS = {
         XAUUSD:  { provider: 'hyperliquid', coins: ['xyz:GOLD', 'xyz:XAU', 'GOLD', 'XAUUSD'], decimals: 2, pip: 0.1 },
         XAGUSD:  { provider: 'hyperliquid', coins: ['xyz:SILVER', 'xyz:XAG', 'SILVER', 'XAGUSD'], decimals: 3, pip: 0.01 },
-        SP500:   { provider: 'hyperliquid', coins: ['xyz:SP500', 'xyz:US500', 'SP500', 'US500'], decimals: 2, pip: 1 },
-        NAS100:  { provider: 'hyperliquid', coins: ['xyz:NAS100', 'xyz:US100', 'xyz:USTECH', 'NAS100', 'US100', 'USTECH', 'NDX'], decimals: 2, pip: 1 },
+        SP500:   { provider: 'hyperliquid', coins: ['xyz:SP500', 'xyz:US500', 'xyz:SPX', 'SP500', 'US500', 'SPX500'], decimals: 2, pip: 1 },
+        NAS100:  { provider: 'hyperliquid', coins: ['xyz:XYZ100', 'xyz:NAS100', 'xyz:US100', 'xyz:USTECH', 'NAS100', 'US100', 'USTEC', 'NDX'], decimals: 2, pip: 1 },
         EURUSD:  { provider: 'veranta', coins: ['EURUSD', 'EUR/USD', 'EURUSD.FX'], decimals: 5, pip: 0.0001 },
         USDJPY:  { provider: 'veranta', coins: ['USDJPY', 'USD/JPY', 'USDJPY.FX'], decimals: 3, pip: 0.01 },
         GBPUSD:  { provider: 'veranta', coins: ['GBPUSD', 'GBP/USD', 'GBPUSD.FX'], decimals: 5, pip: 0.0001 },
-        GBPJPY:  { provider: 'veranta', coins: ['GBPJPY', 'GBP/JPY', 'GBPJPY.FX', 'GBPJPY.s'], decimals: 3, pip: 0.01 },
+        GBPJPY:  { provider: 'veranta', coins: ['GBPJPY', 'GBP/JPY', 'GBPJPY.FX', 'GBPJPY.s', 'hyperliquid|xyz:GBPJPY'], decimals: 3, pip: 0.01 },
         BTCUSDT: { provider: 'binance', coins: ['BTCUSDT'], decimals: 2, pip: 1 },
         ETHUSDT: { provider: 'binance', coins: ['ETHUSDT'], decimals: 2, pip: 0.1 },
         SOLUSDT: { provider: 'binance', coins: ['SOLUSDT'], decimals: 2, pip: 0.01 },
         XRPUSDT: { provider: 'binance', coins: ['XRPUSDT'], decimals: 4, pip: 0.0001 },
         DJI:     { provider: 'ostium', coins: ['DJI', 'DJIUSD', 'DJI-USD', 'US30'], decimals: 2, pip: 1 },
-        NIKKEI:  { provider: 'ostium', coins: ['NIK225', 'NIKKEI', 'NIKKEI225', 'JP225', 'JPN225', 'N225'], decimals: 2, pip: 1 },
+        NIKKEI:  { provider: 'ostium', coins: ['NIK225', 'NIKKEI', 'NIKKEI225', 'JP225', 'JPN225', 'N225', 'hyperliquid|xyz:JP225', 'hyperliquid|xyz:NIKKEI'], decimals: 2, pip: 1 },
         DAX:     { provider: 'ostium', coins: ['DAX', 'GER40', 'DE40'], decimals: 2, pip: 1 },
     };
 
     // Normalisasi: "xyz:GOLD", "GOLD", "EUR/USD", "EURUSD.FX" dibandingkan dengan cara yang sama
     const norm = s => String(s ?? '').toUpperCase().replace(/^XYZ:/, '').replace(/\.[A-Z]+$/, '').replace(/[^A-Z0-9]/g, '');
 
+    // Alias yang sudah diurai menjadi { provider, coin }
+    const ALIASES = {};
+    for (const [key, m] of Object.entries(MARKETS)) {
+        ALIASES[key] = m.coins.map(c => {
+            const i = c.indexOf('|');
+            return i > 0 ? { provider: c.slice(0, i), coin: c.slice(i + 1) } : { provider: m.provider, coin: c };
+        });
+    }
+    const PROVIDERS = [...new Set(Object.values(ALIASES).flat().map(a => a.provider))];
+    const COIN_KEY = new Map();
+    for (const [key, list] of Object.entries(ALIASES))
+        for (const a of list) COIN_KEY.set(`${a.provider.toLowerCase()}|${norm(a.coin)}`, key);
+
     // ================= STATE =================
     let ws = null, reconnectTimer = null, pingTimer = null;
     let retryCount = 0, lastIn = 0;
     let trades = [], activeId = null;
     const prices = {}, history = {}, rawPrices = {}, marketCandles = {};
-    const symbolOf = {}, kindLock = {}, mstate = {};
+    const symbolOf = {}, providerOf = {}, kindLock = {}, mstate = {};
     const subOwner = new Map();      // id subscription -> key market
     const pendingReq = new Map();    // id request -> { resolve, reject, timer }
     const dirty = new Set();         // market yang harganya berubah sejak frame terakhir
@@ -606,41 +619,41 @@
     }
 
     // ================= STREAM =================
-    const PROVIDERS = [...new Set(Object.values(MARKETS).map(m => m.provider))];
-    const COIN_KEY = new Map();
-    for (const [key, m] of Object.entries(MARKETS))
-        for (const c of m.coins) COIN_KEY.set(`${m.provider}|${norm(c)}`, key);
-
     const sendJSON = (sock, obj) => { if (sock && sock.readyState === WebSocket.OPEN) sock.send(JSON.stringify(obj)); };
 
-    // Satu subscription aktif per market. Kalau ditolak atau tidak ada tick, pindah ke alias berikutnya.
+    // Satu subscription aktif per market. Ditolak server (sub_err) -> alias berikutnya.
+    // Sudah diterima (sub_ok) tapi sepi -> tetap dipakai, karena pasar memang bisa tutup.
     function subscribeMarket(sock, key, idx) {
-        const m = MARKETS[key];
-        const st = mstate[key] ??= { idx: 0, id: null, sentAt: 0 };
+        const list = ALIASES[key];
+        const st = mstate[key] ??= { idx: 0, id: null, sentAt: 0, ok: false };
 
         if (st.id != null) {
             sendJSON(sock, { op: 'unsub', id: st.id });
             subOwner.delete(st.id);
-            st.id = null;
         }
+        st.id = null;
+        st.ok = false;
 
-        if (idx >= m.coins.length) {
+        if (idx >= list.length) {
+            st.idx = idx;
             markSrc(key, 'NO DATA', 'text-red-400');
             return;
         }
 
+        const a = list[idx];
         const id = nextId();
         Object.assign(st, { idx, id, sentAt: Date.now() });
         subOwner.set(id, key);
-        if (DEBUG) console.info('[sub]', key, m.coins[idx]);
-        sendJSON(sock, { op: 'sub', id, channel: 'ticks', payload: { symbols: [m.coins[idx]], providers: [m.provider] } });
-        markSrc(key, `TRY ${idx + 1}/${m.coins.length}`, 'text-gray-500');
+        if (DEBUG) console.info('[sub]', key, a.provider, a.coin);
+        sendJSON(sock, { op: 'sub', id, channel: 'ticks', payload: { symbols: [a.coin], providers: [a.provider] } });
+        markSrc(key, `TRY ${idx + 1}/${list.length}`, 'text-gray-500');
     }
 
     function handleEvents(f) {
         for (const ev of f.events || []) {
             if (!ev || !ev.symbol) continue;
-            const key = COIN_KEY.get(`${String(ev.provider).toLowerCase()}|${norm(ev.symbol)}`);
+            const prov = String(ev.provider ?? '').toLowerCase();
+            const key = COIN_KEY.get(`${prov}|${norm(ev.symbol)}`);
             if (!key) {
                 const k = `${ev.provider}|${ev.symbol}`;
                 if (!unmapped.has(k)) { unmapped.add(k); console.warn('[stream] simbol belum dipetakan:', k); }
@@ -652,13 +665,14 @@
             if (ev.kind && ev.kind !== kindLock[key]) continue;
 
             symbolOf[key] = ev.symbol;
+            providerOf[key] = prov;
             rawPrices[key] = p;
             markSrc(key, 'LIVE', 'text-emerald-400');
             updatePrice(key, p + (offsets[key] || 0), ev);
         }
     }
 
-    // Dipanggil tiap detik: cek market yang belum mengirim tick
+    // Dipanggil tiap detik
     function watchdog() {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
         const now = Date.now();
@@ -666,13 +680,20 @@
             const st = mstate[key];
             if (!st || st.id == null) continue;
             const recv = prices[key]?.recv ?? 0;
-            if (recv > st.sentAt) {
+            const gotTick = recv > st.sentAt;
+
+            if (gotTick) {
                 if (now - recv > 30000) markSrc(key, 'IDLE', 'text-gray-500');
                 continue;
             }
+            if (st.ok) {
+                // Diterima server tapi belum ada tick: tunggu, jangan langsung ganti alias
+                if (now - st.sentAt > QUIET_MS) subscribeMarket(ws, key, (st.idx + 1) % ALIASES[key].length);
+                else markSrc(key, 'WAIT', 'text-gray-500');
+                continue;
+            }
             if (now - st.sentAt < ALIAS_WAIT_MS) continue;
-            if (st.idx + 1 < MARKETS[key].coins.length) subscribeMarket(ws, key, st.idx + 1);
-            else markSrc(key, 'NO DATA', 'text-red-400');
+            subscribeMarket(ws, key, st.idx + 1);
         }
     }
 
@@ -688,8 +709,7 @@
         clearInterval(pingTimer);
         if (ws) { const old = ws; ws = null; old.onclose = null; old.onmessage = null; old.close(); }
 
-        // Batalkan request yang masih menunggu agar tidak menggantung
-        for (const [id, p] of pendingReq) { clearTimeout(p.timer); p.reject(new Error('koneksi ulang')); }
+        for (const [, p] of pendingReq) { clearTimeout(p.timer); p.reject(new Error('koneksi ulang')); }
         pendingReq.clear();
         subOwner.clear();
         for (const k of Object.keys(mstate)) delete mstate[k];
@@ -705,7 +725,7 @@
             for (const key of Object.keys(MARKETS)) subscribeMarket(sock, key, 0);
             setTimeout(() => { if (ws === sock) refreshBias(selectedKey(), true); }, 1500);
 
-            // Heartbeat: ping ke server. Tanpa respons dalam 60 detik, koneksi dianggap mati.
+            // Heartbeat: tanpa frame masuk selama 60 detik, koneksi dianggap mati
             pingTimer = setInterval(() => {
                 if (ws !== sock) return;
                 if (Date.now() - lastIn > 60000) { sock.close(); return; }
@@ -725,7 +745,9 @@
                     handleEvents(f);
                     break;
                 case 'sub_ok': {
-                    // subscription diterima; tick akan dihitung oleh watchdog
+                    const key = subOwner.get(f.id);
+                    const st = key && mstate[key];
+                    if (st && st.id === f.id) st.ok = true;
                     break;
                 }
                 case 'sub_err': {
@@ -733,14 +755,14 @@
                     if (!key) break;
                     subOwner.delete(f.id);
                     const st = mstate[key];
-                    st.id = null;
-                    console.warn('[sub ditolak]', key, MARKETS[key].coins[st.idx], f.error);
+                    if (st.id !== f.id) break;
+                    console.warn('[sub ditolak]', key, ALIASES[key][st.idx], f.error);
                     subscribeMarket(sock, key, st.idx + 1);
                     break;
                 }
                 case 'end': {
                     const key = subOwner.get(f.id);
-                    if (key) subscribeMarket(sock, key, mstate[key].idx);
+                    if (key && mstate[key].id === f.id) subscribeMarket(sock, key, mstate[key].idx);
                     break;
                 }
                 case 'draining':
@@ -790,7 +812,7 @@
         const arr = (bucket[tfKey] ??= []);
         const intervalMs = timeframeMinutes * 60 * 1000;
         const candleTime = Math.floor(Date.now() / intervalMs) * intervalMs;
-        let cur = arr[arr.length - 1];
+        const cur = arr[arr.length - 1];
         if (!cur || cur.time !== candleTime) {
             arr.push({ time: candleTime, open: price, high: price, low: price, close: price });
             if (arr.length > 100) arr.shift();
@@ -843,7 +865,7 @@
     const hitList = t => TP_KEYS.filter(k => t.hits?.[k]);
     const maxHitIndex = t => TP_KEYS.reduce((m, k, i) => (t.hits?.[k] ? i + 1 : m), 0);
 
-    // PnL dibagi rata ke tiap TP yang didefinisikan.
+    // Pip untuk statistik WIN/LOSE: dibagi rata ke tiap TP yang didefinisikan.
     // Leg yang sudah kena dihitung di harga TP, leg lain di finalPrice.
     function computePips(t, finalPrice) {
         const keys = definedTps(t);
@@ -859,12 +881,33 @@
         return '';
     };
 
-    // Teks "entry > harga  +30 pip"
-    const flowText = (t, price) => {
+    // Titik kunci tampilan:
+    //  - Sudah TP/SL/BE: terkunci di harga exit
+    //  - TP sudah kena tapi masih berjalan: terkunci di TP terakhir yang kena
+    //  - Belum ada TP: ikut harga live
+    function lockOf(t) {
+        if (t.status === 'CLOSED') {
+            return { price: t.exitPrice, label: resultLabel(t), closed: true };
+        }
+        const k = [...TP_KEYS].reverse().find(k => t.hits?.[k]);
+        return k ? { price: t[k], label: k.toUpperCase(), closed: false } : null;
+    }
+
+    // Teks: "4100 > 4105 +50 pip TP1" (terkunci) atau "4100 > 4103 +30 pip RUNNING" (live)
+    function tradeFlow(t) {
         const entry = fmt(t.key, t.entry);
-        if (price == null) return `${entry} > --`;
-        return `${entry} > ${fmt(t.key, price)}  ${fmtPips(computePips(t, price))}`;
-    };
+        const live = prices[t.key]?.price;
+        const lk = lockOf(t);
+        const line = (price, label) => `${entry} > ${fmt(t.key, price)} ${fmtPips(pipsOf(t, price))} ${label}`;
+
+        if (lk) {
+            const liveTxt = !lk.closed && live != null ? `live ${entry} > ${fmt(t.key, live)} ${fmtPips(pipsOf(t, live))}` : '';
+            return { main: line(lk.price, lk.label), sub: liveTxt, pips: pipsOf(t, lk.price) };
+        }
+        if (live == null) return { main: `${entry} > --`, sub: '', pips: 0 };
+        return { main: line(live, 'RUNNING'), sub: '', pips: pipsOf(t, live) };
+    }
+    const pipColor = p => p > 0 ? 'text-emerald-400' : p < 0 ? 'text-red-400' : 'text-gray-400';
 
     function normalizeTrade(t) {
         t.hits = t.hits || {};
@@ -959,25 +1002,21 @@
         if (!trades.length) { box.innerHTML = `<p class="text-center text-[10px] text-gray-500 py-3">${DICT[currentLang].noHistory}</p>`; return; }
 
         box.innerHTML = trades.slice().reverse().map(t => {
+            const f = tradeFlow(t);
             const hits = hitList(t).map(k => `✓${k.toUpperCase()}`).join(' ');
             const active = t.id === activeId ? 'ring-1 ring-accentblue' : '';
-            const closed = t.status === 'CLOSED';
-            const price = closed ? t.exitPrice : prices[t.key]?.price;
-            const pips = closed ? t.pips : (price != null ? computePips(t, price) : 0);
-            const color = pips > 0 ? 'text-emerald-400' : pips < 0 ? 'text-red-400' : 'text-gray-400';
-            const right = closed
-                ? `${resultLabel(t)} ${fmtPips(t.pips)}`
-                : `${fmtPips(pips)} · ${maxHitIndex(t) ? `TP${maxHitIndex(t)} HIT` : 'RUNNING'}`;
+            const badge = t.status === 'CLOSED'
+                ? `<span class="${pipColor(t.pips)}">${t.result}</span>`
+                : `<span class="text-blue-400">${maxHitIndex(t) ? `TP${maxHitIndex(t)} HIT` : 'RUNNING'}</span>`;
             return `
             <div onclick="viewTrade('${t.id}')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1.5 rounded cursor-pointer space-y-0.5 ${active}">
-              <div class="flex justify-between items-center gap-2 text-[10px] font-bold">
+              <div class="flex justify-between items-center gap-2 text-[9px] font-bold">
                 <span class="text-white truncate">${t.no}. ${displayName(t.key)} <span class="text-[8px] text-gray-400">${t.style} · ${t.signal}</span></span>
-                <span class="font-mono whitespace-nowrap ${color}">${right}</span>
+                <span class="font-mono whitespace-nowrap">${badge}</span>
               </div>
-              <div class="flex justify-between items-center gap-2 text-[8px] font-mono text-gray-400">
-                <span>${flowText(t, price)}</span>
-                ${hits ? `<span class="text-emerald-400">${hits}</span>` : ''}
-              </div>
+              <div class="font-mono text-[10px] font-bold ${pipColor(f.pips)}">${f.main}</div>
+              ${f.sub ? `<div class="font-mono text-[8px] text-gray-400">${f.sub}</div>` : ''}
+              ${hits ? `<div class="font-mono text-[8px] text-emerald-400">${hits}</div>` : ''}
             </div>`;
         }).join('');
     }
@@ -1013,7 +1052,7 @@
         pipEl('cardSLPips', t.sl); pipEl('cardTP1Pips', t.tp1); pipEl('cardTP2Pips', t.tp2); pipEl('cardTP3Pips', t.tp3);
     }
 
-    // Ceklis, status, harga, dan PnL dibaca dari data trade
+    // Ceklis, status, teks flow, dan harga dibaca dari data trade
     function refreshActiveUI() {
         const t = getActive();
         if (!t) return;
@@ -1034,10 +1073,7 @@
             }
         });
 
-        const live = closed ? t.exitPrice : prices[t.key]?.price;
-        const pips = closed ? t.pips : (live != null ? computePips(t, live) : null);
-        const pipColor = pips == null ? 'text-gray-400' : pips > 0 ? 'text-emerald-400' : pips < 0 ? 'text-red-400' : 'text-gray-400';
-
+        const live = prices[t.key]?.price;
         const topEl = document.getElementById('cardLivePriceTop');
         const badgeEl = document.getElementById('cardLivePriceBadge');
         if (live != null) {
@@ -1045,19 +1081,18 @@
             if (badgeEl) badgeEl.textContent = fmt(t.key, live);
         }
 
+        const f = tradeFlow(t);
         const st = document.getElementById('tradeStatus');
         if (st) {
             const text = closed ? resultLabel(t) : maxHitIndex(t) ? `TP${maxHitIndex(t)} HIT` : 'RUNNING';
-            const color = closed ? (pips > 0 ? BADGE_STYLES.green : pips < 0 ? BADGE_STYLES.red : BADGE_STYLES.gray) : BADGE_STYLES.blue;
+            const color = closed ? (t.pips > 0 ? BADGE_STYLES.green : t.pips < 0 ? BADGE_STYLES.red : BADGE_STYLES.gray) : BADGE_STYLES.blue;
             st.textContent = text;
             st.className = `text-[8px] font-mono font-bold px-2 py-0.5 rounded border whitespace-nowrap ${color}`;
         }
-
         const pnlEl = document.getElementById('tradePnl');
-        if (pnlEl) {
-            pnlEl.textContent = flowText(t, live);
-            pnlEl.className = `text-[9px] font-mono font-bold ${pipColor}`;
-        }
+        if (pnlEl) { pnlEl.textContent = f.main; pnlEl.className = `text-[10px] font-mono font-bold ${pipColor(f.pips)}`; }
+        const liveEl = document.getElementById('tradeLive');
+        if (liveEl) liveEl.textContent = f.sub;
     }
 
     // ================= CHART =================
@@ -1176,7 +1211,8 @@
         ctx.beginPath(); ctx.arc(cx, yOf(last.p), 3.5, 0, Math.PI * 2); ctx.fill();
     }
 
-    // Satu loop untuk semua render: harga ticker, kartu aktif, dan chart
+    // Satu loop render: ticker, kartu aktif, history (throttle), dan chart
+    let lastHistPaint = 0;
     function uiFrame() {
         requestAnimationFrame(uiFrame);
         if (dirty.size) {
@@ -1184,6 +1220,11 @@
             const t = getActive();
             if (t && dirty.has(t.key)) refreshActiveUI();
             dirty.clear();
+        }
+        const nowMs = performance.now();
+        if (nowMs - lastHistPaint > 500 && trades.some(t => t.status !== 'CLOSED')) {
+            lastHistPaint = nowMs;
+            renderHistory();
         }
         drawChart();
     }
@@ -1243,15 +1284,16 @@
         const cached = biasCache[key];
         if (!force && cached && Date.now() - cached.at < 60000) return renderBias(key);
         if (!ws || ws.readyState !== WebSocket.OPEN || biasBusy) return;
+        if (!symbolOf[key]) return renderBias(key);   // harus ada tick dulu agar simbol pasti benar
 
         biasBusy = true;
-        const symbol = symbolOf[key] || m.coins[0];
+        const symbol = symbolOf[key];
+        const provider = providerOf[key] || ALIASES[key][0].provider;
         const rows = {};
         try {
-            // Berurutan agar tidak membebani koneksi
             for (const tf of BIAS_TF) {
                 try {
-                    const candles = await fetchCandles(m.provider, symbol, tf.interval);
+                    const candles = await fetchCandles(provider, symbol, tf.interval);
                     rows[tf.label] = calcBias(candles);
                 } catch (e) {
                     rows[tf.label] = { bias: 'N/A', score: null, err: e.message };
@@ -1286,7 +1328,7 @@
               </div>`;
         }).join('');
 
-        if (!rows) { info.textContent = 'memuat bias...'; return; }
+        if (!rows) { info.textContent = symbolOf[key] ? 'memuat bias...' : 'menunggu harga live...'; return; }
         const vals = Object.values(rows).map(r => r.bias);
         const bull = vals.filter(v => v === 'BULLISH').length;
         const bear = vals.filter(v => v === 'BEARISH').length;
