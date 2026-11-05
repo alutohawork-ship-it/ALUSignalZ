@@ -9,7 +9,7 @@ const DECIMALS = { XAUUSD: 2, XAGUSD: 3, EURUSD: 5, USDJPY: 3, GBPUSD: 5, BTCUSD
 // Ukuran 1 pip per simbol. Harus sama dengan MARKETS.pip di index.html
 const PIP = { XAUUSD: 0.1, XAGUSD: 0.01, EURUSD: 0.0001, USDJPY: 0.01, GBPUSD: 0.0001, BTCUSDT: 1, ETHUSDT: 0.1, SOLUSDT: 0.01, XRPUSDT: 0.0001, DJI: 1, DAX: 1 };
 
-// Jarak minimal SL (pip dari entry) untuk Scalping
+// Scalping: jarak SL MINIMUM (pip dari entry). SL tidak boleh lebih rapat dari ini.
 const SCALP_SL_PIPS = {
   XAUUSD: 30, XAGUSD: 30,
   EURUSD: 25, USDJPY: 25, GBPUSD: 25,
@@ -31,7 +31,7 @@ const KIND_NAME = { OB: 'Order Block', FVG: 'FVG', OTE: 'OTE 62-79%' };
 const ROLE_W = { htf: 3, mtf: 2, ltf: 1 };
 
 // Harus sama dengan STYLE_TF di index.html
-// kind: 'scalp'    = entry market searah MTF, SL minimal SCALP_SL_PIPS, selalu beri setup
+// kind: 'scalp'    = entry market searah MTF, SL fleksibel (swing) dibatasi min & max
 //       'day'      = zona terbaik (skor), dekat harga diutamakan, TP1 minimal DAY_MIN_TP1_PIPS
 //       'intraday' = zona terbaik (skor probabilitas), tanpa syarat fresh
 //       'zone'     = Swing: zona fresh (perilaku lama)
@@ -69,7 +69,8 @@ const STYLES = {
 };
 
 const SL_BUFFER = 0.2;                     // buffer SL dalam ATR
-const RISK_MAX = 3.0;                      // scalping: batas SL maks dalam ATR
+const SCALP_MAX_ATR = 1.5;                 // scalping: batas SL maks = 1.5 ATR MTF...
+const SCALP_CAP_MULT = 2;                  // ...atau 2x batas minimum, mana yang lebih besar
 const RISK_MIN = 0.5;                      // SL minimal 0.5 ATR
 const LIMIT_RISK_MAX = 4.0;                // swing: SL maks 4 ATR
 const ZONE_MAX_DIST = 4.0;                 // swing: zona maks 4 ATR dari harga
@@ -228,32 +229,31 @@ function impulseZones(candles, isBuy, a) {
 
 // ---------- Scalping ----------
 
-// Entry market searah arah yang sudah ditentukan.
-// SL = swing terdekat + buffer, minimal slFloor dari entry, dibatasi cap.
-function scalpPlan(candles, dir, price, a, slFloor) {
+// Entry market searah arah MTF.
+// SL = swing terdekat + buffer (atau ekstrem 12 candle jika swing tidak ada).
+// Jarak SL dijepit: minimal slFloor (tidak terlalu rapat), maksimal slCap (tidak terlalu jauh).
+function scalpPlan(candles, dir, price, a, slFloor, slCap) {
   const sw = swings(candles, 2);
-  const recent = candles.slice(-10);
-  const cap = Math.max(RISK_MAX * a, slFloor);
-  let sl;
+  const recent = candles.slice(-12);
+  const isBuy = dir === 1;
+  let dist;
 
-  if (dir === 1) {
+  if (isBuy) {
     const sl0 = lastSwing(sw, 'L');
     const base = sl0 && sl0.price < price ? sl0.price : Math.min(...recent.map(c => c.l));
-    let dist = Math.max((price - base) + SL_BUFFER * a, slFloor);
-    dist = Math.min(dist, cap);
-    sl = price - dist;
+    dist = (price - base) + SL_BUFFER * a;
   } else {
     const sh0 = lastSwing(sw, 'H');
     const base = sh0 && sh0.price > price ? sh0.price : Math.max(...recent.map(c => c.h));
-    let dist = Math.max((base - price) + SL_BUFFER * a, slFloor);
-    dist = Math.min(dist, cap);
-    sl = price + dist;
+    dist = (base - price) + SL_BUFFER * a;
   }
+
+  dist = Math.min(Math.max(dist, slFloor), slCap);
 
   return {
     status: 'RUNNING',
     entry: price,
-    sl,
+    sl: isBuy ? price - dist : price + dist,
     zone: { min: price - 0.1 * a, max: price + 0.1 * a },
     trigger: 'market',
   };
@@ -261,8 +261,6 @@ function scalpPlan(candles, dir, price, a, slFloor) {
 
 // ---------- Day Trading & Intraday: zona terbaik berdasarkan skor probabilitas ----------
 
-// Semua kandidat zona dari HTF, MTF, LTF (tanpa syarat fresh) diberi skor.
-// Selalu mengembalikan satu setup terbaik selama ada impuls di salah satu TF.
 function bestZonePlan(series, dir, price, refAtr, distW) {
   const isBuy = dir === 1;
   const pool = [];
@@ -347,7 +345,6 @@ function freshZonePlan(candles, dir, price, a, refAtr) {
 
   if (n - 1 - S.i > IMPULSE_MAX_AGE) return { err: 'Impuls terlalu lama.' };
 
-  // Pullback belum menembus awal impuls dan belum membuat extreme baru
   for (let i = E.i + 1; i < n; i++) {
     const c = candles[i];
     if (isBuy ? c.l < S.price : c.h > S.price) return { err: 'Struktur sudah patah.' };
@@ -426,7 +423,6 @@ function findZone(series, dir, price, refAtr) {
 function buildMeta({ lang, style, dir, plan, price, pip, htfDir, mtfDir, refAtr, risk }) {
   const isScalp = style.kind === 'scalp';
 
-  // Setup: searah HTF = continuation, melawan HTF = reversal
   const setup = htfDir === 0 ? 'NEUTRAL' : htfDir === dir ? 'CONTINUATION' : 'REVERSAL';
   const setupLabel = {
     NEUTRAL: T(lang, 'Netral (HTF belum jelas)', 'Neutral (HTF unclear)'),
@@ -434,7 +430,6 @@ function buildMeta({ lang, style, dir, plan, price, pip, htfDir, mtfDir, refAtr,
     REVERSAL: T(lang, 'Reversal (melawan trend HTF)', 'Reversal (against HTF trend)'),
   }[setup];
 
-  // Confidence: kumpulkan poin dari kualitas konfluensi
   const riskAtr = risk / refAtr;
   let pts = 0;
   if (htfDir === dir) pts += 2;
@@ -446,17 +441,14 @@ function buildMeta({ lang, style, dir, plan, price, pip, htfDir, mtfDir, refAtr,
   if (riskAtr <= 2) pts += 1;
   const confidence = pts >= 5 ? 'HIGH' : pts >= 3 ? 'MEDIUM' : 'LOW';
 
-  // Risk: reversal dan SL lebar = high risk
   let riskCode = setup === 'REVERSAL' || riskAtr > 2.5 ? 'HIGH' : riskAtr > 1.5 ? 'MEDIUM' : 'LOW';
   if (confidence === 'LOW' && riskCode === 'LOW') riskCode = 'MEDIUM';
 
-  // Label zona: contoh "Order Block Demand H1", "FVG Supply M30"
   const side = dir === 1 ? 'Demand' : 'Supply';
   const zoneLabel = isScalp
     ? T(lang, 'Momentum MTF', 'MTF momentum')
     : `${KIND_NAME[plan.zoneType] || plan.zoneType} ${side} ${TF_LABEL[plan.zoneTf] || ''}`.trim();
 
-  // Keterangan jarak entry dari harga sekarang
   const distPip = Math.round(Math.abs(plan.entry - price) / (pip || refAtr));
   let zoneNote;
   if (isScalp) {
@@ -564,7 +556,6 @@ export default async function handler(req, res) {
     // Scalping, Day Trading, dan Intraday selalu memberi setup. Swing tetap ketat.
     const flexible = style.kind === 'scalp' || style.kind === 'day' || style.kind === 'intraday';
 
-    // Arah dari struktur MTF. Mode fleksibel selalu punya arah (fallback HTF lalu momentum).
     let dir = mtfDir;
     if (dir === 0 && flexible) {
       dir = htfDir || (mtfC[mtfC.length - 1].c >= mtfC.slice(-20).reduce((s, c) => s + c.c, 0) / 20 ? 1 : -1);
@@ -573,7 +564,6 @@ export default async function handler(req, res) {
       return none(T(lang, 'Struktur belum jelas di timeframe MTF. Tidak ada sinyal.', 'Structure is unclear on the MTF. No signal.'));
     }
 
-    // Swing masih menolak jika HTF berlawanan
     if (!flexible && htfDir !== 0 && htfDir !== dir) {
       return none(T(lang, 'Arah HTF berlawanan dengan arah entry. Tidak ada sinyal.', 'HTF direction conflicts with entry. No signal.'));
     }
@@ -584,9 +574,12 @@ export default async function handler(req, res) {
         ? { id: 'searah', en: 'aligned' }
         : { id: 'berlawanan', en: 'opposite' };
 
-    // SL minimal untuk Scalping (harga)
+    // Scalping: SL minimum (floor) dan maksimum (cap)
     const slFloor = style.kind === 'scalp'
       ? (SCALP_SL_PIPS[symbol] && pip ? SCALP_SL_PIPS[symbol] * pip : RISK_MIN * refAtr)
+      : 0;
+    const slCap = style.kind === 'scalp'
+      ? Math.max(SCALP_MAX_ATR * refAtr, slFloor * SCALP_CAP_MULT)
       : 0;
 
     // Jarak minimal TP1 (harga)
@@ -605,7 +598,7 @@ export default async function handler(req, res) {
 
     let plan;
     if (style.kind === 'scalp') {
-      plan = scalpPlan(mtfC, dir, price, refAtr, slFloor);
+      plan = scalpPlan(mtfC, dir, price, refAtr, slFloor, slCap);
     } else if (style.kind === 'day' || style.kind === 'intraday') {
       plan = bestZonePlan(series, dir, price, refAtr, style.distW);
     } else {
@@ -617,7 +610,7 @@ export default async function handler(req, res) {
     const risk = Math.abs(entry - plan.sl);
     const r = v => Number(v.toFixed(dec));
 
-    // TP: rasio RR biasa, TP1 dipaksa minimal minTp1Dist. TP2/TP3 ikut proporsi.
+    // TP: rasio RR, TP1 dipaksa minimal minTp1Dist. TP2/TP3 ikut proporsi.
     const tps = style.rr.map(x => entry + dir * Math.max(risk * x, minTp1Dist * (x / style.rr[0])));
 
     const meta = buildMeta({
