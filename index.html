@@ -866,25 +866,6 @@
         }
     }
 
-    function analyzeSMCStructure(candles) {
-        if (!candles || candles.length < 5) return { status: "Membentuk data struktur..." };
-        const swings = [];
-        for (let i = 1; i < candles.length - 1; i++) {
-            const prev = candles[i - 1], curr = candles[i], next = candles[i + 1];
-            if (curr.high > prev.high && curr.high > next.high) swings.push({ type: 'SWING_HIGH', price: curr.high });
-            if (curr.low < prev.low && curr.low < next.low) swings.push({ type: 'SWING_LOW', price: curr.low });
-        }
-        const last = candles[candles.length - 1];
-        const recentHigh = swings.filter(s => s.type === 'SWING_HIGH').pop();
-        const recentLow = swings.filter(s => s.type === 'SWING_LOW').pop();
-        let hasCHoCH = false, chochType = null, liquiditySweep = false;
-        if (recentHigh && last.close > recentHigh.price) { hasCHoCH = true; chochType = 'BULLISH_CHoCH'; }
-        else if (recentLow && last.close < recentLow.price) { hasCHoCH = true; chochType = 'BEARISH_CHoCH'; }
-        if (recentHigh && last.high > recentHigh.price && last.close < recentHigh.price) liquiditySweep = true;
-        else if (recentLow && last.low < recentLow.price && last.close > recentLow.price) liquiditySweep = true;
-        return { recentHigh: recentHigh?.price, recentLow: recentLow?.price, hasCHoCH, chochType, liquiditySweep };
-    }
-
     function updatePrice(key, price, ev) {
         const prev = prices[key]?.price;
         const dir = prev == null ? 0 : price > prev ? 1 : price < prev ? -1 : (prices[key].dir ?? 0);
@@ -901,6 +882,7 @@
 
     // ================= TRADE & HISTORY =================
     const TP_KEYS = ['tp1', 'tp2', 'tp3'];
+    const TEXT_COLOR = { green: 'text-emerald-400', red: 'text-red-400', gray: 'text-gray-400', yellow: 'text-yellow-400', blue: 'text-blue-400' };
     const pipsOf = (t, price) => (price - t.entry) * t.dir / (MARKETS[t.key]?.pip || 1);
     const nextNo = () => trades.reduce((m, t) => Math.max(m, t.no || 0), 0) + 1;
     const definedTps = t => TP_KEYS.filter(k => t[k] != null);
@@ -916,11 +898,21 @@
     }
 
     const resultLabel = t => {
+        if (t.result === 'CANCEL') return 'BATAL';
         if (t.result === 'SL') return 'SL';
         if (t.result === 'TP') return `TP${t.maxTp} MAX`;
         if (t.result === 'BE') return t.maxTp ? `TP${t.maxTp} → BE` : 'BE';
         return '';
     };
+
+    function statusOf(t) {
+        if (t.status === 'CLOSED') {
+            if (t.result === 'CANCEL') return { text: 'BATAL', color: 'gray' };
+            return { text: resultLabel(t), color: t.pips > 0 ? 'green' : t.pips < 0 ? 'red' : 'gray' };
+        }
+        if (t.status === 'PENDING') return { text: 'MENUNGGU ZONA', color: 'yellow' };
+        return { text: maxHitIndex(t) ? `TP${maxHitIndex(t)} HIT` : 'RUNNING', color: 'blue' };
+    }
 
     function lockOf(t) {
         if (t.status === 'CLOSED') {
@@ -931,8 +923,17 @@
     }
 
     function tradeFlow(t) {
-        const entry = fmt(t.key, t.entry);
         const live = prices[t.key]?.price;
+
+        if (t.status === 'PENDING') {
+            const z = t.zone ? `${fmt(t.key, t.zone.min)} – ${fmt(t.key, t.zone.max)}` : '--';
+            return { main: `ZONA ${z} · entry ${fmt(t.key, t.entry)}`, sub: live != null ? `live ${fmt(t.key, live)}` : '', pips: 0 };
+        }
+        if (t.status === 'CLOSED' && t.result === 'CANCEL') {
+            return { main: `${fmt(t.key, t.entry)} > dibatalkan`, sub: t.cancelReason || '', pips: 0 };
+        }
+
+        const entry = fmt(t.key, t.entry);
         const lk = lockOf(t);
         const line = (price, label) => `${entry} > ${fmt(t.key, price)} ${fmtPips(pipsOf(t, price))} ${label}`;
 
@@ -975,6 +976,23 @@
 
     function evaluateTrade(t, price) {
         const d = t.dir;
+
+        // Entry limit: menunggu harga menyentuh level entry (tengah zona)
+        if (t.status === 'PENDING') {
+            if (d > 0 ? price <= t.entry : price >= t.entry) {
+                t.status = 'RUNNING';
+                t.filledAt = Date.now();
+                return true;
+            }
+            const slHit = d > 0 ? price <= t.sl : price >= t.sl;
+            const tp1Hit = t.tp1 != null && (d > 0 ? price >= t.tp1 : price <= t.tp1);
+            if (slHit || tp1Hit) {
+                cancelTrade(t, 'SL atau TP1 tersentuh sebelum zona');
+                return true;
+            }
+            return false;
+        }
+
         const reached = v => v != null && (d > 0 ? price >= v : price <= v);
         const lost = v => v != null && (d > 0 ? price <= v : price >= v);
         let changed = false;
@@ -1005,6 +1023,21 @@
     function closeTrade(t, result, exitPrice) {
         Object.assign(t, { status: 'CLOSED', result, exitPrice, closedAt: Date.now(), maxTp: maxHitIndex(t) });
         t.pips = pipsOf(t, recapPrice(t));
+    }
+
+    function cancelTrade(t, reason) {
+        Object.assign(t, { status: 'CLOSED', result: 'CANCEL', closedAt: Date.now(), pips: 0, maxTp: 0, cancelReason: reason });
+    }
+
+    function expirePending() {
+        let changed = false;
+        for (const t of trades) {
+            if (t.status === 'PENDING' && t.expiresAt && Date.now() > t.expiresAt) {
+                cancelTrade(t, 'Zona tidak tersentuh sampai batas waktu');
+                changed = true;
+            }
+        }
+        if (changed) { saveTrades(); renderHistory(); refreshActiveUI(); }
     }
 
     function clearHistory() {
@@ -1039,16 +1072,14 @@
 
         box.innerHTML = trades.slice().reverse().map(t => {
             const f = tradeFlow(t);
+            const s = statusOf(t);
             const hits = hitList(t).map(k => `✓${k.toUpperCase()}`).join(' ');
             const active = t.id === activeId ? 'ring-1 ring-accentblue' : '';
-            const badge = t.status === 'CLOSED'
-                ? `<span class="${pipColor(t.pips)}">${t.result}</span>`
-                : `<span class="text-blue-400">${maxHitIndex(t) ? `TP${maxHitIndex(t)} HIT` : 'RUNNING'}</span>`;
             return `
             <div onclick="viewTrade('${t.id}')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1.5 rounded cursor-pointer space-y-0.5 ${active}">
               <div class="flex justify-between items-center gap-2 text-[9px] font-bold">
                 <span class="text-white truncate">${t.no}. ${displayName(t.key)} <span class="text-[8px] text-gray-400">${t.style} · ${t.signal}</span></span>
-                <span class="font-mono whitespace-nowrap">${badge}</span>
+                <span class="font-mono whitespace-nowrap ${TEXT_COLOR[s.color]}">${s.text}</span>
               </div>
               <div class="font-mono text-[10px] font-bold ${pipColor(f.pips)}">${f.main}</div>
               ${f.sub ? `<div class="font-mono text-[8px] text-gray-400">${f.sub}</div>` : ''}
@@ -1068,11 +1099,17 @@
 
     function renderSignalCard(t) {
         const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v ?? '--'; };
-        const c = t.card || {};
+        const money = v => (v == null || !Number.isFinite(Number(v))) ? '--' : fmt(t.key, Number(v));
+
         set('cardMarketTitle', `${displayName(t.key)} (Pure SMC AI)`);
-        set('cardEntryZone', `${c.entry_min ?? '--'} - ${c.entry_max ?? '--'}`);
-        set('cardSL', c.sl); set('cardTP1', c.tp1); set('cardTP2', c.tp2); set('cardTP3', c.tp3);
-        set('cardReason', c.reason);
+        set('cardEntryZone', t.zone
+            ? `${money(t.zone.min)} - ${money(t.zone.max)}`
+            : (t.card?.entry_min ? `${t.card.entry_min} - ${t.card.entry_max}` : '--'));
+        set('cardSL', money(t.sl));
+        set('cardTP1', money(t.tp1));
+        set('cardTP2', money(t.tp2));
+        set('cardTP3', money(t.tp3));
+        set('cardReason', t.card?.reason ?? '---');
 
         const sig = t.signal || '';
         const badge = document.getElementById('signalBadgeBtn');
@@ -1080,7 +1117,8 @@
             badge.className = `${sig === 'BUY' ? 'bg-sky-500' : 'bg-red-500'} text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg flex items-center gap-1`;
             badge.innerHTML = `<i class="fa-solid ${sig === 'BUY' ? 'fa-caret-up' : 'fa-caret-down'}"></i> ${sig}`;
         }
-        set('cardStyleSub', `${t.style} / ${new Date(t.createdAt).toLocaleTimeString('id-ID', { hour12: false })}`);
+        const modeTxt = t.mode === 'LIMIT' ? 'Entry zona' : 'Entry market';
+        set('cardStyleSub', `${t.style} · ${modeTxt} / ${new Date(t.createdAt).toLocaleTimeString('id-ID', { hour12: false })}`);
         document.getElementById('standbyView')?.classList.add('hidden');
         document.getElementById('activeSignalCard')?.classList.remove('hidden');
 
@@ -1092,7 +1130,6 @@
         const t = getActive();
         if (!t) return;
         const hits = t.hits || {};
-        const closed = t.status === 'CLOSED';
 
         [['SL', 'sl'], ['TP1', 'tp1'], ['TP2', 'tp2'], ['TP3', 'tp3']].forEach(([name, k]) => {
             const box = document.getElementById(`box${name}`), chk = document.getElementById(`chk${name}`);
@@ -1119,10 +1156,9 @@
         const f = tradeFlow(t);
         const st = document.getElementById('tradeStatus');
         if (st) {
-            const text = closed ? resultLabel(t) : maxHitIndex(t) ? `TP${maxHitIndex(t)} HIT` : 'RUNNING';
-            const color = closed ? (t.pips > 0 ? BADGE_STYLES.green : t.pips < 0 ? BADGE_STYLES.red : BADGE_STYLES.gray) : BADGE_STYLES.blue;
-            st.textContent = text;
-            st.className = `text-[8px] font-mono font-bold px-2 py-0.5 rounded border whitespace-nowrap ${color}`;
+            const s = statusOf(t);
+            st.textContent = s.text;
+            st.className = `text-[8px] font-mono font-bold px-2 py-0.5 rounded border whitespace-nowrap ${BADGE_STYLES[s.color]}`;
         }
         const pnlEl = document.getElementById('tradePnl');
         if (pnlEl) { pnlEl.textContent = f.main; pnlEl.className = `text-[10px] font-mono font-bold ${pipColor(f.pips)}`; }
@@ -1179,7 +1215,8 @@
 
         const visible = arr.filter(x => xOfT(x.t) >= PAD_L);
         const levels = chartLevels(t);
-        const zMin = parseLevel(t.card?.entry_min), zMax = parseLevel(t.card?.entry_max);
+        const zMin = parseLevel(t.zone?.min ?? t.card?.entry_min);
+        const zMax = parseLevel(t.zone?.max ?? t.card?.entry_max);
 
         const vals = visible.length ? visible.map(x => x.p) : [arr[arr.length - 1].p];
         let lo = Math.min(...vals), hi = Math.max(...vals);
@@ -1440,7 +1477,15 @@
                     },
                 }),
             });
-            const data = await res.json().catch(() => ({}));
+
+            const txt = await res.text();
+            let data = {};
+            try {
+                data = JSON.parse(txt);
+            } catch {
+                const snippet = txt.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+                data = { error: `Server tidak mengirim JSON (HTTP ${res.status}). ${snippet}` };
+            }
             if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
 
             if (!data.signal) return alert('Belum ada setup valid.\n\n' + (data.reason || ''));
@@ -1484,7 +1529,7 @@
         renderBias(selectedKey());
         requestAnimationFrame(uiFrame);
         connect();
-        setInterval(watchdog, 1000);
+        setInterval(() => { watchdog(); expirePending(); }, 1000);
         setInterval(() => refreshBias(selectedKey()), 60000);
     };
     </script>
