@@ -458,13 +458,30 @@ export function backtest({ symbol = '', style, htf, ltf, htfMs, warmup = 300, ma
 
 // ---------- handler (Vercel) ----------
 function resolveStyle(name) {
-  const key = Object.keys(STYLES).find(k => String(name || '').includes(k));
+  const key = Object.keys(STYLES)
+    .sort((a, b) => b.length - a.length)           // nama yang lebih panjang dicek dulu
+    .find(k => String(name || '').includes(k));
   return key ? { name: key, ...STYLES[key] } : null;
 }
 
-function validCandles(arr, min = 150) {
-  return Array.isArray(arr) && arr.length >= min &&
-    arr.every(x => x && [x.o, x.h, x.l, x.c].every(Number.isFinite) && x.h >= x.l);
+// Normalisasi candle. Terima o/h/l/c atau open/high/low/close.
+// Harga boleh berupa string desimal (format Hyperliquid); dikonversi ke angka di sini.
+function normalizeCandles(arr, label, min = 150) {
+  if (!Array.isArray(arr)) return { error: `${label}: data candle tidak ditemukan.` };
+  const out = [];
+  for (const x of arr) {
+    if (!x) continue;
+    const o = Number(x.o ?? x.open), h = Number(x.h ?? x.high);
+    const l = Number(x.l ?? x.low), c = Number(x.c ?? x.close);
+    const t = Number(x.t ?? x.time ?? 0);
+    if (![o, h, l, c].every(Number.isFinite) || h < l) continue;
+    out.push({ t, o, h, l, c });
+  }
+  if (out.length < min) {
+    return { error: `${label}: hanya ${out.length} candle valid dari ${arr.length} baris, butuh minimal ${min}.` };
+  }
+  out.sort((a, b) => a.t - b.t);
+  return { candles: out.slice(-300) };
 }
 
 export default async function handler(req, res) {
@@ -479,13 +496,13 @@ export default async function handler(req, res) {
         error: 'marketId dan tradingStyle (Scalping / Day Trading / Intraday / Swing) wajib diisi.',
       });
     }
-    if (!validCandles(htf) || !validCandles(ltf)) {
-      return res.status(400).json({
-        error: `Butuh minimal 150 candle untuk HTF (${style.htf}) dan LTF (${style.ltf}), urut lama -> baru.`,
-      });
-    }
+    const H = normalizeCandles(htf, `HTF (${style.htf})`);
+    if (H.error) return res.status(400).json({ error: H.error });
+    const L = normalizeCandles(ltf, `LTF (${style.ltf})`);
+    if (L.error) return res.status(400).json({ error: L.error });
+
     const symbol = String(marketId).split('|').pop().toUpperCase();
-    const { raw, ...out } = analyzeSignal({ symbol, style, htf, ltf, lang });
+    const { raw, ...out } = analyzeSignal({ symbol, style, htf: H.candles, ltf: L.candles, lang });
     return res.status(200).json({ choices: [{ message: { content: JSON.stringify(out) } }] });
   } catch (error) {
     console.error('SMC Engine Error:', error);
