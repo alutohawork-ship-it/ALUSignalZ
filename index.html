@@ -1,1303 +1,361 @@
 <!DOCTYPE html>
-<html lang="id" class="dark">
+<html lang="id">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Alu Signal Z & Terminal</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        darkbg: '#0b0e14', cardbg: '#151924', panelborder: '#232936',
-                        accentblue: '#2962ff', accentgreen: '#00c076', accentred: '#ff3b69'
-                    }
-                }
-            }
-        }
-    </script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-
-    <style>
-        .lvl-box { position: relative; transition: all .25s ease; }
-        .tp-hit { background: rgba(16,185,129,.18) !important; border-color: #34d399 !important; box-shadow: 0 0 0 1px #34d399, 0 0 14px rgba(52,211,153,.35); }
-        .sl-hit { background: rgba(239,68,68,.18) !important; border-color: #f87171 !important; box-shadow: 0 0 0 1px #f87171, 0 0 14px rgba(248,113,113,.35); }
-        .hit-badge { position: absolute; top: -6px; right: -6px; width: 16px; height: 16px; border-radius: 9999px; display: none; align-items: center; justify-content: center; font-size: 9px; color: #0b0e14; z-index: 5; }
-        .hit-badge.show { display: flex; animation: pop .45s ease-out; }
-        @keyframes pop { 0% { transform: scale(0); } 60% { transform: scale(1.4); } 100% { transform: scale(1); } }
-        input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alu Signal Z</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: #0b0e14; color: #e5e7eb; min-height: 100vh; padding: 16px; }
+  .hidden { display: none !important; }
+  .wrap { max-width: 480px; margin: 0 auto; }
+  .card { background: #151924; border: 1px solid #232936; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+  h1 { font-size: 18px; margin: 0 0 4px; color: #fff; }
+  h2 { font-size: 14px; margin: 0 0 10px; color: #fff; }
+  .muted { font-size: 12px; color: #9ca3af; }
+  label { display: block; font-size: 12px; color: #9ca3af; margin: 10px 0 4px; }
+  input, select { width: 100%; padding: 10px; background: #0b0e14; color: #fff; border: 1px solid #232936; border-radius: 8px; font-size: 14px; }
+  button { width: 100%; padding: 10px; margin-top: 10px; border: 0; border-radius: 8px; background: #2962ff; color: #fff; font-weight: bold; font-size: 14px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: wait; }
+  button.danger { background: #7f1d1d; }
+  button.small { width: auto; padding: 4px 10px; margin: 0; font-size: 12px; }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .client { background: #0b0e14; border: 1px solid #232936; border-radius: 8px; padding: 8px; margin-top: 6px; }
+  .status { font-size: 12px; color: #9ca3af; min-height: 16px; margin-top: 6px; }
+  #result { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 13px; line-height: 1.6; }
+  .buy { color: #38bdf8; font-weight: bold; }
+  .sell { color: #f87171; font-weight: bold; }
+  .wait { color: #facc15; font-weight: bold; }
+  .hist { font-family: ui-monospace, monospace; font-size: 12px; border-top: 1px solid #232936; padding: 6px 0; }
+</style>
 </head>
-<body class="bg-darkbg text-gray-200 font-sans min-h-screen flex flex-col justify-between p-2">
+<body>
 
-    <div id="toast" class="hidden fixed top-3 left-1/2 -translate-x-1/2 z-50 px-3 py-2 rounded-lg text-[10px] font-bold font-mono shadow-xl border"></div>
+<!-- LOGIN -->
+<div id="authScreen" class="wrap">
+  <div class="card">
+    <h1>Welcome, Alu Signal Z</h1>
+    <p class="muted">Masukkan email atau kode akses</p>
+    <form id="authForm">
+      <label>ACCESS LOGIN</label>
+      <input id="authInput" type="text" required placeholder="nama@email.com">
+      <button type="submit">MASUK SISTEM</button>
+    </form>
+    <p class="muted" style="margin-top:14px">Bantuan admin: <a href="https://wa.me/6285817038501" style="color:#34d399">+6285817038501</a></p>
+  </div>
+</div>
 
-    <!-- ================= LOGIN ================= -->
-    <div id="authScreen" class="fixed inset-0 z-50 bg-darkbg/95 backdrop-blur-md flex flex-col items-center justify-center p-4">
-        <div class="bg-cardbg border border-panelborder rounded-2xl p-6 max-w-sm w-full space-y-5 shadow-2xl">
-            <div class="text-center space-y-1">
-                <div class="bg-accentblue w-12 h-12 rounded-xl flex items-center justify-center text-white mx-auto text-xl shadow-lg shadow-accentblue/30">
-                    <i class="fa-solid fa-chart-line"></i>
-                </div>
-                <h1 class="text-xl font-extrabold text-white pt-2 tracking-tight">Welcome, Alu Signal Z</h1>
-                <p class="text-[11px] text-gray-400">Silakan masukkan email atau kode akses</p>
-            </div>
-            <form id="authForm" onsubmit="handleUniversalLogin(event)" class="space-y-4 pt-2">
-                <div>
-                    <label class="text-[10px] font-bold text-gray-400 block mb-1 tracking-wider">ACCESS LOGIN</label>
-                    <input type="text" id="authInput" required class="w-full bg-darkbg border border-panelborder rounded-xl p-3 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="nama@email.com">
-                </div>
-                <button type="submit" class="w-full bg-accentblue hover:bg-blue-600 text-white font-bold py-3 rounded-xl text-xs transition shadow-lg shadow-accentblue/20 flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-right-to-bracket"></i> MASUK SISTEM
-                </button>
-            </form>
-            <div class="pt-4 border-t border-panelborder/60 text-center space-y-1.5">
-                <p class="text-[10px] text-gray-400 font-medium">Bantuan & Informasi Admin:</p>
-                <a href="https://wa.me/6285817038501?text=Halo%20Admin%20Alu%20Signal%20Z,%20saya%20ingin%20bertanya" target="_blank" class="inline-flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-full text-xs font-bold font-mono transition">
-                    <i class="fa-brands fa-whatsapp text-sm text-emerald-400"></i> +6285817038501
-                </a>
-            </div>
-        </div>
+<!-- ADMIN -->
+<div id="adminScreen" class="wrap hidden">
+  <div class="card">
+    <div class="row">
+      <div>
+        <h2 style="margin:0">Dashboard Admin</h2>
+        <p class="muted" style="margin:0">Pendaftaran klien</p>
+      </div>
+      <button class="small danger" onclick="logout()">KELUAR</button>
     </div>
+  </div>
+  <div class="card">
+    <h2>Daftarkan Klien Baru</h2>
+    <label>EMAIL KLIEN</label>
+    <input id="newEmail" type="email" placeholder="klien@email.com">
+    <label>PAKET</label>
+    <select id="newStatus">
+      <option value="trial">Trial 3 Hari</option>
+      <option value="monthly">Bulanan (30 hari)</option>
+      <option value="lifetime">Lifetime</option>
+    </select>
+    <button onclick="addClient()">SIMPAN & DAFTARKAN</button>
+  </div>
+  <div class="card">
+    <h2>Daftar Klien</h2>
+    <div id="clientList"></div>
+  </div>
+</div>
 
-    <!-- ================= DASHBOARD ADMIN ================= -->
-    <div id="registerDashboard" class="hidden fixed inset-0 z-40 bg-darkbg overflow-y-auto p-4 flex flex-col justify-between">
-        <div class="max-w-md mx-auto w-full space-y-4 pt-6">
-            <div class="flex justify-between items-center border-b border-panelborder pb-3">
-                <div class="flex items-center gap-2">
-                    <div class="bg-yellow-500 w-8 h-8 rounded-lg flex items-center justify-center text-darkbg font-bold"><i class="fa-solid fa-user-plus"></i></div>
-                    <div>
-                        <h2 class="text-sm font-extrabold text-white">Dashboard Pendaftaran Klien</h2>
-                        <p class="text-[9px] text-yellow-400">Akses Khusus Admin</p>
-                    </div>
-                </div>
-                <button onclick="logout()" class="text-[9px] font-mono font-bold px-2.5 py-1 rounded bg-red-500/20 text-red-400 border border-red-500/40">KELUAR</button>
-            </div>
-            <div class="bg-cardbg border border-panelborder rounded-xl p-4 space-y-3 shadow-lg">
-                <h3 class="text-xs font-bold text-white flex items-center gap-1.5"><i class="fa-solid fa-id-card text-accentblue"></i> Daftarkan Email Klien Baru</h3>
-                <div class="space-y-2">
-                    <div>
-                        <label class="text-[9px] font-bold text-gray-400 block mb-1">EMAIL KLIEN</label>
-                        <input type="email" id="newClientEmail" class="w-full bg-darkbg border border-panelborder rounded-lg p-2.5 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="klien@email.com">
-                    </div>
-                    <div>
-                        <label class="text-[9px] font-bold text-gray-400 block mb-1">PAKET / STATUS</label>
-                        <select id="newClientStatus" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2.5 rounded-lg focus:outline-none">
-                            <option value="trial">Trial 3 Hari</option>
-                            <option value="monthly">Langganan Bulanan (Monthly)</option>
-                            <option value="lifetime">Akses Selamanya (Lifetime)</option>
-                        </select>
-                    </div>
-                    <button onclick="registerNewClientByAdmin()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg text-xs transition shadow-md">+ SIMPAN & DAFTARKAN KLIEN</button>
-                </div>
-            </div>
-            <div class="bg-cardbg border border-panelborder rounded-xl p-4 space-y-2 shadow-lg">
-                <div class="flex justify-between items-center border-b border-panelborder pb-2">
-                    <span class="text-xs font-bold text-gray-300">Daftar Klien Terdaftar</span>
-                    <button onclick="loadAdminClientList()" class="text-[9px] text-accentblue hover:underline"><i class="fa-solid fa-rotate"></i> Refresh</button>
-                </div>
-                <div id="adminClientTableList" class="space-y-1.5 max-h-[300px] overflow-y-auto pr-1"></div>
-            </div>
-        </div>
-        <footer class="text-center py-3 text-[9px] text-gray-500">Alu Signal Z Admin Control Panel</footer>
+<!-- APP -->
+<div id="appScreen" class="wrap hidden">
+  <div class="card">
+    <div class="row">
+      <div>
+        <h1>Alu <span style="color:#2962ff">Signal Z</span></h1>
+        <p class="muted" style="margin:0" id="userLabel"></p>
+      </div>
+      <button class="small danger" onclick="logout()">LOGOUT</button>
     </div>
+  </div>
 
-    <!-- ================= TERMINAL ================= -->
-    <div id="mainApp" class="hidden flex-col justify-between min-h-screen">
-        <header class="flex items-center justify-between pb-2 border-b border-panelborder max-w-md mx-auto w-full">
-            <div class="flex items-center gap-2">
-                <div class="bg-accentblue w-7 h-7 rounded-lg flex items-center justify-center text-white"><i class="fa-solid fa-chart-line text-xs"></i></div>
-                <div>
-                    <h1 class="font-bold text-xs text-white">Alu <span class="text-accentblue">Signal Z</span></h1>
-                    <p id="txtSubHeader" class="text-[8px] text-gray-400">Multi-Asset Live Stream</p>
-                </div>
-            </div>
-            <div class="flex items-center gap-2">
-                <button onclick="logout()" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">LOGOUT</button>
-                <button onclick="toggleLang()" id="langBtn" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-panelborder text-gray-300 border border-panelborder hover:border-accentblue">ID 🌐</button>
-                <span id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">WS: OFF</span>
-            </div>
-        </header>
+  <div class="card">
+    <label>MARKET</label>
+    <select id="market">
+      <option value="binance|BTCUSDT">BTC/USDT (Binance)</option>
+      <option value="binance|ETHUSDT">ETH/USDT (Binance)</option>
+      <option value="binance|SOLUSDT">SOL/USDT (Binance)</option>
+      <option value="binance|XRPUSDT">XRP/USDT (Binance)</option>
+      <option value="hyperliquid|xyz:GOLD">XAUUSD / Gold (Hyperliquid)</option>
+      <option value="hyperliquid|xyz:SILVER">XAGUSD / Silver (Hyperliquid)</option>
+    </select>
 
-        <main class="max-w-md mx-auto w-full flex-1 flex flex-col gap-2 pt-2">
-            <!-- Generator -->
-            <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
-                <div class="flex justify-between items-center">
-                    <label id="lblTargetAsset" class="text-[9px] font-bold text-gray-400">TARGET ASET AKTIF</label>
-                    <span id="selectedPairBadge" class="text-[9px] font-mono text-accentblue font-bold">hyperliquid|XAUUSD</span>
-                </div>
-                <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                    <optgroup label="Gold, Silver & Forex">
-                        <option value="hyperliquid|XAUUSD">XAUUSD / Gold (Hyperliquid)</option>
-                        <option value="hyperliquid|XAGUSD">XAGUSD / Silver (Hyperliquid)</option>
-                        <option value="veranta|EURUSD">EUR/USD (Veranta)</option>
-                        <option value="veranta|USDJPY">USD/JPY (Veranta)</option>
-                        <option value="veranta|GBPUSD">GBP/USD (Veranta)</option>
-                        <option value="veranta|GBPJPY">GBP/JPY (Veranta)</option>
-                    </optgroup>
-                    <optgroup label="Indices / Indeks Global">
-                        <option value="ostium|DJI">Dow Jones / US30 (Ostium)</option>
-                        <option value="hyperliquid|xyz:SP500">S&P 500 / US500 (Hyperliquid)</option>
-                        <option value="hyperliquid|xyz:NAS100">Nasdaq 100 / US100 (Hyperliquid)</option>
-                        <option value="ostium|NIKKEI">Nikkei 225 / Jepang (Ostium)</option>
-                        <option value="ostium|DAX">DAX 40 / Eropa (Ostium)</option>
-                    </optgroup>
-                    <optgroup label="Crypto">
-                        <option value="binance|BTCUSDT">BTC/USDT (Binance)</option>
-                        <option value="binance|ETHUSDT">ETH/USDT (Binance)</option>
-                        <option value="binance|SOLUSDT">SOL/USDT (Binance)</option>
-                        <option value="binance|XRPUSDT">XRP/USDT (Binance)</option>
-                    </optgroup>
-                </select>
+    <label>GAYA TRADING</label>
+    <select id="style">
+      <option value="Scalping">Scalping (M1 &amp; M15)</option>
+      <option value="Day Trading">Day Trading (M3 &amp; M30)</option>
+      <option value="Intraday" selected>Intraday (M5 &amp; H1)</option>
+      <option value="Swing">Swing (M15 &amp; H4)</option>
+    </select>
 
-                <div class="flex items-center gap-1.5">
-                    <input id="calibInput" type="number" step="any" inputmode="decimal" placeholder="Harga Bid di MT (opsional)"
-                           class="flex-1 min-w-0 bg-darkbg border border-panelborder text-[10px] font-mono text-white px-2 py-1.5 rounded-lg focus:outline-none">
-                    <button onclick="calibrate()" id="calibBtn" class="text-[9px] font-bold px-2 py-1.5 rounded-lg bg-accentblue/20 text-accentblue border border-accentblue/40">KALIBRASI</button>
-                    <button onclick="resetCalib()" class="text-[9px] font-bold px-2 py-1.5 rounded-lg bg-panelborder text-gray-300 border border-panelborder">RESET</button>
-                </div>
-                <p id="calibInfo" class="text-[8px] font-mono text-gray-500">Offset: 0</p>
+    <button id="btn" onclick="generate()">GENERATE AI SIGNAL</button>
+    <p class="status" id="status"></p>
+  </div>
 
-                <div>
-                    <label id="lblTradingStyle" class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
-                    <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                        <option value="Scalping (M1 & M15)">Scalping (M1 & M15)</option>
-                        <option value="Day Trading (M3 & M30)">Day Trading (M3 & M30)</option>
-                        <option value="Intraday (M5 & H1)">Intraday (M5 & H1)</option>
-                        <option value="Swing Trading (M15 & H4/Daily)">Swing Trading (M15 & H4/Daily)</option>
-                    </select>
-                </div>
+  <div class="card">
+    <div id="result">Pilih market lalu tekan GENERATE.</div>
+  </div>
 
-                <button onclick="generateAISignal()" id="signalBtn" class="w-full bg-gradient-to-r from-accentblue to-indigo-600 hover:from-blue-600 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-accentblue/20 transition active:scale-95">
-                    <i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnGenText">GENERATE AI SIGNAL</span>
-                </button>
-            </div>
-
-            <!-- Kartu signal -->
-            <div id="signalContainer" class="bg-cardbg rounded-xl border border-panelborder p-3 shadow-md space-y-3">
-                <div class="flex items-center justify-between border-b border-panelborder pb-2">
-                    <span id="cardMarketTitle" class="text-xs font-bold text-white">SELECT PAIR SPOT</span>
-                    <span id="cardLivePriceTop" class="text-xs font-mono font-bold text-accentblue">--.--</span>
-                </div>
-
-                <div id="standbyView" class="py-5 text-center text-xs text-gray-400">
-                    Pilih pair, pastikan harga live bergerak, lalu tekan <b>GENERATE AI SIGNAL</b>.
-                </div>
-
-                <div id="activeSignalCard" class="hidden space-y-3">
-                    <div class="bg-darkbg/80 border border-panelborder rounded-xl p-3 text-center space-y-1">
-                        <div class="flex justify-center">
-                            <span id="signalBadgeBtn" class="bg-sky-500 text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg flex items-center gap-1">BUY</span>
-                        </div>
-                        <p id="cardStyleSub" class="text-[9px] text-gray-400 pt-1">SCALPING / Just Now</p>
-                        <p id="lblEntryZone" class="text-[9px] font-bold text-gray-400 tracking-widest pt-1">ENTRY ZONE</p>
-                        <h2 id="cardEntryZone" class="text-xl font-black text-white font-mono tracking-tight">-- - --</h2>
-                        <div class="pt-1">
-                            <span class="inline-flex items-center gap-1.5 bg-darkbg border border-panelborder px-2.5 py-0.5 rounded-full text-[9px] text-gray-300 font-mono">
-                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                                LIVE <span id="cardLivePriceBadge" class="font-bold text-white">--.--</span>
-                            </span>
-                        </div>
-                    </div>
-
-                    <div class="grid grid-cols-4 gap-1.5">
-                        <div id="boxSL" class="lvl-box bg-darkbg/70 border border-red-500/30 rounded-lg p-2 text-center">
-                            <span id="chkSL" class="hit-badge bg-red-400"><i class="fa-solid fa-xmark"></i></span>
-                            <p class="text-[8px] font-bold text-red-400">SL</p>
-                            <p id="cardSL" class="text-[10px] font-extrabold text-red-400 font-mono">--</p>
-                            <p id="cardSLPips" class="text-[7px] text-red-400/80 font-mono">--</p>
-                        </div>
-                        <div id="boxTP1" class="lvl-box bg-darkbg/70 border border-emerald-500/30 rounded-lg p-2 text-center">
-                            <span id="chkTP1" class="hit-badge bg-emerald-400"><i class="fa-solid fa-check"></i></span>
-                            <p class="text-[8px] font-bold text-emerald-400">TP1</p>
-                            <p id="cardTP1" class="text-[10px] font-extrabold text-emerald-400 font-mono">--</p>
-                            <p id="cardTP1Pips" class="text-[7px] text-emerald-400/80 font-mono">--</p>
-                        </div>
-                        <div id="boxTP2" class="lvl-box bg-darkbg/70 border border-emerald-500/30 rounded-lg p-2 text-center">
-                            <span id="chkTP2" class="hit-badge bg-emerald-400"><i class="fa-solid fa-check"></i></span>
-                            <p class="text-[8px] font-bold text-emerald-400">TP2</p>
-                            <p id="cardTP2" class="text-[10px] font-extrabold text-emerald-400 font-mono">--</p>
-                            <p id="cardTP2Pips" class="text-[7px] text-emerald-400/80 font-mono">--</p>
-                        </div>
-                        <div id="boxTP3" class="lvl-box bg-darkbg/70 border border-sky-500/30 rounded-lg p-2 text-center">
-                            <span id="chkTP3" class="hit-badge bg-emerald-400"><i class="fa-solid fa-check"></i></span>
-                            <p class="text-[8px] font-bold text-sky-400">TP3</p>
-                            <p id="cardTP3" class="text-[10px] font-extrabold text-sky-400 font-mono">--</p>
-                            <p id="cardTP3Pips" class="text-[7px] text-sky-400/80 font-mono">--</p>
-                        </div>
-                    </div>
-
-                    <div class="bg-darkbg/80 border border-panelborder rounded-xl p-2.5 space-y-2">
-                        <div class="flex justify-between items-center">
-                            <p id="lblPriceMap" class="text-[9px] font-bold text-gray-400 tracking-wider">LIVE PRICE MAP</p>
-                            <div class="flex items-center gap-1.5">
-                                <span id="tradePnl" class="text-[9px] font-mono font-bold text-gray-400">--</span>
-                                <span id="tradeStatus" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40">RUNNING</span>
-                            </div>
-                        </div>
-                        <div class="relative w-full h-[240px]">
-                            <canvas id="priceChart" class="absolute inset-0 w-full h-full"></canvas>
-                        </div>
-                    </div>
-
-                    <div class="bg-darkbg border border-panelborder rounded-lg p-2.5 text-[10px] text-gray-300 leading-relaxed">
-                        <p id="lblAnalysisReason" class="font-bold text-gray-400 mb-1">ANALYSIS REASON:</p>
-                        <span id="cardReason">---</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- History -->
-            <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
-                <div class="flex justify-between items-center">
-                    <span id="lblTradingHistory" class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
-                        <i class="fa-solid fa-clock-rotate-left text-accentblue"></i> TRADING HISTORY
-                    </span>
-                    <div class="flex items-center gap-1.5">
-                        <select id="histFilter" onchange="renderHistory()" class="bg-darkbg border border-panelborder text-[9px] font-bold text-white px-1.5 py-0.5 rounded focus:outline-none">
-                            <option value="today">Hari ini</option>
-                            <option value="all">Semua</option>
-                        </select>
-                        <button onclick="clearHistory()" title="Hapus history" class="text-[10px] text-gray-500 hover:text-red-400 px-1"><i class="fa-solid fa-trash"></i></button>
-                    </div>
-                </div>
-                <div class="grid grid-cols-2 gap-1.5 text-center">
-                    <div class="bg-darkbg/70 border border-emerald-500/30 rounded-lg p-1.5">
-                        <p class="text-[8px] font-bold text-emerald-400">WIN</p>
-                        <p id="sumWin" class="text-[11px] font-extrabold text-emerald-400 font-mono">+0.0 pip</p>
-                        <p id="sumWinCount" class="text-[7px] text-gray-500 font-mono">0 trade</p>
-                    </div>
-                    <div class="bg-darkbg/70 border border-red-500/30 rounded-lg p-1.5">
-                        <p class="text-[8px] font-bold text-red-400">LOSE</p>
-                        <p id="sumLose" class="text-[11px] font-extrabold text-red-400 font-mono">-0.0 pip</p>
-                        <p id="sumLoseCount" class="text-[7px] text-gray-500 font-mono">0 trade</p>
-                    </div>
-                    <div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5">
-                        <p id="lblTotalPnl" class="text-[8px] font-bold text-gray-400">TOTAL PNL (WIN − LOSE)</p>
-                        <p id="sumTotal" class="text-[11px] font-extrabold text-white font-mono">0.0 pip</p>
-                        <p id="sumOpen" class="text-[7px] text-gray-500 font-mono">0 berjalan</p>
-                    </div>
-                    <div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5">
-                        <p id="lblWinRatio" class="text-[8px] font-bold text-gray-400">WIN RATIO</p>
-                        <p id="sumRatio" class="text-[11px] font-extrabold text-accentblue font-mono">0%</p>
-                        <p id="sumRatioSub" class="text-[7px] text-gray-500 font-mono">0W / 0L</p>
-                    </div>
-                </div>
-                <div id="historyList" class="space-y-1 max-h-[260px] overflow-y-auto pr-1">
-                    <p class="text-center text-[10px] text-gray-500 py-3">Belum ada history.</p>
-                </div>
-            </div>
-
-            <!-- Ticker -->
-            <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md">
-                <div class="flex justify-between items-center pb-1.5 mb-1.5 border-b border-panelborder">
-                    <span id="lblLiveStream" class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
-                        <i class="fa-solid fa-tower-broadcast text-accentblue"></i> LIVE MARKET STREAM
-                    </span>
-                    <span class="text-[8px] text-emerald-400 font-mono animate-pulse">● Live Stream</span>
-                </div>
-                <div id="tickerListContainer" class="space-y-1 max-h-[220px] overflow-y-auto pr-1"></div>
-            </div>
-        </main>
-
-        <footer class="max-w-md mx-auto w-full pt-4 pb-2 border-t border-panelborder/60 text-center space-y-1">
-            <p class="text-[10px] text-gray-400">Punya pertanyaan atau ingin perpanjang langganan?</p>
-            <a href="https://wa.me/6285817038501?text=Halo%20Admin%20Alu%20Signal%20Z,%20saya%20ingin%20berlangganan" target="_blank" class="inline-flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full text-xs font-bold font-mono transition">
-                <i class="fa-brands fa-whatsapp text-sm text-emerald-400"></i> Admin WhatsApp: +6285817038501
-            </a>
-        </footer>
-    </div>
+  <div class="card" id="histCard">
+    <h2>Sinyal Sesi Ini</h2>
+    <div id="histList"><p class="muted">Belum ada sinyal.</p></div>
+  </div>
+</div>
 
 <script>
-// ======================= AUTH & ADMIN =======================
-const MASTER_ADMIN_PASS = 'KMZWAY87AA';
-
-function handleUniversalLogin(e) {
-    e.preventDefault();
-    const val = document.getElementById('authInput').value.trim();
-    if (!val) return;
-    if (val === MASTER_ADMIN_PASS) {
-        localStorage.setItem('alu_session_type', 'admin_reg');
-        openRegisterDashboard();
-        return;
-    }
-    const email = val.toLowerCase();
-    const clients = JSON.parse(localStorage.getItem('alu_local_clients') || '[]');
-    if (!clients.find(c => c.email === email)) {
-        const trialEnds = new Date(); trialEnds.setDate(trialEnds.getDate() + 3);
-        clients.push({ id: 'client_' + Date.now(), email, status: 'trial', trial_ends_at: trialEnds.toISOString() });
-        localStorage.setItem('alu_local_clients', JSON.stringify(clients));
-    }
-    localStorage.setItem('alu_session_type', 'terminal');
-    localStorage.setItem('alu_user_email', email);
-    openTerminalApp();
-}
-function openRegisterDashboard() {
-    document.getElementById('authScreen').classList.add('hidden');
-    document.getElementById('mainApp').classList.add('hidden');
-    document.getElementById('registerDashboard').classList.remove('hidden');
-    loadAdminClientList();
-}
-function openTerminalApp() {
-    document.getElementById('authScreen').classList.add('hidden');
-    document.getElementById('registerDashboard').classList.add('hidden');
-    const m = document.getElementById('mainApp');
-    m.classList.remove('hidden'); m.classList.add('flex');
-}
-function registerNewClientByAdmin() {
-    const email = document.getElementById('newClientEmail').value.trim().toLowerCase();
-    const status = document.getElementById('newClientStatus').value;
-    if (!email) return alert('Masukkan email klien.');
-    const ends = new Date(); ends.setDate(ends.getDate() + (status === 'trial' ? 3 : 3650));
-    const clients = JSON.parse(localStorage.getItem('alu_local_clients') || '[]');
-    clients.push({ id: 'client_' + Date.now(), email, status, trial_ends_at: ends.toISOString() });
-    localStorage.setItem('alu_local_clients', JSON.stringify(clients));
-    document.getElementById('newClientEmail').value = '';
-    loadAdminClientList();
-}
-function loadAdminClientList() {
-    const box = document.getElementById('adminClientTableList');
-    const clients = JSON.parse(localStorage.getItem('alu_local_clients') || '[]');
-    if (!clients.length) { box.innerHTML = '<p class="text-[10px] text-gray-500 text-center py-2">Belum ada klien terdaftar.</p>'; return; }
-    box.innerHTML = clients.map(d => `
-        <div class="bg-darkbg border border-panelborder p-2 rounded flex justify-between items-center text-xs">
-            <div>
-                <p class="font-bold text-white font-mono">${d.email}</p>
-                <p class="text-[9px] text-yellow-400 uppercase">Status: ${d.status}</p>
-            </div>
-            <button onclick="deleteClient('${d.id}')" class="text-red-400 hover:text-red-300 text-[10px] px-2 py-1"><i class="fa-solid fa-trash"></i></button>
-        </div>`).join('');
-}
-function deleteClient(id) {
-    if (!confirm('Hapus klien ini dari daftar?')) return;
-    const clients = JSON.parse(localStorage.getItem('alu_local_clients') || '[]').filter(c => c.id !== id);
-    localStorage.setItem('alu_local_clients', JSON.stringify(clients));
-    loadAdminClientList();
-}
-function logout() {
-    localStorage.removeItem('alu_session_type');
-    localStorage.removeItem('alu_user_email');
-    location.reload();
-}
-
-// ======================= BAHASA =======================
-let currentLang = 'id';
-const DICT = {
-    id: { sub: 'Multi-Asset Live Stream', target: 'TARGET ASET AKTIF', style: 'GAYA TRADING / STRATEGI', gen: 'GENERATE AI SIGNAL', entry: 'ENTRY ZONE', map: 'LIVE PRICE MAP', reason: 'ANALYSIS REASON:', hist: 'TRADING HISTORY', pnl: 'TOTAL PNL (WIN − LOSE)', ratio: 'WIN RATIO', stream: 'LIVE MARKET STREAM', calibPh: 'Harga Bid di MT (opsional)', calib: 'KALIBRASI', eval: 'MENGEVALUASI...', noHist: 'Belum ada history.' },
-    en: { sub: 'Multi-Asset Live Stream', target: 'ACTIVE TARGET ASSET', style: 'TRADING STYLE / STRATEGY', gen: 'GENERATE AI SIGNAL', entry: 'ENTRY ZONE', map: 'LIVE PRICE MAP', reason: 'ANALYSIS REASON:', hist: 'TRADING HISTORY', pnl: 'TOTAL PNL (WIN − LOSE)', ratio: 'WIN RATIO', stream: 'LIVE MARKET STREAM', calibPh: 'MT Bid price (optional)', calib: 'CALIBRATE', eval: 'EVALUATING...', noHist: 'No trading history yet.' }
-};
-function toggleLang() {
-    currentLang = currentLang === 'id' ? 'en' : 'id';
-    document.getElementById('langBtn').textContent = `${currentLang.toUpperCase()} 🌐`;
-    updateTexts();
-}
-function updateTexts() {
-    const d = DICT[currentLang];
-    const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
-    set('txtSubHeader', d.sub); set('lblTargetAsset', d.target); set('lblTradingStyle', d.style);
-    set('btnGenText', d.gen); set('lblEntryZone', d.entry); set('lblPriceMap', d.map);
-    set('lblAnalysisReason', d.reason); set('lblTotalPnl', d.pnl); set('lblWinRatio', d.ratio);
-    set('calibBtn', d.calib);
-    document.getElementById('calibInput').placeholder = d.calibPh;
-    document.getElementById('lblTradingHistory').innerHTML = `<i class="fa-solid fa-clock-rotate-left text-accentblue"></i> ${d.hist}`;
-    document.getElementById('lblLiveStream').innerHTML = `<i class="fa-solid fa-tower-broadcast text-accentblue"></i> ${d.stream}`;
-    renderHistory(); refreshActiveUI();
-}
-
-// ======================= KONFIGURASI =======================
+// ================= KONFIG =================
+const MASTER_ADMIN_PASS = 'GANTI_PASSWORD_ADMIN';
 const WS_URL = 'wss://api-stream.myfundedperpetuals.com/v1/market-data';
-const REST_BASE = 'https://api.myfundedperpetuals.com';
-const HL_WS = 'wss://api.hyperliquid.xyz/ws';
-const HL_INFO = 'https://api.hyperliquid.xyz/info';
-const STORE_KEY = 'aluSignalZ_history_v3';
-const OFFSET_KEY = 'aluSignalZ_offsets_v1';
-const HISTORY_MS = 10 * 60 * 1000, WINDOW_MS = 5 * 60 * 1000, MIN_WINDOW_MS = 30 * 1000;
-const STALE_MS = 20000, FALLBACK_AFTER = 8000, HL_FRESH_MS = 3000;
-const PERP = ['mid', 'last', 'mark'], FX = ['mid', 'last', 'mark'], SPOT = ['last', 'mid', 'mark'];
-const PRICE_SIDE = 'bid'; // harga Bid seperti MT
-
-// fb: sumber cadangan. hl = Hyperliquid REST/WS, bn = Binance, yf = Yahoo via /api/quote, cross = [A,B] -> A x B
-const MARKETS = {
-    XAUUSD:   { provider: 'hyperliquid', coins: ['xyz:GOLD', 'xyz:XAU', 'GOLD', 'XAUUSD'], match: ['GOLD', 'XAU', 'XAUUSD'], kinds: PERP, decimals: 2, pip: 0.1, fb: { hl: ['xyz:GOLD', 'xyz:XAU'], yf: 'GC=F' } },
-    XAGUSD:   { provider: 'hyperliquid', coins: ['xyz:SILVER', 'xyz:XAG', 'SILVER', 'XAGUSD'], match: ['SILVER', 'XAG', 'XAGUSD'], kinds: PERP, decimals: 3, pip: 0.01, fb: { hl: ['xyz:SILVER', 'xyz:XAG'], yf: 'SI=F' } },
-    EURUSD:   { provider: 'veranta', coins: ['EURUSD', 'EUR/USD', 'EURUSD.FX'], match: ['EURUSD'], kinds: FX, decimals: 5, pip: 0.0001, fb: { yf: 'EURUSD=X' } },
-    USDJPY:   { provider: 'veranta', coins: ['USDJPY', 'USD/JPY', 'USDJPY.FX'], match: ['USDJPY'], kinds: FX, decimals: 3, pip: 0.01, fb: { yf: 'JPY=X' } },
-    GBPUSD:   { provider: 'veranta', coins: ['GBPUSD', 'GBP/USD', 'GBPUSD.FX'], match: ['GBPUSD'], kinds: FX, decimals: 5, pip: 0.0001, fb: { yf: 'GBPUSD=X' } },
-    GBPJPY:   { provider: 'veranta', coins: ['GBPJPY', 'GBP/JPY', 'GBPJPY.FX'], match: ['GBPJPY'], kinds: FX, decimals: 3, pip: 0.01, fb: { cross: ['GBPUSD', 'USDJPY'], yf: 'GBPJPY=X' } },
-    BTCUSDT:  { provider: 'binance', coins: ['BTCUSDT'], match: ['BTCUSDT'], kinds: SPOT, decimals: 2, pip: 1, fb: { bn: 'BTCUSDT' } },
-    ETHUSDT:  { provider: 'binance', coins: ['ETHUSDT'], match: ['ETHUSDT'], kinds: SPOT, decimals: 2, pip: 0.1, fb: { bn: 'ETHUSDT' } },
-    SOLUSDT:  { provider: 'binance', coins: ['SOLUSDT'], match: ['SOLUSDT'], kinds: SPOT, decimals: 2, pip: 0.01, fb: { bn: 'SOLUSDT' } },
-    XRPUSDT:  { provider: 'binance', coins: ['XRPUSDT'], match: ['XRPUSDT'], kinds: SPOT, decimals: 4, pip: 0.0001, fb: { bn: 'XRPUSDT' } },
-    'xyz:SP500':  { provider: 'hyperliquid', coins: ['xyz:SP500', 'xyz:US500'], match: ['SP500', 'SPX', 'US500'], kinds: PERP, decimals: 2, pip: 0.1, fb: { hl: ['xyz:SP500', 'xyz:US500'], yf: 'ES=F' } },
-    'xyz:NAS100': { provider: 'hyperliquid', coins: ['xyz:XYZ100', 'xyz:NAS100', 'xyz:NDX', 'xyz:US100'], match: ['XYZ100', 'NAS100', 'NDX', 'US100', 'USTEC'], kinds: PERP, decimals: 2, pip: 1, fb: { hl: ['xyz:XYZ100', 'xyz:NAS100', 'xyz:NDX'], yf: 'NQ=F' } },
-    DJI:    { provider: 'ostium', coins: ['DJI', 'DJIUSD', 'DJI-USD', 'US30'], match: ['DJI', 'DJIUSD', 'US30', 'DOW'], kinds: PERP, decimals: 2, pip: 1, fb: { yf: 'YM=F' } },
-    NIKKEI: { provider: 'ostium', coins: ['NIK225', 'NIKKEI', 'NIKKEI225', 'JP225'], match: ['NIK225', 'NIKKEI', 'JP225', 'N225'], kinds: PERP, decimals: 2, pip: 1, fb: { yf: 'NIY=F' } },
-    DAX:    { provider: 'ostium', coins: ['DAX', 'GER40', 'DE40'], match: ['DAX', 'GER40', 'DE40'], kinds: PERP, decimals: 2, pip: 1, fb: { yf: '^GDAXI' } },
+const CANDLE_BARS = 300;
+const CANDLE_MIN = 150;
+const STYLE_TF = {
+  'Scalping':    { htf: '15m', ltf: '1m' },
+  'Day Trading': { htf: '30m', ltf: '3m' },
+  'Intraday':    { htf: '1h',  ltf: '5m' },
+  'Swing':       { htf: '4h',  ltf: '15m' },
 };
 
-// ======================= STATE =======================
-let ws = null, hlWs = null, pingTimer = null, hlPing = null, nextId = 1;
-const prices = {}, history = {}, rawPrices = {}, lastWsAt = {}, lastHL = {}, lastAt = {}, restAt = {}, kindState = {};
-const COIN_MAP = new Map();
-const BOOT_AT = Date.now();
-let proxyOk = true;
-const offsets = (() => { try { return JSON.parse(localStorage.getItem(OFFSET_KEY)) || {}; } catch { return {}; } })();
+// ================= UTIL =================
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const getClients = () => { try { return JSON.parse(localStorage.getItem('alu_local_clients') || '[]'); } catch { return []; } };
+const saveClients = list => localStorage.setItem('alu_local_clients', JSON.stringify(list));
 
-let trades = loadTrades();
-let activeId = null, transientView = null;
-const getActive = () => trades.find(t => t.id === activeId) || transientView;
-
-const norm = s => String(s ?? '').toUpperCase().split(':').pop().replace(/[^A-Z0-9]/g, '');
-const ck = (p, c) => `${String(p).toLowerCase()}|${String(c).toLowerCase()}`;
-function rebuildCoinMap() {
-    COIN_MAP.clear();
-    for (const [k, m] of Object.entries(MARKETS)) m.coins.forEach(c => COIN_MAP.set(ck(m.provider, c), k));
-}
-function lookupKey(provider, symbol) {
-    const direct = COIN_MAP.get(ck(provider, symbol));
-    if (direct) return direct;
-    const n = norm(symbol), p = String(provider).toLowerCase();
-    for (const [k, m] of Object.entries(MARKETS)) {
-        if (m.provider === p && (m.match.includes(n) || m.coins.some(c => norm(c) === n))) {
-            COIN_MAP.set(ck(p, symbol), k);
-            return k;
-        }
-    }
-    return null;
+function showOnly(id) {
+  ['authScreen', 'adminScreen', 'appScreen'].forEach(s => $(s).classList.toggle('hidden', s !== id));
 }
 
-const fmt = (key, p) => {
-    const d = MARKETS[key]?.decimals ?? 2;
-    return Number(p).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
-};
-const fmtPips = p => `${p > 0 ? '+' : p < 0 ? '−' : ''}${Math.abs(p).toFixed(1)} pip`;
-const displayName = key => key.replace(/^xyz:/, '');
-const fmtTime = ts => new Date(ts).toLocaleString(currentLang === 'id' ? 'id-ID' : 'en-US', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
-const pipsOf = (t, p) => (p - t.entry) * t.dir / (MARKETS[t.key]?.pip || 1);
-const parseLevel = v => { if (v == null) return null; const x = parseFloat(String(v).replace(/[^0-9.\-]/g, '')); return Number.isFinite(x) ? x : null; };
-const isStale = key => !prices[key] || Date.now() - prices[key].recv > STALE_MS;
-const needFb = key => Date.now() - Math.max(lastWsAt[key] || 0, BOOT_AT) > FALLBACK_AFTER;
+// ================= LOGIN =================
+$('authForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const val = $('authInput').value.trim();
+  if (!val) return;
 
-const BADGE = {
-    green: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40', yellow: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40',
-    red: 'bg-red-500/20 text-red-400 border-red-500/40', blue: 'bg-blue-500/20 text-blue-400 border-blue-500/40', gray: 'bg-gray-500/20 text-gray-400 border-gray-500/40'
-};
-const COLORS = ['text-white', 'text-emerald-400', 'text-red-400', 'text-gray-500', 'text-red-600', 'text-gray-400', 'text-yellow-400'];
-function setColor(el, c) { el.classList.remove(...COLORS); el.classList.add(c); }
-function setWsStatus(text, color) {
-    const el = document.getElementById('wsStatus');
-    el.textContent = `WS: ${text}`;
-    el.className = `text-[8px] font-mono px-2 py-0.5 rounded border ${BADGE[color]}`;
-}
-let toastTimer;
-function toast(msg, color = 'green') {
-    const el = document.getElementById('toast');
-    el.textContent = msg;
-    el.className = `fixed top-3 left-1/2 -translate-x-1/2 z-50 px-3 py-2 rounded-lg text-[10px] font-bold font-mono shadow-xl border bg-cardbg ${BADGE[color]}`;
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.add('hidden'), 3500);
-}
-async function fetchT(url, opts = {}, ms = 4000) {
-    const ctrl = new AbortController();
-    const tm = setTimeout(() => ctrl.abort(), ms);
-    try { return await fetch(url, { ...opts, signal: ctrl.signal }); }
-    finally { clearTimeout(tm); }
+  if (val === MASTER_ADMIN_PASS) {
+    localStorage.setItem('alu_session', 'admin');
+    return showAdmin();
+  }
+
+  const email = val.toLowerCase();
+  const clients = getClients();
+  let client = clients.find(c => c.email === email);
+  if (!client) {
+    const ends = new Date();
+    ends.setDate(ends.getDate() + 3);
+    client = { id: 'client_' + Date.now(), email, status: 'trial', trial_ends_at: ends.toISOString() };
+    clients.push(client);
+    saveClients(clients);
+  }
+  if (Date.now() > new Date(client.trial_ends_at).getTime()) {
+    return alert('Masa akses sudah berakhir. Hubungi admin.');
+  }
+  localStorage.setItem('alu_session', 'terminal');
+  localStorage.setItem('alu_email', email);
+  showApp();
+});
+
+function logout() {
+  localStorage.removeItem('alu_session');
+  localStorage.removeItem('alu_email');
+  location.reload();
 }
 
-// ======================= HARGA =======================
-const SRC = { hl: 'HL', ws: 'WS', rest: 'REST', cross: 'X', yahoo: 'YF' };
+// ================= ADMIN =================
+function showAdmin() { showOnly('adminScreen'); renderClients(); }
 
-// Simpan harga raw (tanpa offset), lalu terapkan kalibrasi
-function setRaw(key, raw, via) {
-    if (!(raw > 0)) return;
-    const now = Date.now();
-    rawPrices[key] = raw;
-    lastAt[key] = now;
-    updatePrice(key, raw + (offsets[key] || 0), via);
-}
-function feedFb(key, raw, via) {
-    if (!(raw > 0) || !needFb(key)) return;
-    if (via === 'yahoo' && Date.now() - (restAt[key] || 0) < 6000) return; // REST lebih cepat, jangan campur
-    if (via === 'rest') restAt[key] = Date.now();
-    setRaw(key, raw, via);
+function addClient() {
+  const email = $('newEmail').value.trim().toLowerCase();
+  const status = $('newStatus').value;
+  if (!email) return alert('Masukkan email klien.');
+  const ends = new Date();
+  ends.setDate(ends.getDate() + (status === 'trial' ? 3 : status === 'monthly' ? 30 : 3650));
+  const clients = getClients();
+  clients.push({ id: 'client_' + Date.now(), email, status, trial_ends_at: ends.toISOString() });
+  saveClients(clients);
+  $('newEmail').value = '';
+  renderClients();
 }
 
-function updatePrice(key, price, via) {
-    const prev = prices[key]?.price;
-    prices[key] = { price, recv: Date.now(), via: via || prices[key]?.via || 'ws' };
-    const arr = history[key] ??= [];
-    const now = Date.now();
-    if (arr.length && now - arr[arr.length - 1].t < 200) arr[arr.length - 1].p = price;
-    else arr.push({ t: now, p: price });
-    while (arr.length && now - arr[0].t > HISTORY_MS) arr.shift();
-
-    const el = document.getElementById(`price-${key}`);
-    if (el) {
-        el.textContent = fmt(key, price);
-        setColor(el, prev == null || price === prev ? 'text-white' : price > prev ? 'text-emerald-400' : 'text-red-400');
-    }
-    const src = document.getElementById(`src-${key}`);
-    if (src) src.textContent = SRC[prices[key].via] || '';
-
-    processTick(key, price);
-    const a = getActive();
-    if (a && a.key === key) {
-        ['cardLivePriceTop', 'cardLivePriceBadge'].forEach(id => { const e = document.getElementById(id); if (e) e.textContent = fmt(key, price); });
-        updatePnl(a);
-    }
-    if (prev !== price) updateCross(key);
+function deleteClient(id) {
+  if (!confirm('Hapus klien ini?')) return;
+  saveClients(getClients().filter(c => c.id !== id));
+  renderClients();
 }
 
-// Pair sintetis: GBPJPY = GBPUSD x USDJPY
-function crossTick() {
-    for (const [k, m] of Object.entries(MARKETS)) {
-        if (!m.fb?.cross || !needFb(k)) continue;
-        const [a, b] = m.fb.cross;
-        if (rawPrices[a] > 0 && rawPrices[b] > 0 && Date.now() - lastAt[a] < 20000 && Date.now() - lastAt[b] < 20000)
-            feedFb(k, rawPrices[a] * rawPrices[b], 'cross');
-    }
-}
-function updateCross() { /* cross dihitung di crossTick (interval) */ }
-
-// ======================= TICKER =======================
-const PROV_COLOR = { hyperliquid: 'text-yellow-400', veranta: 'text-blue-400', ostium: 'text-orange-400', binance: 'text-emerald-400' };
-function buildTicker() {
-    const opts = [...document.querySelectorAll('#marketSelect option')];
-    document.getElementById('tickerListContainer').innerHTML = opts.map(o => {
-        const [prov, key] = o.value.split('|');
-        return `
-        <div onclick="selectTicker('${o.value}')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-            <span class="font-bold text-[10px] text-white">${displayName(key)} <span class="text-[7px] ${PROV_COLOR[prov] || 'text-gray-400'}">${prov}</span></span>
-            <span class="flex items-center gap-1">
-                <span id="src-${key}" class="text-[7px] font-mono text-gray-600"></span>
-                <span id="price-${key}" class="text-[10px] font-mono font-bold text-white">--.--</span>
-            </span>
-        </div>`;
-    }).join('');
-}
-function selectTicker(marketId) {
-    document.getElementById('marketSelect').value = marketId;
-    syncSelectedMarket();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+function renderClients() {
+  const list = getClients();
+  $('clientList').innerHTML = list.length
+    ? list.map(c => `
+        <div class="client row">
+          <div>
+            <div style="font-family:ui-monospace,monospace;color:#fff">${esc(c.email)}</div>
+            <div class="muted">${esc(c.status)} · s/d ${new Date(c.trial_ends_at).toLocaleDateString('id-ID')}</div>
+          </div>
+          <button class="small danger" onclick="deleteClient('${esc(c.id)}')">Hapus</button>
+        </div>`).join('')
+    : '<p class="muted">Belum ada klien.</p>';
 }
 
-// ======================= KALIBRASI =======================
-const selectedKey = () => document.getElementById('marketSelect').value.split('|').pop();
-function updateCalibInfo() {
-    const key = selectedKey(), off = offsets[key] || 0;
-    document.getElementById('calibInfo').textContent = `Offset ${displayName(key)}: ${off >= 0 ? '+' : ''}${off.toFixed(MARKETS[key]?.decimals ?? 2)}`;
-}
-function syncSelectedMarket() {
-    document.getElementById('selectedPairBadge').textContent = document.getElementById('marketSelect').value;
-    updateCalibInfo();
-}
-function applyOffsetDelta(key, delta) {
-    if (!delta) return;
-    (history[key] || []).forEach(pt => pt.p += delta);
-    if (prices[key]) updatePrice(key, prices[key].price + delta, prices[key].via);
-}
-function calibrate() {
-    const key = selectedKey(), raw = rawPrices[key];
-    const mt = parseFloat(document.getElementById('calibInput').value);
-    if (raw == null) return alert('Harga live belum masuk.');
-    if (!Number.isFinite(mt) || mt <= 0) return alert('Masukkan harga dari MT.');
-    const old = offsets[key] || 0;
-    offsets[key] = mt - raw;
-    applyOffsetDelta(key, offsets[key] - old);
-    localStorage.setItem(OFFSET_KEY, JSON.stringify(offsets));
-    document.getElementById('calibInput').value = '';
-    updateCalibInfo();
-    toast(`${displayName(key)} dikalibrasi ke MT`, 'blue');
-}
-function resetCalib() {
-    const key = selectedKey(), old = offsets[key] || 0;
-    delete offsets[key];
-    applyOffsetDelta(key, -old);
-    localStorage.setItem(OFFSET_KEY, JSON.stringify(offsets));
-    updateCalibInfo();
+// ================= APP =================
+function showApp() {
+  $('userLabel').textContent = localStorage.getItem('alu_email') || '';
+  showOnly('appScreen');
 }
 
-// ======================= WEBSOCKET RELAY =======================
-const send = obj => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); };
+let ws = null, nextId = 1;
+const pending = new Map();
 
-async function resolveCoins() {
-    try {
-        const r = await fetchT(`${REST_BASE}/v1/markets`, {}, 6000);
-        if (!r.ok) return;
-        const j = await r.json();
-        const list = Array.isArray(j) ? j : (j.markets ?? j.data ?? j.items ?? []);
-        for (const [, m] of Object.entries(MARKETS)) {
-            const hit = list.find(x => String(x.provider).toLowerCase() === m.provider &&
-                (m.coins.includes(x.coin) || m.match.some(t => norm(x.coin) === t || norm(x.symbol) === t || norm(x.name) === t)));
-            if (hit?.coin) m.coins = [hit.coin, ...m.coins.filter(c => c !== hit.coin)];
-        }
-    } catch {}
-    rebuildCoinMap();
-}
-
-function connect() {
-    if (ws) { try { ws.onclose = null; ws.close(); } catch {} }
-    setWsStatus('CONNECTING', 'yellow');
+function connectWS() {
+  return new Promise((resolve, reject) => {
     const sock = new WebSocket(WS_URL);
     ws = sock;
-    sock.lastMsg = Date.now();
-
-    sock.onopen = () => {
-        if (sock !== ws) return;
-        setWsStatus('CONNECTED', 'green');
-        const providers = [...new Set(Object.values(MARKETS).map(m => m.provider))];
-        send({ op: 'sub', id: nextId++, channel: 'status', payload: { providers } });
-        for (const m of Object.values(MARKETS)) {
-            m.coins.forEach(coin => send({ op: 'sub', id: nextId++, channel: 'ticks', payload: { symbols: [coin], providers: [m.provider] } }));
-        }
-        clearInterval(pingTimer);
-        pingTimer = setInterval(() => send({ op: 'req', id: nextId++, method: 'ping' }), 20000);
+    const timer = setTimeout(() => reject(new Error('Koneksi stream timeout')), 10000);
+    sock.onopen = () => { clearTimeout(timer); resolve(); };
+    sock.onerror = () => { clearTimeout(timer); reject(new Error('Tidak bisa terhubung ke stream')); };
+    sock.onclose = () => {
+      if (ws === sock) ws = null;
+      for (const p of pending.values()) p.reject(new Error('Koneksi stream terputus'));
+      pending.clear();
     };
     sock.onmessage = e => {
-        sock.lastMsg = Date.now();
-        let f; try { f = JSON.parse(e.data); } catch { return; }
-        if (f.op === 'events') (f.events || []).forEach(handleEvent);
+      let f; try { f = JSON.parse(e.data); } catch { return; }
+      if ((f.op === 'res' || f.op === 'err') && pending.has(f.id)) {
+        const p = pending.get(f.id);
+        pending.delete(f.id);
+        clearTimeout(p.timer);
+        if (f.op === 'res') p.resolve(f.result);
+        else p.reject(new Error(f.error?.message || JSON.stringify(f.error)));
+      }
     };
-    sock.onerror = () => { if (sock === ws) setWsStatus('ERROR', 'red'); };
-    sock.onclose = () => {
-        if (sock !== ws) return;
-        clearInterval(pingTimer);
-        setWsStatus('DISCONNECTED', 'red');
-        setTimeout(() => { if (sock === ws) connect(); }, 3000);
-    };
+  });
 }
 
-function handleEvent(ev) {
-    if (!ev.provider || !ev.symbol) return;
-    const key = lookupKey(ev.provider, ev.symbol);
-    if (!key) return;
-    const now = Date.now();
-    if (now - (lastHL[key] || 0) < HL_FRESH_MS) return; // feed Hyperliquid langsung lebih cepat
-
-    // prioritas kind: kind utama dipakai, kind lain hanya jika kind utama diam
-    const m = MARKETS[key];
-    const idx = m.kinds.indexOf(ev.kind);
-    const rank = idx < 0 ? 99 : idx;
-    const ks = kindState[key];
-    if (ks && now - ks.ts < 1500 && rank > ks.rank) return;
-    kindState[key] = { rank, ts: now };
-
-    const bid = parseFloat(ev.bid), ask = parseFloat(ev.ask), p = parseFloat(ev.price);
-    const raw = PRICE_SIDE === 'bid' && bid > 0 ? bid : (bid > 0 && ask > 0 ? (bid + ask) / 2 : p);
-    if (!(raw > 0)) return;
-    lastWsAt[key] = now;
-    setRaw(key, raw, 'ws');
+function wsReq(method, payload, ms = 15000) {
+  return new Promise((resolve, reject) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return reject(new Error('WS belum tersambung'));
+    const id = nextId++;
+    const timer = setTimeout(() => {
+      if (pending.delete(id)) reject(new Error('timeout ' + method));
+    }, ms);
+    pending.set(id, { resolve, reject, timer });
+    ws.send(JSON.stringify({ op: 'req', id, method, payload }));
+  });
 }
 
-// ======================= HYPERLIQUID LANGSUNG =======================
-function connectHL() {
-    if (hlWs) { try { hlWs.onclose = null; hlWs.close(); } catch {} }
-    const targets = new Map();
-    for (const [k, m] of Object.entries(MARKETS)) (m.fb?.hl || []).forEach(c => targets.set(c, k));
-    if (!targets.size) return;
-    const sock = new WebSocket(HL_WS);
-    hlWs = sock;
-
-    sock.onopen = () => {
-        const dexes = new Set();
-        for (const coin of targets.keys()) {
-            sock.send(JSON.stringify({ method: 'subscribe', subscription: { type: 'bbo', coin } }));
-            dexes.add(coin.includes(':') ? coin.split(':')[0] : '');
-        }
-        dexes.forEach(dex => sock.send(JSON.stringify({ method: 'subscribe', subscription: dex ? { type: 'allMids', dex } : { type: 'allMids' } })));
-        clearInterval(hlPing);
-        hlPing = setInterval(() => { if (sock.readyState === WebSocket.OPEN) sock.send('{"method":"ping"}'); }, 25000);
-    };
-    sock.onmessage = e => {
-        let msg; try { msg = JSON.parse(e.data); } catch { return; }
-        const now = Date.now();
-        if (msg.channel === 'bbo') {
-            const d = msg.data, key = targets.get(d?.coin);
-            if (!key) return;
-            const bid = +d.bbo?.[0]?.px;
-            if (bid > 0) { lastHL[key] = now; lastWsAt[key] = now; setRaw(key, bid, 'hl'); }
-        } else if (msg.channel === 'allMids') {
-            const mids = msg.data?.mids || {};
-            for (const [coin, key] of targets) {
-                if (now - (lastHL[key] || 0) < 1500) continue; // bbo masih aktif
-                const p = +(mids[coin] ?? mids[coin.split(':').pop()]);
-                if (p > 0) { lastHL[key] = now; lastWsAt[key] = now; setRaw(key, p, 'hl'); }
-            }
-        }
-    };
-    sock.onclose = () => {
-        if (sock !== hlWs) return;
-        clearInterval(hlPing);
-        setTimeout(() => { if (sock === hlWs) connectHL(); }, 5000);
-    };
+async function getCandles(provider, symbol, interval) {
+  const rows = await wsReq('candles.history', { provider, symbol, interval, limit: CANDLE_BARS });
+  if (!Array.isArray(rows)) return [];
+  const out = [], seen = new Set();
+  for (const x of rows) {
+    if (!x || x.isFinal === false) continue; // buang candle yang belum close
+    const c = { t: Number(x.openTime), o: Number(x.open), h: Number(x.high), l: Number(x.low), c: Number(x.close) };
+    if (![c.t, c.o, c.h, c.l, c.c].every(Number.isFinite)) continue;
+    if (seen.has(c.t)) continue;
+    seen.add(c.t);
+    out.push(c);
+  }
+  return out.sort((a, b) => a.t - b.t);
 }
 
-// ======================= FEED CADANGAN (REST) =======================
-const midOf = (mids, coin) => +(mids[coin] ?? mids[coin.split(':').pop()]);
-let hlBusy = false;
-async function pollHL() {
-    if (hlBusy) return;
-    const list = Object.entries(MARKETS).filter(([k, m]) => m.fb?.hl && needFb(k));
-    if (!list.length) return;
-    hlBusy = true;
-    try {
-        const dexes = [...new Set(list.flatMap(([, m]) => m.fb.hl.map(c => c.includes(':') ? c.split(':')[0] : '')))];
-        for (const dex of dexes) {
-            try {
-                const r = await fetchT(HL_INFO, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(dex ? { type: 'allMids', dex } : { type: 'allMids' }),
-                });
-                if (!r.ok) continue;
-                const mids = await r.json();
-                for (const [k, m] of list) {
-                    const coin = m.fb.hl.find(c => (c.includes(':') ? c.split(':')[0] : '') === dex && midOf(mids, c) > 0);
-                    if (coin) feedFb(k, midOf(mids, coin), 'rest');
-                }
-            } catch {}
-        }
-    } finally { hlBusy = false; }
-}
+const setStatus = msg => { $('status').textContent = msg; };
 
-let bnBusy = false;
-async function pollBinance() {
-    if (bnBusy) return;
-    const list = Object.entries(MARKETS).filter(([k, m]) => m.fb?.bn && needFb(k));
-    if (!list.length) return;
-    bnBusy = true;
-    try {
-        const syms = list.map(([, m]) => m.fb.bn);
-        const r = await fetchT(`https://data-api.binance.vision/api/v3/ticker/price?symbols=${encodeURIComponent(JSON.stringify(syms))}`);
-        if (!r.ok) return;
-        const map = new Map((await r.json()).map(x => [x.symbol, +x.price]));
-        for (const [k, m] of list) if (map.has(m.fb.bn)) feedFb(k, map.get(m.fb.bn), 'rest');
-    } catch {} finally { bnBusy = false; }
-}
+async function generate() {
+  const btn = $('btn');
+  const [provider, symbol] = $('market').value.split('|');
+  const styleName = $('style').value;
+  const tf = STYLE_TF[styleName];
 
-let pxBusy = false;
-async function pollProxy() {
-    if (!proxyOk || pxBusy) return;
-    const list = Object.entries(MARKETS).filter(([k, m]) => m.fb?.yf && needFb(k));
-    if (!list.length) return;
-    pxBusy = true;
-    try {
-        const syms = [...new Set(list.map(([, m]) => m.fb.yf))];
-        const r = await fetchT(`/api/quote?s=${encodeURIComponent(syms.join(','))}`, {}, 5000);
-        if (r.status === 404) { proxyOk = false; return; }
-        if (!r.ok) return;
-        const j = await r.json();
-        const now = Date.now();
-        for (const [k, m] of list) {
-            const q = j[m.fb.yf];
-            if (!q || !(q.p > 0)) continue;
-            if (q.t && now - q.t > 30 * 60 * 1000) continue; // market tutup
-            feedFb(k, q.p, 'yahoo');
-        }
-    } catch {} finally { pxBusy = false; }
-}
+  btn.disabled = true;
+  $('result').textContent = '';
+  try {
+    setStatus('Menghubungkan ke stream...');
+    if (!ws || ws.readyState !== WebSocket.OPEN) await connectWS();
 
-// ======================= TRADES =======================
-function loadTrades() {
-    try {
-        return (JSON.parse(localStorage.getItem(STORE_KEY)) || []).map(t => {
-            t.hits ||= {};
-            if (t.status !== 'CLOSED') t.status = t.hits.tp1 ? 'BE' : 'RUNNING';
-            return t;
-        });
-    } catch { return []; }
-}
-function saveTrades() { try { localStorage.setItem(STORE_KEY, JSON.stringify(trades)); } catch {} }
-const nextNo = () => trades.reduce((m, t) => Math.max(m, t.no || 0), 0) + 1;
-const highestTpKey = t => ['tp3', 'tp2', 'tp1'].find(k => t[k] != null);
-const highestHit = t => t.hits.tp3 ? 3 : t.hits.tp2 ? 2 : t.hits.tp1 ? 1 : 0;
-
-function processTick(key, price) {
-    let changed = false;
-    for (const t of trades) if (t.key === key && t.status !== 'CLOSED' && evaluateTrade(t, price)) changed = true;
-    if (changed) { saveTrades(); renderHistory(); refreshActiveUI(); }
-}
-function evaluateTrade(t, price) {
-    const d = t.dir;
-    const reached = v => v != null && (d > 0 ? price >= v : price <= v);
-    const lost = v => v != null && (d > 0 ? price <= v : price >= v);
-    let changed = false;
-    for (const k of ['tp1', 'tp2', 'tp3']) {
-        if (t[k] != null && !t.hits[k] && reached(t[k])) {
-            t.hits[k] = Date.now();
-            if (k === 'tp1') t.status = 'BE';
-            toast(`${displayName(t.key)} ${k.toUpperCase()} HIT ✓${k === 'tp1' ? ' · BE SET' : ''}`);
-            changed = true;
-        }
+    setStatus('Mengambil candle...');
+    const [htf, ltf] = await Promise.all([
+      getCandles(provider, symbol, tf.htf),
+      getCandles(provider, symbol, tf.ltf),
+    ]);
+    if (htf.length < CANDLE_MIN || ltf.length < CANDLE_MIN) {
+      throw new Error(`Candle kurang (HTF ${htf.length}, LTF ${ltf.length}, minimal ${CANDLE_MIN}).`);
     }
-    const mk = highestTpKey(t);
-    if (mk && t.hits[mk]) { closeTrade(t, 'TP'); return true; }
-    const stop = t.hits.tp1 ? t.entry : t.sl;
-    if (stop != null && lost(stop)) { closeTrade(t, t.hits.tp1 ? 'BE' : 'SL'); return true; }
-    return changed;
-}
-function closeTrade(t, result) {
-    const hh = highestHit(t);
-    Object.assign(t, { status: 'CLOSED', result, closedAt: Date.now(), maxTp: hh });
-    if (result === 'SL') t.pips = pipsOf(t, t.sl);
-    else if (result === 'TP') t.pips = pipsOf(t, t[highestTpKey(t)]);
-    else t.pips = hh ? pipsOf(t, t[`tp${hh}`]) : 0;
-    const label = result === 'SL' ? 'SL' : result === 'TP' ? `TP${hh} MAX` : `TP${hh} → BE`;
-    toast(`${displayName(t.key)} CLOSED · ${label} ${fmtPips(t.pips)}`, result === 'SL' ? 'red' : result === 'BE' ? 'yellow' : 'green');
-}
 
-function renderHistory() {
-    const filter = document.getElementById('histFilter').value;
-    const today = new Date().toDateString();
-    const inScope = t => filter === 'all' || (t.status !== 'CLOSED') || new Date(t.closedAt).toDateString() === today;
-    const closed = trades.filter(t => t.status === 'CLOSED' && inScope(t));
-    const wins = closed.filter(t => t.pips > 0), losses = closed.filter(t => t.pips < 0);
-    const winPips = wins.reduce((s, t) => s + t.pips, 0), losePips = losses.reduce((s, t) => s + t.pips, 0);
-    const total = winPips + losePips;
-    const ratio = wins.length + losses.length ? wins.length / (wins.length + losses.length) * 100 : 0;
-    const open = trades.filter(t => t.status !== 'CLOSED').length;
-    const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
-    set('sumWin', fmtPips(winPips)); set('sumWinCount', `${wins.length} trade`);
-    set('sumLose', fmtPips(losePips)); set('sumLoseCount', `${losses.length} trade`);
-    set('sumTotal', fmtPips(total));
-    setColor(document.getElementById('sumTotal'), total > 0 ? 'text-emerald-400' : total < 0 ? 'text-red-400' : 'text-white');
-    set('sumOpen', `${open} ${currentLang === 'id' ? 'berjalan' : 'running'}`);
-    set('sumRatio', `${ratio.toFixed(1)}%`);
-    set('sumRatioSub', `${wins.length}W / ${losses.length}L`);
-
-    const box = document.getElementById('historyList');
-    const list = trades.filter(inScope).sort((a, b) => b.createdAt - a.createdAt);
-    if (!list.length) { box.innerHTML = `<p class="text-center text-[10px] text-gray-500 py-3">${DICT[currentLang].noHist}</p>`; return; }
-    box.innerHTML = list.map(t => {
-        const dirTxt = t.dir > 0 ? '<span class="text-sky-400">BUY</span>' : '<span class="text-red-400">SELL</span>';
-        let right, chip;
-        if (t.status === 'CLOSED') {
-            const c = t.pips > 0 ? 'text-emerald-400' : t.pips < 0 ? 'text-red-400' : 'text-yellow-400';
-            right = `<span class="${c}">${t.result} ${fmtPips(t.pips)}</span>`;
-            chip = `<span class="px-1.5 rounded border ${BADGE[t.result === 'SL' ? 'red' : t.result === 'BE' ? 'yellow' : 'green']}">CLOSED</span>`;
-        } else {
-            right = `<span id="fl-${t.id}" class="text-gray-400">--</span>`;
-            chip = t.status === 'BE'
-                ? `<span class="px-1.5 rounded border ${BADGE.yellow}">TP${highestHit(t)} ✓ BE SET</span>`
-                : `<span class="px-1.5 rounded border ${BADGE.blue}">RUNNING</span>`;
-        }
-        return `
-        <div onclick="viewTrade('${t.id}')" class="bg-darkbg hover:bg-panelborder/60 border ${t.id === activeId ? 'border-accentblue' : 'border-panelborder'} px-2 py-1.5 rounded cursor-pointer space-y-0.5">
-            <div class="flex justify-between items-center text-[10px] font-bold">
-                <span class="text-white">${t.no}. ${displayName(t.key)} <span class="text-[8px] text-gray-400 font-normal">${t.style}</span> <span class="text-[8px]">${dirTxt}</span></span>
-                <span class="font-mono">${right}</span>
-            </div>
-            <div class="flex justify-between items-center text-[8px] font-mono text-gray-500">
-                <span>${fmtTime(t.createdAt)} · Entry ${fmt(t.key, t.entry)}</span>${chip}
-            </div>
-        </div>`;
-    }).join('');
-    updateFloating();
-}
-function updateFloating() {
-    for (const t of trades) {
-        if (t.status === 'CLOSED') continue;
-        const el = document.getElementById(`fl-${t.id}`);
-        const p = prices[t.key]?.price;
-        if (!el || p == null) continue;
-        const pips = pipsOf(t, p);
-        el.textContent = fmtPips(pips);
-        setColor(el, pips >= 0 ? 'text-emerald-400' : 'text-red-400');
-    }
-}
-function clearHistory() {
-    if (!trades.length || !confirm(currentLang === 'id' ? 'Hapus semua history?' : 'Clear all history?')) return;
-    trades = []; activeId = null; transientView = null;
-    saveTrades(); renderHistory();
-    document.getElementById('activeSignalCard').classList.add('hidden');
-    document.getElementById('standbyView').classList.remove('hidden');
-    document.getElementById('cardMarketTitle').textContent = 'SELECT PAIR SPOT';
-}
-function viewTrade(id) {
-    const t = trades.find(x => x.id === id);
-    if (!t) return;
-    activeId = id; transientView = null;
-    renderSignalCard(t); refreshActiveUI(); renderHistory();
-    document.getElementById('signalContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
-function renderSignalCard(t) {
-    const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v ?? '--'; };
-    const c = t.card || {};
-    set('cardMarketTitle', `${displayName(t.key)} (Live AI)`);
-    const badge = document.getElementById('signalBadgeBtn');
-    const base = 'text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg flex items-center gap-1';
-    if (t.signal === 'BUY') { badge.className = `bg-sky-500 ${base}`; badge.innerHTML = '<i class="fa-solid fa-caret-up"></i> BUY'; }
-    else if (t.signal === 'SELL') { badge.className = `bg-red-500 ${base}`; badge.innerHTML = '<i class="fa-solid fa-caret-down"></i> SELL'; }
-    else { badge.className = `bg-yellow-500 ${base}`; badge.innerHTML = 'HOLD'; }
-
-    set('cardStyleSub', `${t.style.toUpperCase()} / ${fmtTime(t.createdAt)}${t.no ? ` / #${t.no}` : ''}`);
-    set('cardEntryZone', `${fmt(t.key, t.emin ?? t.entry)} - ${fmt(t.key, t.emax ?? t.entry)}`);
-
-    const pipTxt = lvl => lvl != null ? `${Math.abs(pipsOf(t, lvl)).toFixed(1)} pip` : '--';
-    set('cardSL', t.sl != null ? fmt(t.key, t.sl) : '--');   set('cardSLPips', pipTxt(t.sl));
-    set('cardTP1', t.tp1 != null ? fmt(t.key, t.tp1) : '--'); set('cardTP1Pips', pipTxt(t.tp1));
-    set('cardTP2', t.tp2 != null ? fmt(t.key, t.tp2) : '--'); set('cardTP2Pips', pipTxt(t.tp2));
-    set('cardTP3', t.tp3 != null ? fmt(t.key, t.tp3) : '--'); set('cardTP3Pips', pipTxt(t.tp3));
-    set('cardReason', c.reason);
-
-    const live = prices[t.key]?.price;
-    ['cardLivePriceTop', 'cardLivePriceBadge'].forEach(id => set(id, live != null ? fmt(t.key, live) : '--.--'));
-    document.getElementById('standbyView').classList.add('hidden');
-    document.getElementById('activeSignalCard').classList.remove('hidden');
-}
-function refreshActiveUI() {
-    const t = getActive();
-    if (!t) return;
-    const hits = t.hits || {};
-    [['SL', 'sl'], ['TP1', 'tp1'], ['TP2', 'tp2'], ['TP3', 'tp3']].forEach(([name, k]) => {
-        const box = document.getElementById(`box${name}`), chk = document.getElementById(`chk${name}`);
-        if (!box) return;
-        box.classList.remove('tp-hit', 'sl-hit'); chk.classList.remove('show');
-        const hit = k === 'sl' ? t.result === 'SL' : !!hits[k];
-        if (hit) { box.classList.add(k === 'sl' ? 'sl-hit' : 'tp-hit'); chk.classList.add('show'); }
+    setStatus('Menganalisis...');
+    const res = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        marketId: `${provider}|${symbol}`,
+        tradingStyle: styleName,
+        currentPrice: ltf[ltf.length - 1].c,
+        lang: 'id',
+        htf,
+        ltf,
+      }),
     });
-    const el = document.getElementById('tradeStatus');
-    let txt, color;
-    if (t.result === 'SL') { txt = 'STOP LOSS HIT'; color = 'red'; }
-    else if (t.result === 'TP') { txt = `TP${t.maxTp} MAX 🏆 CLOSED`; color = 'green'; }
-    else if (t.result === 'BE') { txt = `CLOSED @BE (TP${t.maxTp} ✓)`; color = 'yellow'; }
-    else if (t.status === 'BE') { txt = `TP${highestHit(t)} ✓ · BE SET`; color = 'green'; }
-    else if (t.status === 'CLOSED') { txt = 'CLOSED'; color = 'gray'; }
-    else { txt = 'RUNNING'; color = 'blue'; }
-    el.textContent = txt;
-    el.className = `text-[8px] font-mono font-bold px-2 py-0.5 rounded border ${BADGE[color]}`;
-    updatePnl(t);
-}
-function updatePnl(t) {
-    const el = document.getElementById('tradePnl');
-    const pips = t.status === 'CLOSED' ? t.pips : (prices[t.key] ? pipsOf(t, prices[t.key].price) : null);
-    if (pips == null) { el.textContent = '--'; return; }
-    el.textContent = fmtPips(pips);
-    setColor(el, pips > 0 ? 'text-emerald-400' : pips < 0 ? 'text-red-400' : 'text-yellow-400');
+    const raw = await res.json();
+    if (!res.ok) throw new Error(raw.error || `HTTP ${res.status}`);
+
+    const content = raw.choices[0].message.content;
+    const data = JSON.parse(content.substring(content.indexOf('{'), content.lastIndexOf('}') + 1));
+    showResult(data, symbol, styleName);
+    setStatus('Selesai.');
+  } catch (e) {
+    $('result').textContent = 'Error: ' + e.message;
+    setStatus('');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
-// ======================= GRAFIK LIVE LINE =======================
-const RGB = { green: '0,192,118', red: '255,59,105', blue: '41,98,255' };
-const WIN_FONT = 'ui-monospace, SFMono-Regular, Menlo, monospace';
-const cv = document.getElementById('priceChart');
-const ctx = cv.getContext('2d');
-let animP = null, animKey = null;
+function showResult(d, symbol, styleName) {
+  const el = $('result');
+  if (d.status !== 'SIGNAL') {
+    el.innerHTML = `<span class="wait">WAIT</span>\n${esc(d.reason || '')}`;
+    return;
+  }
+  const sig = String(d.signal || '').toUpperCase();
+  const cls = sig === 'BUY' ? 'buy' : 'sell';
+  el.innerHTML =
+    `<span class="${cls}">${esc(sig)}</span>  grade ${esc(d.grade ?? '-')}  score ${esc(d.score ?? '-')}\n` +
+    `Entry : ${esc(d.entry_min)} - ${esc(d.entry_max)}\n` +
+    `SL    : ${esc(d.sl)}\n` +
+    `TP1   : ${esc(d.tp1)}  (RR ${esc(d.rr_tp1 ?? '-')})\n` +
+    `TP2   : ${esc(d.tp2)}\n` +
+    `TP3   : ${esc(d.tp3)}\n\n` +
+    `${esc(d.reason || '')}`;
 
-// Level dari atas ke bawah. SELL: SL, ENTRY, TP1, TP2, TP3. BUY: TP3, TP2, TP1, ENTRY, SL.
-function levelList(t) {
-    const hits = t.hits || {}, L = [];
-    const add = (k, name, price, color, extra = {}) => { if (Number.isFinite(price)) L.push({ k, name, price, color, ...extra }); };
-    add('tp3', 'TP3', t.tp3, '#38bdf8', { hit: !!hits.tp3 });
-    add('tp2', 'TP2', t.tp2, '#34d399', { hit: !!hits.tp2 });
-    add('tp1', 'TP1', t.tp1, '#34d399', { hit: !!hits.tp1 });
-    add('entry', hits.tp1 ? 'BE' : 'ENTRY', t.entry, '#facc15', { hit: t.result === 'BE' });
-    add('sl', 'SL', t.sl, '#ff3b69', { hit: t.result === 'SL', faded: !!hits.tp1 });
-    return L.sort((a, b) => b.price - a.price);
-}
-function layoutLabels(items, top, bottom, gap = 14) {
-    for (let i = 0; i < items.length; i++) {
-        if (items[i].y < top) items[i].y = top;
-        if (i && items[i].y - items[i - 1].y < gap) items[i].y = items[i - 1].y + gap;
-    }
-    const n = items.length;
-    if (n && items[n - 1].y > bottom) {
-        items[n - 1].y = bottom;
-        for (let i = n - 2; i >= 0; i--) if (items[i + 1].y - items[i].y < gap) items[i].y = items[i + 1].y - gap;
-    }
-    return items;
+  const h = $('histList');
+  if (h.querySelector('.muted')) h.innerHTML = '';
+  const time = new Date().toLocaleTimeString('id-ID', { hour12: false });
+  h.insertAdjacentHTML('afterbegin',
+    `<div class="hist"><span class="${cls}">${esc(sig)}</span> ${esc(symbol)} · ${esc(styleName)} · ${time} · entry ${esc(d.entry_min)}</div>`);
 }
 
-function drawChart() {
-    const t = getActive();
-    if (!t) return;
-    const r = cv.getBoundingClientRect();
-    if (!r.width || !r.height) return;
-    const dpr = window.devicePixelRatio || 1, W = r.width, H = r.height;
-    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, W, H);
-
-    const padL = 6, padR = 86, padT = 14, padB = 18;
-    const plotW = W - padL - padR, plotH = H - padT - padB;
-    const lineW = plotW - Math.max(40, plotW * 0.18);
-    const nowX = padL + lineW;
-
-    const key = t.key, pts = history[key] || [], now = Date.now();
-    const win = Math.min(WINDOW_MS, Math.max(MIN_WINDOW_MS, pts.length ? now - pts[0].t : 0));
-    const t0 = now - win;
-    let s = 0; while (s < pts.length && pts[s].t < t0) s++;
-    const vis = pts.slice(Math.max(0, s - 1));
-    const last = vis[vis.length - 1];
-
-    if (!last) {
-        ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = `600 10px ${WIN_FONT}`;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText('Menunggu harga live...', W / 2, H / 2);
-        return;
-    }
-    if (animKey !== key || animP == null) { animP = last.p; animKey = key; }
-    else animP += (last.p - animP) * 0.3;
-
-    const lv = levelList(t);
-    const vals = vis.map(p => p.p).concat(lv.map(l => l.price));
-    let min = Math.min(...vals), max = Math.max(...vals);
-    const pad = (max - min) * 0.08 || Math.abs(max) * 0.0005 || 1;
-    min -= pad; max += pad;
-    const X = tt => padL + (tt - t0) / win * lineW;
-    const Y = p => padT + (max - p) / (max - min) * plotH;
-
-    // grid
-    ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 1;
-    for (let i = 0; i <= 4; i++) { const gy = padT + plotH * i / 4; ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(padL + plotW, gy); ctx.stroke(); }
-
-    // area risiko & profit
-    if (t.dir && t.entry != null) {
-        const band = (a, b, color) => { const y1 = Y(Math.max(a, b)), y2 = Y(Math.min(a, b)); ctx.fillStyle = color; ctx.fillRect(padL, y1, plotW, y2 - y1); };
-        if (Number.isFinite(t.sl)) band(t.entry, t.sl, t.hits?.tp1 ? 'rgba(255,59,105,0.03)' : 'rgba(255,59,105,0.07)');
-        const farTp = [t.tp3, t.tp2, t.tp1].find(v => Number.isFinite(v));
-        if (farTp != null) band(t.entry, farTp, 'rgba(0,192,118,0.06)');
-    }
-
-    // garis level
-    lv.forEach(l => {
-        const ly = Y(l.price);
-        ctx.strokeStyle = l.color; ctx.globalAlpha = l.faded ? 0.3 : l.hit ? 1 : 0.75; ctx.lineWidth = l.hit ? 1.6 : 1;
-        ctx.setLineDash(l.hit ? [] : [5, 4]);
-        ctx.beginPath(); ctx.moveTo(padL, ly); ctx.lineTo(padL + plotW, ly); ctx.stroke();
-        ctx.setLineDash([]); ctx.globalAlpha = 1;
-    });
-
-    // waktu signal
-    if (t.createdAt >= t0) {
-        const sx = X(t.createdAt);
-        ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.setLineDash([2, 3]);
-        ctx.beginPath(); ctx.moveTo(sx, padT); ctx.lineTo(sx, padT + plotH); ctx.stroke(); ctx.setLineDash([]);
-        ctx.font = `700 8px ${WIN_FONT}`; ctx.fillStyle = 'rgba(255,255,255,0.45)';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-        ctx.fillText('SIGNAL', sx, padT + plotH - 2);
-    }
-
-    // line harga live
-    const c = !t.dir ? RGB.blue : (animP - t.entry) * t.dir >= 0 ? RGB.green : RGB.red;
-    const ey = Y(animP);
-    ctx.save();
-    ctx.beginPath(); ctx.rect(padL, 0, plotW, H); ctx.clip();
-    ctx.beginPath();
-    vis.forEach((p, i) => {
-        const x = X(p.t), y = i === vis.length - 1 ? ey : Y(p.p);
-        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-    });
-    ctx.lineTo(nowX, ey);
-    ctx.strokeStyle = `rgb(${c})`; ctx.lineWidth = 1.8; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-    ctx.shadowColor = `rgba(${c},0.6)`; ctx.shadowBlur = 6;
-    ctx.stroke(); ctx.shadowBlur = 0;
-    ctx.lineTo(nowX, padT + plotH); ctx.lineTo(X(vis[0].t), padT + plotH); ctx.closePath();
-    const g = ctx.createLinearGradient(0, padT, 0, padT + plotH);
-    g.addColorStop(0, `rgba(${c},0.20)`); g.addColorStop(1, `rgba(${c},0)`);
-    ctx.fillStyle = g; ctx.fill();
-    ctx.restore();
-
-    // titik NOW berdenyut
-    const pulse = 3 + 2.5 * Math.abs(Math.sin(now / 350));
-    ctx.beginPath(); ctx.arc(nowX, ey, pulse + 2, 0, Math.PI * 2); ctx.fillStyle = `rgba(${c},0.25)`; ctx.fill();
-    ctx.beginPath(); ctx.arc(nowX, ey, 3, 0, Math.PI * 2); ctx.fillStyle = `rgb(${c})`; ctx.fill();
-
-    // badge arah
-    if (t.dir) {
-        const txt = t.dir < 0 ? '▼ SELL' : '▲ BUY';
-        ctx.font = `800 8px ${WIN_FONT}`;
-        const tw = ctx.measureText(txt).width + 10;
-        ctx.fillStyle = t.dir < 0 ? 'rgba(255,59,105,0.85)' : 'rgba(14,165,233,0.85)';
-        ctx.fillRect(padL + 2, 2, tw, 11);
-        ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-        ctx.fillText(txt, padL + 7, 8);
-    }
-
-    // label level kanan
-    ctx.font = `700 8px ${WIN_FONT}`;
-    const lx = padL + plotW + 3, lw = padR - 5;
-    const labels = layoutLabels(lv.map(l => ({ ...l, y: Y(l.price) })).sort((a, b) => a.y - b.y), padT + 7, padT + plotH - 7);
-    labels.forEach(l => {
-        const ly = Y(l.price);
-        if (Math.abs(l.y - ly) > 1) {
-            ctx.strokeStyle = l.color; ctx.globalAlpha = 0.5; ctx.lineWidth = 1;
-            ctx.beginPath(); ctx.moveTo(lx - 3, ly); ctx.lineTo(lx, l.y); ctx.stroke();
-        }
-        ctx.globalAlpha = l.faded ? 0.4 : 1;
-        ctx.fillStyle = l.color; ctx.fillRect(lx, l.y - 7, lw, 14);
-        ctx.fillStyle = '#0b0e14'; ctx.textBaseline = 'middle';
-        const mark = l.hit ? (l.k === 'sl' ? '✗' : l.k.startsWith('tp') ? '✓' : '•') : '';
-        ctx.textAlign = 'left'; ctx.fillText(`${l.name}${mark}`, lx + 3, l.y + 0.5);
-        ctx.textAlign = 'right'; ctx.fillText(fmt(key, l.price), lx + lw - 3, l.y + 0.5);
-        ctx.globalAlpha = 1;
-    });
-
-    // bubble harga live
-    const ly = Math.min(Math.max(Y(animP), padT + 7), padT + plotH - 7);
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(lx, ly - 7, lw, 14);
-    ctx.fillStyle = '#0b0e14'; ctx.textBaseline = 'middle';
-    ctx.textAlign = 'left'; ctx.fillText('NOW', lx + 3, ly + 0.5);
-    ctx.textAlign = 'right'; ctx.fillText(fmt(key, last.p), lx + lw - 3, ly + 0.5);
-
-    // footer chart
-    const statusTxt = t.status === 'CLOSED' ? 'CLOSED' : isStale(key) ? 'MARKET IDLE' : 'LIVE';
-    ctx.font = `500 8px ${WIN_FONT}`; ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.textBaseline = 'bottom';
-    ctx.textAlign = 'left'; ctx.fillText(new Date(t0).toLocaleTimeString('id-ID', { hour12: false }), padL, H - 2);
-    ctx.textAlign = 'center'; ctx.fillText(statusTxt, nowX, H - 2);
-}
-let lastDraw = 0;
-function chartLoop(ts) {
-    requestAnimationFrame(chartLoop);
-    if (ts - lastDraw < 33) return;
-    lastDraw = ts;
-    drawChart();
-}
-
-// ======================= GENERATE SIGNAL =======================
-const STYLE_TF = [
-    { name: 'Scalping', htf: '15m', ltf: '1m' },
-    { name: 'Day Trading', htf: '30m', ltf: '3m' },
-    { name: 'Intraday', htf: '1h', ltf: '5m' },
-    { name: 'Swing', htf: '4h', ltf: '15m' },
-];
-const TF_MS = { '1m': 60e3, '3m': 180e3, '5m': 300e3, '15m': 900e3, '30m': 1800e3, '1h': 3600e3, '4h': 14400e3 };
-const CANDLE_BARS = 300, CANDLE_MIN = 150;
-
-async function fetchHLCandles(coin, interval) {
-    const endTime = Date.now();
-    const r = await fetchT(HL_INFO, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'candleSnapshot', req: { coin, interval, startTime: endTime - CANDLE_BARS * TF_MS[interval], endTime } }),
-    }, 8000);
-    if (!r.ok) return [];
-    const rows = await r.json();
-    return Array.isArray(rows) ? rows : [];
-}
-
-async function fetchBinanceCandles(symbol, interval) {
-    const r = await fetchT(`https://data-api.binance.vision/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${CANDLE_BARS}`, {}, 8000);
-    if (!r.ok) return [];
-    const rows = await r.json();
-    return Array.isArray(rows) ? rows.map(k => ({ t: k[0], o: k[1], h: k[2], l: k[3], c: k[4] })) : [];
-}
-
-// Hyperliquid: coba nama coin satu per satu sampai ada data
-// Binance: pakai pair utama. FX (Veranta) dan indeks Ostium belum punya sumber candle di aplikasi ini.
-async function fetchCandles(key, interval) {
-    const m = MARKETS[key];
-    if (m.provider === 'binance') return fetchBinanceCandles(m.coins[0], interval);
-    if (m.provider === 'hyperliquid') {
-        for (const coin of m.coins) {
-            let rows = [];
-            try { rows = await fetchHLCandles(coin, interval); } catch {}
-            if (rows.length >= CANDLE_MIN) return rows;
-        }
-    }
-    return [];
-}
-
-async function generateAISignal() {
-    const marketId = document.getElementById('marketSelect').value;
-    const tradingStyle = document.getElementById('tradingStyleSelect').value;
-    const symbolKey = marketId.split('|').pop();
-    const live = prices[symbolKey];
-    if (!live) return alert(currentLang === 'id' ? 'Harga live belum tersambung. Tunggu sebentar.' : 'Live price not connected yet.');
-
-    const style = STYLE_TF.find(s => tradingStyle.includes(s.name));
-    if (!style) return alert('Gaya trading tidak dikenal.');
-
-    const btn = document.getElementById('signalBtn');
-    btn.disabled = true;
-    btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> ${DICT[currentLang].eval}`;
-    try {
-        const [htf, ltf] = await Promise.all([
-            fetchCandles(symbolKey, style.htf),
-            fetchCandles(symbolKey, style.ltf),
-        ]);
-        if (htf.length < CANDLE_MIN || ltf.length < CANDLE_MIN) {
-            throw new Error(`data candle ${displayName(symbolKey)} tidak tersedia (HTF ${htf.length}, LTF ${ltf.length} candle).`);
-        }
-
-        const res = await fetch('/api/generate', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ marketId, tradingStyle, currentPrice: live.price, priceKind: live.via, lang: currentLang, htf, ltf }),
-        });
-        const raw = await res.json();
-        if (!res.ok) throw new Error(raw.error || `HTTP ${res.status}`);
-        const content = raw.choices[0].message.content;
-        const data = JSON.parse(content.substring(content.indexOf('{'), content.lastIndexOf('}') + 1));
-
-        if (data.status !== 'SIGNAL') {
-            toast(`Tidak ada setup: ${data.reason || ''}`, 'yellow');
-            return;
-        }
-
-        // Level dari engine memakai harga candle mentah. Tambahkan offset kalibrasi agar sejajar dengan harga di layar.
-        const off = offsets[symbolKey] || 0;
-        const shift = v => { const x = parseLevel(v); return x == null ? null : x + off; };
-        const signal = String(data.signal).toUpperCase();
-        const dir = signal === 'BUY' ? 1 : -1;
-        const emin = shift(data.entry_min), emax = shift(data.entry_max);
-        const entry = emin != null && emax != null ? (emin + emax) / 2 : live.price;
-
-        const t = {
-            id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-            no: nextNo(), key: symbolKey, style: tradingStyle.split(' (')[0],
-            signal, dir, entry, emin, emax,
-            sl: shift(data.sl), tp1: shift(data.tp1), tp2: shift(data.tp2), tp3: shift(data.tp3),
-            createdAt: Date.now(), status: 'RUNNING', hits: {}, markers: [],
-            card: { reason: data.reason },
-        };
-        const valid = t.sl != null && t.tp1 != null && (t.entry - t.sl) * dir > 0 && (t.tp1 - t.entry) * dir > 0;
-        if (valid) {
-            trades.push(t); activeId = t.id; transientView = null;
-            evaluateTrade(t, live.price);
-            saveTrades();
-        } else {
-            activeId = null; transientView = t;
-            toast('Sinyal tidak valid untuk ditrack, cek kembali data', 'red');
-        }
-        renderSignalCard(t); refreshActiveUI(); renderHistory();
-    } catch (e) {
-        alert(`Gagal generate sinyal: ${e.message}`);
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnGenText">${DICT[currentLang].gen}</span>`;
-    }
-}
-
-// ======================= BOOT =======================
-document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
-    if (!ws || ws.readyState >= WebSocket.CLOSING) connect();
-    if (!hlWs || hlWs.readyState >= WebSocket.CLOSING) connectHL();
-});
-setInterval(() => {
-    // watchdog: socket zombie (tidak ada pesan > 40 detik)
-    if (ws && ws.readyState === WebSocket.OPEN && Date.now() - ws.lastMsg > 40000) ws.close();
-}, 10000);
-setInterval(updateFloating, 1000);
-setInterval(() => { pollHL(); pollBinance(); }, 2000);
-setInterval(crossTick, 2000);
-setInterval(pollProxy, 4000);
-
-window.onload = async () => {
-    const type = localStorage.getItem('alu_session_type');
-    if (type === 'admin_reg') openRegisterDashboard();
-    else if (type === 'terminal') openTerminalApp();
-
-    buildTicker();
-    updateCalibInfo();
-    renderHistory();
-    if (trades.length) viewTrade(trades[trades.length - 1].id);
-    requestAnimationFrame(chartLoop);
-
-    connectHL();
-    await resolveCoins();
-    connect();
-};
+// ================= BOOT =================
+(function boot() {
+  const session = localStorage.getItem('alu_session');
+  if (session === 'admin') showAdmin();
+  else if (session === 'terminal') showApp();
+  else showOnly('authScreen');
+})();
 </script>
 </body>
 </html>
