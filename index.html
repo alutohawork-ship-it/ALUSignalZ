@@ -1032,9 +1032,14 @@
     function evaluateTrade(t, price) {
         const d = t.dir;
 
-        // Entry limit: menunggu harga menyentuh level entry (tepi zona)
+        // Entry pending: LIMIT menunggu harga turun/naik ke entry (pullback),
+        // STOP menunggu harga bergerak searah ke entry (harga belum sampai zona).
         if (t.status === 'PENDING') {
-            if (d > 0 ? price <= t.entry : price >= t.entry) {
+            const stopFill = t.fill === 'STOP';
+            const filled = stopFill
+                ? (d > 0 ? price >= t.entry : price <= t.entry)
+                : (d > 0 ? price <= t.entry : price >= t.entry);
+            if (filled) {
                 t.status = 'RUNNING';
                 t.filledAt = Date.now();
                 return true;
@@ -1842,7 +1847,7 @@
             const t = {
                 id: Date.now().toString(36), key: symbolKey, style: tradingStyle,
                 signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
-                mode: s.mode, status: s.status,
+                mode: s.mode, status: s.status, fill: s.fill || null,
                 entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
                 zone: s.zone,
                 expiresAt: s.expireMs ? Date.now() + s.expireMs : null,
