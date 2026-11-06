@@ -4,19 +4,41 @@
 
 const KV_KEY = 'alu_clients';
 
-const DECIMALS = { XAUUSD: 2, XAGUSD: 3, EURUSD: 5, USDJPY: 3, GBPUSD: 5, BTCUSDT: 2, ETHUSDT: 2, SOLUSDT: 2, XRPUSDT: 4, DJI: 2, DAX: 2 };
+// Harus sama dengan decimals di MARKETS (index.html)
+const DECIMALS = {
+  XAUUSD: 2, XAGUSD: 3, EURUSD: 5, USDJPY: 3, GBPUSD: 5, DJI: 2,
+  AUDUSD: 5, USDCAD: 5, USDCHF: 5,
+  CLUSDT: 2, NATGASUSDT: 3, COPPERUSDT: 4, XPDUSDT: 2, XPTUSDT: 2,
+  BRENTOIL: 2, PALLADIUM: 2, PLATINUM: 2, SP500: 2, XYZ100: 2, JP225: 0, QQQUSDT: 2,
+  BTCUSDT: 2, ETHUSDT: 2, SOLUSDT: 2, XRPUSDT: 4, BNBUSDT: 2, ADAUSDT: 4,
+  LINKUSDT: 3, AVAXUSDT: 3, DOGEUSDT: 5, SUIUSDT: 4, NEARUSDT: 4, DOTUSDT: 4,
+  LTCUSDT: 2, TAOUSDT: 2, HYPEUSDT: 2,
+};
 
 // Ukuran 1 pip per simbol. Harus sama dengan MARKETS.pip di index.html
-const PIP = { XAUUSD: 0.1, XAGUSD: 0.01, EURUSD: 0.0001, USDJPY: 0.01, GBPUSD: 0.0001, BTCUSDT: 1, ETHUSDT: 0.1, SOLUSDT: 0.01, XRPUSDT: 0.0001, DJI: 1, DAX: 1 };
+const PIP = {
+  XAUUSD: 0.1, XAGUSD: 0.01, EURUSD: 0.0001, USDJPY: 0.01, GBPUSD: 0.0001, DJI: 1,
+  AUDUSD: 0.0001, USDCAD: 0.0001, USDCHF: 0.0001,
+  CLUSDT: 0.01, NATGASUSDT: 0.001, COPPERUSDT: 0.0001, XPDUSDT: 0.1, XPTUSDT: 0.1,
+  BRENTOIL: 0.01, PALLADIUM: 0.1, PLATINUM: 0.1, SP500: 1, XYZ100: 1, JP225: 1, QQQUSDT: 0.1,
+  BTCUSDT: 1, ETHUSDT: 0.1, SOLUSDT: 0.01, XRPUSDT: 0.0001, BNBUSDT: 0.1, ADAUSDT: 0.0001,
+  LINKUSDT: 0.001, AVAXUSDT: 0.001, DOGEUSDT: 0.00001, SUIUSDT: 0.0001, NEARUSDT: 0.0001,
+  DOTUSDT: 0.0001, LTCUSDT: 0.01, TAOUSDT: 0.01, HYPEUSDT: 0.01,
+};
 
 // Scalping: rentang jarak SL dalam pip [min, max] dari entry.
 // SL mengikuti swing struktur, lalu dijepit ke rentang ini.
 const SCALP_SL_PIPS = {
   XAUUSD: [20, 30], XAGUSD: [25, 40],
   EURUSD: [10, 15], GBPUSD: [12, 18], USDJPY: [10, 15],
-  BTCUSDT: [150, 250], ETHUSDT: [60, 100],
-  SOLUSDT: [40, 70], XRPUSDT: [50, 80],
-  DJI: [40, 70], DAX: [40, 70],
+  AUDUSD: [10, 15], USDCAD: [10, 15], USDCHF: [10, 15],
+  CLUSDT: [8, 15], NATGASUSDT: [10, 20], COPPERUSDT: [30, 50], XPDUSDT: [20, 35], XPTUSDT: [20, 30],
+  BRENTOIL: [8, 15], PALLADIUM: [20, 35], PLATINUM: [20, 30],
+  SP500: [15, 30], XYZ100: [25, 45], JP225: [20, 40], QQQUSDT: [15, 30],
+  BTCUSDT: [150, 250], ETHUSDT: [60, 100], SOLUSDT: [40, 70], XRPUSDT: [50, 80],
+  BNBUSDT: [15, 30], ADAUSDT: [6, 12], LINKUSDT: [25, 40], AVAXUSDT: [25, 40],
+  DOGEUSDT: [25, 45], SUIUSDT: [20, 35], NEARUSDT: [50, 90], DOTUSDT: [30, 60],
+  LTCUSDT: [20, 35], TAOUSDT: [40, 70], HYPEUSDT: [20, 35],
 };
 
 // Scalping: buffer entry limit dari harga sekarang (pip) [min, max].
@@ -24,26 +46,37 @@ const SCALP_SL_PIPS = {
 const SCALP_ENTRY_PIPS = {
   XAUUSD: [8, 15], XAGUSD: [8, 15],
   EURUSD: [3, 6], GBPUSD: [4, 8], USDJPY: [3, 6],
-  BTCUSDT: [40, 80], ETHUSDT: [15, 30],
-  SOLUSDT: [10, 20], XRPUSDT: [10, 20],
-  DJI: [15, 30], DAX: [15, 30],
+  AUDUSD: [4, 7], USDCAD: [4, 7], USDCHF: [4, 7],
+  CLUSDT: [3, 7], NATGASUSDT: [4, 10], COPPERUSDT: [12, 25], XPDUSDT: [8, 17], XPTUSDT: [8, 15],
+  BRENTOIL: [3, 7], PALLADIUM: [8, 17], PLATINUM: [8, 15],
+  SP500: [6, 15], XYZ100: [10, 22], JP225: [8, 20], QQQUSDT: [6, 15],
+  BTCUSDT: [40, 80], ETHUSDT: [15, 30], SOLUSDT: [10, 20], XRPUSDT: [10, 20],
+  BNBUSDT: [6, 15], ADAUSDT: [2, 6], LINKUSDT: [10, 20], AVAXUSDT: [10, 20],
+  DOGEUSDT: [10, 22], SUIUSDT: [8, 17], NEARUSDT: [20, 45], DOTUSDT: [12, 30],
+  LTCUSDT: [8, 17], TAOUSDT: [16, 35], HYPEUSDT: [8, 17],
 };
 
-// Minimal jarak TP1 (pip) untuk Day Trading. Jika TP1 (2R) di bawah ini, setup dilewati.
+// Day Trading: jarak minimal TP1 (pip). Jika TP1 (2R) di bawah ini, setup dilewati.
 const DAY_MIN_TP1_PIPS = {
   XAUUSD: 80, XAGUSD: 40,
   EURUSD: 30, USDJPY: 30, GBPUSD: 40,
+  AUDUSD: 20, USDCAD: 35, USDCHF: 25,
+  CLUSDT: 30, NATGASUSDT: 15, COPPERUSDT: 150, XPDUSDT: 35, XPTUSDT: 50,
+  BRENTOIL: 30, PALLADIUM: 35, PLATINUM: 50,
+  SP500: 25, XYZ100: 80, JP225: 150, QQQUSDT: 20,
   BTCUSDT: 300, ETHUSDT: 300, SOLUSDT: 300, XRPUSDT: 300,
-  DJI: 150, DAX: 100,
+  BNBUSDT: 20, ADAUSDT: 6, LINKUSDT: 32, AVAXUSDT: 25,
+  DOGEUSDT: 21, SUIUSDT: 26, NEARUSDT: 110, DOTUSDT: 45,
+  LTCUSDT: 24, TAOUSDT: 90, HYPEUSDT: 23,
 };
+
+// TP scalping: target RR tetap. Boleh bergeser ke level struktur terdekat dalam band ini. 0 = TP fixed.
+const TP_FLEX_BAND = 0.15;
 
 const TF_MS = { '1m': 60000, '5m': 300000, '15m': 900000, '30m': 1800000, '1h': 3600000, '4h': 14400000, '1d': 86400000 };
 const TF_LABEL = { '5m': 'M5', '15m': 'M15', '30m': 'M30', '1h': 'H1', '4h': 'H4', '1d': 'D1' };
 const KIND_NAME = { OB: 'Order Block', FVG: 'FVG', OTE: 'OTE 62-79%' };
 const ROLE_W = { htf: 3, mtf: 2, ltf: 1 };
-
-// Scalping: TP target 1:1.2 / 1:2 / 1:2.5. Boleh bergeser ke level struktur terdekat dalam band ini. 0 = TP fixed.
-const TP_FLEX_BAND = 0.15;
 
 // Harus sama dengan STYLE_TF di index.html
 // kind: 'scalp'    = limit entry dengan buffer dari harga sekarang, SL swing dijepit rentang pip, TP RR 1:1.2 / 1:2 / 1:2.5 (fleksibel)
