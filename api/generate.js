@@ -1,6 +1,7 @@
 // api/generate.js
 // Analisis Pure SMC dijalankan di server. Tidak memanggil API eksternal.
 // Hanya klien terdaftar dan masih aktif yang boleh memakai endpoint ini.
+// Order: BUY NOW / SELL NOW (market) atau BUY LIMIT / SELL LIMIT (pending). Tidak ada STOP.
 
 const KV_KEY = 'alu_clients';
 
@@ -33,15 +34,16 @@ const TF_LABEL = { '5m': 'M5', '15m': 'M15', '30m': 'M30', '1h': 'H1', '4h': 'H4
 const KIND_NAME = { OB: 'Order Block', FVG: 'FVG', OTE: 'OTE 62-79%' };
 const ROLE_W = { htf: 3, mtf: 2, ltf: 1 };
 
-// Scalping: selalu memberi sinyal jika ada setup valid. Tiga kemungkinan:
-//   inside / near = entry market sekarang (harga di dalam zona, atau masih dekat tepi zona)
-//   limit         = harga sudah lari dari zona, tunggu pullback ke tengah zona (LIMIT)
-//   stop          = harga belum sampai zona setelah reclaim, tunggu harga bergerak ke tengah zona (STOP)
+// Scalping: jenis entry
+//   inside = harga di dalam zona 38.2–61.8%            -> BUY/SELL NOW
+//   near   = harga sudah lari tapi masih dekat tepi zona -> BUY/SELL NOW
+//   deep   = harga sudah lebih dalam dari zona, belum menembus kaki reaksi -> BUY/SELL NOW
+//   limit  = harga sudah lari jauh dari zona            -> BUY/SELL LIMIT di tengah zona
 const SCALP_WINDOW = 6;                     // jendela kaki reaksi (candle M5, sekitar 30 menit)
 const SCALP_MIN_REACTION_ATR = 0.5;         // kaki reaksi minimal 0.5 ATR
-const SCALP_NEAR_ATR = 0.5;                 // harga dianggap masih dekat tepi zona jika selisihnya <= nilai ini (ATR)
+const SCALP_NEAR_ATR = 0.5;                 // harga dianggap dekat tepi zona jika selisihnya <= nilai ini (ATR)
 const SCALP_REVERSE_TOL_ATR = 0.1;          // jika harga menembus kaki reaksi lebih dari ini, setup gagal
-const SCALP_MAX_WAIT_MS = 20 * 60 * 1000;   // pending scalping batal setelah 20 menit
+const SCALP_MAX_WAIT_MS = 20 * 60 * 1000;   // pending LIMIT scalping batal setelah 20 menit
 
 // Harus sama dengan STYLE_TF di index.html
 // kind: 'scalp'    = trigger M5 (sweep+reclaim / BOS / pullback), zona 38.2–61.8% kaki reaksi, SL di luar kaki, TP 1R / 2R / 3R tetap
@@ -93,6 +95,12 @@ const EXPIRE_MAX_MS = 48 * 60 * 60 * 1000; // maksimal 48 jam
 const MIN_CANDLES = 20;
 
 const T = (lang, id, en) => (lang === 'en' ? en : id);
+
+// BUY NOW / SELL NOW / BUY LIMIT / SELL LIMIT
+const orderLabel = (dir, orderType) => `${dir === 1 ? 'BUY' : 'SELL'} ${orderType === 'LIMIT' ? 'LIMIT' : 'NOW'}`;
+
+// Jenis order dari plan. Plan non-scalping tidak punya orderType, jadi diturunkan dari status.
+const resolveOrder = plan => plan.orderType || (plan.status === 'PENDING' ? 'LIMIT' : 'NOW');
 
 // ---------- Akses klien ----------
 
@@ -305,25 +313,27 @@ function scalpCandidate(candles, dir, price, a, htfDir, slFloor, slCap) {
     mid = low + 0.5 * leg;
   }
 
-  // 3) Posisi harga terhadap zona menentukan mode entry
-  let kind, mode, fill, entry;
+  // 3) Posisi harga terhadap zona menentukan jenis entry
+  let kind, orderType, entry;
   if (price >= zBot && price <= zTop) {
-    kind = 'inside'; mode = 'DIRECT'; fill = null; entry = price;
+    kind = 'inside'; orderType = 'NOW'; entry = price;
   } else if (isBuy ? price > zTop : price < zBot) {
     // Harga sudah lari searah reaksi
     const edgeDist = isBuy ? price - zTop : zBot - price;
     if (edgeDist <= SCALP_NEAR_ATR * a) {
-      kind = 'near'; mode = 'DIRECT'; fill = null; entry = price;
+      kind = 'near'; orderType = 'NOW'; entry = price;
     } else {
-      kind = 'limit'; mode = 'WAIT'; fill = 'LIMIT'; entry = mid;
+      // Tunggu pullback ke tengah zona. Limit selalu di sisi yang benar (di bawah harga untuk BUY, di atas untuk SELL).
+      kind = 'limit'; orderType = 'LIMIT'; entry = mid;
     }
   } else {
-    // Harga belum sampai zona dari sisi sebaliknya: tunggu bergerak ke tengah zona
+    // Harga sudah lebih dalam dari zona tapi belum menembus kaki reaksi.
+    // Tidak ada limit yang valid di sisi ini, jadi entry market dengan SL di luar kaki reaksi.
     const broke = isBuy
       ? price <= low + SCALP_REVERSE_TOL_ATR * a
       : price >= high - SCALP_REVERSE_TOL_ATR * a;
     if (broke) return { err: 'Harga sudah menembus kaki reaksi. Setup gagal, tunggu struktur baru.' };
-    kind = 'stop'; mode = 'WAIT'; fill = 'STOP'; entry = mid;
+    kind = 'deep'; orderType = 'NOW'; entry = price;
   }
 
   // 4) SL di luar kaki reaksi, tidak pernah dipersempit
@@ -339,13 +349,17 @@ function scalpCandidate(candles, dir, price, a, htfDir, slFloor, slCap) {
 
   return {
     plan: {
-      kind, mode, fill, entry,
-      status: mode === 'DIRECT' ? 'RUNNING' : 'PENDING',
+      kind,
+      orderType,
+      mode: orderType === 'NOW' ? 'DIRECT' : 'WAIT',
+      fill: orderType === 'LIMIT' ? 'LIMIT' : null,
+      entry,
+      status: orderType === 'NOW' ? 'RUNNING' : 'PENDING',
       sl: stop,
       zone: { min: zBot, max: zTop },
       mid,
       trigger,
-      expireMs: mode === 'DIRECT' ? 0 : SCALP_MAX_WAIT_MS,
+      expireMs: orderType === 'NOW' ? 0 : SCALP_MAX_WAIT_MS,
       distAtr: Math.abs(price - mid) / a,
       touches: 0,
       zoneType: null,
@@ -414,6 +428,7 @@ function bestZonePlan(series, dir, price, refAtr, distW) {
 
   return {
     status: active ? 'RUNNING' : 'PENDING',
+    orderType: active ? 'NOW' : 'LIMIT',
     entry,
     sl,
     zone: { min: best.z.lo, max: best.z.hi },
@@ -485,6 +500,7 @@ function freshZonePlan(candles, dir, price, a, refAtr) {
   const p = candidates[0];
   return {
     status: p.inZone ? 'RUNNING' : 'PENDING',
+    orderType: p.inZone ? 'NOW' : 'LIMIT',
     entry: p.entry,
     sl: p.sl,
     zone: { min: p.z.lo, max: p.z.hi },
@@ -516,6 +532,8 @@ function findZone(series, dir, price, refAtr) {
 
 function buildMeta({ lang, style, dir, plan, price, pip, htfDir, mtfDir, refAtr, risk }) {
   const isScalp = style.kind === 'scalp';
+  const orderType = resolveOrder(plan);
+  const ord = orderLabel(dir, orderType);
 
   const setup = htfDir === 0 ? 'NEUTRAL' : htfDir === dir ? 'CONTINUATION' : 'REVERSAL';
   const setupLabel = {
@@ -548,22 +566,22 @@ function buildMeta({ lang, style, dir, plan, price, pip, htfDir, mtfDir, refAtr,
   if (isScalp) {
     zoneLabel = { sweep: 'Sweep & Reclaim M5', bos: 'BOS Retest M5', pullback: 'Pullback M5' }[plan.trigger] || 'M5';
     zoneNote = {
-      inside: T(lang, 'Harga di dalam zona, entry market', 'Price inside zone, market entry'),
-      near: T(lang, 'Harga dekat tepi zona, entry market', 'Price near zone edge, market entry'),
-      limit: T(lang, `Tunggu pullback, ${distPip} pip dari harga`, `Wait for pullback, ${distPip} pips away`),
-      stop: T(lang, `Tunggu harga masuk zona, ${distPip} pip dari harga`, `Wait for price to enter zone, ${distPip} pips away`),
+      inside: `${ord} · ${T(lang, 'harga di dalam zona', 'price inside zone')}`,
+      near: `${ord} · ${T(lang, 'harga dekat tepi zona', 'price near zone edge')}`,
+      deep: `${ord} · ${T(lang, 'harga lebih dalam dari zona, SL di luar kaki reaksi', 'price deeper than zone, SL outside reaction leg')}`,
+      limit: `${ord} · ${T(lang, `tunggu pullback, ${distPip} pip dari harga`, `wait for pullback, ${distPip} pips away`)}`,
     }[plan.kind];
   } else {
     zoneLabel = `${KIND_NAME[plan.zoneType] || plan.zoneType} ${side} ${TF_LABEL[plan.zoneTf] || ''}`.trim();
     if (plan.status === 'RUNNING') {
-      zoneNote = T(lang, 'Harga sudah di dalam area entry', 'Price already inside entry area');
+      zoneNote = `${ord} · ${T(lang, 'harga sudah di dalam area entry', 'price already inside entry area')}`;
     } else {
       const near = plan.distAtr != null && plan.distAtr <= 1;
-      zoneNote = T(
+      zoneNote = `${ord} · ${T(
         lang,
-        `Area entry ${distPip} pip dari harga sekarang${near ? ' (dekat)' : ''}`,
-        `Entry area ${distPip} pips from current price${near ? ' (near)' : ''}`
-      );
+        `area entry ${distPip} pip dari harga${near ? ' (dekat)' : ''}`,
+        `entry area ${distPip} pips away${near ? ' (near)' : ''}`
+      )}`;
     }
   }
 
@@ -585,6 +603,8 @@ function buildReason({ lang, style, dir, plan, dec, htfTxt, meta, slPips, tpPips
   const f = v => v.toFixed(dec);
   const d = dir === 1 ? 'BUY' : 'SELL';
   const head = `${d} · ${style.label}.`;
+  const orderType = resolveOrder(plan);
+  const ord = orderLabel(dir, orderType);
   const tail = T(
     lang,
     `Setup: ${meta.setupLabel}. Confidence ${meta.confidence}, risiko ${meta.risk}. HTF ${htfTxt.id}.`,
@@ -595,57 +615,50 @@ function buildReason({ lang, style, dir, plan, dec, htfTxt, meta, slPips, tpPips
     const trigId = { sweep: 'sweep likuiditas lalu reclaim M5', bos: 'break struktur M5', pullback: 'pullback searah trend HTF' }[plan.trigger];
     const trigEn = { sweep: 'liquidity sweep and reclaim on M5', bos: 'M5 structure break', pullback: 'pullback in HTF trend' }[plan.trigger];
     const zone = `${f(plan.zone.min)} – ${f(plan.zone.max)}`;
-    const pendTxt = T(
-      lang,
-      ` Batal jika SL atau TP1 tersentuh dulu, atau belum terisi dalam ${durText(plan.expireMs, lang)}.`,
-      ` Cancelled if SL or TP1 is hit first, or not filled within ${durText(plan.expireMs, lang)}.`
-    );
+    const pendTxt = plan.orderType === 'LIMIT'
+      ? T(
+          lang,
+          ` Batal jika SL atau TP1 tersentuh dulu, atau belum terisi dalam ${durText(plan.expireMs, lang)}.`,
+          ` Cancelled if SL or TP1 is hit first, or not filled within ${durText(plan.expireMs, lang)}.`
+        )
+      : '';
 
-    let action;
-    if (plan.kind === 'inside') {
-      action = T(lang, `Harga di dalam zona, entry market di ${f(plan.entry)}.`, `Price inside zone, market entry at ${f(plan.entry)}.`);
-    } else if (plan.kind === 'near') {
-      action = T(lang, `Harga dekat tepi zona, entry market di ${f(plan.entry)}.`, `Price near zone edge, market entry at ${f(plan.entry)}.`);
-    } else if (plan.kind === 'limit') {
-      action = T(
+    const action = {
+      inside: T(lang, `${ord} di ${f(plan.entry)}, harga di dalam zona.`, `${ord} at ${f(plan.entry)}, price inside zone.`),
+      near: T(lang, `${ord} di ${f(plan.entry)}, harga dekat tepi zona.`, `${ord} at ${f(plan.entry)}, price near zone edge.`),
+      deep: T(lang, `${ord} di ${f(plan.entry)}, harga sudah lebih dalam dari zona setelah trigger.`, `${ord} at ${f(plan.entry)}, price deeper than zone after trigger.`),
+      limit: T(
         lang,
-        `Harga sudah lari dari zona. Tunggu pullback ke tengah zona ${f(plan.entry)}.${pendTxt}`,
-        `Price ran ahead of the zone. Wait for pullback to zone midpoint ${f(plan.entry)}.${pendTxt}`
-      );
-    } else {
-      action = T(
-        lang,
-        `Harga belum masuk zona. Tunggu harga bergerak ke tengah zona ${f(plan.entry)}.${pendTxt}`,
-        `Price has not reached the zone yet. Wait for price to move to zone midpoint ${f(plan.entry)}.${pendTxt}`
-      );
-    }
+        `${ord} di ${f(plan.entry)}, harga sudah lari dari zona. Tunggu pullback ke tengah zona.${pendTxt}`,
+        `${ord} at ${f(plan.entry)}, price ran ahead of zone. Wait for pullback to zone midpoint.${pendTxt}`
+      ),
+    }[plan.kind];
 
     const rrTxt = style.rr.map(x => `${x}R`).join(' / ');
     const pipTxt = tpPips ? ` (${tpPips.join(' / ')} pip)` : '';
     const slTxt = T(lang, `SL ${slPips ?? '-'} pip di luar kaki reaksi, tidak dipersempit.`, `SL ${slPips ?? '-'} pips beyond the reaction leg, not tightened.`);
     const tpTxt = T(lang, ` TP ${rrTxt}${pipTxt} tetap dari jarak SL.`, ` TP ${rrTxt}${pipTxt} fixed from SL distance.`);
-
     const trigLine = T(lang, `Trigger: ${trigId}.`, `Trigger: ${trigEn}.`);
+
     return `${head} ${trigLine} Zona ${zone} (38,2–61,8% kaki reaksi). ${action} ${slTxt}${tpTxt} ${tail}`;
   }
 
   const zone = `${f(plan.zone.min)} – ${f(plan.zone.max)}`;
   const rrTxt = style.rr.map(x => `${x}R`).join(' / ');
   const action = plan.status === 'RUNNING'
-    ? T(lang, `Status aktif, entry di ${f(plan.entry)}.`, `Status running, entry at ${f(plan.entry)}.`)
+    ? T(lang, `${ord} di ${f(plan.entry)}, harga sudah di dalam zona.`, `${ord} at ${f(plan.entry)}, price already inside zone.`)
     : T(
         lang,
-        `Status waiting zone: entry limit di tepi zona ${f(plan.entry)}, aktif saat harga masuk zona. Batal jika SL atau TP1 tersentuh lebih dulu, atau belum masuk dalam ${durText(plan.expireMs, lang)}.`,
-        `Waiting zone: limit entry at zone edge ${f(plan.entry)}, active once price enters the zone. Cancelled if SL or TP1 is hit first, or not filled within ${durText(plan.expireMs, lang)}.`
+        `${ord} di tepi zona ${f(plan.entry)}, aktif saat harga masuk zona. Batal jika SL atau TP1 tersentuh lebih dulu, atau belum masuk dalam ${durText(plan.expireMs, lang)}.`,
+        `${ord} at zone edge ${f(plan.entry)}, active once price enters the zone. Cancelled if SL or TP1 is hit first, or not filled within ${durText(plan.expireMs, lang)}.`
       );
   const tpTxt = T(lang, ` Target TP ${rrTxt}.`, ` TP targets ${rrTxt}.`);
 
-  const body = T(
+  return T(
     lang,
-    `${meta.zoneLabel} ${zone} di impuls ${f(plan.impulse.low)} → ${f(plan.impulse.high)}. ${meta.zoneNote}. ${action}${tpTxt}`,
-    `${meta.zoneLabel} ${zone} within impulse ${f(plan.impulse.low)} → ${f(plan.impulse.high)}. ${meta.zoneNote}. ${action}${tpTxt}`
+    `${head} ${meta.zoneLabel} ${zone} di impuls ${f(plan.impulse.low)} → ${f(plan.impulse.high)}. ${action}${tpTxt} ${tail}`,
+    `${head} ${meta.zoneLabel} ${zone} within impulse ${f(plan.impulse.low)} → ${f(plan.impulse.high)}. ${action}${tpTxt} ${tail}`
   );
-  return `${head} ${body} ${tail}`;
 }
 
 // ---------- Handler ----------
@@ -672,4 +685,135 @@ export default async function handler(req, res) {
     const htfC = cleanCandles(cnd.htf);
     const mtfC = cleanCandles(cnd.mtf ?? cnd.entry);
     const ltfC = cleanCandles(cnd.ltf);
-    if (mtfC.length < 30 || htfC.length
+    if (mtfC.length < 30 || htfC.length < 20) {
+      return res.status(422).json({ error: 'Data candle belum cukup. Tunggu beberapa menit lalu coba lagi.' });
+    }
+
+    const none = reason => res.status(200).json({ ok: true, signal: null, reason });
+
+    const refAtr = atr(mtfC, 14);
+    if (!(refAtr > 0)) return none('Data volatilitas tidak valid.');
+
+    const htfDir = structureDir(htfC);
+    const mtfDir = structureDir(mtfC);
+    const isScalp = style.kind === 'scalp';
+
+    const rng = SCALP_SL_PIPS[symbol];
+    const slFloor = isScalp ? (rng && pip ? rng[0] * pip : RISK_MIN * refAtr) : 0;
+    const slCap = isScalp ? (rng && pip ? rng[1] * pip : slFloor * 1.5) : 0;
+
+    let dir = 0, plan = null, minTp1Dist = 0;
+
+    if (isScalp) {
+      // Coba kedua arah, pilih kandidat terbaik
+      const cands = [], errs = [];
+      for (const d of [1, -1]) {
+        const out = scalpCandidate(mtfC, d, price, refAtr, htfDir, slFloor, slCap);
+        if (out.plan) cands.push({ dir: d, plan: out.plan });
+        else if (out.err) errs.push(out.err);
+      }
+      if (!cands.length) {
+        return none(errs[0] || T(lang, 'Belum ada setup scalping yang valid. Tunggu trigger M5.', 'No valid scalping setup yet. Wait for an M5 trigger.'));
+      }
+      // Urutan: sweep > BOS > pullback, searah HTF, NOW lebih diutamakan, lalu paling dekat harga
+      const TRIG_W = { sweep: 3, bos: 2, pullback: 1 };
+      const score = c => TRIG_W[c.plan.trigger]
+        + (htfDir === c.dir ? 2 : 0)
+        + (c.plan.mode === 'DIRECT' ? 1 : 0)
+        - Math.min(c.plan.distAtr, 3) * 0.5;
+      cands.sort((x, y) => score(y) - score(x));
+      dir = cands[0].dir;
+      plan = cands[0].plan;
+    } else {
+      const flexible = style.kind === 'day' || style.kind === 'intraday';
+      dir = mtfDir;
+      if (dir === 0 && flexible) {
+        const sma20 = mtfC.slice(-20).reduce((s, c) => s + c.c, 0) / 20;
+        dir = htfDir || (mtfC[mtfC.length - 1].c >= sma20 ? 1 : -1);
+      }
+      if (dir === 0) {
+        return none(T(lang, 'Struktur belum jelas di timeframe MTF. Tidak ada sinyal.', 'Structure is unclear on the MTF. No signal.'));
+      }
+      if (!flexible && htfDir !== 0 && htfDir !== dir) {
+        return none(T(lang, 'Arah HTF berlawanan dengan arah entry. Tidak ada sinyal.', 'HTF direction conflicts with entry. No signal.'));
+      }
+
+      const series = [
+        { role: 'htf', tf: style.tf?.htf, candles: htfC },
+        { role: 'mtf', tf: style.tf?.mtf, candles: mtfC },
+        { role: 'ltf', tf: style.tf?.ltf, candles: ltfC },
+      ];
+      if (style.kind === 'day') {
+        minTp1Dist = DAY_MIN_TP1_PIPS[symbol] && pip ? DAY_MIN_TP1_PIPS[symbol] * pip : 1.5 * refAtr;
+      }
+      plan = (style.kind === 'day' || style.kind === 'intraday')
+        ? bestZonePlan(series, dir, price, refAtr, style.distW)
+        : findZone(series, dir, price, refAtr);
+      if (plan.err) return none(plan.err);
+    }
+
+    const htfTxt = htfDir === 0
+      ? { id: 'belum jelas', en: 'unclear' }
+      : htfDir === dir
+        ? { id: 'searah', en: 'aligned' }
+        : { id: 'berlawanan', en: 'opposite' };
+
+    const entry = plan.entry;
+    const risk = Math.abs(entry - plan.sl);
+    const r = v => Number(v.toFixed(dec));
+
+    if (style.kind === 'day' && minTp1Dist && risk * style.rr[0] < minTp1Dist) {
+      const tp1Dist = (risk * style.rr[0]).toFixed(dec);
+      const minDist = minTp1Dist.toFixed(dec);
+      return none(T(
+        lang,
+        `TP1 ${style.rr[0]}R (${tp1Dist}) di bawah minimum ${minDist} untuk ${symbol}. Setup dilewati.`,
+        `TP1 ${style.rr[0]}R (${tp1Dist}) is below the minimum ${minDist} for ${symbol}. Setup skipped.`
+      ));
+    }
+
+    const tps = style.rr.map(x => entry + dir * risk * x);
+    const tpPips = pip ? tps.map(tp => Math.round(Math.abs(tp - entry) / pip)) : null;
+    const slPips = pip ? Math.round(risk / pip) : null;
+
+    const meta = buildMeta({
+      lang, style, dir, plan, price, pip, htfDir, mtfDir, refAtr, risk,
+    });
+
+    const reason = buildReason({
+      lang, style, dir, plan, dec, htfTxt, meta, slPips, tpPips,
+    });
+
+    const orderType = resolveOrder(plan);
+
+    return res.status(200).json({
+      ok: true,
+      signal: {
+        signal: dir === 1 ? 'BUY' : 'SELL',
+        mode: orderType === 'LIMIT' ? 'LIMIT' : 'MARKET',
+        orderType,
+        orderLabel: orderLabel(dir, orderType),
+        status: plan.status,
+        fill: plan.fill || null,
+        entry: r(entry),
+        sl: r(plan.sl),
+        tp1: r(tps[0]),
+        tp2: r(tps[1]),
+        tp3: r(tps[2]),
+        zone: plan.zone ? { min: r(plan.zone.min), max: r(plan.zone.max) } : null,
+        zoneTf: plan.zoneTf || null,
+        expireMs: plan.status === 'PENDING' ? (plan.expireMs || 0) : 0,
+        confidence: meta.confidence,
+        risk: meta.risk,
+        setup: meta.setup,
+        setupLabel: meta.setupLabel,
+        zoneLabel: meta.zoneLabel,
+        zoneNote: meta.zoneNote,
+        reason,
+      },
+    });
+  } catch (err) {
+    console.error('generate error:', err);
+    return res.status(500).json({ error: 'Server error: ' + err.message });
+  }
+}
