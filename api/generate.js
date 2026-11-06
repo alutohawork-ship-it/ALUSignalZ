@@ -5,17 +5,18 @@
 
 const KV_KEY = 'alu_clients';
 
-const DECIMALS = { XAUUSD: 2, XAGUSD: 3, EURUSD: 5, USDJPY: 3, GBPUSD: 5, BTCUSDT: 2, ETHUSDT: 2, SOLUSDT: 2, XRPUSDT: 4, DJI: 2, DAX: 2 };
+const DECIMALS = { XAUUSD: 2, XAGUSD: 3, EURUSD: 5, USDJPY: 3, GBPUSD: 5, AUDUSD: 5, USDCAD: 5, USDCHF: 5, BTCUSDT: 2, ETHUSDT: 2, SOLUSDT: 2, XRPUSDT: 4, DJI: 2, DAX: 2 };
 
 // Ukuran 1 pip per simbol. Harus sama dengan MARKETS.pip di index.html
-const PIP = { XAUUSD: 0.1, XAGUSD: 0.01, EURUSD: 0.0001, USDJPY: 0.01, GBPUSD: 0.0001, BTCUSDT: 1, ETHUSDT: 0.1, SOLUSDT: 0.01, XRPUSDT: 0.0001, DJI: 1, DAX: 1 };
+const PIP = { XAUUSD: 0.1, XAGUSD: 0.01, EURUSD: 0.0001, USDJPY: 0.01, GBPUSD: 0.0001, AUDUSD: 0.0001, USDCAD: 0.0001, USDCHF: 0.0001, BTCUSDT: 1, ETHUSDT: 0.1, SOLUSDT: 0.01, XRPUSDT: 0.0001, DJI: 1, DAX: 1 };
 
 // Scalping: rentang jarak SL dalam pip [min, max]. Tidak diubah dari ketentuan.
 const SCALP_SL_PIPS = {
-  XAUUSD: [20, 30], XAGUSD: [25, 40],
+  XAUUSD: [25, 30], XAGUSD: [25, 40],
   EURUSD: [10, 15], GBPUSD: [12, 18], USDJPY: [10, 15],
-  BTCUSDT: [150, 250], ETHUSDT: [60, 100],
-  SOLUSDT: [40, 70], XRPUSDT: [50, 80],
+  AUDUSD: [10, 15], USDCAD: [10, 15], USDCHF: [10, 15],
+  BTCUSDT: [150, 250], ETHUSDT: [75, 120],
+  SOLUSDT: [40, 70], XRPUSDT: [55, 90],
   DJI: [40, 70], DAX: [40, 70],
 };
 
@@ -23,6 +24,7 @@ const SCALP_SL_PIPS = {
 const DAY_MIN_TP1_PIPS = {
   XAUUSD: 80, XAGUSD: 40,
   EURUSD: 30, USDJPY: 30, GBPUSD: 40,
+  AUDUSD: 30, USDCAD: 30, USDCHF: 30,
   BTCUSDT: 300, ETHUSDT: 300, SOLUSDT: 300, XRPUSDT: 300,
   DJI: 150, DAX: 100,
 };
@@ -808,6 +810,35 @@ export default async function handler(req, res) {
       cands.sort((x, y) => scalpScore(y, htfDir) - scalpScore(x, htfDir));
       dir = cands[0].dir;
       plan = cands[0].plan;
+    } else if (style.kind === 'day') {
+      // Day Trading: BUY dan SELL sama-sama dinilai, setup yang keluar adalah yang paling kuat.
+      // Kekuatan = skor zona + bonus searah HTF (+2) dan searah MTF (+1).
+      const series = [
+        { role: 'htf', tf: style.tf?.htf, candles: htfC },
+        { role: 'mtf', tf: style.tf?.mtf, candles: mtfC },
+        { role: 'ltf', tf: style.tf?.ltf, candles: ltfC },
+      ];
+      minTp1Dist = DAY_MIN_TP1_PIPS[symbol] && pip ? DAY_MIN_TP1_PIPS[symbol] * pip : 1.5 * refAtr;
+
+      let best = null, lastErr = null, skipMsg = null;
+      for (const d of [1, -1]) {
+        const p = bestZonePlan(series, d, price, refAtr, style.distW);
+        if (p.err) { lastErr = p.err; continue; }
+        const rk = Math.abs(p.entry - p.sl);
+        if (rk * style.rr[0] < minTp1Dist) {
+          skipMsg = T(
+            lang,
+            `TP1 ${style.rr[0]}R (${(rk * style.rr[0]).toFixed(dec)}) di bawah minimum ${minTp1Dist.toFixed(dec)} untuk ${symbol}. Setup dilewati.`,
+            `TP1 ${style.rr[0]}R (${(rk * style.rr[0]).toFixed(dec)}) is below the minimum ${minTp1Dist.toFixed(dec)} for ${symbol}. Setup skipped.`
+          );
+          continue;
+        }
+        const strength = p.score + (d === htfDir ? 2 : 0) + (d === mtfDir ? 1 : 0);
+        if (!best || strength > best.strength) best = { dir: d, plan: p, strength };
+      }
+      if (!best) return none(skipMsg || lastErr || T(lang, 'Belum ada setup Day Trading yang valid.', 'No valid Day Trading setup yet.'));
+      dir = best.dir;
+      plan = best.plan;
     } else {
       const flexible = style.kind === 'day' || style.kind === 'intraday';
       dir = mtfDir;
