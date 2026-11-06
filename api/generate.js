@@ -1,36 +1,105 @@
 // api/generate.js
 // Analisis Pure SMC dijalankan di server. Tidak memanggil API eksternal.
-// Scalping: Mengikuti alur pergerakan M5 (Retracement / Impuls) dengan konfirmasi M1 + M3.
-// Day Trading: Responsif berbasis zona HTF/MTF (H1/M30) dengan eksekusi cepat gaya scalping.
+// Hanya klien terdaftar dan masih aktif yang boleh memakai endpoint ini.
+// Scalping: Hit & Run (arah M5, filter M15, pullback M5 sehat, trigger M1/M5).
+// Day Trading: Zone Strength (zona kuat H1/M30, trend atau counter, konfirmasi M15/M5, TP 1.5R / 2R / psikologi).
+// Intraday dan Swing tidak berubah.
 
 const KV_KEY = 'alu_clients';
 
-const DECIMALS = { XAUUSD: 2, XAGUSD: 3, EURUSD: 5, USDJPY: 3, GBPUSD: 5, BTCUSDT: 2, ETHUSDT: 2, SOLUSDT: 2, XRPUSDT: 4, DJI: 2, DAX: 2 };
-
-const PIP = { XAUUSD: 0.1, XAGUSD: 0.01, EURUSD: 0.0001, USDJPY: 0.01, GBPUSD: 0.0001, BTCUSDT: 1, ETHUSDT: 0.1, SOLUSDT: 0.01, XRPUSDT: 0.0001, DJI: 1, DAX: 1 };
-
-const SCALP_SL_PIPS = {
-  XAUUSD: [15, 25], XAGUSD: [20, 35],
-  EURUSD: [8, 12], GBPUSD: [10, 15], USDJPY: [8, 12],
-  BTCUSDT: [120, 200], ETHUSDT: [50, 80],
-  SOLUSDT: [30, 60], XRPUSDT: [40, 70],
-  DJI: [30, 60], DAX: [30, 60],
+// Harus sama dengan decimals di MARKETS (index.html)
+const DECIMALS = {
+  XAUUSD: 2, XAGUSD: 3, EURUSD: 5, USDJPY: 3, GBPUSD: 5, DJI: 2,
+  AUDUSD: 5, USDCAD: 5, USDCHF: 5,
+  CLUSDT: 2, NATGASUSDT: 3, COPPERUSDT: 4, XPDUSDT: 2, XPTUSDT: 2,
+  BRENTOIL: 2, PALLADIUM: 2, PLATINUM: 2, SP500: 2, XYZ100: 2, JP225: 0, QQQUSDT: 2,
+  BTCUSDT: 2, ETHUSDT: 2, SOLUSDT: 2, XRPUSDT: 4, BNBUSDT: 2, ADAUSDT: 4,
+  LINKUSDT: 3, AVAXUSDT: 3, DOGEUSDT: 5, SUIUSDT: 4, NEARUSDT: 4, DOTUSDT: 4,
+  LTCUSDT: 2, TAOUSDT: 2, HYPEUSDT: 2,
 };
 
+// Ukuran 1 pip per simbol. Harus sama dengan MARKETS.pip di index.html
+const PIP = {
+  XAUUSD: 0.1, XAGUSD: 0.01, EURUSD: 0.0001, USDJPY: 0.01, GBPUSD: 0.0001, DJI: 1,
+  AUDUSD: 0.0001, USDCAD: 0.0001, USDCHF: 0.0001,
+  CLUSDT: 0.01, NATGASUSDT: 0.001, COPPERUSDT: 0.0001, XPDUSDT: 0.1, XPTUSDT: 0.1,
+  BRENTOIL: 0.01, PALLADIUM: 0.1, PLATINUM: 0.1, SP500: 1, XYZ100: 1, JP225: 1, QQQUSDT: 0.1,
+  BTCUSDT: 1, ETHUSDT: 0.1, SOLUSDT: 0.01, XRPUSDT: 0.0001, BNBUSDT: 0.1, ADAUSDT: 0.0001,
+  LINKUSDT: 0.001, AVAXUSDT: 0.001, DOGEUSDT: 0.00001, SUIUSDT: 0.0001, NEARUSDT: 0.0001,
+  DOTUSDT: 0.0001, LTCUSDT: 0.01, TAOUSDT: 0.01, HYPEUSDT: 0.01,
+};
+
+// Scalping: rentang jarak SL dalam pip [min, max] dari entry.
+const SCALP_SL_PIPS = {
+  XAUUSD: [20, 30], XAGUSD: [25, 40],
+  EURUSD: [10, 15], GBPUSD: [12, 18], USDJPY: [10, 15],
+  AUDUSD: [10, 15], USDCAD: [10, 15], USDCHF: [10, 15],
+  CLUSDT: [8, 15], NATGASUSDT: [10, 20], COPPERUSDT: [30, 50], XPDUSDT: [20, 35], XPTUSDT: [20, 30],
+  BRENTOIL: [8, 15], PALLADIUM: [20, 35], PLATINUM: [20, 30],
+  SP500: [15, 30], XYZ100: [25, 45], JP225: [20, 40], QQQUSDT: [15, 30],
+  BTCUSDT: [150, 250], ETHUSDT: [60, 100], SOLUSDT: [40, 70], XRPUSDT: [50, 80],
+  BNBUSDT: [15, 30], ADAUSDT: [6, 12], LINKUSDT: [25, 40], AVAXUSDT: [25, 40],
+  DOGEUSDT: [25, 45], SUIUSDT: [20, 35], NEARUSDT: [50, 90], DOTUSDT: [30, 60],
+  LTCUSDT: [20, 35], TAOUSDT: [40, 70], HYPEUSDT: [20, 35],
+};
+
+// Jika SL struktur melebihi batas max pair (Scalping):
+//   'FLAG' = SL tetap dipakai, risk HIGH, confidence LOW
+//   'CAP'  = SL dipaksa masuk batas max pair, risk HIGH, confidence LOW
+const SCALP_OVER_CAP = 'FLAG';
+
+// Level psikologi per pair (perkiraan, sesuaikan dengan harga live)
+const DAY_PSY_STEP = {
+  XAUUSD: 50, XAGUSD: 1, EURUSD: 0.005, USDJPY: 0.5, GBPUSD: 0.005,
+  AUDUSD: 0.005, USDCAD: 0.005, USDCHF: 0.005,
+  CLUSDT: 5, NATGASUSDT: 0.5, COPPERUSDT: 0.1, XPDUSDT: 50, XPTUSDT: 50,
+  BRENTOIL: 5, PALLADIUM: 50, PLATINUM: 50, SP500: 100, XYZ100: 500, JP225: 500, QQQUSDT: 5,
+  BTCUSDT: 1000, ETHUSDT: 100, SOLUSDT: 10, XRPUSDT: 0.1, BNBUSDT: 10, ADAUSDT: 0.05,
+  LINKUSDT: 0.5, AVAXUSDT: 0.5, DOGEUSDT: 0.01, SUIUSDT: 0.1, NEARUSDT: 0.1, DOTUSDT: 0.5,
+  LTCUSDT: 5, TAOUSDT: 5, HYPEUSDT: 1, DJI: 500,
+};
+
+// Day Trading
+const DAY_ZONE_MIN_LEG_ATR = 1.2;          // kaki impuls minimal 1.2 ATR agar zona dianggap kuat
+const DAY_FAR_ATR = 2.0;                   // harga lebih dari ini dari zona trend = counter boleh dipakai
+const DAY_NEAR_ATR = 1.0;                  // harga dalam jarak ini dari zona = entry NOW
+const DAY_MAX_DIST_ATR = 5.0;              // zona lebih jauh dari ini tidak dipakai
+const DAY_SL_MIN_ATR = 0.8;                // SL minimal 0.8 ATR M15
+const DAY_SL_MAX_ATR = 2.5;                // SL maksimal 2.5 ATR M15 (lebih lebar diberi flag WIDE_SL)
+const DAY_LIMIT_EXPIRE_MS = 90 * 60 * 1000; // LIMIT Day Trading batal setelah 90 menit
+
+// ---------- Scalping: Hit & Run ----------
+const HR_PULLBACK_MIN = 0.236;   // pullback minimal 23,6% dari kaki impuls
+const HR_PULLBACK_MAX = 0.786;   // pullback maksimal 78,6%. Lebih dalam = struktur melemah
+const HR_SWING_AGE_M5 = 30;      // kaki M5: swing maksimal 30 candle M5 yang lalu
+const HR_SWING_AGE_M1 = 60;      // kaki M1: swing maksimal 60 candle M1 yang lalu
+const HR_MAX_SPIKE_ATR = 2.5;    // candle trigger lebih besar dari ini = spike, tidak dikejar
+const HR_MAX_CHASE_ATR = 3.5;    // harga lebih dari ini jauh dari titik pullback, tidak dikejar
+
+const TF_MS = { '1m': 60000, '5m': 300000, '15m': 900000, '30m': 1800000, '1h': 3600000, '4h': 14400000, '1d': 86400000 };
+const TF_LABEL = { '1m': 'M1', '5m': 'M5', '15m': 'M15', '30m': 'M30', '1h': 'H1', '4h': 'H4', '1d': 'D1' };
+const KIND_NAME = { OB: 'Order Block', FVG: 'FVG', OTE: 'OTE 62-79%', FALLBACK: 'Swing' };
+const ROLE_W = { htf: 3, mtf: 2, ltf: 1 };
+
+// Harus sama dengan STYLE_TF di index.html
+// kind: 'scalp'    = Hit & Run: arah M5, entry NOW saat trigger M1/M5, TP 1R / 2R / 3R
+//       'day'      = Zone Strength: zona H1/M30, konfirmasi M15/M5, entry NOW atau LIMIT, TP 1.5R / 2R / psikologi
+//       'intraday' = zona terbaik (skor probabilitas), TP 1.5R / 3R / 5.5R
+//       'zone'     = Swing: zona fresh, TP 2R / 4.5R / 8.5R. Wajib searah HTF.
 const STYLES = {
   'Scalping': {
-    label: 'Scalping (HTF: M15 | MTF: M5 | LTF: M1/M3)',
+    label: 'Scalping Hit & Run (HTF: M15 | MTF: M5 | LTF: M1)',
     mode: 'MARKET',
     kind: 'scalp',
     tf: { htf: '15m', mtf: '5m', ltf: '1m' },
     rr: [1, 2, 3],
   },
   'Day Trading': {
-    label: 'Day Trading (HTF: H1 | MTF: M30 | LTF: M5) - Zone Responsive',
+    label: 'Day Trading Zone (HTF: H1 | MTF: M30 | Konfirmasi: M15 + M5)',
     mode: 'MARKET',
     kind: 'day',
     tf: { htf: '1h', mtf: '30m', ltf: '5m' },
-    rr: [2, 3, 4],
+    rr: [1.5, 2, 3],
   },
   'Intraday': {
     label: 'Intraday (HTF: H4 | MTF: H1 | LTF: M15+M5)',
@@ -49,12 +118,33 @@ const STYLES = {
   },
 };
 
-const SL_BUFFER = 0.2;
-const RISK_MIN = 0.5;
+const SL_BUFFER = 0.2;                     // buffer SL dalam ATR
+const RISK_MIN = 0.5;                      // SL minimal 0.5 ATR
+const LIMIT_RISK_MAX = 4.0;                // swing: SL maks 4 ATR
+const ZONE_MAX_DIST = 4.0;                 // swing: zona maks 4 ATR dari harga
+const IMPULSE_MAX_AGE = 80;                // impuls harus masih baru (dalam candle)
+const HOLD_ATR_MIN = 0.5;                  // swing: SL minimal 0.5 ATR timeframe MTF
+const EXPIRE_BARS = 6;                     // pending batal setelah 6 candle timeframe zona
+const EXPIRE_MIN_MS = 60 * 60 * 1000;      // minimal 1 jam
+const EXPIRE_MAX_MS = 48 * 60 * 60 * 1000; // maksimal 48 jam
 const MIN_CANDLES = 20;
 
 const T = (lang, id, en) => (lang === 'en' ? en : id);
+
+// BUY NOW / SELL NOW / BUY LIMIT / SELL LIMIT
 const orderLabel = (dir, orderType) => `${dir === 1 ? 'BUY' : 'SELL'} ${orderType === 'LIMIT' ? 'LIMIT' : 'NOW'}`;
+
+// Jenis order dari plan. Plan tanpa orderType diturunkan dari status.
+const resolveOrder = plan => plan.orderType || (plan.status === 'PENDING' ? 'LIMIT' : 'NOW');
+
+// Catatan kualitas (id, en). Setiap kunci yang dipakai di flags harus ada di sini.
+const FLAG_TXT = {
+  WIDE_SL: ['SL melebihi 2,5 ATR M15, risiko tinggi', 'SL above 2.5 ATR M15, high risk'],
+  NO_TRIGGER: ['belum ada konfirmasi M5, entry mengikuti zona', 'no M5 confirmation yet, entry follows zone'],
+  PSY_NONE: ['tidak ada level psikologi dalam rentang, TP3 memakai 3R', 'no psychological level in range, TP3 uses 3R'],
+};
+
+// ---------- Akses klien ----------
 
 async function kv(command) {
   const r = await fetch(process.env.KV_REST_API_URL, {
@@ -71,14 +161,20 @@ async function kv(command) {
 }
 
 async function checkAccess(email) {
-  if (!email) return { ok: false, msg: 'Sesi tidak punya email. Silakan login ulang.' };
+  if (!email) return { ok: false, msg: 'Sesi tidak punya email. Silakan logout lalu login ulang.' };
   const raw = await kv(['GET', KV_KEY]);
   const clients = raw ? JSON.parse(raw) : [];
   const c = clients.find(x => x.email === email);
-  if (!c) return { ok: false, msg: 'Email tidak terdaftar di database.' };
-  if (new Date(c.expires_at) <= new Date()) return { ok: false, msg: 'Masa aktif langganan telah berakhir.' };
+  if (!c) {
+    return { ok: false, msg: 'Email ini tidak ada di daftar klien. Kalau baru dihapus admin, logout lalu login ulang.' };
+  }
+  if (new Date(c.expires_at) <= new Date()) {
+    return { ok: false, msg: `Masa aktif habis pada ${String(c.expires_at).slice(0, 10)}. Hubungi admin untuk perpanjangan.` };
+  }
   return { ok: true };
 }
+
+// ---------- Helper candle ----------
 
 function cleanCandles(rows) {
   if (!Array.isArray(rows)) return [];
@@ -89,6 +185,7 @@ function cleanCandles(rows) {
     .slice(-200);
 }
 
+// Swing terkonfirmasi: high/low yang lebih tinggi/rendah dari n candle di kiri dan kanan
 function swings(candles, n = 2) {
   const out = [];
   for (let i = n; i < candles.length - n; i++) {
@@ -118,113 +215,844 @@ function atr(candles, period = 14) {
   return s.length ? s.reduce((a, b) => a + b, 0) / s.length : 0;
 }
 
-// Analisis Fase M5 untuk Scalping
-function analyzeM5Phase(m5Candles, price) {
-  const sw = swings(m5Candles, 2);
-  const sh = lastSwing(sw, 'H');
-  const sl = lastSwing(sw, 'L');
-  const sma20 = m5Candles.slice(-20).reduce((s, c) => s + c.c, 0) / 20;
-  const lastC = m5Candles[m5Candles.length - 1];
-  const trendDir = lastC.c >= sma20 ? 1 : -1;
+// 1 = bullish (HH & HL), -1 = bearish (LH & LL), 0 = belum jelas
+function structureDir(candles) {
+  const sw = swings(candles, 2);
+  const highs = sw.filter(s => s.type === 'H').slice(-2);
+  const lows = sw.filter(s => s.type === 'L').slice(-2);
+  if (highs.length === 2 && lows.length === 2) {
+    if (highs[1].price > highs[0].price && lows[1].price > lows[0].price) return 1;
+    if (highs[1].price < highs[0].price && lows[1].price < lows[0].price) return -1;
+  }
+  const last = candles[candles.length - 1];
+  const sh = lastSwing(sw, 'H'), sl = lastSwing(sw, 'L');
+  if (sh && last.c > sh.price) return 1;
+  if (sl && last.c < sl.price) return -1;
+  return 0;
+}
 
-  let phase = 'IMPULSE';
-  let suggestedDir = trendDir;
+const expireFor = tf => Math.min(Math.max(EXPIRE_BARS * TF_MS[tf], EXPIRE_MIN_MS), EXPIRE_MAX_MS);
 
-  if (sh && sl) {
-    const range = sh.price - sl.price;
-    const midPoint = sl.price + (range / 2);
-    if (trendDir === 1) {
-      if (price < lastC.o && price > midPoint) { phase = 'RETRACEMENT'; suggestedDir = -1; }
-      else { phase = 'IMPULSE'; suggestedDir = 1; }
-    } else {
-      if (price > lastC.o && price < midPoint) { phase = 'RETRACEMENT'; suggestedDir = 1; }
-      else { phase = 'IMPULSE'; suggestedDir = -1; }
+// ---------- Impuls & kandidat zona (Day, Intraday, Swing) ----------
+
+// Cari impuls terakhir searah dir, lalu kumpulkan FVG, OB, dan OTE (retracement 62-79%).
+function impulseZones(candles, isBuy, a) {
+  const sw = swings(candles, 2);
+  let S = null, E;
+  if (isBuy) {
+    E = lastSwing(sw, 'H');
+    if (!E) return { err: 'Swing high belum terbentuk.' };
+    for (let k = sw.length - 1; k >= 0; k--) {
+      if (sw[k].type === 'L' && sw[k].i < E.i) { S = sw[k]; break; }
+    }
+    if (!S) return { err: 'Swing low impuls belum terbentuk.' };
+  } else {
+    E = lastSwing(sw, 'L');
+    if (!E) return { err: 'Swing low belum terbentuk.' };
+    for (let k = sw.length - 1; k >= 0; k--) {
+      if (sw[k].type === 'H' && sw[k].i < E.i) { S = sw[k]; break; }
+    }
+    if (!S) return { err: 'Swing high impuls belum terbentuk.' };
+  }
+  const legs = Math.abs(E.price - S.price);
+  if (legs < a) return { err: 'Impuls terlalu kecil.' };
+
+  const zones = [];
+  if (isBuy) {
+    for (let k = S.i + 2; k <= E.i; k++) {
+      const lo = candles[k - 2].h, hi = candles[k].l;
+      if (hi > lo) zones.push({ type: 'FVG', lo, hi, from: k });
+    }
+    for (let j = E.i - 1; j >= S.i; j--) {
+      const c = candles[j];
+      if (c.c < c.o) { zones.push({ type: 'OB', lo: c.c, hi: c.o, from: j }); break; }
+    }
+  } else {
+    for (let k = S.i + 2; k <= E.i; k++) {
+      const lo = candles[k].h, hi = candles[k - 2].l;
+      if (hi > lo) zones.push({ type: 'FVG', lo, hi, from: k });
+    }
+    for (let j = E.i - 1; j >= S.i; j--) {
+      const c = candles[j];
+      if (c.c > c.o) { zones.push({ type: 'OB', lo: c.o, hi: c.c, from: j }); break; }
     }
   }
-  return { phase, trendDir, suggestedDir };
-}
 
-// Logika Scalping M1+M3+M5
-function scalpAlurPlan(m5C, ltfC, price, a, slFloor, slCap) {
-  const m5Analysis = analyzeM5Phase(m5C, price);
-  const dir = m5Analysis.suggestedDir;
-  const isBuy = dir === 1;
-
-  const ltSw = swings(ltfC, 2);
-  const anchor = lastSwing(ltSw, isBuy ? 'L' : 'H');
-
-  let rawStop;
-  if (anchor) {
-    rawStop = isBuy ? anchor.price - (SL_BUFFER * a) : anchor.price + (SL_BUFFER * a);
-  } else {
-    rawStop = isBuy ? price - (1.5 * a) : price + (1.5 * a);
-  }
-
-  let risk = Math.abs(price - rawStop);
-  if (risk < slFloor) { rawStop = isBuy ? price - slFloor : price + slFloor; risk = slFloor; }
-  else if (risk > slCap) { rawStop = isBuy ? price - slCap : price + slCap; risk = slCap; }
+  const ote = isBuy
+    ? { type: 'OTE', lo: E.price - 0.79 * legs, hi: E.price - 0.62 * legs, from: E.i }
+    : { type: 'OTE', lo: E.price + 0.62 * legs, hi: E.price + 0.79 * legs, from: E.i };
 
   return {
-    status: 'RUNNING', orderType: 'NOW', mode: 'DIRECT', fill: null,
-    entry: price, sl: rawStop, phase: m5Analysis.phase,
-    zoneDesc: m5Analysis.phase === 'RETRACEMENT' ? 'Retracement Zona Pendek M5' : 'Impulse Continuation M5',
-    riskAtr: risk / a, dir,
+    S, E, zones, ote,
+    impulse: { low: Math.min(S.price, E.price), high: Math.max(S.price, E.price) },
   };
 }
 
-// Logika Day Trading Responsif Berbasis Zona HTF (H1) & MTF (M30)
-function dayTradingZonePlan(htfC, mtfC, price, a, pip) {
-  // Cari Order Block / Swing utama di HTF (H1) atau MTF (M30) terdekat dengan harga saat ini
-  const htfSwings = swings(htfC, 2);
-  const htfHigh = lastSwing(htfSwings, 'H');
-  const htfLow = lastSwing(htfSwings, 'L');
+// ---------- Scalping: Hit & Run ----------
 
-  const mtfSwings = swings(mtfC, 2);
-  const mtfHigh = lastSwing(mtfSwings, 'H');
-  const mtfLow = lastSwing(mtfSwings, 'L');
+// Kaki impuls: dari swing terkonfirmasi terakhir (L untuk BUY, H untuk SELL)
+// sampai ekstrem sesudahnya. Kosong jika belum ada kaki yang valid.
+function hrLeg(candles, isBuy, maxAge) {
+  const n = candles.length;
+  const sw = swings(candles, 2).filter(s => n - 1 - s.i <= maxAge);
+  const type = isBuy ? 'L' : 'H';
+  const anchor = lastSwing(sw, type);
+  if (!anchor) return null;
 
-  // Tentukan apakah harga sedang mendekati zona Support/Demand HTF/MTF
-  let zoneType = 'HTF Support / Demand Rejection';
-  let dir = 1;
-  let zoneTarget = price;
+  let ext = anchor.i;
+  for (let i = anchor.i + 1; i < n; i++) {
+    if (isBuy ? candles[i].h > candles[ext].h : candles[i].l < candles[ext].l) ext = i;
+  }
+  if (ext === anchor.i) return null;
 
-  const distToHtfLow = htfLow ? Math.abs(price - htfLow.price) : Infinity;
-  const distToHtfHigh = htfHigh ? Math.abs(price - htfHigh.price) : Infinity;
+  return isBuy
+    ? { low: anchor.price, high: candles[ext].h, extIdx: ext }
+    : { low: candles[ext].l, high: anchor.price, extIdx: ext };
+}
 
-  if (distToHtfLow < distToHtfHigh && htfLow) {
-    // Dekat area Support/Demand bawah HTF -> Siap BUY Rebound
-    dir = 1;
-    zoneTarget = htfLow.price;
-  } else if (htfHigh) {
-    // Dekat area Supply/Resistance atas HTF -> Siap SELL Rejection
-    dir = -1;
-    zoneTarget = htfHigh.price;
-  } else if (mtfLow && Math.abs(price - mtfLow.price) < Math.abs(price - mtfHigh.price)) {
-    dir = 1;
-    zoneTarget = mtfLow.price;
-  } else {
-    dir = -1;
-    zoneTarget = mtfHigh ? mtfHigh.price : price;
+// Pullback sehat: titik terdalam setelah ekstrem kaki harus berada di 23,6%–78,6% kaki,
+// tetap di atas (BUY) / di bawah (SELL) titik awal kaki, dan sudah mulai memantul.
+function hrSetup(candles, isBuy, maxAge) {
+  const leg = hrLeg(candles, isBuy, maxAge);
+  if (!leg) return null;
+
+  const n = candles.length;
+  const size = leg.high - leg.low;
+  if (!(size > 0) || leg.extIdx >= n - 1) return null;
+
+  let di = leg.extIdx + 1;
+  for (let i = di; i < n; i++) {
+    if (isBuy ? candles[i].l < candles[di].l : candles[i].h > candles[di].h) di = i;
+  }
+  if (di >= n - 1) return null;
+
+  const deep = isBuy ? candles[di].l : candles[di].h;
+  if (isBuy ? deep <= leg.low : deep >= leg.high) return null;
+
+  const depth = isBuy ? (leg.high - deep) / size : (deep - leg.low) / size;
+  if (depth < HR_PULLBACK_MIN || depth > HR_PULLBACK_MAX) return null;
+
+  return { leg, deep, deepIdx: di, depth };
+}
+
+// Trigger: candle terakhir menutup di atas (BUY) / di bawah (SELL) titik mikro sesudah pullback.
+function hrTrigger(candles, pb, isBuy, a) {
+  const n = candles.length;
+  const last = candles[n - 1];
+
+  let micro = null;
+  for (let i = pb.deepIdx; i <= n - 2; i++) {
+    const v = isBuy ? candles[i].h : candles[i].l;
+    if (micro === null || (isBuy ? v > micro : v < micro)) micro = v;
+  }
+  if (micro === null) return null;
+
+  const broke = isBuy ? last.c > micro : last.c < micro;
+  if (!broke) return null;
+
+  const spike = (last.h - last.l) / a;
+  if (spike > HR_MAX_SPIKE_ATR) return null;
+
+  return { level: micro, spike };
+}
+
+// SL dari titik pullback yang bisa melebihi batas pair (SCALP_OVER_CAP menentukan perlakuannya)
+function scalpSlFrom(entry, rawStop, isBuy, a, slFloor, slCap) {
+  let stop = rawStop;
+  let risk = Math.abs(entry - stop);
+  if (risk < slFloor) {
+    stop = isBuy ? entry - slFloor : entry + slFloor;
+    risk = slFloor;
+  }
+  let over = false, rawRiskAtr = null;
+  if (risk > slCap) {
+    over = true;
+    rawRiskAtr = risk / a;
+    if (SCALP_OVER_CAP === 'CAP') {
+      stop = isBuy ? entry - slCap : entry + slCap;
+      risk = slCap;
+    }
+  }
+  return { stop, risk, over, rawRiskAtr };
+}
+
+// Hit & Run. Mengembalikan { dir, plan } atau { err: [id, en] }.
+// Urutan: arah M5 -> filter M15 -> pullback M5 sehat -> trigger M1 (atau M5) -> anti kejar -> SL & TP.
+function scalpHitRun(mtfC, ltfC, htfDir, price, a, slFloor, slCap) {
+  const dir = structureDir(mtfC);
+  if (dir === 0) {
+    return { err: ['Struktur M5 belum jelas. Tidak ada sinyal.', 'M5 structure unclear. No signal.'] };
+  }
+  if (htfDir !== 0 && htfDir !== dir) {
+    return { err: ['Arah M5 berlawanan dengan M15. Tidak ada sinyal scalping.', 'M5 direction opposes M15. No scalping signal.'] };
+  }
+  const isBuy = dir === 1;
+
+  const m5 = hrSetup(mtfC, isBuy, HR_SWING_AGE_M5);
+  if (!m5) {
+    return { err: ['Belum ada pullback M5 yang sehat (23,6–78,6%). Tunggu.', 'No healthy M5 pullback (23.6–78.6%). Wait.'] };
   }
 
-  const isBuy = dir === 1;
-  // SL ditempatkan di luar zona HTF/MTF dengan buffer yang aman untuk Day Trading (lebih lebar dari scalping)
-  const slBufferPips = pip ? 15 * pip : 1.5 * a;
-  let rawStop = isBuy ? zoneTarget - slBufferPips : zoneTarget + slBufferPips;
-  let risk = Math.abs(price - rawStop);
+  let trig, trigSrc;
+  if (ltfC.length >= 30) {
+    const la = atr(ltfC, 14);
+    const m1 = la > 0 ? hrSetup(ltfC, isBuy, HR_SWING_AGE_M1) : null;
+    trig = m1 ? hrTrigger(ltfC, m1, isBuy, la) : null;
+    trigSrc = 'M1';
+  } else {
+    trig = hrTrigger(mtfC, m5, isBuy, a);
+    trigSrc = 'M5';
+  }
+  if (!trig) {
+    return { err: [`Menunggu konfirmasi ${trigSrc} searah.`, `Waiting for ${trigSrc} confirmation.`] };
+  }
 
-  // Batasan pengaman risiko minimal/maksimal Day Trading
-  const minRisk = 1.0 * a;
-  const maxRisk = 4.0 * a;
-  if (risk < minRisk) { rawStop = isBuy ? price - minRisk : price + minRisk; risk = minRisk; }
-  else if (risk > maxRisk) { rawStop = isBuy ? price - maxRisk : price + maxRisk; risk = maxRisk; }
+  const chase = Math.abs(price - m5.deep) / a;
+  if (chase > HR_MAX_CHASE_ATR) {
+    return { err: ['Harga sudah terlalu jauh dari titik pullback. Tidak dikejar.', 'Price too far from pullback point. Not chasing.'] };
+  }
+
+  const stopRaw = isBuy ? m5.deep - SL_BUFFER * a : m5.deep + SL_BUFFER * a;
+  if (isBuy ? stopRaw >= price : stopRaw <= price) {
+    return { err: ['Harga sudah menembus titik pullback. Tidak ada sinyal.', 'Price broke the pullback point. No signal.'] };
+  }
+  const s = scalpSlFrom(price, stopRaw, isBuy, a, slFloor, slCap);
 
   return {
-    status: 'RUNNING', orderType: 'NOW', mode: 'DIRECT', fill: null,
-    entry: price, sl: rawStop, zoneDesc: `Responsif Zona HTF/MTF (${zoneType})`,
-    riskAtr: risk / a, dir,
+    dir,
+    plan: {
+      kind: 'hitrun',
+      orderType: 'NOW',
+      mode: 'DIRECT',
+      fill: null,
+      entry: price,
+      status: 'RUNNING',
+      sl: s.stop,
+      zone: { min: Math.min(price, m5.deep), max: Math.max(price, m5.deep) },
+      mid: price,
+      trigger: 'bos',
+      trigSrc,
+      expireMs: 0,
+      distAtr: chase,
+      touches: 0,
+      zoneType: null,
+      flags: [],
+      over: s.over,
+      rawRiskAtr: s.rawRiskAtr,
+      riskAtr: Math.abs(price - s.stop) / a,
+      pullbackDepth: m5.depth,
+    },
   };
 }
+
+// ---------- Day Trading: Zone Strength ----------
+
+// M15 dibentuk dari M5. Grup dihitung dari candle terakhir supaya candle terakhir selalu ikut.
+function aggregateM15(m5) {
+  const out = [];
+  const start = m5.length % 3;
+  for (let i = start; i + 2 < m5.length; i += 3) {
+    const g = m5.slice(i, i + 3);
+    out.push({
+      t: g[0].t,
+      o: g[0].o,
+      h: Math.max(...g.map(c => c.h)),
+      l: Math.min(...g.map(c => c.l)),
+      c: g[2].c,
+    });
+  }
+  return out;
+}
+
+// Trigger M5: candle terakhir menutup menembus high (BUY) atau low (SELL) candle sebelumnya
+function m5Trigger(m5C, isBuy) {
+  const n = m5C.length;
+  if (n < 3) return false;
+  const last = m5C[n - 1], prev = m5C[n - 2];
+  return isBuy ? last.c > prev.h : last.c < prev.l;
+}
+
+// Zona kuat dari H1 dan M30: OB, OTE, FVG dari impuls dengan kaki minimal DAY_ZONE_MIN_LEG_ATR.
+// Zona yang sudah disentuh 2 kali atau lebih, atau sudah tembus, dibuang.
+function dayCollectZones(series) {
+  const out = [];
+  for (const s of series) {
+    const a = atr(s.candles, 14);
+    if (!(a > 0)) continue;
+    const n = s.candles.length;
+    const last = s.candles[n - 1];
+    for (const isBuy of [true, false]) {
+      const imp = impulseZones(s.candles, isBuy, a);
+      if (imp.err) continue;
+      const legAtr = Math.abs(imp.E.price - imp.S.price) / a;
+      if (legAtr < DAY_ZONE_MIN_LEG_ATR) continue;
+
+      for (const z of [...imp.zones, imp.ote]) {
+        if (!(z.hi > z.lo)) continue;
+        if (isBuy ? last.c < z.lo - 0.5 * a : last.c > z.hi + 0.5 * a) continue;
+
+        let touches = 0;
+        for (let m = z.from + 1; m <= n - 2; m++) {
+          if (isBuy ? s.candles[m].l <= z.hi : s.candles[m].h >= z.lo) touches++;
+        }
+        if (touches >= 2) continue;
+
+        out.push({
+          ...z,
+          dir: isBuy ? 1 : -1,
+          src: s.src,
+          tfLabel: s.tfLabel,
+          legAtr,
+          touches,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+// Jarak harga ke zona dalam ATR M15. 0 jika harga di dalam zona.
+const zoneDist = (z, price, a15) =>
+  (price >= z.lo && price <= z.hi) ? 0 : Math.min(Math.abs(price - z.lo), Math.abs(price - z.hi)) / a15;
+
+// Kualitas dasar zona: jenis zona, TF asal, belum pernah disentuh, kaki sangat kuat
+const DAY_TYPE_W = { OB: 3, OTE: 2, FVG: 1, FALLBACK: 0 };
+function dayZoneBase(z) {
+  return (DAY_TYPE_W[z.type] ?? 1)
+    + (z.src === 'htf' ? 2 : 1)
+    + (z.touches === 0 ? 2 : 1)
+    + (z.legAtr >= 2 ? 1 : 0);
+}
+
+// Skor kandidat: kualitas zona + role + konfluensi + trigger M5 - jarak
+function scoreDayCand(z, role, dist, dirArr, trigger, counterConfirmed) {
+  const conf = dirArr.filter(d => d === z.dir).length;
+  const score = dayZoneBase(z)
+    + (role === 'TREND' ? 2 : role === 'NEUTRAL' ? 1 : 0)
+    + conf
+    + (trigger ? 2 : 0)
+    - 1.5 * Math.min(dist, 6)
+    - (role === 'COUNTER' && !counterConfirmed ? 1 : 0);
+  return { z, role, dist, trigger, conf, score };
+}
+
+// Fallback: swing M15 terdekat. Dipakai hanya jika tidak ada zona H1/M30 yang lolos.
+function dayFallbackZone(m15C, a15, dir, price) {
+  const sw = swings(m15C, 2);
+  const sp = lastSwing(sw, dir === 1 ? 'L' : 'H');
+  const base = sp ? sp.price : (dir === 1 ? price - a15 : price + a15);
+  const lo = dir === 1 ? base - 0.2 * a15 : base - 0.3 * a15;
+  const hi = dir === 1 ? base + 0.3 * a15 : base + 0.2 * a15;
+  return {
+    type: 'FALLBACK', lo, hi, from: m15C.length - 1, dir,
+    src: 'm15', tfLabel: 'M15', touches: 0, legAtr: 0,
+  };
+}
+
+// TP3 di level psikologi terdekat di atas 2,2R (maksimal 6R). Null jika tidak ada.
+function dayPsyTp3(symbol, entry, dir, risk, dec) {
+  const step = DAY_PSY_STEP[symbol];
+  if (!step || !(risk > 0)) return null;
+  const target = entry + dir * 2.2 * risk;
+  const lvl = dir === 1 ? Math.ceil(target / step) * step : Math.floor(target / step) * step;
+  const lvlR = Number(lvl.toFixed(dec));
+  const dist = Math.abs(lvlR - entry) / risk;
+  if (dist < 2.2 || dist > 6) return null;
+  return lvlR;
+}
+
+// Workflow Day Trading: arah trend, zona kuat, role, trigger, entry, SL, TP
+function dayTradePlan({ htfC, mtfC, m5C, price, symbol, pip, dec, lang }) {
+  const m15C = aggregateM15(m5C);
+  if (m15C.length < MIN_CANDLES) {
+    return { err: ['Data M15 dari M5 belum cukup.', 'Not enough M15 data from M5.'] };
+  }
+  const a15 = atr(m15C, 14);
+  if (!(a15 > 0)) {
+    return { err: ['Volatilitas M15 tidak valid.', 'Invalid M15 volatility.'] };
+  }
+
+  // 1. Arah tiap timeframe
+  const dH1 = structureDir(htfC);
+  const dM30 = structureDir(mtfC);
+  const dM15 = structureDir(m15C);
+  const dM5 = structureDir(m5C);
+  const dirs = { H1: dH1, M30: dM30, M15: dM15, M5: dM5 };
+  const dirArr = [dH1, dM30, dM15, dM5];
+
+  // 2. Trend: H1 dan M30 bobot 2, M15 dan M5 bobot 1
+  const sc = 2 * dH1 + 2 * dM30 + dM15 + dM5;
+  const trend = sc >= 2 ? 1 : sc <= -2 ? -1 : (dH1 || dM30);
+
+  // Counter hanya jika M5 dan M15 sudah berbalik, atau harga masih jauh dari zona trend
+  const counterConfirmed = trend !== 0 && dM15 === -trend && dM5 === -trend;
+
+  // 3. Zona kuat H1 dan M30
+  const zones = dayCollectZones([
+    { src: 'htf', tfLabel: 'H1', candles: htfC },
+    { src: 'mtf', tfLabel: 'M30', candles: mtfC },
+  ]);
+
+  const trendDists = zones.filter(z => trend !== 0 && z.dir === trend).map(z => zoneDist(z, price, a15));
+  const minTrendDist = trendDists.length ? Math.min(...trendDists) : Infinity;
+  const counterAllowed = trend === 0 || counterConfirmed || minTrendDist > DAY_FAR_ATR;
+
+  // 4. Trigger M5 per arah
+  const trigBuy = m5Trigger(m5C, true);
+  const trigSell = m5Trigger(m5C, false);
+  const trigOf = d => (d === 1 ? trigBuy : trigSell);
+
+  // 5. Klasifikasi role dan skoring
+  const cands = [];
+  for (const z of zones) {
+    const role = trend === 0 ? 'NEUTRAL' : z.dir === trend ? 'TREND' : 'COUNTER';
+    if (role === 'COUNTER' && !counterAllowed) continue;
+    const dist = zoneDist(z, price, a15);
+    if (dist > DAY_MAX_DIST_ATR) continue;
+    cands.push(scoreDayCand(z, role, dist, dirArr, trigOf(z.dir), counterConfirmed));
+  }
+
+  // 6. Fallback swing M15 agar sinyal selalu keluar
+  if (!cands.length) {
+    const sma20 = m15C.slice(-20).reduce((s, c) => s + c.c, 0) / 20;
+    const fdir = trend || dM15 || (price >= sma20 ? 1 : -1);
+    const fz = dayFallbackZone(m15C, a15, fdir, price);
+    const role = trend === 0 ? 'NEUTRAL' : fdir === trend ? 'TREND' : 'COUNTER';
+    cands.push(scoreDayCand(fz, role, zoneDist(fz, price, a15), dirArr, trigOf(fdir), counterConfirmed));
+  }
+
+  cands.sort((x, y) => y.score - x.score);
+  const best = cands[0];
+  const { z, role, dist, trigger } = best;
+  const dir = z.dir;
+  const isBuy = dir === 1;
+
+  // 7. Entry: NOW jika di dalam zona, dekat, atau fallback. LIMIT di tepi zona jika jauh.
+  const inside = price >= z.lo && price <= z.hi;
+  const orderType = (inside || dist <= DAY_NEAR_ATR || z.type === 'FALLBACK') ? 'NOW' : 'LIMIT';
+  const entry = orderType === 'NOW' ? price : (isBuy ? z.hi : z.lo);
+
+  // 8. SL: di luar zona + buffer. Dibatasi min dan max, jika lebih lebar diberi flag.
+  const minR = DAY_SL_MIN_ATR * a15;
+  const maxR = DAY_SL_MAX_ATR * a15;
+  let sl = isBuy ? z.lo - SL_BUFFER * a15 : z.hi + SL_BUFFER * a15;
+  if (isBuy ? sl >= entry : sl <= entry) sl = isBuy ? entry - minR : entry + minR;
+  let risk = Math.abs(entry - sl);
+  if (risk < minR) {
+    sl = isBuy ? entry - minR : entry + minR;
+    risk = minR;
+  }
+  const over = risk > maxR;
+
+  // 9. TP: 1.5R, 2R, dan level psikologi (atau 3R jika tidak ada)
+  const tp1 = entry + dir * 1.5 * risk;
+  const tp2 = entry + dir * 2 * risk;
+  const psy = dayPsyTp3(symbol, entry, dir, risk, dec);
+  const tp3 = psy != null ? psy : entry + dir * 3 * risk;
+
+  const flags = [];
+  if (over) flags.push('WIDE_SL');
+  if (orderType === 'NOW' && !trigger) flags.push('NO_TRIGGER');
+  if (psy == null) flags.push('PSY_NONE');
+
+  // Confidence dan risk
+  let pts = 0;
+  if (role === 'TREND') pts += 2;
+  else if (role === 'NEUTRAL') pts += 1;
+  if (best.conf >= 3) pts += 2;
+  else if (best.conf >= 2) pts += 1;
+  if (trigger) pts += 1;
+  if (z.type === 'OB') pts += 1;
+  if (z.touches === 0 && z.type !== 'FALLBACK') pts += 1;
+  if (orderType === 'NOW') pts += 1;
+  let confidence = pts >= 6 ? 'HIGH' : pts >= 4 ? 'MEDIUM' : 'LOW';
+  if (over) confidence = 'LOW';
+
+  const riskAtr = risk / a15;
+  let riskCode = over || riskAtr > 2.5 ? 'HIGH' : riskAtr > 1.5 ? 'MEDIUM' : 'LOW';
+  if (role === 'COUNTER' && riskCode === 'LOW') riskCode = 'MEDIUM';
+
+  // Label dan setup
+  const setup = trend === 0 ? 'NEUTRAL' : role === 'COUNTER' ? 'REVERSAL' : 'CONTINUATION';
+  const setupLabel = {
+    NEUTRAL: T(lang, 'Netral (trend belum jelas)', 'Neutral (trend unclear)'),
+    CONTINUATION: T(lang, 'Continuation (searah trend)', 'Continuation (with trend)'),
+    REVERSAL: T(lang, 'Counter-trend (melawan trend, konfirmasi M5/M15)', 'Counter-trend (against trend, M5/M15 confirmed)'),
+  }[setup];
+  const side = isBuy ? 'Demand' : 'Supply';
+  const zoneLabel = `${KIND_NAME[z.type] || z.type} ${side} ${z.tfLabel} · ${role}`;
+  const distPip = Math.round(Math.abs(entry - price) / (pip || a15));
+  const zoneNote = orderType === 'NOW'
+    ? `${orderLabel(dir, 'NOW')} · ${inside ? T(lang, 'harga di dalam zona', 'price inside zone') : T(lang, 'harga dekat tepi zona', 'price near zone edge')}`
+    : `${orderLabel(dir, 'LIMIT')} · ${T(lang, `tunggu harga ke tepi zona, ${distPip} pip`, `wait for price at zone edge, ${distPip} pips`)}`;
+
+  return {
+    dir,
+    plan: {
+      kind: 'day',
+      role,
+      orderType,
+      status: orderType === 'NOW' ? 'RUNNING' : 'PENDING',
+      entry,
+      sl,
+      tps: [tp1, tp2, tp3],
+      zone: { min: z.lo, max: z.hi },
+      zoneTf: z.tfLabel,
+      zoneType: z.type,
+      expireMs: orderType === 'LIMIT' ? DAY_LIMIT_EXPIRE_MS : 0,
+      flags,
+      over,
+      dirs,
+      meta: { confidence, risk: riskCode, setup, setupLabel, zoneLabel, zoneNote },
+    },
+  };
+}
+
+// ---------- Intraday: zona terbaik berdasarkan skor probabilitas ----------
+
+function bestZonePlan(series, dir, price, refAtr, distW) {
+  const isBuy = dir === 1;
+  const pool = [];
+
+  for (const s of series) {
+    if (!s.candles || s.candles.length < MIN_CANDLES) continue;
+    const a = atr(s.candles, 14);
+    if (!(a > 0)) continue;
+    const imp = impulseZones(s.candles, isBuy, a);
+    if (imp.err) continue;
+
+    const n = s.candles.length;
+    for (const z of [...imp.zones, imp.ote]) {
+      const inside = price >= z.lo && price <= z.hi;
+      const beyond = isBuy ? price < z.lo : price > z.hi;
+      const edge = isBuy ? z.hi : z.lo;
+      const dist = inside ? 0 : Math.abs(price - edge);
+
+      let touches = 0;
+      for (let m = z.from + 1; m <= n - 2; m++) {
+        if (isBuy ? s.candles[m].l <= z.hi : s.candles[m].h >= z.lo) touches++;
+      }
+
+      const recency = Math.max(0, 1 - (n - 1 - z.from) / IMPULSE_MAX_AGE);
+      const typeBonus = z.type === 'OB' ? 1 : z.type === 'FVG' ? 0.5 : 0;
+
+      const score = ROLE_W[s.role] * 2
+        + recency * 2
+        + typeBonus
+        + (inside ? 3 : 0)
+        - touches * 1.5
+        - distW * Math.min(dist / a, 5)
+        - (beyond ? 6 : 0);
+
+      pool.push({
+        z, a, score, inside, beyond, edge, touches,
+        distAtr: dist / a,
+        role: s.role, tf: s.tf, impulse: imp.impulse,
+      });
+    }
+  }
+
+  if (!pool.length) return { err: 'Belum ada impuls yang terbentuk di HTF, MTF, maupun LTF.' };
+
+  pool.sort((x, y) => y.score - x.score);
+  const best = pool[0];
+  const active = best.inside || best.beyond;
+  const entry = active ? price : best.edge;
+
+  let sl = isBuy ? best.z.lo - SL_BUFFER * best.a : best.z.hi + SL_BUFFER * best.a;
+  let risk = Math.abs(entry - sl);
+  const minRisk = RISK_MIN * refAtr;
+  if (risk < minRisk) {
+    sl = isBuy ? entry - minRisk : entry + minRisk;
+    risk = minRisk;
+  }
+
+  return {
+    status: active ? 'RUNNING' : 'PENDING',
+    orderType: active ? 'NOW' : 'LIMIT',
+    entry,
+    sl,
+    zone: { min: best.z.lo, max: best.z.hi },
+    zoneType: best.z.type,
+    zoneRole: best.role,
+    zoneTf: best.tf,
+    impulse: best.impulse,
+    touches: best.touches,
+    distAtr: best.distAtr,
+    expireMs: expireFor(best.tf),
+    score: best.score,
+  };
+}
+
+// ---------- Swing: zona fresh ----------
+
+function freshZonePlan(candles, dir, price, a, refAtr) {
+  const n = candles.length;
+  const isBuy = dir === 1;
+  const imp = impulseZones(candles, isBuy, a);
+  if (imp.err) return imp;
+  const { S, E } = imp;
+
+  if (n - 1 - S.i > IMPULSE_MAX_AGE) return { err: 'Impuls terlalu lama.' };
+
+  for (let i = E.i + 1; i < n; i++) {
+    const c = candles[i];
+    if (isBuy ? c.l < S.price : c.h > S.price) return { err: 'Struktur sudah patah.' };
+    if (isBuy ? c.h > E.price : c.l < E.price) return { err: 'Masih membuat extreme baru, tunggu pullback.' };
+  }
+
+  const last = candles[n - 1];
+  const maxDist = ZONE_MAX_DIST * a;
+  const minRisk = Math.max(RISK_MIN * a, HOLD_ATR_MIN * refAtr);
+  const maxRisk = LIMIT_RISK_MAX * Math.max(a, refAtr);
+
+  const isFresh = z => {
+    if (isBuy ? price < z.lo : price > z.hi) return false;
+    for (let m = z.from + 1; m <= n - 2; m++) {
+      if (isBuy ? candles[m].l <= z.hi : candles[m].h >= z.lo) return false;
+    }
+    const inside = price >= z.lo && price <= z.hi;
+    if (!inside && (isBuy ? last.l <= z.hi : last.h >= z.lo)) return false;
+    const dist = isBuy ? price - z.hi : z.lo - price;
+    if (!inside && dist > maxDist) return false;
+    return true;
+  };
+
+  const build = z => {
+    const inZone = price >= z.lo && price <= z.hi;
+    const entry = inZone ? price : (isBuy ? z.hi : z.lo);
+    let sl = isBuy ? z.lo - SL_BUFFER * a : z.hi + SL_BUFFER * a;
+    let risk = Math.abs(entry - sl);
+    if (risk < minRisk) {
+      sl = isBuy ? entry - minRisk : entry + minRisk;
+      risk = minRisk;
+    }
+    return { z, inZone, entry, sl, risk };
+  };
+
+  const candidates = imp.zones
+    .filter(isFresh)
+    .map(build)
+    .filter(p => p.risk <= maxRisk)
+    .sort((x, y) => y.z.from - x.z.from);
+
+  if (!candidates.length) return { err: 'Tidak ada zona fresh di timeframe ini.' };
+
+  const p = candidates[0];
+  return {
+    status: p.inZone ? 'RUNNING' : 'PENDING',
+    orderType: p.inZone ? 'NOW' : 'LIMIT',
+    entry: p.entry,
+    sl: p.sl,
+    zone: { min: p.z.lo, max: p.z.hi },
+    zoneType: p.z.type,
+    touches: 0,
+    distAtr: Math.abs(price - p.entry) / a,
+    impulse: imp.impulse,
+  };
+}
+
+function findZone(series, dir, price, refAtr) {
+  for (const s of series) {
+    if (!s.tf || !s.candles || s.candles.length < MIN_CANDLES) continue;
+    const a = atr(s.candles, 14);
+    if (!(a > 0)) continue;
+    const plan = freshZonePlan(s.candles, dir, price, a, refAtr);
+    if (plan.err) continue;
+    return {
+      ...plan,
+      zoneRole: s.role,
+      zoneTf: s.tf,
+      expireMs: expireFor(s.tf),
+    };
+  }
+  return { err: 'Tidak ada zona FVG atau Order Block yang fresh di HTF, MTF, maupun LTF. Tidak ada sinyal.' };
+}
+
+// ---------- Metadata setup untuk Scalping, Intraday, Swing ----------
+
+function buildMeta({ lang, style, dir, plan, price, pip, htfDir, mtfDir, refAtr, risk }) {
+  const isScalp = style.kind === 'scalp';
+  const orderType = resolveOrder(plan);
+  const ord = orderLabel(dir, orderType);
+
+  const setup = htfDir === 0 ? 'NEUTRAL' : htfDir === dir ? 'CONTINUATION' : 'REVERSAL';
+  const setupLabel = {
+    NEUTRAL: T(lang, 'Netral (HTF belum jelas)', 'Neutral (HTF unclear)'),
+    CONTINUATION: T(lang, 'Continuation (searah trend HTF)', 'Continuation (with HTF trend)'),
+    REVERSAL: T(lang, 'Reversal (melawan trend HTF)', 'Reversal (against HTF trend)'),
+  }[setup];
+
+  const riskAtr = risk / refAtr;
+  let pts = 0;
+  if (htfDir === dir) pts += 2;
+  if (mtfDir === dir) pts += 1;
+  if (plan.status === 'RUNNING') pts += 1;
+  if (plan.trigSrc === 'M1') pts += 1;
+  if (plan.zoneType === 'OB') pts += 1;
+  if (plan.zoneType && (plan.touches ?? 0) === 0) pts += 1;
+  if (plan.distAtr != null && plan.distAtr <= 1) pts += 1;
+  if (riskAtr <= 2.5) pts += 1;
+  let confidence = pts >= 5 ? 'HIGH' : pts >= 3 ? 'MEDIUM' : 'LOW';
+  if (plan.over) confidence = 'LOW';
+
+  const hiAtr = isScalp ? 3 : 2.5;
+  const midAtr = isScalp ? 2 : 1.5;
+  let riskCode = setup === 'REVERSAL' || riskAtr > hiAtr ? 'HIGH' : riskAtr > midAtr ? 'MEDIUM' : 'LOW';
+  if (plan.over) riskCode = 'HIGH';
+  if (confidence === 'LOW' && riskCode === 'LOW') riskCode = 'MEDIUM';
+
+  const side = dir === 1 ? 'Demand' : 'Supply';
+  const distPip = Math.round(Math.abs(plan.entry - price) / (pip || refAtr));
+
+  let zoneLabel, zoneNote;
+  if (isScalp) {
+    const src = plan.trigSrc || 'M5';
+    const depthPct = Math.round((plan.pullbackDepth || 0) * 100);
+    zoneLabel = `Hit & Run M5 · ${src}`;
+    zoneNote = `${ord} · ${T(
+      lang,
+      `pullback M5 ${depthPct}%, trigger ${src} searah`,
+      `M5 pullback ${depthPct}%, ${src} trigger aligned`
+    )}`;
+  } else {
+    zoneLabel = `${KIND_NAME[plan.zoneType] || plan.zoneType} ${side} ${TF_LABEL[plan.zoneTf] || ''}`.trim();
+    if (plan.status === 'RUNNING') {
+      zoneNote = `${ord} · ${T(lang, 'harga sudah di dalam area entry', 'price already inside entry area')}`;
+    } else {
+      const near = plan.distAtr != null && plan.distAtr <= 1;
+      zoneNote = `${ord} · ${T(
+        lang,
+        `area entry ${distPip} pip dari harga${near ? ' (dekat)' : ''}`,
+        `entry area ${distPip} pips away${near ? ' (near)' : ''}`
+      )}`;
+    }
+  }
+
+  return { confidence, risk: riskCode, setup, setupLabel, zoneLabel, zoneNote };
+}
+
+// ---------- Teks alasan ----------
+
+function durText(ms, lang) {
+  const m = Math.round(ms / 60000);
+  if (m >= 60) {
+    const h = Math.round((m / 60) * 10) / 10;
+    return T(lang, `${h} jam`, `${h} hour${h === 1 ? '' : 's'}`);
+  }
+  return T(lang, `${m} menit`, `${m} minute${m === 1 ? '' : 's'}`);
+}
+
+// Catatan kualitas untuk alasan. Kosong jika tidak ada catatan.
+function flagNotes(plan, lang) {
+  const parts = (plan.flags || []).map(k => T(lang, FLAG_TXT[k][0], FLAG_TXT[k][1]));
+  if (plan.kind === 'hitrun' && plan.over) {
+    const x = Number(plan.rawRiskAtr).toFixed(1);
+    parts.push(SCALP_OVER_CAP === 'CAP'
+      ? T(lang, `SL dipersempit ke batas rentang pair (jarak asli ${x} ATR), risiko tinggi`, `SL tightened to pair range limit (original ${x} ATR), high risk`)
+      : T(lang, `SL struktur berjarak ${x} ATR, melebihi batas rentang pair, risiko tinggi`, `structure SL is ${x} ATR, above pair range limit, high risk`));
+  }
+  return parts.length ? ` Catatan: ${parts.join('; ')}.` : '';
+}
+
+// Alasan untuk Day Trading
+function buildDayReason({ lang, style, dir, plan, dec, slPips, tpPips }) {
+  const f = v => v.toFixed(dec);
+  const d = dir === 1 ? 'BUY' : 'SELL';
+  const ord = orderLabel(dir, plan.orderType);
+  const roleTxt = {
+    TREND: T(lang, 'Searah trend H1/M30', 'With H1/M30 trend'),
+    COUNTER: T(lang, 'Counter-trend: harga masih jauh dari zona trend, atau M5 dan M15 sudah berbalik', 'Counter-trend: price still far from trend zone, or M5 and M15 turned'),
+    NEUTRAL: T(lang, 'Trend belum jelas, zona terkuat dipilih', 'Trend unclear, strongest zone chosen'),
+  }[plan.role];
+  const w = v => v === 1 ? T(lang, 'naik', 'up') : v === -1 ? T(lang, 'turun', 'down') : T(lang, 'netral', 'flat');
+  const dirsTxt = `H1 ${w(plan.dirs.H1)}, M30 ${w(plan.dirs.M30)}, M15 ${w(plan.dirs.M15)}, M5 ${w(plan.dirs.M5)}`;
+  const zoneTxt = `${T(lang, 'Zona', 'Zone')} ${f(plan.zone.min)} – ${f(plan.zone.max)} (${plan.meta.zoneLabel}).`;
+  const action = plan.orderType === 'NOW'
+    ? T(lang, `${ord} di ${f(plan.entry)} (market).`, `${ord} at ${f(plan.entry)} (market).`)
+    : T(
+        lang,
+        `${ord} di ${f(plan.entry)} (limit di tepi zona). Batal jika belum terisi dalam 90 menit atau SL/TP1 tersentuh dulu.`,
+        `${ord} at ${f(plan.entry)} (limit at zone edge). Cancelled if not filled within 90 minutes or SL/TP1 is hit first.`
+      );
+  const pipTxt = tpPips ? ` (${tpPips.join(' / ')} pip)` : '';
+  const tp3Txt = plan.flags.includes('PSY_NONE')
+    ? T(lang, '3R', '3R')
+    : T(lang, `level psikologi ${f(plan.tps[2])}`, `psychological level ${f(plan.tps[2])}`);
+  const tpTxt = T(
+    lang,
+    `SL ${slPips ?? '-'} pip. TP1 1,5R, TP2 2R, TP3 ${tp3Txt}${pipTxt}.`,
+    `SL ${slPips ?? '-'} pips. TP1 1.5R, TP2 2R, TP3 ${tp3Txt}${pipTxt}.`
+  );
+  const notes = flagNotes(plan, lang);
+  const tail = T(
+    lang,
+    `Konfluensi: ${dirsTxt}. Setup: ${plan.meta.setupLabel}. Confidence ${plan.meta.confidence}, risiko ${plan.meta.risk}.`,
+    `Confluence: ${dirsTxt}. Setup: ${plan.meta.setupLabel}. Confidence ${plan.meta.confidence}, risk ${plan.meta.risk}.`
+  );
+  return `${d} · ${style.label}. ${roleTxt}. ${zoneTxt} ${action} ${tpTxt}${notes} ${tail}`;
+}
+
+function buildReason({ lang, style, dir, plan, dec, htfTxt, meta, slPips, tpPips }) {
+  const f = v => v.toFixed(dec);
+  const d = dir === 1 ? 'BUY' : 'SELL';
+  const head = `${d} · ${style.label}.`;
+  const orderType = resolveOrder(plan);
+  const ord = orderLabel(dir, orderType);
+  const tail = T(
+    lang,
+    `Setup: ${meta.setupLabel}. Confidence ${meta.confidence}, risiko ${meta.risk}. HTF ${htfTxt.id}.`,
+    `Setup: ${meta.setupLabel}. Confidence ${meta.confidence}, risk ${meta.risk}. HTF ${htfTxt.en}.`
+  );
+  const rrTxt = style.rr.map(x => `${x}R`).join(' / ');
+
+  if (style.kind === 'scalp') {
+    const src = plan.trigSrc || 'M5';
+    const up = dir === 1;
+    const depthPct = Math.round((plan.pullbackDepth || 0) * 100);
+    const ctxId = `Konteks: struktur M5 ${up ? 'naik' : 'turun'}, M15 ${htfTxt.id}. Pullback M5 ${depthPct}% dari kaki. Trigger: konfirmasi ${src} searah.`;
+    const ctxEn = `Context: M5 structure ${up ? 'up' : 'down'}, M15 ${htfTxt.en}. M5 pullback ${depthPct}% of leg. Trigger: ${src} confirmation aligned.`;
+    const action = T(
+      lang,
+      `${ord} di ${f(plan.entry)} (market, langsung saat trigger).`,
+      `${ord} at ${f(plan.entry)} (market, immediately on trigger).`
+    );
+    const slTxt = plan.over && SCALP_OVER_CAP === 'CAP'
+      ? T(lang, `SL ${slPips ?? '-'} pip (batas rentang pair).`, `SL ${slPips ?? '-'} pips (pair range limit).`)
+      : T(
+          lang,
+          `SL ${slPips ?? '-'} pip di luar titik pullback${plan.over ? '' : ', tidak dipersempit'}.`,
+          `SL ${slPips ?? '-'} pips beyond pullback point${plan.over ? '' : ', not tightened'}.`
+        );
+    const pipTxt = tpPips ? ` (${tpPips.join(' / ')} pip)` : '';
+    const tpTxt = T(
+      lang,
+      ` TP ${rrTxt}${pipTxt} tetap dari jarak SL. Setelah TP1, SL pindah ke entry.`,
+      ` TP ${rrTxt}${pipTxt} fixed from SL distance. After TP1, SL moves to entry.`
+    );
+    const notes = flagNotes(plan, lang);
+
+    return `${head} ${T(lang, ctxId, ctxEn)} ${action} ${slTxt}${tpTxt}${notes} ${tail}`;
+  }
+
+  const zone = `${f(plan.zone.min)} – ${f(plan.zone.max)}`;
+  const action = plan.status === 'RUNNING'
+    ? T(lang, `${ord} di ${f(plan.entry)}, harga sudah di dalam zona.`, `${ord} at ${f(plan.entry)}, price already inside zone.`)
+    : T(
+        lang,
+        `${ord} di tepi zona ${f(plan.entry)}, aktif saat harga masuk zona. Batal jika SL atau TP1 tersentuh lebih dulu, atau belum masuk dalam ${durText(plan.expireMs, lang)}.`,
+        `${ord} at zone edge ${f(plan.entry)}, active once price enters the zone. Cancelled if SL or TP1 is hit first, or not filled within ${durText(plan.expireMs, lang)}.`
+      );
+  const tpTxt = T(lang, ` Target TP ${rrTxt}.`, ` TP targets ${rrTxt}.`);
+
+  return T(
+    lang,
+    `${head} ${meta.zoneLabel} ${zone} di impuls ${f(plan.impulse.low)} → ${f(plan.impulse.high)}. ${action}${tpTxt} ${tail}`,
+    `${head} ${meta.zoneLabel} ${zone} within impulse ${f(plan.impulse.low)} → ${f(plan.impulse.high)}. ${action}${tpTxt} ${tail}`
+  );
+}
+
+// ---------- Handler ----------
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -248,65 +1076,112 @@ export default async function handler(req, res) {
     const htfC = cleanCandles(cnd.htf);
     const mtfC = cleanCandles(cnd.mtf ?? cnd.entry);
     const ltfC = cleanCandles(cnd.ltf);
-
     if (mtfC.length < 30 || htfC.length < 20) {
-      return res.status(422).json({ error: 'Data candle belum cukup.' });
+      return res.status(422).json({ error: 'Data candle belum cukup. Tunggu beberapa menit lalu coba lagi.' });
     }
+
+    const none = reason => res.status(200).json({ ok: true, signal: null, reason });
 
     const refAtr = atr(mtfC, 14);
-    const rng = SCALP_SL_PIPS[symbol];
-    const slFloor = rng && pip ? rng[0] * pip : RISK_MIN * refAtr;
-    const slCap = rng && pip ? rng[1] * pip : slFloor * 1.5;
-
-    let plan;
-    if (style.kind === 'scalp') {
-      plan = scalpAlurPlan(mtfC, ltfC, price, refAtr, slFloor, slCap);
-    } else if (style.kind === 'day') {
-      // Day Trading Responsif Zona HTF/MTF gaya cepat
-      plan = dayTradingZonePlan(htfC, mtfC, price, refAtr, pip);
-    } else {
-      return res.status(400).json({ error: 'Gaya trading ini memerlukan konfigurasi zona standar.' });
+    if (!(refAtr > 0)) {
+      return res.status(422).json({ error: 'Data volatilitas tidak valid. Tunggu beberapa menit lalu coba lagi.' });
     }
+
+    const htfDir = structureDir(htfC);
+    const mtfDir = structureDir(mtfC);
+    const isScalp = style.kind === 'scalp';
+
+    const rng = SCALP_SL_PIPS[symbol];
+    const slFloor = isScalp ? (rng && pip ? rng[0] * pip : RISK_MIN * refAtr) : 0;
+    const slCap = isScalp ? (rng && pip ? rng[1] * pip : slFloor * 1.5) : 0;
+
+    let dir = 0, plan = null;
+
+    if (isScalp) {
+      const hr = scalpHitRun(mtfC, ltfC, htfDir, price, refAtr, slFloor, slCap);
+      if (hr.err) return none(T(lang, ...hr.err));
+      dir = hr.dir;
+      plan = hr.plan;
+    } else if (style.kind === 'day') {
+      if (ltfC.length < 60) {
+        return res.status(422).json({ error: 'Data M5 belum cukup untuk Day Trading. Tunggu beberapa menit lalu coba lagi.' });
+      }
+      const dp = dayTradePlan({ htfC, mtfC, m5C: ltfC, price, symbol, pip, dec, lang });
+      if (dp.err) return none(T(lang, ...dp.err));
+      dir = dp.dir;
+      plan = dp.plan;
+    } else {
+      const flexible = style.kind === 'intraday';
+      dir = mtfDir;
+      if (dir === 0 && flexible) {
+        const sma20 = mtfC.slice(-20).reduce((s, c) => s + c.c, 0) / 20;
+        dir = htfDir || (mtfC[mtfC.length - 1].c >= sma20 ? 1 : -1);
+      }
+      if (dir === 0) {
+        return none(T(lang, 'Struktur belum jelas di timeframe MTF. Tidak ada sinyal.', 'Structure is unclear on the MTF. No signal.'));
+      }
+      if (!flexible && htfDir !== 0 && htfDir !== dir) {
+        return none(T(lang, 'Arah HTF berlawanan dengan arah entry. Tidak ada sinyal.', 'HTF direction conflicts with entry. No signal.'));
+      }
+
+      const series = [
+        { role: 'htf', tf: style.tf?.htf, candles: htfC },
+        { role: 'mtf', tf: style.tf?.mtf, candles: mtfC },
+        { role: 'ltf', tf: style.tf?.ltf, candles: ltfC },
+      ];
+      plan = style.kind === 'intraday'
+        ? bestZonePlan(series, dir, price, refAtr, style.distW)
+        : findZone(series, dir, price, refAtr);
+      if (plan.err) return none(plan.err);
+    }
+
+    const htfTxt = htfDir === 0
+      ? { id: 'belum jelas', en: 'unclear' }
+      : htfDir === dir
+        ? { id: 'searah', en: 'aligned' }
+        : { id: 'berlawanan', en: 'opposite' };
 
     const entry = plan.entry;
     const risk = Math.abs(entry - plan.sl);
-    const dir = plan.dir;
     const r = v => Number(v.toFixed(dec));
 
-    const tps = style.rr.map(x => entry + dir * risk * x);
+    const tps = plan.tps || style.rr.map(x => entry + dir * risk * x);
     const tpPips = pip ? tps.map(tp => Math.round(Math.abs(tp - entry) / pip)) : null;
     const slPips = pip ? Math.round(risk / pip) : null;
 
-    const rrTxt = style.rr.map(x => `${x}R`).join(' / ');
-    const dStr = dir === 1 ? 'BUY' : 'SELL';
+    const meta = plan.meta || buildMeta({
+      lang, style, dir, plan, price, pip, htfDir, mtfDir, refAtr, risk,
+    });
 
-    const reason = T(
-      lang,
-      `${dStr} ${style.kind === 'day' ? 'Day Trading (Zone Responsive)' : 'Scalping'}. ${plan.zoneDesc} di harga ${entry.toFixed(dec)}. SL ${slPips} pip, TP ${rrTxt} (${tpPips?.join('/')} pip).`,
-      `${dStr} ${style.kind === 'day' ? 'Day Trading (Zone Responsive)' : 'Scalping'}. ${plan.zoneDesc} at ${entry.toFixed(dec)}. SL ${slPips} pips, TP ${rrTxt}.`
-    );
+    const reason = style.kind === 'day'
+      ? buildDayReason({ lang, style, dir, plan, dec, slPips, tpPips })
+      : buildReason({ lang, style, dir, plan: { ...plan, meta }, dec, htfTxt, meta, slPips, tpPips });
+
+    const orderType = resolveOrder(plan);
 
     return res.status(200).json({
       ok: true,
       signal: {
-        signal: dStr,
-        mode: 'MARKET',
-        orderType: 'NOW',
-        orderLabel: orderLabel(dir, 'NOW'),
-        status: 'RUNNING',
-        fill: null,
+        signal: dir === 1 ? 'BUY' : 'SELL',
+        mode: orderType === 'LIMIT' ? 'LIMIT' : 'MARKET',
+        orderType,
+        orderLabel: orderLabel(dir, orderType),
+        status: plan.status,
+        fill: plan.fill || null,
         entry: r(entry),
         sl: r(plan.sl),
         tp1: r(tps[0]),
         tp2: r(tps[1]),
         tp3: r(tps[2]),
-        zone: { min: r(entry - 0.3 * refAtr), max: r(entry + 0.3 * refAtr) },
-        confidence: 'HIGH',
-        risk: 'MEDIUM',
-        setup: style.kind === 'day' ? 'HTF_ZONE_RESPONSE' : plan.phase,
-        setupLabel: plan.zoneDesc,
-        zoneLabel: style.kind === 'day' ? 'Day Trading HTF Zone' : `M1+M3+M5 ${plan.phase}`,
-        zoneNote: `Eksekusi cepat ${dStr} merespons zona HTF/MTF`,
+        zone: plan.zone ? { min: r(plan.zone.min), max: r(plan.zone.max) } : null,
+        zoneTf: plan.zoneTf || null,
+        expireMs: plan.status === 'PENDING' ? (plan.expireMs || 0) : 0,
+        confidence: meta.confidence,
+        risk: meta.risk,
+        setup: meta.setup,
+        setupLabel: meta.setupLabel,
+        zoneLabel: meta.zoneLabel,
+        zoneNote: meta.zoneNote,
         reason,
       },
     });
