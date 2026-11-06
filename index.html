@@ -218,7 +218,7 @@
                                 </span>
                             </div>
                             <p id="cardStyleSub" class="text-[9px] text-gray-400 pt-1">SCALPING / Just Now</p>
-                            <p id="lblEntryZone" class="text-[9px] font-bold text-gray-400 tracking-widest pt-1">ENTRY ZONE (SBR/RBS / OB)</p>
+                            <p id="lblEntryZone" class="text-[9px] font-bold text-gray-400 tracking-widest pt-1">ENTRY ZONE</p>
                             <h2 id="cardEntryZone" class="text-xl font-black text-white font-mono tracking-tight">-- - --</h2>
                             <p id="cardZoneNote" class="text-[8px] text-gray-400 font-mono"></p>
                             <div class="flex justify-center gap-1.5 flex-wrap pt-1">
@@ -1464,6 +1464,7 @@
             return;
         }
 
+        const MIN_SPAN_MS = 15000;
         const dec = MARKETS[t.key]?.decimals ?? 2;
         const fmtP = v => Number(v).toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
 
@@ -1471,12 +1472,17 @@
         const plotL = 6, plotT = 20, plotB = CH - 8, plotR = CW - CHART_GUT;
         const plotW = plotR - plotL, plotH = plotB - plotT;
         const now = Date.now();
-        const headX = plotR - 8;
-        const xOfT = tm => headX - ((now - tm) / CHART_SPAN_MS) * (plotW - 8);
 
-        const visible = arr.filter(p => xOfT(p.t) >= plotL);
-        const pts = visible.length ? visible : [arr[arr.length - 1]];
+        // Kepala garis di ~82% lebar grafik, tidak mepet ke kolom label kanan
+        const headX = plotL + plotW * 0.82;
         const last = arr[arr.length - 1];
+
+        // Jendela waktu adaptif: dimulai dari tick pertama (maks CHART_SPAN_MS),
+        // jadi garis selalu terbentang dari tepi kiri sampai kepala
+        const span = Math.min(Math.max(now - arr[0].t, MIN_SPAN_MS), CHART_SPAN_MS);
+        const xOfT = tm => headX - ((now - tm) / span) * (headX - plotL);
+
+        const pts = arr.filter(p => xOfT(p.t) >= plotL);
         const levels = chartLevels(t);
         const zMin = parseLevel(t.zone?.min ?? t.card?.entry_min);
         const zMax = parseLevel(t.zone?.max ?? t.card?.entry_max);
@@ -1534,10 +1540,10 @@
             ctx.restore();
         }
 
-        // 4. Area dan garis harga (kurva halus)
+        // 4. Area dan garis harga, disambung sampai kepala
         const P = pts.map(p => ({ x: xOfT(p.t), y: yOf(p.p) }));
-        const hx = Math.min(headX, Math.max(plotL, P[P.length - 1].x));
-        const hy = P[P.length - 1].y;
+        P.push({ x: headX, y: yOf(last.p) });
+        const hx = headX, hy = yOf(last.p);
 
         if (P.length >= 2) {
             ctx.save();
@@ -1585,7 +1591,7 @@
         ctx.fillStyle = '#ffffff'; ctx.fill();
         ctx.lineWidth = 2; ctx.strokeStyle = '#3b82f6'; ctx.stroke();
 
-        // 7. Harga running di kepala garis
+        // 7. Harga running di atas kepala garis
         const dirNow = prices[t.key]?.dir ?? 0;
         const pillColor = dirNow > 0 ? '#10b981' : dirNow < 0 ? '#ef4444' : '#3b82f6';
         const pillTxt = fmtP(last.p);
@@ -1601,7 +1607,7 @@
         ctx.fillStyle = '#ffffff';
         ctx.fillText(pillTxt, px + 6, py + ph / 2 + 0.5);
 
-        // 8. Label level di kolom kanan (dihindari agar tidak tumpang tindih)
+        // 8. Label level di kolom kanan (dijaga agar tidak tumpang tindih)
         const tags = levels.map(l => ({
             text: `${l.hit ? '✓ ' : ''}${l.label} ${fmtP(l.value)}`,
             c: l.c, bg: l.bg, y: yOf(l.value),
