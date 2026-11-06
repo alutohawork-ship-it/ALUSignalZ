@@ -645,6 +645,11 @@
 
     const offsets = (() => { try { return JSON.parse(localStorage.getItem(OFFSET_KEY)) || {}; } catch { return {}; } })();
 
+    // Offset bawaan per pair untuk menyetarakan harga feed dengan harga spot/MT.
+    // Kalibrasi manual (tombol KALIBRASI) menimpa nilai ini. RESET mengembalikan ke nilai bawaan.
+    const DEFAULT_OFFSETS = { XAUUSD: -8.1, XAGUSD: -0.11 };
+    const getOffset = key => offsets[key] ?? DEFAULT_OFFSETS[key] ?? 0;
+
     function pushHistory(key, p) {
         const arr = history[key] ??= [];
         const t = Date.now();
@@ -654,7 +659,7 @@
 
     // ================= KALIBRASI =================
     function updateCalibInfo() {
-        const key = selectedKey(), off = offsets[key] || 0;
+        const key = selectedKey(), off = getOffset(key);
         document.getElementById('calibInfo').textContent = `Offset ${displayName(key)}: ${off >= 0 ? '+' : ''}${off.toFixed(MARKETS[key]?.decimals ?? 2)}`;
     }
     function calibrate() {
@@ -773,7 +778,7 @@
             providerOf[key] = prov;
             rawPrices[key] = p;
             markSrc(key, 'LIVE', 'text-emerald-400');
-            updatePrice(key, p + (offsets[key] || 0), ev);
+            updatePrice(key, p + getOffset(key), ev);
         }
     }
 
@@ -1813,7 +1818,7 @@
             const tf = STYLE_TF[tradingStyle];
             if (!tf) throw new Error('gaya trading tidak dikenal');
 
-            const off = offsets[symbolKey] || 0;
+            const off = getOffset(symbolKey);
             const [htfRows, mtfRows, ltfRows] = await Promise.all([
                 loadCandles(symbolKey, tf.htf),
                 loadCandles(symbolKey, tf.mtf),
