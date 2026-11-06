@@ -140,16 +140,19 @@
                 <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
                     <div class="flex justify-between items-center">
                         <label id="lblTargetAsset" class="text-[9px] font-bold text-gray-400">TARGET ASET AKTIF</label>
-                        <span id="selectedPairBadge" class="text-[9px] font-mono text-accentblue font-bold">hyperliquid|XAUUSD</span>
+                        <span id="selectedPairBadge" class="text-[9px] font-mono text-accentblue font-bold">binance|XAUUSD</span>
                     </div>
 
                     <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
                         <optgroup label="Gold, Silver & Forex">
-                            <option value="hyperliquid|XAUUSD">XAUUSD / Gold (Hyperliquid)</option>
-                            <option value="hyperliquid|XAGUSD">XAGUSD / Silver (Hyperliquid)</option>
+                            <option value="binance|XAUUSD">XAUUSD / Gold (Binance)</option>
+                            <option value="binance|XAGUSD">XAGUSD / Silver (Binance)</option>
                             <option value="veranta|EURUSD">EUR/USD (Veranta)</option>
                             <option value="veranta|USDJPY">USD/JPY (Veranta)</option>
                             <option value="veranta|GBPUSD">GBP/USD (Veranta)</option>
+                            <option value="veranta|AUDUSD">AUD/USD (Veranta)</option>
+                            <option value="veranta|USDCAD">USD/CAD (Veranta)</option>
+                            <option value="veranta|USDCHF">USD/CHF (Veranta)</option>
                         </optgroup>
                         <optgroup label="Indices / Indeks Global">
                             <option value="ostium|DJI">Dow Jones / US30 (Ostium)</option>
@@ -589,11 +592,14 @@
     const DEBUG = localStorage.getItem('alu_debug') === '1';
 
     const MARKETS = {
-        XAUUSD:  { provider: 'hyperliquid', coins: ['xyz:GOLD', 'xyz:XAU', 'GOLD', 'XAUUSD'], decimals: 2, pip: 0.1 },
-        XAGUSD:  { provider: 'hyperliquid', coins: ['xyz:SILVER', 'xyz:XAG', 'SILVER', 'XAGUSD'], decimals: 3, pip: 0.01 },
+        XAUUSD:  { provider: 'hyperliquid', coins: ['binance|XAUUSDT', 'xyz:GOLD', 'xyz:XAU', 'GOLD', 'XAUUSD'], decimals: 2, pip: 0.1 },
+        XAGUSD:  { provider: 'hyperliquid', coins: ['binance|XAGUSDT', 'xyz:SILVER', 'xyz:XAG', 'SILVER', 'XAGUSD'], decimals: 3, pip: 0.01 },
         EURUSD:  { provider: 'veranta', coins: ['EURUSD', 'EUR/USD', 'EURUSD.FX'], decimals: 5, pip: 0.0001 },
         USDJPY:  { provider: 'veranta', coins: ['USDJPY', 'USD/JPY', 'USDJPY.FX'], decimals: 3, pip: 0.01 },
         GBPUSD:  { provider: 'veranta', coins: ['GBPUSD', 'GBP/USD', 'GBPUSD.FX'], decimals: 5, pip: 0.0001 },
+        AUDUSD:  { provider: 'veranta', coins: ['AUDUSD', 'AUD/USD', 'AUDUSD.FX'], decimals: 5, pip: 0.0001 },
+        USDCAD:  { provider: 'veranta', coins: ['USDCAD', 'USD/CAD', 'USDCAD.FX'], decimals: 5, pip: 0.0001 },
+        USDCHF:  { provider: 'veranta', coins: ['USDCHF', 'USD/CHF', 'USDCHF.FX'], decimals: 5, pip: 0.0001 },
         BTCUSDT: { provider: 'binance', coins: ['BTCUSDT'], decimals: 2, pip: 1 },
         ETHUSDT: { provider: 'binance', coins: ['ETHUSDT'], decimals: 2, pip: 0.1 },
         SOLUSDT: { provider: 'binance', coins: ['SOLUSDT'], decimals: 2, pip: 0.01 },
