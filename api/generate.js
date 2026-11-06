@@ -9,9 +9,8 @@ const DECIMALS = { XAUUSD: 2, XAGUSD: 3, EURUSD: 5, USDJPY: 3, GBPUSD: 5, BTCUSD
 // Ukuran 1 pip per simbol. Harus sama dengan MARKETS.pip di index.html
 const PIP = { XAUUSD: 0.1, XAGUSD: 0.01, EURUSD: 0.0001, USDJPY: 0.01, GBPUSD: 0.0001, BTCUSDT: 1, ETHUSDT: 0.1, SOLUSDT: 0.01, XRPUSDT: 0.0001, DJI: 1, DAX: 1 };
 
-// Scalping (hit & run): rentang jarak SL dalam pip [min, max] dari entry.
-// SL mengikuti swing struktur, lalu dijepit ke rentang ini. Samakan min & max untuk SL fixed.
-// Angka selain XAUUSD adalah perkiraan, sesuaikan dengan spread broker.
+// Scalping: rentang jarak SL dalam pip [min, max] dari entry.
+// SL mengikuti swing struktur, lalu dijepit ke rentang ini.
 const SCALP_SL_PIPS = {
   XAUUSD: [20, 30], XAGUSD: [25, 40],
   EURUSD: [10, 15], GBPUSD: [12, 18], USDJPY: [10, 15],
@@ -20,7 +19,7 @@ const SCALP_SL_PIPS = {
   DJI: [40, 70], DAX: [40, 70],
 };
 
-// Minimal jarak TP1 (pip) untuk Day Trading
+// Minimal jarak TP1 (pip) untuk Day Trading. Jika TP1 (2R) di bawah ini, setup dilewati.
 const DAY_MIN_TP1_PIPS = {
   XAUUSD: 80, XAGUSD: 40,
   EURUSD: 30, USDJPY: 30, GBPUSD: 40,
@@ -33,18 +32,21 @@ const TF_LABEL = { '5m': 'M5', '15m': 'M15', '30m': 'M30', '1h': 'H1', '4h': 'H4
 const KIND_NAME = { OB: 'Order Block', FVG: 'FVG', OTE: 'OTE 62-79%' };
 const ROLE_W = { htf: 3, mtf: 2, ltf: 1 };
 
+// Scalping: TP target 1:1.2 / 1:2 / 1:2.5. Boleh bergeser ke level struktur terdekat dalam band ini. 0 = TP fixed.
+const TP_FLEX_BAND = 0.15;
+
 // Harus sama dengan STYLE_TF di index.html
-// kind: 'scalp'    = entry market searah struktur MTF, SL swing dijepit rentang pip, TP murni RR 1:1.5 / 1:2.5 / 1:4
-//       'day'      = zona terbaik (skor), dekat harga diutamakan, TP1 minimal DAY_MIN_TP1_PIPS
-//       'intraday' = zona terbaik (skor probabilitas), tanpa syarat fresh
-//       'zone'     = Swing: zona fresh (perilaku lama)
+// kind: 'scalp'    = entry market searah struktur MTF, SL swing dijepit rentang pip, TP RR 1:1.2 / 1:2 / 1:2.5 (fleksibel)
+//       'day'      = zona terbaik (skor), dekat harga diutamakan, TP 2R / 3R / 4R
+//       'intraday' = zona terbaik (skor probabilitas), tanpa syarat fresh, TP 1.5R / 3R / 5.5R
+//       'zone'     = Swing: zona fresh, TP 2R / 4.5R / 8.5R
 const STYLES = {
   'Scalping': {
     label: 'Scalping (HTF: M15 | MTF: M5 | LTF: M1/M3)',
     mode: 'MARKET',
     kind: 'scalp',
     tf: { htf: '15m', mtf: '5m' },
-    rr: [1.5, 2.5, 4.0],
+    rr: [1.2, 2.0, 2.5],
   },
   'Day Trading': {
     label: 'Day Trading (HTF: H1 | MTF: M30 | LTF: M5)',
@@ -52,7 +54,7 @@ const STYLES = {
     kind: 'day',
     distW: 2,
     tf: { htf: '1h', mtf: '30m', ltf: '5m' },
-    rr: [1.3, 2.5, 4.0],
+    rr: [2, 3, 4],
   },
   'Intraday': {
     label: 'Intraday (HTF: H4 | MTF: H1 | LTF: M15+M5)',
@@ -233,7 +235,6 @@ function impulseZones(candles, isBuy, a) {
 // Hit & run: entry market searah struktur MTF.
 // SL = swing terdekat + buffer (atau ekstrem 12 candle jika swing tidak ada).
 // Jarak SL dijepit ke rentang pip per pair: minimal slFloor, maksimal slCap.
-// TP dihitung dari jarak SL (RR 1:1.5, 1:2.5, 1:4) di handler.
 function scalpPlan(candles, dir, price, a, slFloor, slCap) {
   const sw = swings(candles, 2);
   const recent = candles.slice(-12);
@@ -259,6 +260,36 @@ function scalpPlan(candles, dir, price, a, slFloor, slCap) {
     zone: { min: price - 0.1 * a, max: price + 0.1 * a },
     trigger: 'market',
   };
+}
+
+// TP scalping: target RR tetap. Jika ada level struktur (swing) di dalam band dari target,
+// TP digeser ke level itu. Urutan TP selalu naik.
+function structureTargets(candles, dir, entry, risk, rrs, band) {
+  const sw = swings(candles, 2);
+  const levels = sw
+    .filter(s => (dir === 1 ? s.type === 'H' && s.price > entry : s.type === 'L' && s.price < entry))
+    .map(s => Math.abs(s.price - entry))
+    .sort((a, b) => a - b);
+
+  const out = [];
+  let prev = 0;
+  for (const rr of rrs) {
+    const target = risk * rr;
+    let d = target;
+    if (band > 0) {
+      const lo = target * (1 - band), hi = target * (1 + band);
+      let best = null;
+      for (const l of levels) {
+        if (l < lo || l > hi || l <= prev) continue;
+        if (best === null || Math.abs(l - target) < Math.abs(best - target)) best = l;
+      }
+      if (best !== null) d = best;
+    }
+    if (d <= prev) d = target;
+    out.push(entry + dir * d);
+    prev = d;
+  }
+  return out;
 }
 
 // ---------- Day Trading & Intraday: zona terbaik berdasarkan skor probabilitas ----------
@@ -336,7 +367,7 @@ function bestZonePlan(series, dir, price, refAtr, distW) {
   };
 }
 
-// ---------- Swing: zona fresh (perilaku lama) ----------
+// ---------- Swing: zona fresh ----------
 
 function freshZonePlan(candles, dir, price, a, refAtr) {
   const n = candles.length;
@@ -480,7 +511,7 @@ function durText(ms, lang) {
   return T(lang, `${m} menit`, `${m} minute${m === 1 ? '' : 's'}`);
 }
 
-function buildReason({ lang, style, dir, plan, dec, htfTxt, meta, slPips, minTp1Pips }) {
+function buildReason({ lang, style, dir, plan, dec, htfTxt, meta, slPips, tpPips }) {
   const f = v => v.toFixed(dec);
   const d = dir === 1 ? 'BUY' : 'SELL';
   const head = `${d} · ${style.label}.`;
@@ -491,15 +522,22 @@ function buildReason({ lang, style, dir, plan, dec, htfTxt, meta, slPips, minTp1
   );
 
   if (style.kind === 'scalp') {
+    const tpId = tpPips
+      ? ` TP1 ${tpPips[0]} pip, TP2 ${tpPips[1]} pip, TP3 ${tpPips[2]} pip (mengikuti struktur ±${Math.round(TP_FLEX_BAND * 100)}%).`
+      : '';
+    const tpEn = tpPips
+      ? ` TP1 ${tpPips[0]} pips, TP2 ${tpPips[1]} pips, TP3 ${tpPips[2]} pips (structure-adjusted ±${Math.round(TP_FLEX_BAND * 100)}%).`
+      : '';
     const body = T(
       lang,
-      `Entry market di ${f(plan.entry)} searah struktur MTF. SL ${slPips} pip, TP1 ${minTp1Pips} pip (1:1.5), TP2 1:2.5, TP3 1:4.`,
-      `Market entry at ${f(plan.entry)} with MTF structure. SL ${slPips} pips, TP1 ${minTp1Pips} pips (1:1.5), TP2 1:2.5, TP3 1:4.`
+      `Entry market di ${f(plan.entry)} searah struktur MTF. SL ${slPips ?? '-'} pip.${tpId}`,
+      `Market entry at ${f(plan.entry)} with MTF structure. SL ${slPips ?? '-'} pips.${tpEn}`
     );
     return `${head} ${body} ${tail}`;
   }
 
   const zone = `${f(plan.zone.min)} – ${f(plan.zone.max)}`;
+  const rrTxt = style.rr.map(x => `${x}R`).join(' / ');
   const action = plan.status === 'RUNNING'
     ? T(lang, `Status aktif, entry di ${f(plan.entry)}.`, `Status running, entry at ${f(plan.entry)}.`)
     : T(
@@ -507,15 +545,12 @@ function buildReason({ lang, style, dir, plan, dec, htfTxt, meta, slPips, minTp1
         `Status waiting zone: entry limit di tepi zona ${f(plan.entry)}, aktif saat harga masuk zona. Batal jika SL atau TP1 tersentuh lebih dulu, atau belum masuk dalam ${durText(plan.expireMs, lang)}.`,
         `Waiting zone: limit entry at zone edge ${f(plan.entry)}, active once price enters the zone. Cancelled if SL or TP1 is hit first, or not filled within ${durText(plan.expireMs, lang)}.`
       );
-
-  const tp1Txt = style.kind === 'day' && minTp1Pips
-    ? T(lang, ` TP1 minimal ${minTp1Pips} pip.`, ` TP1 at least ${minTp1Pips} pips.`)
-    : '';
+  const tpTxt = T(lang, ` Target TP ${rrTxt}.`, ` TP targets ${rrTxt}.`);
 
   const body = T(
     lang,
-    `${meta.zoneLabel} ${zone} di impuls ${f(plan.impulse.low)} → ${f(plan.impulse.high)}. ${meta.zoneNote}. ${action}${tp1Txt}`,
-    `${meta.zoneLabel} ${zone} within impulse ${f(plan.impulse.low)} → ${f(plan.impulse.high)}. ${meta.zoneNote}. ${action}${tp1Txt}`
+    `${meta.zoneLabel} ${zone} di impuls ${f(plan.impulse.low)} → ${f(plan.impulse.high)}. ${meta.zoneNote}. ${action}${tpTxt}`,
+    `${meta.zoneLabel} ${zone} within impulse ${f(plan.impulse.low)} → ${f(plan.impulse.high)}. ${meta.zoneNote}. ${action}${tpTxt}`
   );
   return `${head} ${body} ${tail}`;
 }
@@ -561,7 +596,8 @@ export default async function handler(req, res) {
 
     let dir = mtfDir;
     if (dir === 0 && flexible) {
-      dir = htfDir || (mtfC[mtfC.length - 1].c >= mtfC.slice(-20).reduce((s, c) => s + c.c, 0) / 20 ? 1 : -1);
+      const sma20 = mtfC.slice(-20).reduce((s, c) => s + c.c, 0) / 20;
+      dir = htfDir || (mtfC[mtfC.length - 1].c >= sma20 ? 1 : -1);
     }
     if (dir === 0) {
       return none(T(lang, 'Struktur belum jelas di timeframe MTF. Tidak ada sinyal.', 'Structure is unclear on the MTF. No signal.'));
@@ -582,7 +618,7 @@ export default async function handler(req, res) {
     const slFloor = isScalp ? (rng && pip ? rng[0] * pip : RISK_MIN * refAtr) : 0;
     const slCap = isScalp ? (rng && pip ? rng[1] * pip : slFloor * 1.5) : 0;
 
-    // Jarak minimal TP1 (harga). Scalping: 0, TP murni dari RR agar tidak melebar.
+    // Jarak minimal TP1 (harga) untuk Day Trading. Dipakai sebagai filter, bukan untuk memperlebar TP.
     let minTp1Dist = 0;
     if (style.kind === 'day') {
       minTp1Dist = DAY_MIN_TP1_PIPS[symbol] && pip ? DAY_MIN_TP1_PIPS[symbol] * pip : 1.5 * refAtr;
@@ -608,23 +644,28 @@ export default async function handler(req, res) {
     const risk = Math.abs(entry - plan.sl);
     const r = v => Number(v.toFixed(dec));
 
-    // TP: rasio RR dari jarak SL. Day Trading: TP1 dipaksa minimal minTp1Dist, TP2/TP3 ikut proporsi.
-    const tps = style.rr.map(x => entry + dir * Math.max(risk * x, minTp1Dist * (x / style.rr[0])));
+    if (style.kind === 'day' && minTp1Dist && risk * style.rr[0] < minTp1Dist) {
+      const tp1Dist = (risk * style.rr[0]).toFixed(dec);
+      const minDist = minTp1Dist.toFixed(dec);
+      return none(T(
+        lang,
+        `TP1 ${style.rr[0]}R (${tp1Dist}) di bawah minimum ${minDist} untuk ${symbol}. Setup dilewati.`,
+        `TP1 ${style.rr[0]}R (${tp1Dist}) is below the minimum ${minDist} for ${symbol}. Setup skipped.`
+      ));
+    }
+
+    const tps = isScalp
+      ? structureTargets(mtfC, dir, entry, risk, style.rr, TP_FLEX_BAND)
+      : style.rr.map(x => entry + dir * risk * x);
+    const tpPips = pip ? tps.map(tp => Math.round(Math.abs(tp - entry) / pip)) : null;
+    const slPips = pip ? Math.round(risk / pip) : null;
 
     const meta = buildMeta({
       lang, style, dir, plan, price, pip, htfDir, mtfDir, refAtr, risk,
     });
 
-    const tp1Pips = pip
-      ? (isScalp
-          ? Math.round((risk * style.rr[0]) / pip)
-          : (minTp1Dist ? Math.round(minTp1Dist / pip) : null))
-      : null;
-
     const reason = buildReason({
-      lang, style, dir, plan, dec, htfTxt, meta,
-      slPips: pip ? Math.round(risk / pip) : null,
-      minTp1Pips: tp1Pips,
+      lang, style, dir, plan, dec, htfTxt, meta, slPips, tpPips,
     });
 
     return res.status(200).json({
