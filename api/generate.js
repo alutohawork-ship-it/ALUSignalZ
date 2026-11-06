@@ -19,6 +19,16 @@ const SCALP_SL_PIPS = {
   DJI: [40, 70], DAX: [40, 70],
 };
 
+// Scalping: buffer entry limit dari harga sekarang (pip) [min, max].
+// Offset = clamp(0.5 × ATR M5, min, max). Zona entry lebar = setengah offset.
+const SCALP_ENTRY_PIPS = {
+  XAUUSD: [8, 15], XAGUSD: [8, 15],
+  EURUSD: [3, 6], GBPUSD: [4, 8], USDJPY: [3, 6],
+  BTCUSDT: [40, 80], ETHUSDT: [15, 30],
+  SOLUSDT: [10, 20], XRPUSDT: [10, 20],
+  DJI: [15, 30], DAX: [15, 30],
+};
+
 // Minimal jarak TP1 (pip) untuk Day Trading. Jika TP1 (2R) di bawah ini, setup dilewati.
 const DAY_MIN_TP1_PIPS = {
   XAUUSD: 80, XAGUSD: 40,
@@ -36,14 +46,14 @@ const ROLE_W = { htf: 3, mtf: 2, ltf: 1 };
 const TP_FLEX_BAND = 0.15;
 
 // Harus sama dengan STYLE_TF di index.html
-// kind: 'scalp'    = entry market searah struktur MTF, SL swing dijepit rentang pip, TP RR 1:1.2 / 1:2 / 1:2.5 (fleksibel)
+// kind: 'scalp'    = limit entry dengan buffer dari harga sekarang, SL swing dijepit rentang pip, TP RR 1:1.2 / 1:2 / 1:2.5 (fleksibel)
 //       'day'      = zona terbaik (skor), dekat harga diutamakan, TP 2R / 3R / 4R
 //       'intraday' = zona terbaik (skor probabilitas), tanpa syarat fresh, TP 1.5R / 3R / 5.5R
 //       'zone'     = Swing: zona fresh, TP 2R / 4.5R / 8.5R
 const STYLES = {
   'Scalping': {
     label: 'Scalping (HTF: M15 | MTF: M5 | LTF: M1/M3)',
-    mode: 'MARKET',
+    mode: 'LIMIT',
     kind: 'scalp',
     tf: { htf: '15m', mtf: '5m' },
     rr: [1.2, 2.0, 2.5],
@@ -232,33 +242,43 @@ function impulseZones(candles, isBuy, a) {
 
 // ---------- Scalping ----------
 
-// Hit & run: entry market searah struktur MTF.
-// SL = swing terdekat + buffer (atau ekstrem 12 candle jika swing tidak ada).
-// Jarak SL dijepit ke rentang pip per pair: minimal slFloor, maksimal slCap.
-function scalpPlan(candles, dir, price, a, slFloor, slCap) {
+// Limit entry konservatif: entry diberi buffer dari harga sekarang.
+// BUY: entry di bawah harga, zona di bawah entry. SELL: entry di atas harga, zona di atas entry.
+// Status selalu PENDING (waiting). SL dihitung dari entry lalu dijepit ke rentang pip.
+function scalpPlan(candles, dir, price, a, slFloor, slCap, offLo, offHi, expireMs) {
   const sw = swings(candles, 2);
   const recent = candles.slice(-12);
   const isBuy = dir === 1;
-  let dist;
 
+  const offset = Math.min(Math.max(0.5 * a, offLo), offHi);
+  const zoneW = offset * 0.5;
+  const entry = isBuy ? price - offset : price + offset;
+
+  let dist;
   if (isBuy) {
     const sl0 = lastSwing(sw, 'L');
-    const base = sl0 && sl0.price < price ? sl0.price : Math.min(...recent.map(c => c.l));
-    dist = (price - base) + SL_BUFFER * a;
+    const base = sl0 && sl0.price < entry ? sl0.price : Math.min(...recent.map(c => c.l));
+    dist = (entry - base) + SL_BUFFER * a;
   } else {
     const sh0 = lastSwing(sw, 'H');
-    const base = sh0 && sh0.price > price ? sh0.price : Math.max(...recent.map(c => c.h));
-    dist = (base - price) + SL_BUFFER * a;
+    const base = sh0 && sh0.price > entry ? sh0.price : Math.max(...recent.map(c => c.h));
+    dist = (base - entry) + SL_BUFFER * a;
   }
 
   dist = Math.min(Math.max(dist, slFloor), slCap);
 
   return {
-    status: 'RUNNING',
-    entry: price,
-    sl: isBuy ? price - dist : price + dist,
-    zone: { min: price - 0.1 * a, max: price + 0.1 * a },
-    trigger: 'market',
+    status: 'PENDING',
+    entry,
+    sl: isBuy ? entry - dist : entry + dist,
+    zone: isBuy
+      ? { min: entry - zoneW, max: entry }
+      : { min: entry, max: entry + zoneW },
+    zoneType: 'PULLBACK',
+    touches: 0,
+    distAtr: offset / a,
+    trigger: 'limit',
+    expireMs,
   };
 }
 
@@ -479,14 +499,12 @@ function buildMeta({ lang, style, dir, plan, price, pip, htfDir, mtfDir, refAtr,
 
   const side = dir === 1 ? 'Demand' : 'Supply';
   const zoneLabel = isScalp
-    ? T(lang, 'Momentum MTF', 'MTF momentum')
+    ? T(lang, 'Pullback MTF', 'MTF pullback')
     : `${KIND_NAME[plan.zoneType] || plan.zoneType} ${side} ${TF_LABEL[plan.zoneTf] || ''}`.trim();
 
   const distPip = Math.round(Math.abs(plan.entry - price) / (pip || refAtr));
   let zoneNote;
-  if (isScalp) {
-    zoneNote = T(lang, 'Entry market di harga sekarang', 'Market entry at current price');
-  } else if (plan.status === 'RUNNING') {
+  if (plan.status === 'RUNNING') {
     zoneNote = T(lang, 'Harga sudah di dalam area entry', 'Price already inside entry area');
   } else {
     const near = plan.distAtr != null && plan.distAtr <= 1;
@@ -522,6 +540,7 @@ function buildReason({ lang, style, dir, plan, dec, htfTxt, meta, slPips, tpPips
   );
 
   if (style.kind === 'scalp') {
+    const zone = `${f(plan.zone.min)} – ${f(plan.zone.max)}`;
     const tpId = tpPips
       ? ` TP1 ${tpPips[0]} pip, TP2 ${tpPips[1]} pip, TP3 ${tpPips[2]} pip (mengikuti struktur ±${Math.round(TP_FLEX_BAND * 100)}%).`
       : '';
@@ -530,8 +549,8 @@ function buildReason({ lang, style, dir, plan, dec, htfTxt, meta, slPips, tpPips
       : '';
     const body = T(
       lang,
-      `Entry market di ${f(plan.entry)} searah struktur MTF. SL ${slPips ?? '-'} pip.${tpId}`,
-      `Market entry at ${f(plan.entry)} with MTF structure. SL ${slPips ?? '-'} pips.${tpEn}`
+      `Limit entry di ${f(plan.entry)} dalam zona ${zone}. ${meta.zoneNote}. Status waiting, aktif saat harga masuk zona. Batal jika SL atau TP1 tersentuh lebih dulu, atau belum masuk dalam ${durText(plan.expireMs, lang)}. SL ${slPips ?? '-'} pip.${tpId}`,
+      `Limit entry at ${f(plan.entry)} within zone ${zone}. ${meta.zoneNote}. Status waiting, active once price enters the zone. Cancelled if SL or TP1 is hit first, or not filled within ${durText(plan.expireMs, lang)}. SL ${slPips ?? '-'} pips.${tpEn}`
     );
     return `${head} ${body} ${tail}`;
   }
@@ -618,6 +637,11 @@ export default async function handler(req, res) {
     const slFloor = isScalp ? (rng && pip ? rng[0] * pip : RISK_MIN * refAtr) : 0;
     const slCap = isScalp ? (rng && pip ? rng[1] * pip : slFloor * 1.5) : 0;
 
+    // Scalping: buffer entry dari harga sekarang (harga). Pair tanpa tabel pakai ATR.
+    const eRng = SCALP_ENTRY_PIPS[symbol];
+    const offLo = isScalp ? (eRng && pip ? eRng[0] * pip : 0.3 * refAtr) : 0;
+    const offHi = isScalp ? (eRng && pip ? eRng[1] * pip : 0.6 * refAtr) : 0;
+
     // Jarak minimal TP1 (harga) untuk Day Trading. Dipakai sebagai filter, bukan untuk memperlebar TP.
     let minTp1Dist = 0;
     if (style.kind === 'day') {
@@ -632,7 +656,7 @@ export default async function handler(req, res) {
 
     let plan;
     if (isScalp) {
-      plan = scalpPlan(mtfC, dir, price, refAtr, slFloor, slCap);
+      plan = scalpPlan(mtfC, dir, price, refAtr, slFloor, slCap, offLo, offHi, expireFor(style.tf.mtf));
     } else if (style.kind === 'day' || style.kind === 'intraday') {
       plan = bestZonePlan(series, dir, price, refAtr, style.distW);
     } else {
