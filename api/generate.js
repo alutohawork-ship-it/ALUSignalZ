@@ -9,24 +9,15 @@ const DECIMALS = { XAUUSD: 2, XAGUSD: 3, EURUSD: 5, USDJPY: 3, GBPUSD: 5, BTCUSD
 // Ukuran 1 pip per simbol. Harus sama dengan MARKETS.pip di index.html
 const PIP = { XAUUSD: 0.1, XAGUSD: 0.01, EURUSD: 0.0001, USDJPY: 0.01, GBPUSD: 0.0001, BTCUSDT: 1, ETHUSDT: 0.1, SOLUSDT: 0.01, XRPUSDT: 0.0001, DJI: 1, DAX: 1 };
 
-// Scalping: rentang jarak SL dalam pip [min, max] dari entry.
-// SL mengikuti swing struktur, lalu dijepit ke rentang ini.
+// Scalping: batas jarak SL dalam pip [min, max]. Tidak diubah dari ketentuan.
+// SL selalu di luar kaki reaksi. Jika jaraknya di atas max, setup dilewati (SL tidak dipersempit).
+// Jika di bawah min, SL dilebarkan ke min.
 const SCALP_SL_PIPS = {
   XAUUSD: [20, 30], XAGUSD: [25, 40],
   EURUSD: [10, 15], GBPUSD: [12, 18], USDJPY: [10, 15],
   BTCUSDT: [150, 250], ETHUSDT: [60, 100],
   SOLUSDT: [40, 70], XRPUSDT: [50, 80],
   DJI: [40, 70], DAX: [40, 70],
-};
-
-// Scalping: buffer entry limit dari harga sekarang (pip) [min, max].
-// Offset = clamp(0.5 × ATR M5, min, max). Zona entry lebar = setengah offset.
-const SCALP_ENTRY_PIPS = {
-  XAUUSD: [8, 15], XAGUSD: [8, 15],
-  EURUSD: [3, 6], GBPUSD: [4, 8], USDJPY: [3, 6],
-  BTCUSDT: [40, 80], ETHUSDT: [15, 30],
-  SOLUSDT: [10, 20], XRPUSDT: [10, 20],
-  DJI: [15, 30], DAX: [15, 30],
 };
 
 // Minimal jarak TP1 (pip) untuk Day Trading. Jika TP1 (2R) di bawah ini, setup dilewati.
@@ -42,21 +33,28 @@ const TF_LABEL = { '5m': 'M5', '15m': 'M15', '30m': 'M30', '1h': 'H1', '4h': 'H4
 const KIND_NAME = { OB: 'Order Block', FVG: 'FVG', OTE: 'OTE 62-79%' };
 const ROLE_W = { htf: 3, mtf: 2, ltf: 1 };
 
-// Scalping: TP target 1:1.2 / 1:2 / 1:2.5. Boleh bergeser ke level struktur terdekat dalam band ini. 0 = TP fixed.
-const TP_FLEX_BAND = 0.15;
+// Scalping: selalu memberi sinyal jika ada setup valid. Tiga kemungkinan:
+//   inside / near = entry market sekarang (harga di dalam zona, atau masih dekat tepi zona)
+//   limit         = harga sudah lari dari zona, tunggu pullback ke tengah zona (LIMIT)
+//   stop          = harga belum sampai zona setelah reclaim, tunggu harga bergerak ke tengah zona (STOP)
+const SCALP_WINDOW = 6;                     // jendela kaki reaksi (candle M5, sekitar 30 menit)
+const SCALP_MIN_REACTION_ATR = 0.5;         // kaki reaksi minimal 0.5 ATR
+const SCALP_NEAR_ATR = 0.5;                 // harga dianggap masih dekat tepi zona jika selisihnya <= nilai ini (ATR)
+const SCALP_REVERSE_TOL_ATR = 0.1;          // jika harga menembus kaki reaksi lebih dari ini, setup gagal
+const SCALP_MAX_WAIT_MS = 20 * 60 * 1000;   // pending scalping batal setelah 20 menit
 
 // Harus sama dengan STYLE_TF di index.html
-// kind: 'scalp'    = limit entry dengan buffer dari harga sekarang, SL swing dijepit rentang pip, TP RR 1:1.2 / 1:2 / 1:2.5 (fleksibel)
+// kind: 'scalp'    = trigger M5 (sweep+reclaim / BOS / pullback), zona 38.2–61.8% kaki reaksi, SL di luar kaki, TP 1R / 2R / 3R tetap
 //       'day'      = zona terbaik (skor), dekat harga diutamakan, TP 2R / 3R / 4R
 //       'intraday' = zona terbaik (skor probabilitas), tanpa syarat fresh, TP 1.5R / 3R / 5.5R
-//       'zone'     = Swing: zona fresh, TP 2R / 4.5R / 8.5R
+//       'zone'     = Swing: zona fresh, TP 2R / 4.5R / 8.5R. Wajib searah HTF.
 const STYLES = {
   'Scalping': {
     label: 'Scalping (HTF: M15 | MTF: M5 | LTF: M1/M3)',
-    mode: 'LIMIT',
+    mode: 'MARKET',
     kind: 'scalp',
     tf: { htf: '15m', mtf: '5m' },
-    rr: [1.2, 2.0, 2.5],
+    rr: [1, 2, 3],
   },
   'Day Trading': {
     label: 'Day Trading (HTF: H1 | MTF: M30 | LTF: M5)',
@@ -242,74 +240,117 @@ function impulseZones(candles, isBuy, a) {
 
 // ---------- Scalping ----------
 
-// Limit entry konservatif: entry diberi buffer dari harga sekarang.
-// BUY: entry di bawah harga, zona di bawah entry. SELL: entry di atas harga, zona di atas entry.
-// Status selalu PENDING (waiting). SL dihitung dari entry lalu dijepit ke rentang pip.
-function scalpPlan(candles, dir, price, a, slFloor, slCap, offLo, offHi, expireMs) {
-  const sw = swings(candles, 2);
-  const recent = candles.slice(-12);
-  const isBuy = dir === 1;
-
-  const offset = Math.min(Math.max(0.5 * a, offLo), offHi);
-  const zoneW = offset * 0.5;
-  const entry = isBuy ? price - offset : price + offset;
-
-  let dist;
+// Kaki reaksi: BUY = low terendah di jendela, lalu high tertinggi sesudahnya.
+// SELL = high tertinggi di jendela, lalu low terendah sesudahnya.
+function scalpLeg(candles, isBuy) {
+  const win = candles.slice(-SCALP_WINDOW);
+  let idx = 0;
   if (isBuy) {
-    const sl0 = lastSwing(sw, 'L');
-    const base = sl0 && sl0.price < entry ? sl0.price : Math.min(...recent.map(c => c.l));
-    dist = (entry - base) + SL_BUFFER * a;
-  } else {
-    const sh0 = lastSwing(sw, 'H');
-    const base = sh0 && sh0.price > entry ? sh0.price : Math.max(...recent.map(c => c.h));
-    dist = (base - entry) + SL_BUFFER * a;
+    for (let i = 1; i < win.length; i++) if (win[i].l < win[idx].l) idx = i;
+    let high = -Infinity;
+    for (let i = idx; i < win.length; i++) if (win[i].h > high) high = win[i].h;
+    return { low: win[idx].l, high };
   }
-
-  dist = Math.min(Math.max(dist, slFloor), slCap);
-
-  return {
-    status: 'PENDING',
-    entry,
-    sl: isBuy ? entry - dist : entry + dist,
-    zone: isBuy
-      ? { min: entry - zoneW, max: entry }
-      : { min: entry, max: entry + zoneW },
-    zoneType: 'PULLBACK',
-    touches: 0,
-    distAtr: offset / a,
-    trigger: 'limit',
-    expireMs,
-  };
+  for (let i = 1; i < win.length; i++) if (win[i].h > win[idx].h) idx = i;
+  let low = Infinity;
+  for (let i = idx; i < win.length; i++) if (win[i].l < low) low = win[i].l;
+  return { low, high: win[idx].h };
 }
 
-// TP scalping: target RR tetap. Jika ada level struktur (swing) di dalam band dari target,
-// TP digeser ke level itu. Urutan TP selalu naik.
-function structureTargets(candles, dir, entry, risk, rrs, band) {
-  const sw = swings(candles, 2);
-  const levels = sw
-    .filter(s => (dir === 1 ? s.type === 'H' && s.price > entry : s.type === 'L' && s.price < entry))
-    .map(s => Math.abs(s.price - entry))
-    .sort((a, b) => a - b);
+// Satu kandidat scalping untuk satu arah. Mengembalikan { plan } atau { err }.
+function scalpCandidate(candles, dir, price, a, htfDir, slFloor, slCap) {
+  const isBuy = dir === 1;
+  const n = candles.length;
+  const sw = swings(candles.slice(0, -3), 2);
+  const sh = lastSwing(sw, 'H');
+  const sl0 = lastSwing(sw, 'L');
+  const recent = candles.slice(-3);
+  const lastC = candles[n - 1];
 
-  const out = [];
-  let prev = 0;
-  for (const rr of rrs) {
-    const target = risk * rr;
-    let d = target;
-    if (band > 0) {
-      const lo = target * (1 - band), hi = target * (1 + band);
-      let best = null;
-      for (const l of levels) {
-        if (l < lo || l > hi || l <= prev) continue;
-        if (best === null || Math.abs(l - target) < Math.abs(best - target)) best = l;
-      }
-      if (best !== null) d = best;
+  // 1) Trigger: sweep lalu reclaim, atau break struktur M5. Tanpa trigger: pullback searah HTF.
+  let trigger = null;
+  if (sh && sl0) {
+    if (isBuy) {
+      if (recent.some(c => c.l < sl0.price) && lastC.c > sl0.price) trigger = 'sweep';
+      else if (recent.some(c => c.c > sh.price)) trigger = 'bos';
+    } else {
+      if (recent.some(c => c.h > sh.price) && lastC.c < sh.price) trigger = 'sweep';
+      else if (recent.some(c => c.c < sl0.price)) trigger = 'bos';
     }
-    if (d <= prev) d = target;
-    out.push(entry + dir * d);
-    prev = d;
   }
-  return out;
+  if (!trigger) {
+    if (htfDir !== dir) return { err: 'Belum ada trigger sweep atau BOS M5 searah HTF.' };
+    trigger = 'pullback';
+  }
+  // Trigger melawan HTF hanya sah jika berupa sweep (lebih konservatif)
+  if (htfDir !== 0 && htfDir !== dir && trigger !== 'sweep') {
+    return { err: 'Trigger melawan HTF hanya sah jika sweep. Tidak ada sinyal.' };
+  }
+
+  // 2) Kaki reaksi dan zona 38.2–61.8%
+  const { low, high } = scalpLeg(candles, isBuy);
+  const leg = high - low;
+  if (!(leg >= SCALP_MIN_REACTION_ATR * a)) {
+    return { err: 'Kaki reaksi terlalu kecil untuk trigger yang valid.' };
+  }
+
+  let zTop, zBot, mid;
+  if (isBuy) {
+    zTop = high - 0.382 * leg;
+    zBot = high - 0.618 * leg;
+    mid = high - 0.5 * leg;
+  } else {
+    zBot = low + 0.382 * leg;
+    zTop = low + 0.618 * leg;
+    mid = low + 0.5 * leg;
+  }
+
+  // 3) Posisi harga terhadap zona menentukan mode entry
+  let kind, mode, fill, entry;
+  if (price >= zBot && price <= zTop) {
+    kind = 'inside'; mode = 'DIRECT'; fill = null; entry = price;
+  } else if (isBuy ? price > zTop : price < zBot) {
+    // Harga sudah lari searah reaksi
+    const edgeDist = isBuy ? price - zTop : zBot - price;
+    if (edgeDist <= SCALP_NEAR_ATR * a) {
+      kind = 'near'; mode = 'DIRECT'; fill = null; entry = price;
+    } else {
+      kind = 'limit'; mode = 'WAIT'; fill = 'LIMIT'; entry = mid;
+    }
+  } else {
+    // Harga belum sampai zona dari sisi sebaliknya: tunggu bergerak ke tengah zona
+    const broke = isBuy
+      ? price <= low + SCALP_REVERSE_TOL_ATR * a
+      : price >= high - SCALP_REVERSE_TOL_ATR * a;
+    if (broke) return { err: 'Harga sudah menembus kaki reaksi. Setup gagal, tunggu struktur baru.' };
+    kind = 'stop'; mode = 'WAIT'; fill = 'STOP'; entry = mid;
+  }
+
+  // 4) SL di luar kaki reaksi, tidak pernah dipersempit
+  let stop = isBuy ? low - SL_BUFFER * a : high + SL_BUFFER * a;
+  let risk = Math.abs(entry - stop);
+  if (risk < slFloor) {
+    stop = isBuy ? entry - slFloor : entry + slFloor;
+    risk = slFloor;
+  }
+  if (risk > slCap) {
+    return { err: `SL aman di luar kaki reaksi berjarak ${(risk / a).toFixed(1)} ATR, di atas batas rentang pair. Setup dilewati, SL tidak dipersempit.` };
+  }
+
+  return {
+    plan: {
+      kind, mode, fill, entry,
+      status: mode === 'DIRECT' ? 'RUNNING' : 'PENDING',
+      sl: stop,
+      zone: { min: zBot, max: zTop },
+      mid,
+      trigger,
+      expireMs: mode === 'DIRECT' ? 0 : SCALP_MAX_WAIT_MS,
+      distAtr: Math.abs(price - mid) / a,
+      touches: 0,
+      zoneType: null,
+    },
+  };
 }
 
 // ---------- Day Trading & Intraday: zona terbaik berdasarkan skor probabilitas ----------
@@ -488,31 +529,42 @@ function buildMeta({ lang, style, dir, plan, price, pip, htfDir, mtfDir, refAtr,
   if (htfDir === dir) pts += 2;
   if (mtfDir === dir) pts += 1;
   if (plan.status === 'RUNNING') pts += 1;
+  if (plan.trigger === 'sweep') pts += 1;
   if (plan.zoneType === 'OB') pts += 1;
   if (plan.zoneType && (plan.touches ?? 0) === 0) pts += 1;
   if (plan.distAtr != null && plan.distAtr <= 1) pts += 1;
-  if (riskAtr <= 2) pts += 1;
+  if (riskAtr <= 2.5) pts += 1;
   const confidence = pts >= 5 ? 'HIGH' : pts >= 3 ? 'MEDIUM' : 'LOW';
 
-  let riskCode = setup === 'REVERSAL' || riskAtr > 2.5 ? 'HIGH' : riskAtr > 1.5 ? 'MEDIUM' : 'LOW';
+  const hiAtr = isScalp ? 3 : 2.5;
+  const midAtr = isScalp ? 2 : 1.5;
+  let riskCode = setup === 'REVERSAL' || riskAtr > hiAtr ? 'HIGH' : riskAtr > midAtr ? 'MEDIUM' : 'LOW';
   if (confidence === 'LOW' && riskCode === 'LOW') riskCode = 'MEDIUM';
 
   const side = dir === 1 ? 'Demand' : 'Supply';
-  const zoneLabel = isScalp
-    ? T(lang, 'Pullback MTF', 'MTF pullback')
-    : `${KIND_NAME[plan.zoneType] || plan.zoneType} ${side} ${TF_LABEL[plan.zoneTf] || ''}`.trim();
-
   const distPip = Math.round(Math.abs(plan.entry - price) / (pip || refAtr));
-  let zoneNote;
-  if (plan.status === 'RUNNING') {
-    zoneNote = T(lang, 'Harga sudah di dalam area entry', 'Price already inside entry area');
+
+  let zoneLabel, zoneNote;
+  if (isScalp) {
+    zoneLabel = { sweep: 'Sweep & Reclaim M5', bos: 'BOS Retest M5', pullback: 'Pullback M5' }[plan.trigger] || 'M5';
+    zoneNote = {
+      inside: T(lang, 'Harga di dalam zona, entry market', 'Price inside zone, market entry'),
+      near: T(lang, 'Harga dekat tepi zona, entry market', 'Price near zone edge, market entry'),
+      limit: T(lang, `Tunggu pullback, ${distPip} pip dari harga`, `Wait for pullback, ${distPip} pips away`),
+      stop: T(lang, `Tunggu harga masuk zona, ${distPip} pip dari harga`, `Wait for price to enter zone, ${distPip} pips away`),
+    }[plan.kind];
   } else {
-    const near = plan.distAtr != null && plan.distAtr <= 1;
-    zoneNote = T(
-      lang,
-      `Area entry ${distPip} pip dari harga sekarang${near ? ' (dekat)' : ''}`,
-      `Entry area ${distPip} pips from current price${near ? ' (near)' : ''}`
-    );
+    zoneLabel = `${KIND_NAME[plan.zoneType] || plan.zoneType} ${side} ${TF_LABEL[plan.zoneTf] || ''}`.trim();
+    if (plan.status === 'RUNNING') {
+      zoneNote = T(lang, 'Harga sudah di dalam area entry', 'Price already inside entry area');
+    } else {
+      const near = plan.distAtr != null && plan.distAtr <= 1;
+      zoneNote = T(
+        lang,
+        `Area entry ${distPip} pip dari harga sekarang${near ? ' (dekat)' : ''}`,
+        `Entry area ${distPip} pips from current price${near ? ' (near)' : ''}`
+      );
+    }
   }
 
   return { confidence, risk: riskCode, setup, setupLabel, zoneLabel, zoneNote };
@@ -540,19 +592,41 @@ function buildReason({ lang, style, dir, plan, dec, htfTxt, meta, slPips, tpPips
   );
 
   if (style.kind === 'scalp') {
+    const trigId = { sweep: 'sweep likuiditas lalu reclaim M5', bos: 'break struktur M5', pullback: 'pullback searah trend HTF' }[plan.trigger];
+    const trigEn = { sweep: 'liquidity sweep and reclaim on M5', bos: 'M5 structure break', pullback: 'pullback in HTF trend' }[plan.trigger];
     const zone = `${f(plan.zone.min)} – ${f(plan.zone.max)}`;
-    const tpId = tpPips
-      ? ` TP1 ${tpPips[0]} pip, TP2 ${tpPips[1]} pip, TP3 ${tpPips[2]} pip (mengikuti struktur ±${Math.round(TP_FLEX_BAND * 100)}%).`
-      : '';
-    const tpEn = tpPips
-      ? ` TP1 ${tpPips[0]} pips, TP2 ${tpPips[1]} pips, TP3 ${tpPips[2]} pips (structure-adjusted ±${Math.round(TP_FLEX_BAND * 100)}%).`
-      : '';
-    const body = T(
+    const pendTxt = T(
       lang,
-      `Limit entry di ${f(plan.entry)} dalam zona ${zone}. ${meta.zoneNote}. Status waiting, aktif saat harga masuk zona. Batal jika SL atau TP1 tersentuh lebih dulu, atau belum masuk dalam ${durText(plan.expireMs, lang)}. SL ${slPips ?? '-'} pip.${tpId}`,
-      `Limit entry at ${f(plan.entry)} within zone ${zone}. ${meta.zoneNote}. Status waiting, active once price enters the zone. Cancelled if SL or TP1 is hit first, or not filled within ${durText(plan.expireMs, lang)}. SL ${slPips ?? '-'} pips.${tpEn}`
+      ` Batal jika SL atau TP1 tersentuh dulu, atau belum terisi dalam ${durText(plan.expireMs, lang)}.`,
+      ` Cancelled if SL or TP1 is hit first, or not filled within ${durText(plan.expireMs, lang)}.`
     );
-    return `${head} ${body} ${tail}`;
+
+    let action;
+    if (plan.kind === 'inside') {
+      action = T(lang, `Harga di dalam zona, entry market di ${f(plan.entry)}.`, `Price inside zone, market entry at ${f(plan.entry)}.`);
+    } else if (plan.kind === 'near') {
+      action = T(lang, `Harga dekat tepi zona, entry market di ${f(plan.entry)}.`, `Price near zone edge, market entry at ${f(plan.entry)}.`);
+    } else if (plan.kind === 'limit') {
+      action = T(
+        lang,
+        `Harga sudah lari dari zona. Tunggu pullback ke tengah zona ${f(plan.entry)}.${pendTxt}`,
+        `Price ran ahead of the zone. Wait for pullback to zone midpoint ${f(plan.entry)}.${pendTxt}`
+      );
+    } else {
+      action = T(
+        lang,
+        `Harga belum masuk zona. Tunggu harga bergerak ke tengah zona ${f(plan.entry)}.${pendTxt}`,
+        `Price has not reached the zone yet. Wait for price to move to zone midpoint ${f(plan.entry)}.${pendTxt}`
+      );
+    }
+
+    const rrTxt = style.rr.map(x => `${x}R`).join(' / ');
+    const pipTxt = tpPips ? ` (${tpPips.join(' / ')} pip)` : '';
+    const slTxt = T(lang, `SL ${slPips ?? '-'} pip di luar kaki reaksi, tidak dipersempit.`, `SL ${slPips ?? '-'} pips beyond the reaction leg, not tightened.`);
+    const tpTxt = T(lang, ` TP ${rrTxt}${pipTxt} tetap dari jarak SL.`, ` TP ${rrTxt}${pipTxt} fixed from SL distance.`);
+
+    const trigLine = T(lang, `Trigger: ${trigId}.`, `Trigger: ${trigEn}.`);
+    return `${head} ${trigLine} Zona ${zone} (38,2–61,8% kaki reaksi). ${action} ${slTxt}${tpTxt} ${tail}`;
   }
 
   const zone = `${f(plan.zone.min)} – ${f(plan.zone.max)}`;
@@ -598,125 +672,4 @@ export default async function handler(req, res) {
     const htfC = cleanCandles(cnd.htf);
     const mtfC = cleanCandles(cnd.mtf ?? cnd.entry);
     const ltfC = cleanCandles(cnd.ltf);
-    if (mtfC.length < 30 || htfC.length < 20) {
-      return res.status(422).json({ error: 'Data candle belum cukup. Tunggu beberapa menit lalu coba lagi.' });
-    }
-
-    const none = reason => res.status(200).json({ ok: true, signal: null, reason });
-
-    const refAtr = atr(mtfC, 14);
-    if (!(refAtr > 0)) return none('Data volatilitas tidak valid.');
-
-    const mtfDir = structureDir(mtfC);
-    const htfDir = structureDir(htfC);
-    const isScalp = style.kind === 'scalp';
-    // Scalping, Day Trading, dan Intraday selalu memberi setup. Swing tetap ketat.
-    const flexible = isScalp || style.kind === 'day' || style.kind === 'intraday';
-
-    let dir = mtfDir;
-    if (dir === 0 && flexible) {
-      const sma20 = mtfC.slice(-20).reduce((s, c) => s + c.c, 0) / 20;
-      dir = htfDir || (mtfC[mtfC.length - 1].c >= sma20 ? 1 : -1);
-    }
-    if (dir === 0) {
-      return none(T(lang, 'Struktur belum jelas di timeframe MTF. Tidak ada sinyal.', 'Structure is unclear on the MTF. No signal.'));
-    }
-
-    if (!flexible && htfDir !== 0 && htfDir !== dir) {
-      return none(T(lang, 'Arah HTF berlawanan dengan arah entry. Tidak ada sinyal.', 'HTF direction conflicts with entry. No signal.'));
-    }
-
-    const htfTxt = htfDir === 0
-      ? { id: 'belum jelas', en: 'unclear' }
-      : htfDir === dir
-        ? { id: 'searah', en: 'aligned' }
-        : { id: 'berlawanan', en: 'opposite' };
-
-    // Scalping: rentang SL per pair (pip -> harga). Pair tanpa tabel pakai ATR.
-    const rng = SCALP_SL_PIPS[symbol];
-    const slFloor = isScalp ? (rng && pip ? rng[0] * pip : RISK_MIN * refAtr) : 0;
-    const slCap = isScalp ? (rng && pip ? rng[1] * pip : slFloor * 1.5) : 0;
-
-    // Scalping: buffer entry dari harga sekarang (harga). Pair tanpa tabel pakai ATR.
-    const eRng = SCALP_ENTRY_PIPS[symbol];
-    const offLo = isScalp ? (eRng && pip ? eRng[0] * pip : 0.3 * refAtr) : 0;
-    const offHi = isScalp ? (eRng && pip ? eRng[1] * pip : 0.6 * refAtr) : 0;
-
-    // Jarak minimal TP1 (harga) untuk Day Trading. Dipakai sebagai filter, bukan untuk memperlebar TP.
-    let minTp1Dist = 0;
-    if (style.kind === 'day') {
-      minTp1Dist = DAY_MIN_TP1_PIPS[symbol] && pip ? DAY_MIN_TP1_PIPS[symbol] * pip : 1.5 * refAtr;
-    }
-
-    const series = [
-      { role: 'htf', tf: style.tf?.htf, candles: htfC },
-      { role: 'mtf', tf: style.tf?.mtf, candles: mtfC },
-      { role: 'ltf', tf: style.tf?.ltf, candles: ltfC },
-    ];
-
-    let plan;
-    if (isScalp) {
-      plan = scalpPlan(mtfC, dir, price, refAtr, slFloor, slCap, offLo, offHi, expireFor(style.tf.mtf));
-    } else if (style.kind === 'day' || style.kind === 'intraday') {
-      plan = bestZonePlan(series, dir, price, refAtr, style.distW);
-    } else {
-      plan = findZone(series, dir, price, refAtr);
-    }
-    if (plan.err) return none(plan.err);
-
-    const entry = plan.entry;
-    const risk = Math.abs(entry - plan.sl);
-    const r = v => Number(v.toFixed(dec));
-
-    if (style.kind === 'day' && minTp1Dist && risk * style.rr[0] < minTp1Dist) {
-      const tp1Dist = (risk * style.rr[0]).toFixed(dec);
-      const minDist = minTp1Dist.toFixed(dec);
-      return none(T(
-        lang,
-        `TP1 ${style.rr[0]}R (${tp1Dist}) di bawah minimum ${minDist} untuk ${symbol}. Setup dilewati.`,
-        `TP1 ${style.rr[0]}R (${tp1Dist}) is below the minimum ${minDist} for ${symbol}. Setup skipped.`
-      ));
-    }
-
-    const tps = isScalp
-      ? structureTargets(mtfC, dir, entry, risk, style.rr, TP_FLEX_BAND)
-      : style.rr.map(x => entry + dir * risk * x);
-    const tpPips = pip ? tps.map(tp => Math.round(Math.abs(tp - entry) / pip)) : null;
-    const slPips = pip ? Math.round(risk / pip) : null;
-
-    const meta = buildMeta({
-      lang, style, dir, plan, price, pip, htfDir, mtfDir, refAtr, risk,
-    });
-
-    const reason = buildReason({
-      lang, style, dir, plan, dec, htfTxt, meta, slPips, tpPips,
-    });
-
-    return res.status(200).json({
-      ok: true,
-      signal: {
-        signal: dir === 1 ? 'BUY' : 'SELL',
-        mode: style.mode,
-        status: plan.status,
-        entry: r(entry),
-        sl: r(plan.sl),
-        tp1: r(tps[0]),
-        tp2: r(tps[1]),
-        tp3: r(tps[2]),
-        zone: plan.zone ? { min: r(plan.zone.min), max: r(plan.zone.max) } : null,
-        zoneTf: plan.zoneTf || null,
-        expireMs: plan.status === 'PENDING' ? (plan.expireMs || 0) : 0,
-        confidence: meta.confidence,
-        risk: meta.risk,
-        setup: meta.setup,
-        setupLabel: meta.setupLabel,
-        zoneLabel: meta.zoneLabel,
-        zoneNote: meta.zoneNote,
-        reason,
-      },
-    });
-  } catch (err) {
-    console.error('generate error:', err);
-    return res.status(500).json({ error: 'Server error: ' + err.message });
-  }
-}
+    if (mtfC.length < 30 || htfC.length
