@@ -1,24 +1,22 @@
 // api/generate.js
 // Analisis Pure SMC dijalankan di server. Tidak memanggil API eksternal.
 // Hanya klien terdaftar dan masih aktif yang boleh memakai endpoint ini.
-// Scalping: selalu memberi sinyal. Arah dari vote struktur HTF/MTF/LTF, ada mode pantulan (bounce),
-//           filter kualitas hanya memberi label IDEAL / OK / CAUTION dan peringatan.
+// Scalping: arah mengikuti struktur M5, SL menempel di swing terkonfirmasi, TP tetap 1R / 2R / 3R.
 // Day, Intraday, dan Swing tidak berubah.
 
 const KV_KEY = 'alu_clients';
 
-const DECIMALS = { XAUUSD: 2, XAGUSD: 3, EURUSD: 5, USDJPY: 3, GBPUSD: 5, AUDUSD: 5, USDCAD: 5, USDCHF: 5, BTCUSDT: 2, ETHUSDT: 2, SOLUSDT: 2, XRPUSDT: 4, DJI: 2, DAX: 2 };
+const DECIMALS = { XAUUSD: 2, XAGUSD: 3, EURUSD: 5, USDJPY: 3, GBPUSD: 5, BTCUSDT: 2, ETHUSDT: 2, SOLUSDT: 2, XRPUSDT: 4, DJI: 2, DAX: 2 };
 
 // Ukuran 1 pip per simbol. Harus sama dengan MARKETS.pip di index.html
-const PIP = { XAUUSD: 0.1, XAGUSD: 0.01, EURUSD: 0.0001, USDJPY: 0.01, GBPUSD: 0.0001, AUDUSD: 0.0001, USDCAD: 0.0001, USDCHF: 0.0001, BTCUSDT: 1, ETHUSDT: 0.1, SOLUSDT: 0.01, XRPUSDT: 0.0001, DJI: 1, DAX: 1 };
+const PIP = { XAUUSD: 0.1, XAGUSD: 0.01, EURUSD: 0.0001, USDJPY: 0.01, GBPUSD: 0.0001, BTCUSDT: 1, ETHUSDT: 0.1, SOLUSDT: 0.01, XRPUSDT: 0.0001, DJI: 1, DAX: 1 };
 
 // Scalping: rentang jarak SL dalam pip [min, max]. Tidak diubah dari ketentuan.
 const SCALP_SL_PIPS = {
-  XAUUSD: [25, 30], XAGUSD: [25, 40],
+  XAUUSD: [20, 30], XAGUSD: [25, 40],
   EURUSD: [10, 15], GBPUSD: [12, 18], USDJPY: [10, 15],
-  AUDUSD: [10, 15], USDCAD: [10, 15], USDCHF: [10, 15],
-  BTCUSDT: [150, 250], ETHUSDT: [75, 120],
-  SOLUSDT: [40, 70], XRPUSDT: [55, 90],
+  BTCUSDT: [150, 250], ETHUSDT: [60, 100],
+  SOLUSDT: [40, 70], XRPUSDT: [50, 80],
   DJI: [40, 70], DAX: [40, 70],
 };
 
@@ -26,7 +24,6 @@ const SCALP_SL_PIPS = {
 const DAY_MIN_TP1_PIPS = {
   XAUUSD: 80, XAGUSD: 40,
   EURUSD: 30, USDJPY: 30, GBPUSD: 40,
-  AUDUSD: 30, USDCAD: 30, USDCHF: 30,
   BTCUSDT: 300, ETHUSDT: 300, SOLUSDT: 300, XRPUSDT: 300,
   DJI: 150, DAX: 100,
 };
@@ -37,33 +34,18 @@ const KIND_NAME = { OB: 'Order Block', FVG: 'FVG', OTE: 'OTE 62-79%' };
 const ROLE_W = { htf: 3, mtf: 2, ltf: 1 };
 
 // ---------- Scalping ----------
-const SCALP_WINDOWS = [6, 4, 3];           // jendela kaki reaksi (candle M5), dicoba dari yang terlebar
+const SCALP_SWING_AGE = [8, 16, 30];       // usia maksimal swing M5 (candle) yang dipakai sebagai titik SL, dicoba dari yang terdekat
 const SCALP_MIN_REACTION_ATR = 0.5;        // kaki reaksi minimal 0.5 ATR (kalau lebih kecil, diperlebar)
 const SCALP_NEAR_ATR = 0.5;                // harga dianggap dekat tepi zona jika selisihnya <= nilai ini (ATR)
-const SCALP_REVERSE_TOL_ATR = 0.1;         // jika harga menembus kaki reaksi lebih dari ini, kandidat itu dilewati
+const SCALP_REVERSE_TOL_ATR = 0.1;         // jika harga sudah menembus kaki dari sisi lawan lebih dari ini, kandidat dilewati
 const SCALP_MAX_WAIT_MS = 20 * 60 * 1000;  // LIMIT scalping batal setelah 20 menit
 // Jika SL struktur melebihi batas max pair:
 //   'FLAG' = SL struktur tetap dipakai (tidak dipersempit), risk HIGH, confidence LOW
 //   'CAP'  = SL dipaksa masuk batas max pair, risk HIGH, confidence LOW
 const SCALP_OVER_CAP = 'FLAG';
 
-// ---------- Kualitas scalping (hanya untuk label, tidak memblokir sinyal) ----------
-const SCALP_IDEAL_RISK = ['LOW'];            // risk yang dianggap ideal
-const SCALP_ATR_RATIO = [0.7, 2.5];          // ATR sekarang / ATR 50 candle: di luar rentang = sepi / spike
-const SCALP_MAX_LAST_RANGE_ATR = 2.5;        // candle terakhir terlalu besar
-const SCALP_BODY_AGAINST_ATR = 0.6;          // candle terakhir kuat melawan arah
-const SCALP_SESSION_UTC = [7, 20];           // jam aktif UTC (forex, emas, perak, indeks)
-const SCALP_24H = new Set(['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT']);
-const SCALP_STRICT_LOSSES = 2;               // setelah 2 SL beruntun: utamakan sweep + beri peringatan
-const VOTE_W = { htf: 3, mtf: 2, ltf: 1 };   // bobot vote arah struktur
-
-// ---------- Mode pantulan (bounce) ----------
-const SCALP_BOUNCE_ENABLED = true;           // false = selalu ikut tren, tanpa scalp pantulan
-const SCALP_BOUNCE_MIN_ROOM_R = 1;           // ruang ke target pantulan minimal 1R (sampai TP1)
-const SCALP_BOUNCE_MOMENTUM_BARS = 3;        // harga harus sedang bergerak searah pantulan dalam 3 candle M5
-
 // Harus sama dengan STYLE_TF di index.html
-// kind: 'scalp'    = trigger M5, BUY/SELL NOW atau LIMIT, selalu memberi sinyal, TP 1R / 2R / 3R
+// kind: 'scalp'    = arah struktur M5, BUY/SELL NOW atau LIMIT, selalu memberi sinyal, TP 1R / 2R / 3R
 //       'day'      = zona terbaik (skor), dekat harga diutamakan, TP 2R / 3R / 4R
 //       'intraday' = zona terbaik (skor probabilitas), TP 1.5R / 3R / 5.5R
 //       'zone'     = Swing: zona fresh, TP 2R / 4.5R / 8.5R. Wajib searah HTF.
@@ -269,23 +251,51 @@ function impulseZones(candles, isBuy, a) {
   };
 }
 
-// ---------- Scalping ----------
+// ---------- Scalping (ikut struktur M5) ----------
 
-// Kaki reaksi dalam 'lookback' candle terakhir.
-// BUY = low terendah, lalu high tertinggi sesudahnya. SELL = kebalikannya.
-function scalpLeg(candles, isBuy, lookback) {
-  const win = candles.slice(-lookback);
-  let idx = 0;
-  if (isBuy) {
-    for (let i = 1; i < win.length; i++) if (win[i].l < win[idx].l) idx = i;
-    let high = -Infinity;
-    for (let i = idx; i < win.length; i++) if (win[i].h > high) high = win[i].h;
-    return { low: win[idx].l, high };
+// Arah scalping = arah struktur M5.
+// Urutan: HH/HL atau LH/LL, lalu BOS terbaru, lalu HTF, lalu posisi harga terhadap SMA20.
+function scalpDirection(mtfC, htfDir) {
+  const d = structureDir(mtfC);
+  if (d !== 0) return d;
+  const sw = swings(mtfC.slice(0, -1), 2);
+  const sh = lastSwing(sw, 'H'), sl = lastSwing(sw, 'L');
+  for (let i = mtfC.length - 1; i >= Math.max(0, mtfC.length - 12); i--) {
+    const c = mtfC[i];
+    if (sh && c.c > sh.price) return 1;
+    if (sl && c.c < sl.price) return -1;
   }
-  for (let i = 1; i < win.length; i++) if (win[i].h > win[idx].h) idx = i;
+  if (htfDir !== 0) return htfDir;
+  const sma20 = mtfC.slice(-20).reduce((s, c) => s + c.c, 0) / 20;
+  return mtfC[mtfC.length - 1].c >= sma20 ? 1 : -1;
+}
+
+// Kaki reaksi dari swing terkonfirmasi terdekat (usia maksimal maxAge candle).
+// BUY: low = titik terendah sejak swing low itu, high = tertinggi sesudahnya.
+// SELL: kebalikannya.
+// Titik ini stabil: tidak bergeser tiap candle baru, hanya berubah saat terbentuk swing baru.
+function scalpLegFor(candles, isBuy, maxAge) {
+  const n = candles.length;
+  const sw = swings(candles, 2);
+  const type = isBuy ? 'L' : 'H';
+  let anchor = null;
+  for (let k = sw.length - 1; k >= 0; k--) {
+    if (sw[k].type === type && n - 1 - sw[k].i <= maxAge) { anchor = sw[k]; break; }
+  }
+  if (!anchor) return null;
+
+  if (isBuy) {
+    let lowIdx = anchor.i;
+    for (let i = anchor.i; i < n; i++) if (candles[i].l < candles[lowIdx].l) lowIdx = i;
+    let high = -Infinity;
+    for (let i = lowIdx; i < n; i++) if (candles[i].h > high) high = candles[i].h;
+    return { low: candles[lowIdx].l, high };
+  }
+  let highIdx = anchor.i;
+  for (let i = anchor.i; i < n; i++) if (candles[i].h > candles[highIdx].h) highIdx = i;
   let low = Infinity;
-  for (let i = idx; i < win.length; i++) if (win[i].l < low) low = win[i].l;
-  return { low, high: win[idx].h };
+  for (let i = highIdx; i < n; i++) if (candles[i].l < low) low = candles[i].l;
+  return { low, high: candles[highIdx].h };
 }
 
 // Jarak SL: di bawah floor dilebarkan. Di atas cap ditandai (over), dan dipersempit hanya jika SCALP_OVER_CAP = 'CAP'.
@@ -308,19 +318,38 @@ function scalpSlFrom(entry, rawStop, isBuy, a, slFloor, slCap) {
   return { stop, risk, over, rawRiskAtr };
 }
 
-// Satu kandidat scalping untuk satu arah dan satu jendela kaki. Mengembalikan plan, atau null jika kaki sudah dilanggar.
-function scalpCandidate(candles, dir, price, a, htfDir, slFloor, slCap, lookback) {
+// Satu kandidat scalping untuk arah dir dan satu usia swing. Mengembalikan plan atau null.
+function scalpCandidate(candles, dir, price, a, htfDir, slFloor, slCap, maxAge) {
   const isBuy = dir === 1;
+  const leg0 = scalpLegFor(candles, isBuy, maxAge);
+  if (!leg0) return null;
+
+  let { low, high } = leg0;
+  const need = SCALP_MIN_REACTION_ATR * a;
+  if (high - low < need) {
+    if (isBuy) high = low + need; else low = high - need;
+  }
+  const leg = high - low;
+  if (!(leg > 0)) return null;
+
+  const zTop = isBuy ? high - 0.382 * leg : low + 0.618 * leg;
+  const zBot = isBuy ? high - 0.618 * leg : low + 0.382 * leg;
+  const mid = (zTop + zBot) / 2;
+
+  // Kaki sudah ditembus dari sisi lawan: kandidat ini tidak dipakai
+  const broke = isBuy
+    ? price <= low + SCALP_REVERSE_TOL_ATR * a
+    : price >= high - SCALP_REVERSE_TOL_ATR * a;
+  if (broke) return null;
+
+  // Trigger: sweep lalu reclaim, atau BOS M5 searah. Jika tidak ada, pullback.
   const n = candles.length;
   const sw = swings(candles.slice(0, -3), 2);
   const sh = lastSwing(sw, 'H');
   const sl0 = lastSwing(sw, 'L');
   const recent = candles.slice(-3);
   const lastC = candles[n - 1];
-  const flags = [];
-
-  // 1) Trigger: sweep lalu reclaim, atau break struktur M5. Jika tidak ada, pakai pullback.
-  let trigger = null;
+  let trigger = 'pullback';
   if (sh && sl0) {
     if (isBuy) {
       if (recent.some(c => c.l < sl0.price) && lastC.c > sl0.price) trigger = 'sweep';
@@ -330,34 +359,17 @@ function scalpCandidate(candles, dir, price, a, htfDir, slFloor, slCap, lookback
       else if (recent.some(c => c.c < sl0.price)) trigger = 'bos';
     }
   }
-  if (!trigger) trigger = 'pullback';
+
+  const flags = [];
   if (htfDir !== 0 && htfDir !== dir) flags.push('HTF_OPPOSITE');
 
-  // 2) Kaki reaksi. Jika terlalu kecil, diperlebar dari sisi yang benar agar zona tetap terbentuk.
-  let { low, high } = scalpLeg(candles, isBuy, lookback);
-  const need = SCALP_MIN_REACTION_ATR * a;
-  if (high - low < need) {
-    if (isBuy) high = low + need;
-    else low = high - need;
-  }
-  const leg = high - low;
-  const zTop = isBuy ? high - 0.382 * leg : low + 0.618 * leg;
-  const zBot = isBuy ? high - 0.618 * leg : low + 0.382 * leg;
-  const mid = isBuy ? high - 0.5 * leg : low + 0.5 * leg;
-
-  // 3) Kaki sudah ditembus dari sisi lawan: kandidat ini tidak dipakai
-  const broke = isBuy
-    ? price <= low + SCALP_REVERSE_TOL_ATR * a
-    : price >= high - SCALP_REVERSE_TOL_ATR * a;
-  if (broke) return null;
-
-  // 4) Entry: NOW jika di dalam, dekat, atau sudah lebih dalam dari zona. LIMIT di tengah zona jika harga sudah lari jauh.
+  // Entry: NOW jika di dalam, dekat, atau sudah lebih dalam dari zona. LIMIT di tengah zona jika harga sudah lari jauh.
   let kind, orderType, entry;
   if (price >= zBot && price <= zTop) {
     kind = 'inside'; orderType = 'NOW'; entry = price;
   } else if (isBuy ? price > zTop : price < zBot) {
-    const edgeDist = isBuy ? price - zTop : zBot - price;
-    if (edgeDist <= SCALP_NEAR_ATR * a) {
+    const edge = isBuy ? price - zTop : zBot - price;
+    if (edge <= SCALP_NEAR_ATR * a) {
       kind = 'near'; orderType = 'NOW'; entry = price;
     } else {
       kind = 'limit'; orderType = 'LIMIT'; entry = mid;
@@ -366,10 +378,11 @@ function scalpCandidate(candles, dir, price, a, htfDir, slFloor, slCap, lookback
     kind = 'deep'; orderType = 'NOW'; entry = price;
   }
 
-  // 5) SL di luar kaki reaksi
+  // SL di luar kaki reaksi (di bawah low untuk BUY, di atas high untuk SELL)
   const rawStop = isBuy ? low - SL_BUFFER * a : high + SL_BUFFER * a;
   if (isBuy ? rawStop >= entry : rawStop <= entry) return null;
   const s = scalpSlFrom(entry, rawStop, isBuy, a, slFloor, slCap);
+  const risk = Math.abs(entry - s.stop);
 
   return {
     kind,
@@ -389,12 +402,13 @@ function scalpCandidate(candles, dir, price, a, htfDir, slFloor, slCap, lookback
     flags,
     over: s.over,
     rawRiskAtr: s.rawRiskAtr,
-    lookback,
+    riskAtr: risk / a,
+    maxAge,
   };
 }
 
-// Cadangan scalping: selalu tersedia untuk kedua arah. Entry NOW di harga sekarang, SL dari 3 candle terakhir.
-function scalpFallback(candles, dir, price, a, slFloor, slCap) {
+// Cadangan scalping: entry NOW di harga sekarang, SL dari 3 candle terakhir. Arahnya tetap arah struktur.
+function scalpFallback(candles, dir, price, a, htfDir, slFloor, slCap) {
   const isBuy = dir === 1;
   const win = candles.slice(-3);
   const low = Math.min(...win.map(c => c.l));
@@ -404,6 +418,8 @@ function scalpFallback(candles, dir, price, a, slFloor, slCap) {
     rawStop = isBuy ? price - slFloor : price + slFloor;
   }
   const s = scalpSlFrom(price, rawStop, isBuy, a, slFloor, slCap);
+  const flags = ['NO_TRIGGER'];
+  if (htfDir !== 0 && htfDir !== dir) flags.push('HTF_OPPOSITE');
   return {
     kind: 'fallback',
     orderType: 'NOW',
@@ -419,97 +435,22 @@ function scalpFallback(candles, dir, price, a, slFloor, slCap) {
     distAtr: 0,
     touches: 0,
     zoneType: null,
-    flags: ['NO_TRIGGER'],
+    flags,
     over: s.over,
     rawRiskAtr: s.rawRiskAtr,
-    lookback: 3,
+    riskAtr: Math.abs(price - s.stop) / a,
+    maxAge: 3,
   };
 }
 
-// Skor kandidat: sweep > BOS > pullback > fallback. Searah HTF menambah, berlawanan HTF mengurangi.
+// Peringkat kandidat (dalam satu arah): trigger lebih kuat lebih baik, flag dan SL over cap menurunkan, risiko lebih kecil sedikit diutamakan.
 const TRIG_W = { sweep: 3, bos: 2, pullback: 1, fallback: 0 };
-function scalpScore(c, htfDir) {
-  const p = c.plan;
-  let s = TRIG_W[p.trigger] ?? 0;
-  if (htfDir !== 0) s += htfDir === c.dir ? 2 : -1;
-  if (p.orderType === 'NOW') s += 1;
-  if (p.over) s -= 3;
-  s -= Math.min(p.distAtr, 3) * 0.5;
+function scalpRank(c) {
+  let s = TRIG_W[c.trigger] ?? 0;
+  if (c.over) s -= 3;
+  s -= 2 * (c.flags || []).length;
+  s -= 0.2 * (c.riskAtr || 0);
   return s;
-}
-
-// ---------- Scalping: kualitas (label dan peringatan, tidak memblokir) ----------
-
-function scalpSessionOk(candles, symbol) {
-  if (SCALP_24H.has(symbol)) return true;
-  const t = candles[candles.length - 1].t;
-  const ms = t < 1e12 ? t * 1000 : t;
-  const h = new Date(ms).getUTCHours();
-  return h >= SCALP_SESSION_UTC[0] && h < SCALP_SESSION_UTC[1];
-}
-
-// Swing lawan terdekat (M5 dan M15) vs jarak TP1
-function scalpRoomOk(plan, dir, rr1, mtfC, htfC) {
-  const isBuy = dir === 1;
-  const risk = Math.abs(plan.entry - plan.sl);
-  const gaps = [];
-  for (const arr of [mtfC, htfC]) {
-    for (const s of swings(arr, 2)) {
-      if (isBuy && s.type === 'H' && s.price > plan.entry) gaps.push(s.price - plan.entry);
-      if (!isBuy && s.type === 'L' && s.price < plan.entry) gaps.push(plan.entry - s.price);
-    }
-  }
-  if (!gaps.length) return true;
-  return Math.min(...gaps) >= risk * rr1;
-}
-
-// Menilai kandidat terpilih. Tidak pernah menolak, hanya mengisi catatan dan label.
-function scalpQuality(c, ctx) {
-  const { lang, style, pip, refAtr, htfDir, mtfDir, ltfDir, mtfC, htfC, price, symbol, losses } = ctx;
-  const p = c.plan, dir = c.dir;
-  const notes = [];
-  const add = (id, en) => notes.push(T(lang, id, en));
-
-  if (p.trigger === 'fallback') add('tanpa trigger M5', 'no M5 trigger');
-  if (p.trigger === 'pullback' && !(htfDir === dir && mtfDir === dir)) add('pullback tanpa struktur HTF/M5 searah', 'pullback without aligned HTF/M5 structure');
-  if (!p.bounce && htfDir !== 0 && htfDir !== dir) add('melawan HTF M15', 'against HTF M15');
-  if (!p.bounce && mtfDir === -dir && p.trigger !== 'sweep') add('struktur M5 berlawanan, belum ada sweep', 'M5 structure opposite, no sweep');
-  if (!p.bounce && ltfDir === -dir) add('LTF belum searah', 'LTF not aligned yet');
-  if (p.over) add('SL melebihi batas rentang pair', 'SL above pair range limit');
-
-  if (p.bounce) {
-    add('mode pantulan melawan MTF, ambil profit cepat', 'bounce mode against MTF, take profit quickly');
-    const risk0 = Math.abs(p.entry - p.sl);
-    const reach = Math.abs(p.bounceTarget - p.entry);
-    const beyond = style.rr.map((x, i) => (risk0 * x > reach ? `TP${i + 1}` : null)).filter(Boolean);
-    if (beyond.length) {
-      add(`${beyond.join('/')} melewati target pantulan, ambil partial lebih awal`, `${beyond.join('/')} beyond bounce target, take partial earlier`);
-    }
-  }
-
-  if (!scalpSessionOk(mtfC, symbol)) add('di luar jam aktif, likuiditas tipis', 'outside active hours, thin liquidity');
-
-  const base = atr(mtfC.slice(-61), 50);
-  if (base > 0) {
-    const ratio = refAtr / base;
-    if (ratio < SCALP_ATR_RATIO[0]) add('volatilitas sepi', 'quiet volatility');
-    if (ratio > SCALP_ATR_RATIO[1]) add('volatilitas liar (spike/berita)', 'wild volatility (spike/news)');
-  }
-  const last = mtfC[mtfC.length - 1];
-  if (last.h - last.l > SCALP_MAX_LAST_RANGE_ATR * refAtr) add('candle terakhir besar, hindari mengejar', 'last candle large, avoid chasing');
-  const body = last.c - last.o;
-  if ((dir === 1 && body < -SCALP_BODY_AGAINST_ATR * refAtr) || (dir === -1 && body > SCALP_BODY_AGAINST_ATR * refAtr)) {
-    add('candle terakhir kuat melawan arah', 'last candle strongly against direction');
-  }
-  if (!scalpRoomOk(p, dir, style.rr[0], mtfC, htfC)) add('swing lawan dekat, TP1 bisa terhalang', 'opposing swing close, TP1 may be blocked');
-  if (losses >= SCALP_STRICT_LOSSES) add(`${losses} SL beruntun, kurangi lot atau tunggu konfirmasi`, `${losses} consecutive SL, reduce lot or wait for confirmation`);
-
-  const risk = Math.abs(p.entry - p.sl);
-  const meta = buildMeta({ lang, style, dir, plan: p, price, pip, htfDir, mtfDir, refAtr, risk });
-  const ideal = notes.length === 0 && meta.confidence === 'HIGH' && SCALP_IDEAL_RISK.includes(meta.risk);
-  const caution = meta.confidence === 'LOW' || meta.risk === 'HIGH' || notes.length >= 3;
-  const label = ideal ? 'IDEAL' : caution ? 'CAUTION' : 'OK';
-  return { label, notes };
 }
 
 // ---------- Day Trading & Intraday: zona terbaik berdasarkan skor probabilitas ----------
@@ -670,7 +611,7 @@ function findZone(series, dir, price, refAtr) {
       expireMs: expireFor(s.tf),
     };
   }
-  return { err: 'Tidak ada zona FVG atau Order Block yang fresh di HTF, MTF, maupun LTF. Tidak ada sinyal.' };
+  return { err: 'Tidak ada zona FVG atau Order Block yang fresh di HTF, MTF, maupun LTF.' };
 }
 
 // ---------- Metadata setup: confidence, risk, setup type, label zona, keterangan entry ----------
@@ -681,14 +622,11 @@ function buildMeta({ lang, style, dir, plan, price, pip, htfDir, mtfDir, refAtr,
   const ord = orderLabel(dir, orderType);
   const flags = plan.flags || [];
 
-  const setup = plan.bounce
-    ? 'BOUNCE'
-    : htfDir === 0 ? 'NEUTRAL' : htfDir === dir ? 'CONTINUATION' : 'REVERSAL';
+  const setup = htfDir === 0 ? 'NEUTRAL' : htfDir === dir ? 'CONTINUATION' : 'REVERSAL';
   const setupLabel = {
     NEUTRAL: T(lang, 'Netral (HTF belum jelas)', 'Neutral (HTF unclear)'),
     CONTINUATION: T(lang, 'Continuation (searah trend HTF)', 'Continuation (with HTF trend)'),
     REVERSAL: T(lang, 'Reversal (melawan trend HTF)', 'Reversal (against HTF trend)'),
-    BOUNCE: T(lang, 'Pantulan (counter-trend jangka pendek)', 'Bounce (short-term counter-trend)'),
   }[setup];
 
   const riskAtr = risk / refAtr;
@@ -780,13 +718,13 @@ function buildReason({ lang, style, dir, plan, dec, htfTxt, meta, slPips, tpPips
     const trigId = {
       sweep: 'sweep likuiditas lalu reclaim M5',
       bos: 'break struktur M5',
-      pullback: 'pullback searah trend HTF',
+      pullback: 'pullback searah struktur M5',
       fallback: 'arah struktur M5 dan HTF',
     }[plan.trigger];
     const trigEn = {
       sweep: 'liquidity sweep and reclaim on M5',
       bos: 'M5 structure break',
-      pullback: 'pullback in HTF trend',
+      pullback: 'pullback in M5 structure',
       fallback: 'M5 and HTF structure direction',
     }[plan.trigger];
     const zoneTxt = plan.kind === 'fallback' ? '' : T(
@@ -819,8 +757,8 @@ function buildReason({ lang, style, dir, plan, dec, htfTxt, meta, slPips, tpPips
       ? T(lang, `SL ${slPips ?? '-'} pip (batas rentang pair).`, `SL ${slPips ?? '-'} pips (pair range limit).`)
       : T(
           lang,
-          `SL ${slPips ?? '-'} pip di luar kaki reaksi${plan.over ? '' : ', tidak dipersempit'}.`,
-          `SL ${slPips ?? '-'} pips beyond the reaction leg${plan.over ? '' : ', not tightened'}.`
+          `SL ${slPips ?? '-'} pip di luar swing M5${plan.over ? '' : ', tidak dipersempit'}.`,
+          `SL ${slPips ?? '-'} pips beyond M5 swing${plan.over ? '' : ', not tightened'}.`
         );
     const tpTxt = T(lang, ` TP ${rrTxt}${pipTxt} tetap dari jarak SL.`, ` TP ${rrTxt}${pipTxt} fixed from SL distance.`);
     const trigLine = T(lang, `Trigger: ${trigId}.`, `Trigger: ${trigEn}.`);
@@ -877,7 +815,9 @@ export default async function handler(req, res) {
     const none = reason => res.status(200).json({ ok: true, signal: null, reason });
 
     const refAtr = atr(mtfC, 14);
-    if (!(refAtr > 0)) return none('Data volatilitas tidak valid.');
+    if (!(refAtr > 0)) {
+      return res.status(422).json({ error: 'Data volatilitas tidak valid. Tunggu beberapa menit lalu coba lagi.' });
+    }
 
     const htfDir = structureDir(htfC);
     const mtfDir = structureDir(mtfC);
@@ -890,104 +830,18 @@ export default async function handler(req, res) {
     let dir = 0, plan = null, minTp1Dist = 0;
 
     if (isScalp) {
-      // Jumlah SL beruntun dikirim klien (body.scalpLosses). Server tidak menyimpan hasil trade.
-      const losses = Math.max(0, Math.floor(Number(body.scalpLosses) || 0));
-      const ltfDir = ltfC.length >= MIN_CANDLES ? structureDir(ltfC) : 0;
-
-      // Kandidat terbaik untuk satu arah. Selalu ada (cadangan momentum jika semua kaki sudah dilanggar).
-      const bestFor = d => {
-        const list = [];
-        for (const lb of SCALP_WINDOWS) {
-          const p = scalpCandidate(mtfC, d, price, refAtr, htfDir, slFloor, slCap, lb);
-          if (p) list.push({ dir: d, plan: p });
-        }
-        if (!list.length) list.push({ dir: d, plan: scalpFallback(mtfC, d, price, refAtr, slFloor, slCap) });
-        for (const c of list) {
-          c.score = scalpScore(c, htfDir) + (losses >= SCALP_STRICT_LOSSES && c.plan.trigger === 'sweep' ? 2 : 0);
-        }
-        list.sort((x, y) => y.score - x.score);
-        return list[0];
-      };
-
-      // Arah tren = HTF x3 + MTF x2. LTF menentukan fase: searah (tren) atau melawan (pantulan).
-      const trendVote = htfDir * VOTE_W.htf + mtfDir * VOTE_W.mtf;
-      const trendDir = trendVote > 0 ? 1 : trendVote < 0 ? -1 : 0;
-      let pick;
-
-      if (trendDir !== 0 && ltfDir === -trendDir) {
-        // FASE PANTULAN. Contoh: MTF bearish, LTF bullish, harga sedang naik.
-        // A = ikut tren (SELL di zona retrace atas: LIMIT jika belum sampai, NOW jika sudah di zona)
-        const A = bestFor(trendDir);
-        pick = A;
-
-        // B = scalp pantulan searah LTF, hanya jika ada trigger nyata dan masih ada ruang ke target pantulan
-        if (SCALP_BOUNCE_ENABLED) {
-          const n = mtfC.length;
-          const ref = mtfC[Math.max(0, n - 1 - SCALP_BOUNCE_MOMENTUM_BARS)].c;
-          const moving = (price - ref) * ltfDir > 0;
-          const B = bestFor(ltfDir);
-          const realTrigger = B.plan.trigger === 'sweep' || B.plan.trigger === 'bos';
-          const target = trendDir === -1 ? A.plan.zone.min : A.plan.zone.max;
-          const riskB = Math.abs(B.plan.entry - B.plan.sl);
-          const room = trendDir === -1 ? target - B.plan.entry : B.plan.entry - target;
-          if (moving && realTrigger && !B.plan.over && room >= riskB * style.rr[0] * SCALP_BOUNCE_MIN_ROOM_R) {
-            B.plan.bounce = true;
-            B.plan.bounceTarget = target;
-            B.plan.bounceZone = A.plan.zone;
-            B.plan.flags = (B.plan.flags || []).filter(f => f !== 'HTF_OPPOSITE');
-            pick = B;
-          }
-        }
-      } else if (trendDir !== 0) {
-        // FASE TREN: HTF/MTF dan LTF searah
-        pick = bestFor(trendDir);
-      } else if (ltfDir !== 0) {
-        pick = bestFor(ltfDir);
-      } else {
-        // Struktur belum jelas: arah dengan skor setup tertinggi, lalu posisi harga vs SMA20
-        const b = bestFor(1), s = bestFor(-1);
-        if (b.score !== s.score) {
-          pick = b.score > s.score ? b : s;
-        } else {
-          const sma20 = mtfC.slice(-20).reduce((x, c) => x + c.c, 0) / 20;
-          pick = price >= sma20 ? b : s;
-        }
+      // Arah dari struktur M5. Semua kandidat hanya di arah itu, tidak ada kandidat arah lawan.
+      dir = scalpDirection(mtfC, htfDir);
+      const cands = [];
+      for (const age of SCALP_SWING_AGE) {
+        const p = scalpCandidate(mtfC, dir, price, refAtr, htfDir, slFloor, slCap, age);
+        if (p) cands.push(p);
       }
-
-      dir = pick.dir;
-      plan = pick.plan;
-      plan.quality = scalpQuality(pick, {
-        lang, style, pip, refAtr, htfDir, mtfDir, ltfDir, mtfC, htfC, price, symbol, losses,
-      });
-    } else if (style.kind === 'day') {
-      // Day Trading: BUY dan SELL sama-sama dinilai, setup yang keluar adalah yang paling kuat.
-      // Kekuatan = skor zona + bonus searah HTF (+2) dan searah MTF (+1).
-      const series = [
-        { role: 'htf', tf: style.tf?.htf, candles: htfC },
-        { role: 'mtf', tf: style.tf?.mtf, candles: mtfC },
-        { role: 'ltf', tf: style.tf?.ltf, candles: ltfC },
-      ];
-      minTp1Dist = DAY_MIN_TP1_PIPS[symbol] && pip ? DAY_MIN_TP1_PIPS[symbol] * pip : 1.5 * refAtr;
-
-      let best = null, lastErr = null, skipMsg = null;
-      for (const d of [1, -1]) {
-        const p = bestZonePlan(series, d, price, refAtr, style.distW);
-        if (p.err) { lastErr = p.err; continue; }
-        const rk = Math.abs(p.entry - p.sl);
-        if (rk * style.rr[0] < minTp1Dist) {
-          skipMsg = T(
-            lang,
-            `TP1 ${style.rr[0]}R (${(rk * style.rr[0]).toFixed(dec)}) di bawah minimum ${minTp1Dist.toFixed(dec)} untuk ${symbol}. Setup dilewati.`,
-            `TP1 ${style.rr[0]}R (${(rk * style.rr[0]).toFixed(dec)}) is below the minimum ${minTp1Dist.toFixed(dec)} for ${symbol}. Setup skipped.`
-          );
-          continue;
-        }
-        const strength = p.score + (d === htfDir ? 2 : 0) + (d === mtfDir ? 1 : 0);
-        if (!best || strength > best.strength) best = { dir: d, plan: p, strength };
+      if (!cands.length) {
+        cands.push(scalpFallback(mtfC, dir, price, refAtr, htfDir, slFloor, slCap));
       }
-      if (!best) return none(skipMsg || lastErr || T(lang, 'Belum ada setup Day Trading yang valid.', 'No valid Day Trading setup yet.'));
-      dir = best.dir;
-      plan = best.plan;
+      cands.sort((x, y) => scalpRank(y) - scalpRank(x));
+      plan = cands[0];
     } else {
       const flexible = style.kind === 'day' || style.kind === 'intraday';
       dir = mtfDir;
@@ -1027,13 +881,7 @@ export default async function handler(req, res) {
     const r = v => Number(v.toFixed(dec));
 
     if (style.kind === 'day' && minTp1Dist && risk * style.rr[0] < minTp1Dist) {
-      const tp1Dist = (risk * style.rr[0]).toFixed(dec);
-      const minDist = minTp1Dist.toFixed(dec);
-      return none(T(
-        lang,
-        `TP1 ${style.rr[0]}R (${tp1Dist}) di bawah minimum ${minDist} untuk ${symbol}. Setup dilewati.`,
-        `TP1 ${style.rr[0]}R (${tp1Dist}) is below the minimum ${minDist} for ${symbol}. Setup skipped.`
-      ));
+      plan.flags = [...(plan.flags || []), 'SMALL_TP'];
     }
 
     const tps = style.rr.map(x => entry + dir * risk * x);
@@ -1044,24 +892,9 @@ export default async function handler(req, res) {
       lang, style, dir, plan, price, pip, htfDir, mtfDir, refAtr, risk,
     });
 
-    let reason = buildReason({
+    const reason = buildReason({
       lang, style, dir, plan, dec, htfTxt, meta, slPips, tpPips,
     });
-
-    // Scalping: peringatan kualitas dan keterangan mode pantulan
-    const q = plan.quality || null;
-    if (q && q.notes.length) {
-      reason += ` ${T(lang, 'Peringatan', 'Warnings')}: ${q.notes.join('; ')}.`;
-    }
-    if (plan.bounce) {
-      const f = v => v.toFixed(dec);
-      const nextSide = dir === 1 ? 'SELL' : 'BUY';
-      reason += T(
-        lang,
-        ` Mode pantulan: ${dir === 1 ? 'BUY' : 'SELL'} melawan MTF, target pantulan ${f(plan.bounceTarget)}. Setelah pantulan, area ${nextSide} lanjutan ${f(plan.bounceZone.min)} – ${f(plan.bounceZone.max)}.`,
-        ` Bounce mode: ${dir === 1 ? 'BUY' : 'SELL'} against MTF, bounce target ${f(plan.bounceTarget)}. After the bounce, next ${nextSide} area ${f(plan.bounceZone.min)} – ${f(plan.bounceZone.max)}.`
-      );
-    }
 
     const orderType = resolveOrder(plan);
 
@@ -1089,10 +922,6 @@ export default async function handler(req, res) {
         zoneLabel: meta.zoneLabel,
         zoneNote: meta.zoneNote,
         reason,
-        quality: q ? q.label : null,              // IDEAL | OK | CAUTION (hanya scalping)
-        qualityNotes: q ? q.notes : [],
-        bounceTarget: plan.bounce ? r(plan.bounceTarget) : null,
-        nextZone: plan.bounce ? { min: r(plan.bounceZone.min), max: r(plan.bounceZone.max) } : null,
       },
     });
   } catch (err) {
