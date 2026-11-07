@@ -629,12 +629,12 @@
     }
 
     // ================= KONFIG MARKET =================
-    const WS_URL = 'wss://api-stream.myfundedperpetuals.com/v1/market-data';
+    // Feed: xbtfx. Token JANGAN ditaruh di file yang di-host publik (lihat catatan).
+    const WS_URL = 'wss://ws.xbtfx.com/v1/ws';
+    const XBTFX_TOKEN = 'ISI_TOKEN_KAMU';
     const HISTORY_MS = 10 * 60 * 1000;
     const CHART_SPAN_MS = 3 * 60 * 1000;
-    const ALIAS_WAIT_MS = 4000;
-    const QUIET_MS = 90000;
-    const RETRY_ALL_MS = 60000;
+    const STALE_MS = 30000;
     const STORE_KEY = 'aluSignalZ_history_v3';
     const OFFSET_KEY = 'aluSignalZ_offsets_v1';
     const DEBUG = localStorage.getItem('alu_debug') === '1';
@@ -706,8 +706,6 @@
             return i > 0 ? { provider: c.slice(0, i), coin: c.slice(i + 1) } : { provider: m.provider, coin: c };
         });
     }
-    // Perluas daftar provider pencarian otomatis jika server menggunakan provider lain
-    const PROVIDERS = [...new Set([...Object.values(ALIASES).flat().map(a => a.provider), 'veranta', 'binance', 'ostium', 'hyperliquid'])];
 
     const COIN_KEY = new Map();
     for (const [key, list] of Object.entries(ALIASES))
@@ -716,7 +714,7 @@
             const arr = COIN_KEY.get(k) || [];
             if (!arr.includes(key)) arr.push(key);
             COIN_KEY.set(k, arr);
-            // Tambahkan juga key universal tanpa membatasi provider ketat untuk mengantisipasi cross-provider
+            // Key universal untuk pencocokan tanpa provider (cadangan)
             const univK = `*|${norm(a.coin)}`;
             const univArr = COIN_KEY.get(univK) || [];
             if (!univArr.includes(key)) univArr.push(key);
@@ -724,21 +722,18 @@
         }
 
     const SUB_KEYS = Object.keys(MARKETS).filter(k => !MARKETS[k].base);
+    // Simbol yang dikirim ke xbtfx untuk tiap pair (nama utama = coin pertama)
+    const STREAM_SYMBOL = key => MARKETS[key].coins[0];
     const PENDING_SL_CANCEL = true;
 
     // ================= STATE =================
-    let ws = null, reconnectTimer = null, pingTimer = null;
-    let retryCount = 0, lastIn = 0;
-    let trades = [], activeId = null;
+    let ws = null, reconnectTimer = null;
+    let retryCount = 0, streamReady = false, authFailed = false;
     let dbgCount = 0;
+    let trades = [], activeId = null;
     const prices = {}, history = {}, rawPrices = {}, marketCandles = {};
-    const symbolOf = {}, providerOf = {}, kindLock = {}, mstate = {};
-    const subOwner = new Map();
-    const pendingReq = new Map();
+    const symbolOf = {}, providerOf = {};
     const dirty = new Set();
-    const seenOps = new Set();
-    let seq = 10;
-    const nextId = () => seq++;
 
     const getActive = () => trades.find(t => t.id === activeId) || null;
     const selectedKey = () => document.getElementById('marketSelect').value.split('|').pop();
@@ -747,18 +742,9 @@
     const displayName = key => key.replace(/^xyz:/, '');
     const parseLevel = v => Number.isFinite(parseFloat(v)) ? parseFloat(v) : null;
 
-    const DEFAULT_OFFSETS = {
-        XAUUSD: -8.1,
-        XAGUSD: -0.07,
-        EURUSD: -0.00053,
-        GBPUSD: -0.00045,
-        USDJPY: 0.048,
-        AUDUSD: 0.00004,
-        USDCAD: 0.00006,
-        USDCHF: 0.00003,
-        BTCUSD: -108.2,
-        ETHUSD: -3.5,
-    };
+    // Offset bawaan dikosongkan karena nilai lama diukur dari feed lain.
+    // Kalibrasi ulang per pair (isi Bid dari MT lalu KALIBRASI) jika selisihnya terlihat.
+    const DEFAULT_OFFSETS = {};
 
     const offsets = (() => { try { return JSON.parse(localStorage.getItem(OFFSET_KEY)) || {}; } catch { return {}; } })();
     const getOffset = key => offsets[key] ?? DEFAULT_OFFSETS[key] ?? 0;
@@ -850,36 +836,10 @@
 
     const isLive = key => prices[key] && Date.now() - prices[key].recv < 30000;
 
-    // ================= STREAM =================
+    // ================= STREAM (xbtfx) =================
     const sendJSON = (sock, obj) => { if (sock && sock.readyState === WebSocket.OPEN) sock.send(JSON.stringify(obj)); };
 
-    function subscribeMarket(sock, key, idx) {
-        const list = ALIASES[key];
-        const st = mstate[key] ??= { idx: 0, id: null, sentAt: 0, ok: false, exhaustedAt: 0 };
-
-        if (st.id != null) {
-            sendJSON(sock, { op: 'unsub', id: st.id });
-            subOwner.delete(st.id);
-        }
-        st.id = null;
-        st.ok = false;
-
-        if (idx >= list.length) {
-            st.idx = 0;
-            st.exhaustedAt = Date.now();
-            markSrc(key, 'TIDAK TERSAMBUNG', 'text-red-400');
-            return;
-        }
-
-        const a = list[idx];
-        const id = nextId();
-        Object.assign(st, { idx, id, sentAt: Date.now(), exhaustedAt: 0 });
-        subOwner.set(id, key);
-        sendJSON(sock, { op: 'sub', id, channel: 'ticks', payload: { symbols: [a.coin], providers: [a.provider] } });
-        markSrc(key, `TRY ${idx + 1}/${list.length}`, 'text-gray-500');
-    }
-
-    // Ambil angka harga pertama yang valid dari beberapa kemungkinan nama field
+    // Pengganti pickPrice: ambil angka valid pertama dari daftar field
     const pickPrice = (...vals) => {
         for (const v of vals) {
             const n = parseFloat(v);
@@ -888,61 +848,43 @@
         return NaN;
     };
 
-    function handleEvents(f) {
-        const list = f.events || f.data || f.payload?.events || [];
-        for (const ev of list) {
-            if (!ev) continue;
-            const sym = ev.symbol ?? ev.coin ?? ev.s ?? ev.instrument;
-            if (!sym) continue;
+    // Daftar key pair yang cocok dengan sebuah simbol dari xbtfx
+    const keysOf = sym => {
+        const n = norm(sym);
+        return [...new Set([...(COIN_KEY.get(`xbtfx|${n}`) || []), ...(COIN_KEY.get(`*|${n}`) || [])])];
+    };
 
-            const prov = String(ev.provider ?? ev.venue ?? ev.source ?? '').toLowerCase();
-            const normSym = norm(sym);
-            const keys = [
-                ...(COIN_KEY.get(`${prov}|${normSym}`) || []),
-                ...(COIN_KEY.get(`*|${normSym}`) || []),
-            ];
+    function subscribeAll(sock) {
+        SUB_KEYS.forEach((key, i) => setTimeout(() => {
+            if (ws !== sock || sock.readyState !== WebSocket.OPEN) return;
+            sendJSON(sock, { action: 'subscribe', channel: 'quotes', symbols: [STREAM_SYMBOL(key)] });
+            markSrc(key, 'SUB', 'text-gray-500');
+        }, i * 40));
+    }
 
-            const p0 = pickPrice(ev.price, ev.bid, ev.mid, ev.last, ev.close, ev.p, ev.ask);
-            if (!(p0 > 0)) continue;
-
-            for (const key of keys) {
-                // Kunci 'kind' hanya berlaku selama feed masih segar (15 detik)
-                const fresh = Date.now() - (prices[key]?.recv ?? 0) < 15000;
-                if (ev.kind && kindLock[key] && ev.kind !== kindLock[key] && fresh) continue;
-                if (ev.kind) kindLock[key] = ev.kind;
-
-                symbolOf[key] = sym;
-                providerOf[key] = prov || providerOf[key] || 'xbtfx';
-                rawPrices[key] = p0;
-                markSrc(key, 'LIVE', 'text-emerald-400');
-                updatePrice(key, p0 + getOffset(key), ev);
-            }
+    function handleQuote(msg) {
+        // Harga pakai BID agar sejajar dengan kalibrasi terhadap harga Bid di MT
+        const p0 = pickPrice(msg.bid, msg.mid, msg.price, msg.ask);
+        if (!(p0 > 0)) return;
+        for (const key of keysOf(msg.symbol)) {
+            symbolOf[key] = msg.symbol;
+            providerOf[key] = 'xbtfx';
+            rawPrices[key] = p0;
+            markSrc(key, 'LIVE', 'text-emerald-400');
+            updatePrice(key, p0 + getOffset(key), msg);
         }
     }
 
+    // Penanda status per pair: menunggu tick, atau sudah lewat batas waktu tanpa tick
     function watchdog() {
-        if (!ws || ws.readyState !== WebSocket.OPEN) return;
         const now = Date.now();
         for (const key of SUB_KEYS) {
-            const st = mstate[key];
-            if (!st) continue;
-            if (st.id == null) {
-                if (st.exhaustedAt && now - st.exhaustedAt > RETRY_ALL_MS) subscribeMarket(ws, key, 0);
+            const p = prices[key];
+            if (!p) {
+                if (streamReady) markSrc(key, 'MENUNGGU', 'text-gray-500');
                 continue;
             }
-            const recv = prices[key]?.recv ?? 0;
-            const gotTick = recv > st.sentAt;
-            if (gotTick) {
-                if (now - recv > 30000) markSrc(key, 'SEPI', 'text-gray-500');
-                continue;
-            }
-            if (st.ok) {
-                if (now - st.sentAt > QUIET_MS) subscribeMarket(ws, key, (st.idx + 1) % ALIASES[key].length);
-                else markSrc(key, 'MENUNGGU', 'text-gray-500');
-                continue;
-            }
-            if (now - st.sentAt < ALIAS_WAIT_MS) continue;
-            subscribeMarket(ws, key, st.idx + 1);
+            if (now - p.recv > STALE_MS) markSrc(key, 'SEPI', 'text-gray-500');
         }
     }
 
@@ -955,103 +897,60 @@
 
     function connect() {
         clearTimeout(reconnectTimer);
-        clearInterval(pingTimer);
         if (ws) { const old = ws; ws = null; old.onclose = null; old.onmessage = null; old.close(); }
-
-        for (const [, p] of pendingReq) { clearTimeout(p.timer); p.reject(new Error('koneksi ulang')); }
-        pendingReq.clear();
-        subOwner.clear();
-        for (const k of Object.keys(mstate)) delete mstate[k];
+        streamReady = false;
 
         setWsStatus('CONNECTING', 'yellow');
         const sock = new WebSocket(WS_URL);
         ws = sock;
 
         sock.onopen = () => {
-            lastIn = Date.now();
-            setWsStatus('CONNECTED', 'green');
-            sendJSON(sock, { op: 'sub', id: nextId(), channel: 'status', payload: { providers: PROVIDERS } });
-            // Sebar subscribe supaya tidak semua dikirim sekaligus
-            SUB_KEYS.forEach((key, i) => setTimeout(() => {
-                if (ws === sock && sock.readyState === WebSocket.OPEN) subscribeMarket(sock, key, 0);
-            }, i * 40));
-            setTimeout(() => { if (ws === sock) refreshBias(selectedKey(), true); }, 1500);
-
-            pingTimer = setInterval(() => {
-                if (ws !== sock) return;
-                if (Date.now() - lastIn > 60000) { sock.close(); return; }
-                sendJSON(sock, { op: 'req', id: nextId(), method: 'ping' });
-            }, 20000);
+            setWsStatus('AUTH...', 'yellow');
+            sendJSON(sock, { action: 'auth', token: XBTFX_TOKEN });
         };
 
         sock.onmessage = e => {
-            lastIn = Date.now();
             retryCount = 0;
-            let f; try { f = JSON.parse(e.data); } catch { return; }
-            if (DEBUG && dbgCount < 20) { dbgCount++; console.log('[WS]', e.data.slice(0, 400)); }
-            if (!seenOps.has(f.op)) { seenOps.add(f.op); }
+            let msg; try { msg = JSON.parse(e.data); } catch { return; }
+            if (DEBUG && dbgCount < 40) { dbgCount++; console.log('[WS]', e.data.slice(0, 400)); }
 
-            switch (f.op) {
-                case 'events':
-                    handleEvents(f);
-                    break;
-                case 'sub_ok': {
-                    const key = subOwner.get(f.id);
-                    const st = key && mstate[key];
-                    if (st && st.id === f.id) st.ok = true;
-                    break;
-                }
-                case 'sub_err': {
-                    const key = subOwner.get(f.id);
-                    if (!key) break;
-                    subOwner.delete(f.id);
-                    const st = mstate[key];
-                    if (st.id !== f.id) break;
-                    subscribeMarket(sock, key, st.idx + 1);
-                    break;
-                }
-                case 'end': {
-                    const key = subOwner.get(f.id);
-                    if (key && mstate[key].id === f.id) subscribeMarket(sock, key, mstate[key].idx);
-                    break;
-                }
-                case 'draining':
-                    setWsStatus('RECONNECTING', 'yellow');
-                    setTimeout(connect, 300);
-                    break;
-                case 'res':
-                case 'err': {
-                    const p = pendingReq.get(f.id);
-                    if (!p) break;
-                    pendingReq.delete(f.id);
-                    clearTimeout(p.timer);
-                    if (f.op === 'res') p.resolve(f.result);
-                    else p.reject(new Error(f.error?.message || f.error?.reason || 'request gagal'));
-                    break;
-                }
+            if (msg.action === 'auth_ok') {
+                streamReady = true;
+                setWsStatus('CONNECTED', 'green');
+                subscribeAll(sock);
+                setTimeout(() => { if (ws === sock) refreshBias(selectedKey(), true); }, 1500);
+                return;
+            }
+
+            if (msg.channel === 'quote') { handleQuote(msg); return; }
+
+            // Auth gagal: hentikan reconnect supaya tidak looping dengan token salah
+            if (!streamReady && (msg.action === 'auth_error' || msg.action === 'error' || msg.error)) {
+                authFailed = true;
+                setWsStatus('AUTH GAGAL', 'red');
+                return;
+            }
+
+            // Error untuk satu simbol: tandai pair-nya agar kelihatan simbol mana yang ditolak
+            if (msg.action === 'error' && msg.symbol) {
+                for (const key of keysOf(msg.symbol)) markSrc(key, 'ERR', 'text-red-400');
             }
         };
 
         sock.onerror = () => setWsStatus('ERROR', 'red');
         sock.onclose = () => {
             if (ws !== sock) return;
-            clearInterval(pingTimer);
+            streamReady = false;
             setWsStatus('DISCONNECTED', 'red');
             for (const k of Object.keys(MARKETS)) markSrc(k, 'OFF', 'text-gray-600');
-            scheduleReconnect();
+            if (!authFailed) scheduleReconnect();
         };
     }
 
-    function wsReq(method, payload, ms = 15000) {
-        return new Promise((resolve, reject) => {
-            if (!ws || ws.readyState !== WebSocket.OPEN) return reject(new Error('WS belum tersambung'));
-            const id = nextId();
-            const timer = setTimeout(() => {
-                if (pendingReq.delete(id)) reject(new Error('timeout ' + method));
-            }, ms);
-            pendingReq.set(id, { resolve, reject, timer });
-            ws.send(JSON.stringify({ op: 'req', id, method, payload }));
-        });
+    // TODO: request candle history xbtfx belum diketahui protokolnya.
+    // Sementara ditolak dengan pesan jelas, supaya tidak menebak format.
+    function wsReq(method) {
+        return Promise.reject(new Error(`Data candle xbtfx belum dihubungkan (${method})`));
     }
 
     // ================= AGREGATOR TICK =================
@@ -1076,7 +975,7 @@
     function updatePrice(key, price, ev) {
         const prev = prices[key]?.price;
         const dir = prev == null ? 0 : price > prev ? 1 : price < prev ? -1 : (prices[key].dir ?? 0);
-        prices[key] = { price, dir, recv: Date.now(), kind: ev.kind, provider: ev.provider };
+        prices[key] = { price, dir, recv: Date.now(), kind: ev.kind, provider: 'xbtfx' };
 
         processTickToCandle(key, price, 1);
         processTickToCandle(key, price, 5);
