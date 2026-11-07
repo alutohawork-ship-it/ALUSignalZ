@@ -632,7 +632,7 @@
     const WS_URL = 'wss://api-stream.myfundedperpetuals.com/v1/market-data';
     const HISTORY_MS = 10 * 60 * 1000;
     const CHART_SPAN_MS = 3 * 60 * 1000;
-    const ALIAS_WAIT_MS = 10000;
+    const ALIAS_WAIT_MS = 4000;
     const QUIET_MS = 90000;
     const RETRY_ALL_MS = 60000;
     const STORE_KEY = 'aluSignalZ_history_v3';
@@ -640,7 +640,7 @@
     const DEBUG = localStorage.getItem('alu_debug') === '1';
 
     const MARKETS = {
-        DXY:        { provider: 'xbtfx', coins: ['DXY'], decimals: 2, pip: 0.01 },
+        DXY:        { provider: 'xbtfx', coins: ['DXY', 'USDX'], decimals: 2, pip: 0.01 },
         EURUSD:     { provider: 'xbtfx', coins: ['EURUSD'], decimals: 5, pip: 0.0001 },
         GBPUSD:     { provider: 'xbtfx', coins: ['GBPUSD'], decimals: 5, pip: 0.0001 },
         USDJPY:     { provider: 'xbtfx', coins: ['USDJPY'], decimals: 3, pip: 0.01 },
@@ -658,43 +658,43 @@
         CADJPY:     { provider: 'xbtfx', coins: ['CADJPY'], decimals: 3, pip: 0.01 },
         CHFJPY:     { provider: 'xbtfx', coins: ['CHFJPY'], decimals: 3, pip: 0.01 },
         EURNZD:     { provider: 'xbtfx', coins: ['EURNZD'], decimals: 5, pip: 0.0001 },
-        XAUUSD:     { provider: 'xbtfx', coins: ['XAUUSD'], decimals: 2, pip: 0.1 },
-        XAGUSD:     { provider: 'xbtfx', coins: ['XAGUSD'], decimals: 3, pip: 0.01 },
+        XAUUSD:     { provider: 'xbtfx', coins: ['XAUUSD', 'GOLD'], decimals: 2, pip: 0.1 },
+        XAGUSD:     { provider: 'xbtfx', coins: ['XAGUSD', 'SILVER'], decimals: 3, pip: 0.01 },
         XPTUSD:     { provider: 'xbtfx', coins: ['XPTUSD'], decimals: 2, pip: 0.1 },
         XPDUSD:     { provider: 'xbtfx', coins: ['XPDUSD'], decimals: 2, pip: 0.1 },
         XAUEUR:     { provider: 'xbtfx', coins: ['XAUEUR'], decimals: 2, pip: 0.1 },
         XAGEUR:     { provider: 'xbtfx', coins: ['XAGEUR'], decimals: 3, pip: 0.01 },
-        BRENT:      { provider: 'xbtfx', coins: ['BRENT'], decimals: 2, pip: 0.01 },
-        WTI:        { provider: 'xbtfx', coins: ['WTI'], decimals: 2, pip: 0.01 },
-        NATGAS:     { provider: 'xbtfx', coins: ['NATGAS'], decimals: 3, pip: 0.001 },
+        BRENT:      { provider: 'xbtfx', coins: ['BRENT', 'BRENTOIL'], decimals: 2, pip: 0.01 },
+        WTI:        { provider: 'xbtfx', coins: ['WTI', 'USOUSD'], decimals: 2, pip: 0.01 },
+        NATGAS:     { provider: 'xbtfx', coins: ['NATGAS', 'NG'], decimals: 3, pip: 0.001 },
         COPPER:     { provider: 'xbtfx', coins: ['COPPER'], decimals: 4, pip: 0.0001 },
         COFFEE:     { provider: 'xbtfx', coins: ['COFFEE'], decimals: 2, pip: 0.01 },
         SUGAR:      { provider: 'xbtfx', coins: ['SUGAR'], decimals: 2, pip: 0.01 },
-        US30:       { provider: 'xbtfx', coins: ['US30'], decimals: 2, pip: 1 },
-        NAS100:     { provider: 'xbtfx', coins: ['NAS100'], decimals: 2, pip: 1 },
-        SPX500:     { provider: 'xbtfx', coins: ['SPX500'], decimals: 2, pip: 1 },
-        GER40:      { provider: 'xbtfx', coins: ['GER40'], decimals: 2, pip: 1 },
-        UK100:      { provider: 'xbtfx', coins: ['UK100'], decimals: 2, pip: 1 },
-        JPN225:     { provider: 'xbtfx', coins: ['JPN225'], decimals: 0, pip: 1 },
-        FRA40:      { provider: 'xbtfx', coins: ['FRA40'], decimals: 2, pip: 1 },
-        AUS200:     { provider: 'xbtfx', coins: ['AUS200'], decimals: 2, pip: 1 },
-        BTCUSD:     { provider: 'xbtfx', coins: ['BTCUSD'], decimals: 2, pip: 1 },
-        ETHUSD:     { provider: 'xbtfx', coins: ['ETHUSD'], decimals: 2, pip: 0.1 },
-        SOLUSD:     { provider: 'xbtfx', coins: ['SOLUSD'], decimals: 2, pip: 0.01 },
-        XRPUSD:     { provider: 'xbtfx', coins: ['XRPUSD'], decimals: 4, pip: 0.0001 },
-        BNBUSD:     { provider: 'xbtfx', coins: ['BNBUSD'], decimals: 2, pip: 0.1 },
-        ADAUSD:     { provider: 'xbtfx', coins: ['ADAUSD'], decimals: 4, pip: 0.0001 },
-        DOGEUSD:    { provider: 'xbtfx', coins: ['DOGEUSD'], decimals: 5, pip: 0.00001 },
-        AVAXUSD:    { provider: 'xbtfx', coins: ['AVAXUSD'], decimals: 3, pip: 0.001 },
-        LINKUSD:    { provider: 'xbtfx', coins: ['LINKUSD'], decimals: 3, pip: 0.001 },
-        DOTUSD:     { provider: 'xbtfx', coins: ['DOTUSD'], decimals: 4, pip: 0.0001 },
-        MATICUSD:   { provider: 'xbtfx', coins: ['MATICUSD'], decimals: 4, pip: 0.0001 },
-        UNIUSD:     { provider: 'xbtfx', coins: ['UNIUSD'], decimals: 3, pip: 0.001 },
+        US30:       { provider: 'xbtfx', coins: ['US30', 'DJI', 'WALLSTREET'], decimals: 2, pip: 1 },
+        NAS100:     { provider: 'xbtfx', coins: ['NAS100', 'NDX', 'USTECH'], decimals: 2, pip: 1 },
+        SPX500:     { provider: 'xbtfx', coins: ['SPX500', 'SP500'], decimals: 2, pip: 1 },
+        GER40:      { provider: 'xbtfx', coins: ['GER40', 'DAX'], decimals: 2, pip: 1 },
+        UK100:      { provider: 'xbtfx', coins: ['UK100', 'FTSE'], decimals: 2, pip: 1 },
+        JPN225:     { provider: 'xbtfx', coins: ['JPN225', 'N225'], decimals: 0, pip: 1 },
+        FRA40:      { provider: 'xbtfx', coins: ['FRA40', 'CAC40'], decimals: 2, pip: 1 },
+        AUS200:     { provider: 'xbtfx', coins: ['AUS200', 'ASX200'], decimals: 2, pip: 1 },
+        BTCUSD:     { provider: 'xbtfx', coins: ['BTCUSD', 'BTCUSDT'], decimals: 2, pip: 1 },
+        ETHUSD:     { provider: 'xbtfx', coins: ['ETHUSD', 'ETHUSDT'], decimals: 2, pip: 0.1 },
+        SOLUSD:     { provider: 'xbtfx', coins: ['SOLUSD', 'SOLUSDT'], decimals: 2, pip: 0.01 },
+        XRPUSD:     { provider: 'xbtfx', coins: ['XRPUSD', 'XRPUSDT'], decimals: 4, pip: 0.0001 },
+        BNBUSD:     { provider: 'xbtfx', coins: ['BNBUSD', 'BNBUSDT'], decimals: 2, pip: 0.1 },
+        ADAUSD:     { provider: 'xbtfx', coins: ['ADAUSD', 'ADAUSDT'], decimals: 4, pip: 0.0001 },
+        DOGEUSD:    { provider: 'xbtfx', coins: ['DOGEUSD', 'DOGEUSDT'], decimals: 5, pip: 0.00001 },
+        AVAXUSD:    { provider: 'xbtfx', coins: ['AVAXUSD', 'AVAXUSDT'], decimals: 3, pip: 0.001 },
+        LINKUSD:    { provider: 'xbtfx', coins: ['LINKUSD', 'LINKUSDT'], decimals: 3, pip: 0.001 },
+        DOTUSD:     { provider: 'xbtfx', coins: ['DOTUSD', 'DOTUSDT'], decimals: 4, pip: 0.0001 },
+        MATICUSD:   { provider: 'xbtfx', coins: ['MATICUSD', 'MATICUSDT'], decimals: 4, pip: 0.0001 },
+        UNIUSD:     { provider: 'xbtfx', coins: ['UNIUSD', 'UNIUSDT'], decimals: 3, pip: 0.001 },
         BTCXAU:     { provider: 'xbtfx', coins: ['BTCXAU'], decimals: 2, pip: 0.1 },
         ETHBTC:     { provider: 'xbtfx', coins: ['ETHBTC'], decimals: 5, pip: 0.00001 },
         SOLBTC:     { provider: 'xbtfx', coins: ['SOLBTC'], decimals: 5, pip: 0.00001 },
         US30BTC:    { provider: 'xbtfx', coins: ['US30BTC'], decimals: 2, pip: 1 },
-        XAUUSDX:    { provider: 'xbtfx', coins: ['XAUUSDX'], decimals: 2, pip: 0.1 },
+        XAUUSDX:    { provider: 'xbtfx', coins: ['XAUUSDX', 'XAUUSD'], decimals: 2, pip: 0.1 },
     };
 
     const norm = s => String(s ?? '').toUpperCase().replace(/^XYZ:/, '').replace(/\.[A-Z]+$/, '').replace(/[^A-Z0-9]/g, '');
@@ -706,7 +706,8 @@
             return i > 0 ? { provider: c.slice(0, i), coin: c.slice(i + 1) } : { provider: m.provider, coin: c };
         });
     }
-    const PROVIDERS = [...new Set(Object.values(ALIASES).flat().map(a => a.provider))];
+    // Perluas daftar provider pencarian otomatis jika server menggunakan provider lain
+    const PROVIDERS = [...new Set([...Object.values(ALIASES).flat().map(a => a.provider), 'veranta', 'binance', 'ostium', 'hyperliquid'])];
 
     const COIN_KEY = new Map();
     for (const [key, list] of Object.entries(ALIASES))
@@ -715,6 +716,11 @@
             const arr = COIN_KEY.get(k) || [];
             if (!arr.includes(key)) arr.push(key);
             COIN_KEY.set(k, arr);
+            // Tambahkan juga key universal tanpa membatasi provider ketat untuk mengantisipasi cross-provider
+            const univK = `*|${norm(a.coin)}`;
+            const univArr = COIN_KEY.get(univK) || [];
+            if (!univArr.includes(key)) univArr.push(key);
+            COIN_KEY.set(univK, univArr);
         }
 
     const SUB_KEYS = Object.keys(MARKETS).filter(k => !MARKETS[k].base);
@@ -876,7 +882,8 @@
         for (const ev of f.events || []) {
             if (!ev || !ev.symbol) continue;
             const prov = String(ev.provider ?? '').toLowerCase();
-            const keys = COIN_KEY.get(`${prov}|${norm(ev.symbol)}`) || [];
+            const normSym = norm(ev.symbol);
+            const keys = [...(COIN_KEY.get(`${prov}|${normSym}`) || []), ...(COIN_KEY.get(`*|${normSym}`) || [])];
             const p0 = parseFloat(ev.price ?? ev.bid ?? ev.mid);
             if (!(p0 > 0)) continue;
             for (const key of keys) {
@@ -1988,6 +1995,6 @@
         setInterval(() => { watchdog(); expirePending(); }, 1000);
         setInterval(() => refreshBias(selectedKey()), 60000);
     };
-    </script>
+        </script>
 </body>
 </html>
