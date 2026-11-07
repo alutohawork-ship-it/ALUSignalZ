@@ -1,5 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC dengan Penyusunan Ulang Teks Reason (Analisis Teknikal di Atas, Catatan Sistem di Bawah)
+// Analisis Pure SMC dengan Kombinasi ATR + Structure & Penyusunan Teks Reason
 
 const KV_KEY = 'alu_clients';
 
@@ -26,7 +26,7 @@ const PIP = {
 };
 
 const STYLES = {
-  'Scalping': { label: 'Scalping Hit & Run (Fixed Gold SL)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
+  'Scalping': { label: 'Scalping Hit & Run (ATR + Structure)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
   'Day Trading': { label: 'Day Trading Zone (HTF: H1 | MTF: M30)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
   'Intraday': { label: 'Intraday (HTF: H4 | MTF: H1)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
   'Swing': { label: 'Swing Trading (HTF: D1 | MTF: H4)', mode: 'LIMIT', kind: 'zone', rr: [2.0, 4.5, 8.5] },
@@ -92,29 +92,20 @@ function getStructuralExtremes(candles, isBuy) {
   return extreme;
 }
 
-function getEstimatedSpread(symbol, pip) {
-  const s = symbol.toUpperCase();
-  const p = pip || 1;
-  if (s.includes('XAU')) return 20 * p;
-  if (s.includes('BTC')) return 100 * p;
-  if (s.includes('EUR') || s.includes('GBP')) return 1.2 * p;
-  return 5 * p;
-}
-
 function getAssetConfig(symbol) {
   const s = symbol.toUpperCase();
-  if (s.includes('XAU')) return { bufferMultiplier: 1.0, slMultiplier: 2.5, type: 'GOLD_FIX_20_30' };
-  if (s.includes('XAG')) return { bufferMultiplier: 1.0, slMultiplier: 2.0, type: 'METAL' };
+  if (s.includes('XAU')) return { bufferMultiplier: 0.8, atrMultiplier: 0.5, type: 'GOLD_ATR_STRUCTURE' };
+  if (s.includes('XAG')) return { bufferMultiplier: 1.0, atrMultiplier: 0.6, type: 'METAL' };
   if (s.includes('EUR') || s.includes('GBP') || s.includes('AUD') || s.includes('NZD') || s.includes('USD') || s.includes('CAD') || s.includes('CHF')) {
-    if (s.includes('JPY')) return { bufferMultiplier: 1.2, slMultiplier: 2.2, type: 'CURRENCY' };
-    return { bufferMultiplier: 0.8, slMultiplier: 1.8, type: 'CURRENCY' };
+    if (s.includes('JPY')) return { bufferMultiplier: 1.0, atrMultiplier: 0.8, type: 'CURRENCY' };
+    return { bufferMultiplier: 0.8, atrMultiplier: 0.6, type: 'CURRENCY' };
   }
-  if (s.includes('BTC')) return { bufferMultiplier: 1.2, slMultiplier: 2.2, type: 'CRYPTO' };
-  if (s.includes('ETH')) return { bufferMultiplier: 1.0, slMultiplier: 2.0, type: 'CRYPTO' };
-  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP')) return { bufferMultiplier: 1.0, slMultiplier: 1.8, type: 'CRYPTO' };
-  if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) return { bufferMultiplier: 1.2, slMultiplier: 2.2, type: 'INDEX' };
-  if (s.includes('OIL') || s.includes('CLUSDT')) return { bufferMultiplier: 1.0, slMultiplier: 2.0, type: 'COMMODITY' };
-  return { bufferMultiplier: 0.8, slMultiplier: 1.8, type: 'DEFAULT' };
+  if (s.includes('BTC')) return { bufferMultiplier: 1.2, atrMultiplier: 1.0, type: 'CRYPTO' };
+  if (s.includes('ETH')) return { bufferMultiplier: 1.0, atrMultiplier: 0.8, type: 'CRYPTO' };
+  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP')) return { bufferMultiplier: 1.0, atrMultiplier: 0.8, type: 'CRYPTO' };
+  if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) return { bufferMultiplier: 1.2, atrMultiplier: 1.0, type: 'INDEX' };
+  if (s.includes('OIL') || s.includes('CLUSDT')) return { bufferMultiplier: 1.0, atrMultiplier: 0.8, type: 'COMMODITY' };
+  return { bufferMultiplier: 0.8, atrMultiplier: 0.6, type: 'DEFAULT' };
 }
 
 function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal) {
@@ -131,21 +122,24 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal)
 
   let sl;
   if (isGold) {
-    const fixedGoldSlPips = 25 * (pip || 0.1);
-    sl = isBuy ? bufferEnd - fixedGoldSlPips : bufferEnd + fixedGoldSlPips;
+    const structExtreme = getStructuralExtremes(mtfC, isBuy);
+    const baseSl = structExtreme != null ? structExtreme : (isBuy ? price - (a * 1.5) : price + (a * 1.5));
+    const atrBuffer = a * cfg.atrMultiplier;
+    sl = isBuy ? baseSl - atrBuffer : baseSl + atrBuffer;
+    
+    const distancePips = Math.abs(bufferEnd - sl) / (pip || 0.1);
+    if (distancePips < 20) {
+      sl = isBuy ? bufferEnd - (25 * (pip || 0.1)) : bufferEnd + (25 * (pip || 0.1));
+    }
   } else {
     const structExtreme = getStructuralExtremes(mtfC, isBuy);
-    sl = structExtreme != null 
-      ? (isBuy ? structExtreme - (a * 0.2) : structExtreme + (a * 0.2))
-      : (isBuy ? bufferEnd - (a * cfg.slMultiplier) : bufferEnd + (a * cfg.slMultiplier));
-
-    const estSpread = getEstimatedSpread(symbol, pip);
-    const spreadPadding = estSpread * 2.0;
-    sl = isBuy ? sl - spreadPadding : sl + spreadPadding;
+    const baseSl = structExtreme != null ? structExtreme : (isBuy ? bufferEnd - (a * 1.2) : bufferEnd + (a * 1.2));
+    const atrPadding = a * cfg.atrMultiplier;
+    sl = isBuy ? baseSl - atrPadding : baseSl + atrPadding;
   }
 
-  if (isBuy && sl >= bufferEnd) sl = bufferEnd - (a * 1.5);
-  if (!isBuy && sl <= bufferEnd) sl = bufferEnd + (a * 1.5);
+  if (isBuy && sl >= bufferEnd) sl = bufferEnd - (a * 1.0);
+  if (!isBuy && sl <= bufferEnd) sl = bufferEnd + (a * 1.0);
 
   const riskDistance = Math.abs(price - sl);
   const tp1 = isBuy ? price + (1.0 * riskDistance) : price - (1.0 * riskDistance);
@@ -165,7 +159,7 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal)
       sl: sl,
       tps: [tp1, tp2, tp3],
       zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
-      trigSrc: `Workflow-${cfg.type}`,
+      trigSrc: `ATR+Structure (${cfg.type})`,
       expireMs: 0,
       riskAtr: Math.abs(bufferEnd - sl) / a,
       over: false,
@@ -196,22 +190,18 @@ function generalTradePlan({ htfC, mtfC, m5C, price, symbol, pip, dec, lang, styl
   const bufferDist = a15 * cfg.bufferMultiplier * 1.2;
   const bufferEnd = isBuy ? entry - bufferDist : entry + bufferDist;
 
-  let sl;
+  const structExtreme = getStructuralExtremes(mtfC, isBuy);
+  const baseSl = structExtreme != null ? structExtreme : (isBuy ? bufferEnd - (a15 * 1.5) : bufferEnd + (a15 * 1.5));
+  const atrPadding = a15 * cfg.atrMultiplier;
+  
+  let sl = isBuy ? baseSl - atrPadding : baseSl + atrPadding;
   if (isGold) {
     const fixedGoldSlPips = 25 * (pip || 0.1);
     sl = isBuy ? bufferEnd - fixedGoldSlPips : bufferEnd + fixedGoldSlPips;
-  } else {
-    const structExtreme = getStructuralExtremes(mtfC, isBuy);
-    sl = structExtreme != null
-      ? (isBuy ? structExtreme - (a15 * 0.3) : structExtreme + (a15 * 0.3))
-      : (isBuy ? bufferEnd - (a15 * cfg.slMultiplier) : bufferEnd + (a15 * cfg.slMultiplier));
-
-    const estSpread = getEstimatedSpread(symbol, pip);
-    sl = isBuy ? sl - (estSpread * 2.0) : sl + (estSpread * 2.0);
   }
 
-  if (isBuy && sl >= bufferEnd) sl = bufferEnd - (a15 * 1.5);
-  if (!isBuy && sl <= bufferEnd) sl = bufferEnd + (a15 * 1.5);
+  if (isBuy && sl >= bufferEnd) sl = bufferEnd - (a15 * 1.2);
+  if (!isBuy && sl <= bufferEnd) sl = bufferEnd + (a15 * 1.2);
 
   const risk = Math.abs(price - sl);
   const tp1 = entry + dir * 1.0 * risk;
@@ -282,14 +272,14 @@ export default async function handler(req, res) {
     const sideText = dir === 1 ? 'BUY' : 'SELL';
     const cfgInfo = getAssetConfig(symbol);
     const isGold = symbol.includes('XAU');
-    const setupLabelText = isGold ? 'Gold Fixed SL (20~30 pip)' : `Structural SL + 2x Spread (${cfgInfo.type})`;
+    const setupLabelText = isGold ? 'Gold ATR + Structure (20~30 pip)' : `ATR + Structure (${cfgInfo.type})`;
 
-    // PENYUSUNAN ULANG REASON: Analisis Teknikal Murni di Atas, Catatan Aturan/Workflow di Bawah
+    // PENYUSUNAN REASON: Analisis Teknikal Murni di Atas, Catatan Aturan/Workflow di Bawah
     const techReason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol}. Struktur multi-timeframe terkonfirmasi searah dengan Order Block / FVG aktif. Eksekusi ${actionType} dipetakan dengan presisi tinggi di area likuiditas terdekat. Target Take Profit (TP1-TP3) dihitung proporsional dari garis depan (entry) berdasarkan kelipatan rasio risiko 1:1, 1:2, dan 1:3.`;
     
     const workflowNote = isGold 
-      ? `[Catatan Sistem: Workflow GOLD_FIX_20_30 aktif. Stop Loss dikunci fix pada rentang ideal 20-30 pip dari buffer zone berdasarkan struktur market emas.]` 
-      : `[Catatan Sistem: Workflow ${cfgInfo.type} aktif. Stop Loss dihitung berbasis struktur market ditambah proteksi 2x spread broker untuk menghindari false trigger/stop hunting.]`;
+      ? `[Catatan Sistem: Workflow ATR+Structure aktif. Stop Loss dihitung dari swing struktur market emas ditambah padding ATR, dikunci fix pada rentang ideal 20-30 pip.]` 
+      : `[Catatan Sistem: Workflow ATR+Structure aktif untuk ${cfgInfo.type}. Stop Loss diletakkan di luar titik ekstrem struktur (Swing High/Low) digabungkan dengan pengali volatilitas ATR agar aman dari noise market.]`;
 
     const reason = `${techReason}\n\n${workflowNote}`;
 
@@ -311,7 +301,7 @@ export default async function handler(req, res) {
         setup: 'CONTINUATION',
         setupLabel: setupLabelText,
         zoneLabel: 'Order Block / FVG Structure',
-        zoneNote: isGold ? 'Gold Fixed Range 20~30 pip' : `Konfigurasi Optimal (${cfgInfo.type})`,
+        zoneNote: isGold ? 'Gold ATR+Structure (20~30 pip)' : `ATR + Structure (${cfgInfo.type})`,
         reason: reason
       }
     });
