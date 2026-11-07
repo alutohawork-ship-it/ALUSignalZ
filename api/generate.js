@@ -1,5 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC Universal: Scalping Agresif, Day Trading, Intraday, & Swing Trading
+// Analisis Pure SMC Universal: Scalping Agresif (Fixed SL x3 / BTC 300-500 Pip), Day, Intraday, & Swing
 
 const KV_KEY = 'alu_clients';
 
@@ -26,10 +26,10 @@ const PIP = {
 };
 
 const STYLES = {
-  'Scalping': { label: 'Scalping Agresif (M1+M3+M5 + EMA 5/9 + BB)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
-  'Day Trading': { label: 'Day Trading (M5+M15+M30/H1 + EMA 14/20 + Zona & Kontinuitas)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
-  'Intraday': { label: 'Intraday (H4+H1+M15 + EMA 20/50/100 + Limit Order)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
-  'Swing': { label: 'Swing Trading (D1+H4+H1 + EMA 20/50/100/200 + Limit Order)', mode: 'LIMIT', kind: 'swing', rr: [2.0, 4.5, 8.5] },
+  'Scalping': { label: 'Scalping Agresif (Fixed SL x3 / BTC 300-500 Pip)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
+  'Day Trading': { label: 'Day Trading (Zona & Kontinuitas + EMA 14/20)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
+  'Intraday': { label: 'Intraday (Limit Order + EMA 20/50/100)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
+  'Swing': { label: 'Swing Trading (Limit Order + EMA 20/50/100/200)', mode: 'LIMIT', kind: 'swing', rr: [2.0, 4.5, 8.5] },
 };
 
 const orderLabel = (dir, orderType) => `${dir === 1 ? 'BUY' : 'SELL'} ${orderType === 'LIMIT' ? 'LIMIT' : 'NOW'}`;
@@ -77,7 +77,7 @@ function structureDir(candles) {
   return last.c >= first.c ? 1 : -1;
 }
 
-// Konfigurasi Scale Digit & Buffer 3x untuk Kripto & Currency + Multiplier Horizon
+// Konfigurasi Scale Digit & Buffer Khusus (BTC 300-500 Pip, Lainnya x3 untuk Scalp Agresif)
 function getAssetConfig(symbol, kind) {
   const s = symbol.toUpperCase();
   let mult = (kind === 'intraday' || kind === 'swing') ? 2.5 : 1.0;
@@ -87,12 +87,16 @@ function getAssetConfig(symbol, kind) {
   if (s.includes('XPT') || s.includes('PLATINUM')) return { bufferVal: 5.0 * mult, slVal: 12.0 * mult, type: 'METAL_XPT' };
   if (s.includes('XPD') || s.includes('PALLADIUM')) return { bufferVal: 5.0 * mult, slVal: 12.0 * mult, type: 'METAL_XPD' };
   
-  // Kripto (BTC, ETH, Altcoins) - Diperbesar 3x lipat standar
-  if (s.includes('BTC')) return { bufferVal: 45.0 * mult, slVal: 135.0 * mult, type: 'CRYPTO_BTC_3X' };
-  if (s.includes('ETH')) return { bufferVal: 15.0 * mult, slVal: 45.0 * mult, type: 'CRYPTO_ETH_3X' };
-  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP') || s.includes('LTC')) return { bufferVal: 3.0 * mult, slVal: 9.0 * mult, type: 'CRYPTO_ALT_3X' };
+  // Bitcoin (BTC) dikunci di kisaran 300-500 pip untuk agresif (atau proporsional horizon)
+  if (s.includes('BTC')) {
+    const btcMult = kind === 'scalp' ? 1.0 : mult;
+    return { bufferVal: 120.0 * btcMult, slVal: 400.0 * btcMult, type: 'CRYPTO_BTC_300_500' };
+  }
   
-  // Currency (Forex Major & JPY) - Diperbesar 3x lipat standar
+  if (s.includes('ETH')) return { bufferVal: 45.0 * mult, slVal: 135.0 * mult, type: 'CRYPTO_ETH_3X' };
+  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP') || s.includes('LTC')) return { bufferVal: 9.0 * mult, slVal: 27.0 * mult, type: 'CRYPTO_ALT_3X' };
+  
+  // Currency (Forex Major & JPY) - x3 standar
   if (s.includes('EUR') || s.includes('GBP') || s.includes('AUD') || s.includes('NZD') || s.includes('USD') || s.includes('CAD') || s.includes('CHF')) {
     if (s.includes('JPY')) return { bufferVal: 0.45 * mult, slVal: 1.20 * mult, type: 'CURRENCY_JPY_3X' };
     return { bufferVal: 0.0045 * mult, slVal: 0.0120 * mult, type: 'CURRENCY_MAJOR_3X' };
@@ -100,7 +104,7 @@ function getAssetConfig(symbol, kind) {
   
   if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) return { bufferVal: 15.0 * mult, slVal: 45.0 * mult, type: 'INDEX' };
   if (s.includes('OIL') || s.includes('NATGAS') || s.includes('COPPER')) return { bufferVal: 1.5 * mult, slVal: 4.5 * mult, type: 'COMMODITY_3X' };
-  return { bufferVal: 3.0 * mult, slVal: 9.0 * mult, type: 'DEFAULT_3X' };
+  return { bufferVal: 9.0 * mult, slVal: 27.0 * mult, type: 'DEFAULT_3X' };
 }
 
 function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol) {
@@ -130,7 +134,7 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol) {
       sl: sl,
       tps: [tp1, tp2, tp3],
       zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
-      trigSrc: `Scalping Agresif (EMA 5/9 + BB) [${cfg.type}]`,
+      trigSrc: `Scalping Agresif (Fixed SL x3) [${cfg.type}]`,
       expireMs: 0,
     }
   };
@@ -166,10 +170,6 @@ function generalTradePlan({ mtfC, m5C, price, symbol, styleKind }) {
   const tp2 = entry + dir * rrList[1] * risk;
   const tp3 = entry + dir * rrList[2] * risk;
 
-  let trigName = 'Day Trading (EMA 14/20 + Zona)';
-  if (styleKind === 'intraday') trigName = 'Intraday (EMA 20/50/100 + Limit)';
-  if (styleKind === 'swing') trigName = 'Swing Trading (EMA 20/50/100/200 + Limit)';
-
   return {
     dir,
     plan: {
@@ -182,7 +182,7 @@ function generalTradePlan({ mtfC, m5C, price, symbol, styleKind }) {
       tps: [tp1, tp2, tp3],
       zone: { min: entry - a15, max: entry + a15 },
       expireMs: isLimit ? 360 * 60 * 1000 : 90 * 60 * 1000,
-      trigSrc: `${trigName} [${cfg.type}]`,
+      trigSrc: `${styleKind} [${cfg.type}]`,
       flags: [],
     }
   };
@@ -232,7 +232,7 @@ export default async function handler(req, res) {
     const sideText = dir === 1 ? 'BUY' : 'SELL';
     const cfgInfo = getAssetConfig(symbol, style.kind);
 
-    const techReason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol}. Validasi struktur melibatkan Zona Utama institusi, filter kontinuitas, serta jajaran filter EMA spesifik (${plan.trigSrc}). Jarak Stop Loss dan Buffer dikunci menggunakan skala digit 3x standar untuk perlindungan optimal terhadap noise market.`;
+    const techReason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol}. Jarak Stop Loss dan Buffer BTC dikunci pada rentang 300-500 pip, sementara pair lainnya menggunakan skala fixed SL x3 standar untuk ketahanan optimal terhadap noise market.`;
 
     return res.status(200).json({
       ok: true,
@@ -251,7 +251,7 @@ export default async function handler(req, res) {
         risk: 'LOW',
         setup: 'CONTINUATION / REVERSAL',
         setupLabel: style.label,
-        zoneLabel: 'Order Block / FVG / EMA Dynamic Zone',
+        zoneLabel: 'Order Block / FVG / Structure Zone',
         zoneNote: `Scale Digit Range (${cfgInfo.type})`,
         reason: techReason
       }
