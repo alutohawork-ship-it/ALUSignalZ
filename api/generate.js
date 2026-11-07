@@ -1,5 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC Universal: Fixed Range Pip Presisi untuk Currency & Crypto
+// Analisis Pure SMC Universal: Absolute Fixed Range (XAU 20-30 pip, XAG 2x XAU, Currency & Crypto)
 
 const KV_KEY = 'alu_clients';
 
@@ -15,7 +15,7 @@ const DECIMALS = {
 };
 
 const STYLES = {
-  'Scalping': { label: 'Scalping Agresif (Fixed Range & Structure)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
+  'Scalping': { label: 'Scalping Agresif (Absolute Fixed Range)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
   'Day Trading': { label: 'Day Trading (Zona & Kontinuitas + EMA 14/20)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
   'Intraday': { label: 'Intraday (Limit Order + EMA 20/50/100)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
   'Swing': { label: 'Swing Trading (Limit Order + EMA 20/50/100/200)', mode: 'LIMIT', kind: 'swing', rr: [2.0, 4.5, 8.5] },
@@ -66,48 +66,49 @@ function structureDir(candles) {
   return last.c >= first.c ? 1 : -1;
 }
 
-// PENGATURAN FIXED RANGE & SL PRESISI SESUAI PERMINTAAN
-function getAssetConfig(symbol, kind, atrVal = 10) {
+// DEFINISI JARAK ABSOLUT (BUFFER & SL) UNTUK SCALPING AGRESIF
+function getAbsoluteScalpOffsets(symbol) {
   const s = symbol.toUpperCase();
-  let mult = (kind === 'intraday' || kind === 'swing') ? 2.0 : 1.0;
 
-  if (s.includes('XAU')) return { bufferVal: 1.5 * mult, slVal: 3.0 * mult, type: 'GOLD_FIX' };
-  if (s.includes('XAG')) return { bufferVal: 0.03 * mult, slVal: 0.06 * mult, type: 'SILVER_FIX' };
+  // XAUUSD: SL 2.5 (masuk kisaran 20-30 pip), XAGUSD: 2x XAUUSD
+  if (s.includes('XAU')) return { buffer: 1.0, sl: 2.5, type: 'XAU_20_30_PIP' };
+  if (s.includes('XAG')) return { buffer: 2.0, sl: 5.0, type: 'XAG_2X_XAU' };
   
-  // Crypto (BTC, ETH, dll) -> Kisaran 30-50 pip/poin
-  if (s.includes('BTC')) return { bufferVal: 35.0 * mult, slVal: 90.0 * mult, type: 'CRYPTO_BTC_RANGE' };
-  if (s.includes('ETH')) return { bufferVal: 4.0 * mult, slVal: 12.0 * mult, type: 'CRYPTO_ETH_RANGE' };
-  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP') || s.includes('LTC')) return { bufferVal: 1.5 * mult, slVal: 4.0 * mult, type: 'CRYPTO_ALT_RANGE' };
+  // Crypto (30 - 50 Poin/Pip ideal)
+  if (s.includes('BTC')) return { buffer: 35.0, sl: 100.0, type: 'BTC_100PIP' };
+  if (s.includes('ETH')) return { buffer: 4.0, sl: 12.0, type: 'ETH_40PIP' };
+  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP') || s.includes('LTC')) return { buffer: 1.5, sl: 4.5, type: 'ALT_FIX' };
   
-  // Currency Pairs (Fixed Range Sesuai Standar Baru)
-  if (s.includes('USDJPY')) return { bufferVal: 0.05 * mult, slVal: 0.12 * mult, type: 'USDJPY_50PIP' };
-  if (s.includes('GBPUSD')) return { bufferVal: 0.0005 * mult, slVal: 0.0012 * mult, type: 'GBPUSD_50PIP' };
-  if (s.includes('AUDUSD')) return { bufferVal: 0.0003 * mult, slVal: 0.0008 * mult, type: 'AUDUSD_30PIP' };
-  if (s.includes('USDCAD')) return { bufferVal: 0.0008 * mult, slVal: 0.0018 * mult, type: 'USDCAD_80PIP' };
-  if (s.includes('USDCHF')) return { bufferVal: 0.0006 * mult, slVal: 0.0014 * mult, type: 'USDCHF_60PIP' };
+  // Currency Pairs (Sesuai Permintaan Presisi Anda)
+  if (s.includes('USDJPY')) return { buffer: 0.05, sl: 0.15, type: 'USDJPY_50PIP' };   // 50 pip
+  if (s.includes('GBPUSD')) return { buffer: 0.0005, sl: 0.0015, type: 'GBPUSD_50PIP' }; // 50 pip
+  if (s.includes('AUDUSD')) return { buffer: 0.0003, sl: 0.0010, type: 'AUDUSD_30PIP' }; // 30-40 pip
+  if (s.includes('USDCAD')) return { buffer: 0.0008, sl: 0.0024, type: 'USDCAD_80PIP' }; // 60-80 pip
+  if (s.includes('USDCHF')) return { buffer: 0.0006, sl: 0.0018, type: 'USDCHF_60PIP' }; // 50-60 pip
   
-  // EURUSD & Currency General Lainnya -> Dipatok di kisaran 50-60 pip (Buffer 0.0005, SL 0.0012)
+  // EURUSD & Major Lainnya (50-60 pip)
   if (s.includes('EUR') || s.includes('NZD') || s.includes('CHF') || s.includes('CAD')) {
-    return { bufferVal: 0.0005 * mult, slVal: 0.0012 * mult, type: 'CURRENCY_50_60_PIP' };
+    return { buffer: 0.0005, sl: 0.0015, type: 'CURRENCY_50_60_PIP' };
   }
   
-  // Index & Commodity (Berbasis ATR)
+  // Index & Lainnya
   if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) {
-    return { bufferVal: Math.max(atrVal * 0.4, 15.0) * mult, slVal: Math.max(atrVal * 1.2, 40.0) * mult, type: 'INDEX_ATR' };
+    return { buffer: 20.0, sl: 60.0, type: 'INDEX_FIX' };
   }
   
-  return { bufferVal: 0.0005 * mult, slVal: 0.0012 * mult, type: 'DEFAULT_CURRENCY_FIX' };
+  return { buffer: 0.0005, sl: 0.0015, type: 'DEFAULT_FIX' };
 }
 
-function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol) {
+function scalpHitRun(mtfC, ltfC, htfDir, price, symbol) {
   let dir = structureDir(mtfC);
   if (dir === 0) dir = htfDir !== 0 ? htfDir : 1;
   const activeDir = htfDir !== 0 ? htfDir : dir;
   const isBuy = activeDir === 1;
 
-  const cfg = getAssetConfig(symbol, 'scalp', a);
-  const bufferEnd = isBuy ? price - cfg.bufferVal : price + cfg.bufferVal;
-  const sl = isBuy ? bufferEnd - cfg.slVal : bufferEnd + cfg.slVal;
+  const offsets = getAbsoluteScalpOffsets(symbol);
+  
+  const bufferEnd = isBuy ? price - offsets.buffer : price + offsets.buffer;
+  const sl = isBuy ? price - offsets.sl : price + offsets.sl;
 
   const riskDistance = Math.abs(price - sl);
   const tp1 = isBuy ? price + (1.0 * riskDistance) : price - (1.0 * riskDistance);
@@ -126,7 +127,7 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol) {
       sl: sl,
       tps: [tp1, tp2, tp3],
       zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
-      trigSrc: `Scalping Agresif (Fixed Range 50-60 Pip) [${cfg.type}]`,
+      trigSrc: `Scalping Agresif (Absolute Fixed Range) [${offsets.type}]`,
       expireMs: 0,
     }
   };
@@ -144,23 +145,26 @@ function aggregateM15(m5) {
 
 function generalTradePlan({ mtfC, m5C, price, symbol, styleKind }) {
   const m15C = aggregateM15(m5C);
-  const a15 = atr(m15C, 14);
+  const a15 = atr(m15C, 14) || 10;
   const dir = structureDir(mtfC) || 1;
   const isBuy = dir === 1;
 
-  const cfg = getAssetConfig(symbol, styleKind, a15);
-  const isLimit = styleKind === 'intraday' || styleKind === 'swing';
+  let mult = (styleKind === 'intraday' || styleKind === 'swing') ? 2.0 : 1.0;
+  const isLimit = (styleKind === 'intraday' || styleKind === 'swing');
+  const actualEntry = isLimit ? (isBuy ? price - a15 * 0.5 : price + a15 * 0.5) : price;
   
-  const entry = isLimit ? (isBuy ? price - a15 * 0.5 : price + a15 * 0.5) : price;
-  const bufferEnd = isBuy ? entry - cfg.bufferVal : entry + cfg.bufferVal;
-  const sl = isBuy ? bufferEnd - cfg.slVal : bufferEnd + cfg.slVal;
+  const bufferVal = a15 * 0.5 * mult;
+  const slVal = a15 * 1.5 * mult;
 
-  const risk = Math.abs(entry - sl);
+  const bufferEnd = isBuy ? actualEntry - bufferVal : actualEntry + bufferVal;
+  const sl = isBuy ? actualEntry - slVal : actualEntry + slVal;
+
+  const risk = Math.abs(actualEntry - sl);
   const rrList = STYLES[Object.keys(STYLES).find(k => STYLES[k].kind === styleKind)]?.rr || [1.5, 2.5, 4.0];
   
-  const tp1 = entry + dir * rrList[0] * risk;
-  const tp2 = entry + dir * rrList[1] * risk;
-  const tp3 = entry + dir * rrList[2] * risk;
+  const tp1 = actualEntry + dir * rrList[0] * risk;
+  const tp2 = actualEntry + dir * rrList[1] * risk;
+  const tp3 = actualEntry + dir * rrList[2] * risk;
 
   let trigName = 'Day Trading (Zona & Kontinuitas)';
   if (styleKind === 'intraday') trigName = 'Intraday (Limit Order + EMA 20/50/100)';
@@ -172,13 +176,13 @@ function generalTradePlan({ mtfC, m5C, price, symbol, styleKind }) {
       kind: styleKind,
       orderType: isLimit ? 'LIMIT' : 'NOW',
       status: isLimit ? 'PENDING' : 'RUNNING',
-      entry,
+      entry: actualEntry,
       bufferEnd,
       sl,
       tps: [tp1, tp2, tp3],
-      zone: { min: entry - a15, max: entry + a15 },
+      zone: { min: actualEntry - a15, max: actualEntry + a15 },
       expireMs: isLimit ? 360 * 60 * 1000 : 90 * 60 * 1000,
-      trigSrc: `${trigName} [${cfg.type}]`,
+      trigSrc: `${trigName} [ATR_DYNAMIC]`,
       flags: [],
     }
   };
@@ -204,14 +208,13 @@ export default async function handler(req, res) {
     const mtfC = cleanCandles(cnd.mtf ?? cnd.entry);
     const ltfC = cleanCandles(cnd.ltf);
 
-    const refAtr = atr(mtfC, 14) || 1;
     const htfDir = structureDir(htfC);
     const isScalp = style.kind === 'scalp';
 
     let dir = 0, plan = null;
 
     if (isScalp) {
-      const hr = scalpHitRun(mtfC, ltfC, htfDir, price, refAtr, symbol);
+      const hr = scalpHitRun(mtfC, ltfC, htfDir, price, symbol);
       dir = hr.dir;
       plan = hr.plan;
     } else {
@@ -226,7 +229,7 @@ export default async function handler(req, res) {
 
     const actionType = plan.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET';
     const sideText = dir === 1 ? 'BUY' : 'SELL';
-    const cfgInfo = getAssetConfig(symbol, style.kind, refAtr);
+    const offsets = getAbsoluteScalpOffsets(symbol);
 
     const actionDesc = sideText === 'BUY' 
       ? 'mengambil posisi BELI (BUY) karena harga merespons area Demand / Batas Bawah Bollinger Bands dengan reaksi penolakan (wick rejection) yang kuat' 
@@ -235,7 +238,7 @@ export default async function handler(req, res) {
     const techReason = [
       `Analisis Teknikal Pure SMC ${sideText} (${style.label}) pada pair ${symbol}.`,
       `Alasan Eksekusi: Diputuskan ${actionDesc}. Pemicu utama didasarkan pada pembacaan struktur mikro dan filter indikator (${plan.trigSrc}).`,
-      `Manajemen Risiko: Jarak Stop Loss dan Buffer telah disesuaikan secara presisi (${cfgInfo.type}) mengikuti standar fixed range pip yang ditetapkan.`
+      `Manajemen Risiko: Jarak Stop Loss dan Buffer telah dikunci secara absolut mengikuti standar fixed range (${offsets.type}).`
     ].join('\n\n');
 
     return res.status(200).json({
@@ -256,7 +259,7 @@ export default async function handler(req, res) {
         setup: 'CONTINUATION / REVERSAL',
         setupLabel: style.label,
         zoneLabel: 'Order Block / FVG / Structure Zone',
-        zoneNote: `Scale Digit Range (${cfgInfo.type})`,
+        zoneNote: `Absolute Range (${offsets.type})`,
         reason: techReason
       }
     });
