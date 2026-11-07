@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Alu Signal Z & Terminal (MT5 #2121955946)</title>
+    <title>Alu Signal Z & Terminal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -121,7 +121,7 @@
                     <i class="fa-solid fa-chart-line text-xs"></i>
                 </div>
                 <div class="min-w-0">
-                    <h1 class="font-bold text-xs text-white">Alu <span class="text-accentblue">Signal Z</span> <span class="text-[9px] text-amber-400 font-mono font-normal">(MT5: #2121955946)</span></h1>
+                    <h1 class="font-bold text-xs text-white">Alu <span class="text-accentblue">Signal Z</span></h1>
                     <p id="txtSubHeader" class="text-[8px] text-gray-400 truncate">Pure SMC 3-Layer Terminal</p>
                 </div>
             </div>
@@ -439,7 +439,7 @@
         </main>
 
         <footer class="max-w-md md:max-w-6xl mx-auto w-full pt-4 pb-2 border-t border-panelborder/60 text-center space-y-1">
-            <p class="text-[10px] text-gray-400">Punya pertanyaan atau ingin perpanjang langganan? (MT5 ID: #2121955946)</p>
+            <p class="text-[10px] text-gray-400">Punya pertanyaan atau ingin perpanjang langganan?</p>
             <a href="https://wa.me/6285817038501?text=Halo%20Admin%20Alu%20Signal%20Z,%20saya%20ingin%20berlangganan" target="_blank" class="inline-flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full text-xs font-bold font-mono transition">
                 <i class="fa-brands fa-whatsapp text-sm text-emerald-400"></i> Admin WhatsApp: +6285817038501
             </a>
@@ -629,9 +629,8 @@
     }
 
     // ================= KONFIG MARKET =================
-    // Feed: xbtfx. Token JANGAN ditaruh di file yang di-host publik (lihat catatan).
     const WS_URL = 'wss://ws.xbtfx.com/v1/ws';
-    const XBTFX_TOKEN = 'ISI_TOKEN_KAMU';
+    const XBTFX_TOKEN = 'xbtfx_live_00ed4a87dadb4cdd89bf7a3c18713a3c';
     const HISTORY_MS = 10 * 60 * 1000;
     const CHART_SPAN_MS = 3 * 60 * 1000;
     const STALE_MS = 30000;
@@ -714,7 +713,6 @@
             const arr = COIN_KEY.get(k) || [];
             if (!arr.includes(key)) arr.push(key);
             COIN_KEY.set(k, arr);
-            // Key universal untuk pencocokan tanpa provider (cadangan)
             const univK = `*|${norm(a.coin)}`;
             const univArr = COIN_KEY.get(univK) || [];
             if (!univArr.includes(key)) univArr.push(key);
@@ -722,7 +720,6 @@
         }
 
     const SUB_KEYS = Object.keys(MARKETS).filter(k => !MARKETS[k].base);
-    // Simbol yang dikirim ke xbtfx untuk tiap pair (nama utama = coin pertama)
     const STREAM_SYMBOL = key => MARKETS[key].coins[0];
     const PENDING_SL_CANCEL = true;
 
@@ -742,8 +739,6 @@
     const displayName = key => key.replace(/^xyz:/, '');
     const parseLevel = v => Number.isFinite(parseFloat(v)) ? parseFloat(v) : null;
 
-    // Offset bawaan dikosongkan karena nilai lama diukur dari feed lain.
-    // Kalibrasi ulang per pair (isi Bid dari MT lalu KALIBRASI) jika selisihnya terlihat.
     const DEFAULT_OFFSETS = {};
 
     const offsets = (() => { try { return JSON.parse(localStorage.getItem(OFFSET_KEY)) || {}; } catch { return {}; } })();
@@ -839,7 +834,6 @@
     // ================= STREAM (xbtfx) =================
     const sendJSON = (sock, obj) => { if (sock && sock.readyState === WebSocket.OPEN) sock.send(JSON.stringify(obj)); };
 
-    // Pengganti pickPrice: ambil angka valid pertama dari daftar field
     const pickPrice = (...vals) => {
         for (const v of vals) {
             const n = parseFloat(v);
@@ -848,7 +842,6 @@
         return NaN;
     };
 
-    // Daftar key pair yang cocok dengan sebuah simbol dari xbtfx
     const keysOf = sym => {
         const n = norm(sym);
         return [...new Set([...(COIN_KEY.get(`xbtfx|${n}`) || []), ...(COIN_KEY.get(`*|${n}`) || [])])];
@@ -863,7 +856,6 @@
     }
 
     function handleQuote(msg) {
-        // Harga pakai BID agar sejajar dengan kalibrasi terhadap harga Bid di MT
         const p0 = pickPrice(msg.bid, msg.mid, msg.price, msg.ask);
         if (!(p0 > 0)) return;
         for (const key of keysOf(msg.symbol)) {
@@ -875,7 +867,6 @@
         }
     }
 
-    // Penanda status per pair: menunggu tick, atau sudah lewat batas waktu tanpa tick
     function watchdog() {
         const now = Date.now();
         for (const key of SUB_KEYS) {
@@ -924,14 +915,12 @@
 
             if (msg.channel === 'quote') { handleQuote(msg); return; }
 
-            // Auth gagal: hentikan reconnect supaya tidak looping dengan token salah
             if (!streamReady && (msg.action === 'auth_error' || msg.action === 'error' || msg.error)) {
                 authFailed = true;
                 setWsStatus('AUTH GAGAL', 'red');
                 return;
             }
 
-            // Error untuk satu simbol: tandai pair-nya agar kelihatan simbol mana yang ditolak
             if (msg.action === 'error' && msg.symbol) {
                 for (const key of keysOf(msg.symbol)) markSrc(key, 'ERR', 'text-red-400');
             }
@@ -947,8 +936,6 @@
         };
     }
 
-    // TODO: request candle history xbtfx belum diketahui protokolnya.
-    // Sementara ditolak dengan pesan jelas, supaya tidak menebak format.
     function wsReq(method) {
         return Promise.reject(new Error(`Data candle xbtfx belum dihubungkan (${method})`));
     }
