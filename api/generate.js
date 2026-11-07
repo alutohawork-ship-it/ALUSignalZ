@@ -16,6 +16,7 @@ const DECIMALS = {
   BTCUSDT: 2, ETHUSDT: 2, SOLUSDT: 2, XRPUSDT: 4, BNBUSDT: 2, ADAUSDT: 4,
   LINKUSDT: 3, AVAXUSDT: 3, DOGEUSDT: 5, SUIUSDT: 4, NEARUSDT: 4, DOTUSDT: 4,
   LTCUSDT: 2, TAOUSDT: 2, HYPEUSDT: 2,
+  BTCUSD: 2, ETHUSD: 2,   // clone MT4/5
 };
 
 // Ukuran 1 pip per simbol. Harus sama dengan MARKETS.pip di index.html
@@ -27,6 +28,7 @@ const PIP = {
   BTCUSDT: 1, ETHUSDT: 0.1, SOLUSDT: 0.01, XRPUSDT: 0.0001, BNBUSDT: 0.1, ADAUSDT: 0.0001,
   LINKUSDT: 0.001, AVAXUSDT: 0.001, DOGEUSDT: 0.00001, SUIUSDT: 0.0001, NEARUSDT: 0.0001,
   DOTUSDT: 0.0001, LTCUSDT: 0.01, TAOUSDT: 0.01, HYPEUSDT: 0.01,
+  BTCUSD: 1, ETHUSD: 0.1,   // clone MT4/5
 };
 
 // Scalping: rentang jarak SL dalam pip [min, max] dari entry.
@@ -41,6 +43,7 @@ const SCALP_SL_PIPS = {
   BNBUSDT: [15, 30], ADAUSDT: [6, 12], LINKUSDT: [25, 40], AVAXUSDT: [25, 40],
   DOGEUSDT: [25, 45], SUIUSDT: [20, 35], NEARUSDT: [50, 90], DOTUSDT: [30, 60],
   LTCUSDT: [20, 35], TAOUSDT: [40, 70], HYPEUSDT: [20, 35],
+  BTCUSD: [150, 250], ETHUSD: [60, 100],   // clone MT4/5
 };
 
 // Jika SL struktur melebihi batas max pair (Scalping):
@@ -57,6 +60,7 @@ const DAY_PSY_STEP = {
   BTCUSDT: 1000, ETHUSDT: 100, SOLUSDT: 10, XRPUSDT: 0.1, BNBUSDT: 10, ADAUSDT: 0.05,
   LINKUSDT: 0.5, AVAXUSDT: 0.5, DOGEUSDT: 0.01, SUIUSDT: 0.1, NEARUSDT: 0.1, DOTUSDT: 0.5,
   LTCUSDT: 5, TAOUSDT: 5, HYPEUSDT: 1, DJI: 500,
+  BTCUSD: 1000, ETHUSD: 100,   // clone MT4/5
 };
 
 // Day Trading
