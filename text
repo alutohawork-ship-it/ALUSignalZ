@@ -1,5 +1,7 @@
-📁 gutsai-trading-agent/
-├── 📁 api/
-│   └── 📄 generate.js       (Backend Proxy Vercel Serverless)
-├── 📄 index.html            (Frontend UI Utama)
-└── 📄 vercel.json           (Konfigurasi Routing Vercel)
+alu-signal-z/
+├── api/
+│   ├── generate.js     # Endpoint backend untuk analisis SMC & data chart XBTFX
+│   └── login.js        # Endpoint backend untuk verifikasi login admin/klien
+├── index.html          # File antarmuka utama (Terminal, Chart, & Live Stream Kavling)
+├── vercel.json         # Konfigurasi deployment Vercel (opsional)
+└── package.json        # Konfigurasi project Node.js
