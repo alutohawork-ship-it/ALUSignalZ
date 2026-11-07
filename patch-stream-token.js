@@ -1,5 +1,5 @@
 /* =====================================================================
-   PATCH untuk index-xbtfx.html
+   PATCH untuk index.html
    Token tidak lagi ditulis di file HTML, melainkan diambil dari server.
 
    PATCH 1: di bagian "KONFIG MARKET", HAPUS baris ini:
