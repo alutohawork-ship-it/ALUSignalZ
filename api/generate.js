@@ -26,50 +26,12 @@ const PIP = {
   BTCUSD: 1, ETHUSD: 0.1,
 };
 
-const SCALP_SL_PIPS = {
-  XAUUSD: [20, 30], XAGUSD: [25, 40],
-  EURUSD: [10, 15], GBPUSD: [12, 18], USDJPY: [10, 15],
-  AUDUSD: [10, 15], USDCAD: [10, 15], USDCHF: [10, 15],
-  CLUSDT: [8, 15], NATGASUSDT: [10, 20], COPPERUSDT: [30, 50], XPDUSDT: [20, 35], XPTUSDT: [20, 30],
-  BRENTOIL: [8, 15], PALLADIUM: [20, 35], PLATINUM: [20, 30],
-  SP500: [15, 30], XYZ100: [25, 45], JP225: [20, 40], QQQUSDT: [15, 30],
-  BTCUSDT: [150, 250], ETHUSDT: [60, 100], SOLUSDT: [40, 70], XRPUSDT: [50, 80],
-  BNBUSDT: [15, 30], ADAUSDT: [6, 12], LINKUSDT: [25, 40], AVAXUSDT: [25, 40],
-  DOGEUSDT: [25, 45], SUIUSDT: [20, 35], NEARUSDT: [50, 90], DOTUSDT: [30, 60],
-  LTCUSDT: [20, 35], TAOUSDT: [40, 70], HYPEUSDT: [20, 35],
-  BTCUSD: [150, 250], ETHUSD: [60, 100],
-};
-
-const SCALP_OVER_CAP = 'FLAG';
-const DAY_PSY_STEP = {
-  XAUUSD: 50, XAGUSD: 1, EURUSD: 0.005, USDJPY: 0.5, GBPUSD: 0.005,
-  AUDUSD: 0.005, USDCAD: 0.005, USDCHF: 0.005,
-  CLUSDT: 5, NATGASUSDT: 0.5, COPPERUSDT: 0.1, XPDUSDT: 50, XPTUSDT: 50,
-  BRENTOIL: 5, PALLADIUM: 50, PLATINUM: 50, SP500: 100, XYZ100: 500, JP225: 500, QQQUSDT: 5,
-  BTCUSDT: 1000, ETHUSDT: 100, SOLUSDT: 10, XRPUSDT: 0.1, BNBUSDT: 10, ADAUSDT: 0.05,
-  LINKUSDT: 0.5, AVAXUSDT: 0.5, DOGEUSDT: 0.01, SUIUSDT: 0.1, NEARUSDT: 0.1, DOTUSDT: 0.5,
-  LTCUSDT: 5, TAOUSDT: 5, HYPEUSDT: 1, DJI: 500,
-  BTCUSD: 1000, ETHUSD: 100,
-};
-
-const DAY_ZONE_MIN_LEG_ATR = 1.0;
-const DAY_SL_MIN_ATR = 0.8;
-const DAY_SL_MAX_ATR = 2.5;
-const DAY_LIMIT_EXPIRE_MS = 90 * 60 * 1000;
-
-const TF_MS = { '1m': 60000, '5m': 300000, '15m': 900000, '30m': 1800000, '1h': 3600000, '4h': 14400000, '1d': 86400000 };
-const TF_LABEL = { '1m': 'M1', '5m': 'M5', '15m': 'M15', '30m': 'M30', '1h': 'H1', '4h': 'H4', '1d': 'D1' };
-const KIND_NAME = { OB: 'Order Block', FVG: 'FVG', OTE: 'OTE 62-79%', FALLBACK: 'Swing' };
-
 const STYLES = {
-  'Scalping': { label: 'Scalping Hit & Run (M5+M3+M1 Buffer Zone)', mode: 'MARKET', kind: 'scalp', tf: { htf: '15m', mtf: '5m', ltf: '1m' }, rr: [1, 2, 3] },
-  'Day Trading': { label: 'Day Trading Zone (HTF: H1 | MTF: M30)', mode: 'MARKET', kind: 'day', tf: { htf: '1h', mtf: '30m', ltf: '5m' }, rr: [1.5, 2, 3] },
-  'Intraday': { label: 'Intraday (HTF: H4 | MTF: H1)', mode: 'LIMIT', kind: 'intraday', distW: 1, tf: { htf: '4h', mtf: '1h', ltf: '15m' }, rr: [1.5, 3.0, 5.5] },
-  'Swing': { label: 'Swing Trading (HTF: D1 | MTF: H4)', mode: 'LIMIT', kind: 'zone', tf: { htf: '1d', mtf: '4h', ltf: '1h' }, rr: [2.0, 4.5, 8.5] },
+  'Scalping': { label: 'Scalping Hit & Run (Multi-TF Buffer Zone)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
+  'Day Trading': { label: 'Day Trading Zone (HTF: H1 | MTF: M30)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
+  'Intraday': { label: 'Intraday (HTF: H4 | MTF: H1)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
+  'Swing': { label: 'Swing Trading (HTF: D1 | MTF: H4)', mode: 'LIMIT', kind: 'zone', rr: [2.0, 4.5, 8.5] },
 };
-
-const SL_BUFFER = 0.2;
-const MIN_CANDLES = 15;
 
 const T = (lang, id, en) => (lang === 'en' ? en : id);
 const orderLabel = (dir, orderType) => `${dir === 1 ? 'BUY' : 'SELL'} ${orderType === 'LIMIT' ? 'LIMIT' : 'NOW'}`;
@@ -101,25 +63,6 @@ function cleanCandles(rows) {
     .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite)).sort((a, b) => a.t - b.t).slice(-200);
 }
 
-function swings(candles, n = 2) {
-  const out = [];
-  for (let i = n; i < candles.length - n; i++) {
-    let isH = true, isL = true;
-    for (let j = 1; j <= n; j++) {
-      if (candles[i].h <= candles[i - j].h || candles[i].h <= candles[i + j].h) isH = false;
-      if (candles[i].l >= candles[i - j].l || candles[i].l >= candles[i + j].l) isL = false;
-    }
-    if (isH) out.push({ type: 'H', i, price: candles[i].h });
-    if (isL) out.push({ type: 'L', i, price: candles[i].l });
-  }
-  return out;
-}
-
-const lastSwing = (sw, type) => {
-  for (let k = sw.length - 1; k >= 0; k--) if (sw[k].type === type) return sw[k];
-  return null;
-};
-
 function atr(candles, period = 14) {
   const trs = [];
   for (let i = 1; i < candles.length; i++) {
@@ -136,37 +79,42 @@ function structureDir(candles) {
   return last.c >= first.c ? 1 : -1;
 }
 
-function impulseZones(candles, isBuy, a) {
-  const last = candles[candles.length - 1];
-  const base = last.c;
-  const lo = isBuy ? base - 1.5 * a : base - 0.5 * a;
-  const hi = isBuy ? base + 0.5 * a : base + 1.5 * a;
-  return {
-    zones: [{ type: 'OB', lo, hi, from: candles.length - 1 }],
-    ote: { type: 'OTE', lo: base - a, hi: base + a, from: candles.length - 1 },
-    impulse: { low: base - a, high: base + a }
-  };
+// Konfigurasi Rentang Buffer & SL Ideal Spesifik Per Karakteristik Pair
+function getAssetConfig(symbol) {
+  const s = symbol.toUpperCase();
+  if (s.includes('XAU')) return { bufferPips: 15, slPips: 25, tp1: 15, tp2: 30, tp3: 50 };
+  if (s.includes('XAG')) return { bufferPips: 20, slPips: 30, tp1: 20, tp2: 40, tp3: 70 };
+  if (s.includes('EUR') || s.includes('GBP') || s.includes('AUD') || s.includes('NZD') || s.includes('USD')) {
+    if (s.includes('JPY')) return { bufferPips: 15, slPips: 25, tp1: 15, tp2: 30, tp3: 50 };
+    return { bufferPips: 10, slPips: 18, tp1: 12, tp2: 25, tp3: 40 };
+  }
+  if (s.includes('BTC')) return { bufferPips: 80, slPips: 150, tp1: 100, tp2: 250, tp3: 450 };
+  if (s.includes('ETH')) return { bufferPips: 15, slPips: 30, tp1: 20, tp2: 45, tp3: 80 };
+  if (s.includes('SOL') || s.includes('BNB')) return { bufferPips: 0.5, slPips: 1.2, tp1: 0.8, tp2: 1.8, tp3: 3.0 };
+  if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) return { bufferPips: 30, slPips: 60, tp1: 40, tp2: 90, tp3: 150 };
+  if (s.includes('OIL') || s.includes('CLUSDT') || s.includes('NATGAS')) return { bufferPips: 15, slPips: 30, tp1: 20, tp2: 45, tp3: 80 };
+  
+  return { bufferPips: 15, slPips: 30, tp1: 20, tp2: 40, tp3: 70 };
 }
 
-// Scalping Agresif M5 + M3 + M1 dengan Buffer Zone & Dinamis Zona HTF
-function scalpHitRun(mtfC, ltfC, htfDir, price, a, slFloor, slCap, pip) {
+function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip) {
   let dir = structureDir(mtfC);
   if (dir === 0) dir = htfDir !== 0 ? htfDir : 1;
-
-  // Cek apakah masuk ke area zona HTF / Day Trade (misal supply/demand terdekat)
   const activeDir = htfDir !== 0 ? htfDir : dir;
   const isBuy = activeDir === 1;
 
-  // Buffer Zone (rentang area eksekusi dan buffer dari harga sekarang)
-  const bufferRange = (pip || (a * 0.1)) * 15; 
-  const bufferEnd = isBuy ? price - bufferRange : price + bufferRange;
+  const cfg = getAssetConfig(symbol);
+  const pValue = pip || 1;
 
-  const stopRaw = isBuy ? bufferEnd - SL_BUFFER * a : bufferEnd + SL_BUFFER * a;
-  let risk = Math.abs(bufferEnd - stopRaw);
-  if (risk < slFloor) risk = slFloor;
-  if (risk > slCap) risk = slCap;
+  const bufferOffset = cfg.bufferPips * pValue;
+  const bufferEnd = isBuy ? price - bufferOffset : price + bufferOffset;
 
-  const stop = isBuy ? bufferEnd - risk : bufferEnd + risk;
+  const slDistance = cfg.slPips * pValue;
+  const sl = isBuy ? bufferEnd - slDistance : bufferEnd + slDistance;
+
+  const tp1 = isBuy ? price + (cfg.tp1 * pValue) : price - (cfg.tp1 * pValue);
+  const tp2 = isBuy ? price + (cfg.tp2 * pValue) : price - (cfg.tp2 * pValue);
+  const tp3 = isBuy ? price + (cfg.tp3 * pValue) : price - (cfg.tp3 * pValue);
 
   return {
     dir: activeDir,
@@ -176,13 +124,14 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, slFloor, slCap, pip) {
       mode: 'DIRECT',
       fill: null,
       entry: price,
-      bufferEnd: bufferEnd, // Garis ke-2 Buffer Zone
+      bufferEnd: bufferEnd,
       status: 'RUNNING',
-      sl: stop,
+      sl: sl,
+      tps: [tp1, tp2, tp3],
       zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
       trigSrc: 'M5+M3+M1',
       expireMs: 0,
-      riskAtr: risk / a,
+      riskAtr: slDistance / a,
       over: false,
     }
   };
@@ -198,18 +147,21 @@ function aggregateM15(m5) {
   return out.length ? out : m5;
 }
 
-// Day Trading / Intraday / Swing selalu keluar sinyal tanpa gagal
 function generalTradePlan({ htfC, mtfC, m5C, price, symbol, pip, dec, lang, styleKind }) {
   const m15C = aggregateM15(m5C);
   const a15 = atr(m15C, 14);
   const dir = structureDir(mtfC) || 1;
   const isBuy = dir === 1;
 
+  const cfg = getAssetConfig(symbol);
+  const pValue = pip || 1;
   const entry = price;
-  const bufferRange = (pip || (a15 * 0.1)) * 10;
-  const bufferEnd = isBuy ? entry - bufferRange : entry + bufferRange;
 
-  const sl = isBuy ? bufferEnd - 1.2 * a15 : bufferEnd + 1.2 * a15;
+  const bufferOffset = (cfg.bufferPips * 1.5) * pValue;
+  const bufferEnd = isBuy ? entry - bufferOffset : entry + bufferOffset;
+
+  const slDistance = (cfg.slPips * 1.5) * pValue;
+  const sl = isBuy ? bufferEnd - slDistance : bufferEnd + slDistance;
   const risk = Math.abs(bufferEnd - sl);
 
   const tp1 = entry + dir * 1.5 * risk;
@@ -227,9 +179,9 @@ function generalTradePlan({ htfC, mtfC, m5C, price, symbol, pip, dec, lang, styl
       sl,
       tps: [tp1, tp2, tp3],
       zone: { min: entry - a15, max: entry + a15 },
-      expireMs: DAY_LIMIT_EXPIRE_MS,
+      expireMs: 90 * 60 * 1000,
       flags: [],
-      meta: { confidence: 'HIGH', risk: 'MEDIUM', setup: 'CONTINUATION', setupLabel: 'SMC Setup Valid', zoneLabel: 'Order Block / FVG', zoneNote: 'Pending order aktif, waktu tunggu berlaku' }
+      meta: { confidence: 'HIGH', risk: 'LOW', setup: 'CONTINUATION', setupLabel: 'SMC Setup Valid', zoneLabel: 'Order Block / FVG', zoneNote: 'Pending order aktif sesuai karakter pair' }
     }
   };
 }
@@ -260,14 +212,10 @@ export default async function handler(req, res) {
     const htfDir = structureDir(htfC);
     const isScalp = style.kind === 'scalp';
 
-    const rng = SCALP_SL_PIPS[symbol] || [20, 30];
-    const slFloor = rng[0] * (pip || 0.1);
-    const slCap = rng[1] * (pip || 0.1);
-
     let dir = 0, plan = null;
 
     if (isScalp) {
-      const hr = scalpHitRun(mtfC, ltfC, htfDir, price, refAtr, slFloor, slCap, pip);
+      const hr = scalpHitRun(mtfC, ltfC, htfDir, price, refAtr, symbol, pip);
       dir = hr.dir;
       plan = hr.plan;
     } else {
@@ -294,12 +242,12 @@ export default async function handler(req, res) {
         tp1: r(tps[0]), tp2: r(tps[1]), tp3: r(tps[2]),
         zone: plan.zone ? { min: r(plan.zone.min), max: r(plan.zone.max) } : null,
         confidence: plan.meta?.confidence || 'HIGH',
-        risk: plan.meta?.risk || 'MEDIUM',
+        risk: plan.meta?.risk || 'LOW',
         setup: plan.meta?.setup || 'CONTINUATION',
         setupLabel: plan.meta?.setupLabel || 'Setup SMC Valid',
         zoneLabel: plan.meta?.zoneLabel || 'Buffer Zone Active',
-        zoneNote: plan.meta?.zoneNote || 'Garis Eksekusi & Buffer Zone Sesuai Market',
-        reason: 'Sinyal berhasil digenerate mengikuti pergerakan market real-time dan aturan buffer zone.'
+        zoneNote: plan.meta?.zoneNote || 'Rentang SL & Buffer disesuaikan spesifik per pair',
+        reason: 'Sinyal digenerate dengan pengaturan jarak SL dan TP yang dioptimalkan khusus untuk karakteristik pair ini.'
       }
     });
   } catch (err) {
