@@ -1,5 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC Universal dengan Perhitungan Jarak Berbasis Angka Utama (Full Digits) untuk Semua Pair
+// Analisis Pure SMC Universal dengan Skala Digit Utama untuk Semua Pair
 
 const KV_KEY = 'alu_clients';
 
@@ -26,7 +26,7 @@ const PIP = {
 };
 
 const STYLES = {
-  'Scalping': { label: 'Scalping Hit & Run (Full Digit Universal)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
+  'Scalping': { label: 'Scalping Hit & Run (Scale Digit)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
   'Day Trading': { label: 'Day Trading Zone (HTF: H1 | MTF: M30)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
   'Intraday': { label: 'Intraday (HTF: H4 | MTF: H1)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
   'Swing': { label: 'Swing Trading (HTF: D1 | MTF: H4)', mode: 'LIMIT', kind: 'zone', rr: [2.0, 4.5, 8.5] },
@@ -92,10 +92,11 @@ function getStructuralExtremes(candles, isBuy) {
   return extreme;
 }
 
+// Konfigurasi Skala Digit Utama Berdasarkan Karakteristik Setiap Aset
 function getAssetConfig(symbol) {
   const s = symbol.toUpperCase();
-  if (s.includes('XAU')) return { bufferVal: 1.5, slVal: 3.5, type: 'GOLD_FULL_DIGIT' };
-  if (s.includes('XAG')) return { bufferVal: 0.8, slVal: 2.0, type: 'SILVER_FULL_DIGIT' };
+  if (s.includes('XAU')) return { bufferVal: 1.5, slVal: 2.5, type: 'GOLD_FIX_25' };
+  if (s.includes('XAG')) return { bufferVal: 3.0, slVal: 5.0, type: 'SILVER_2X_GOLD' }; // XAG diset 2x dari Gold
   if (s.includes('BTC')) return { bufferVal: 15.0, slVal: 45.0, type: 'CRYPTO_BTC' };
   if (s.includes('ETH')) return { bufferVal: 5.0, slVal: 15.0, type: 'CRYPTO_ETH' };
   if (s.includes('EUR') || s.includes('GBP') || s.includes('AUD') || s.includes('NZD') || s.includes('USD') || s.includes('CAD') || s.includes('CHF')) {
@@ -114,7 +115,6 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal)
 
   const cfg = getAssetConfig(symbol);
   
-  // Menggunakan skala berbasis digit utama harga agar jarak proporsional dan tidak mepet
   const bufferEnd = isBuy ? price - cfg.bufferVal : price + cfg.bufferVal;
   const sl = isBuy ? bufferEnd - cfg.slVal : bufferEnd + cfg.slVal;
 
@@ -136,7 +136,7 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal)
       sl: sl,
       tps: [tp1, tp2, tp3],
       zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
-      trigSrc: `FullDigitUniversal (${cfg.type})`,
+      trigSrc: `ScaleDigit (${cfg.type})`,
       expireMs: 0,
       riskAtr: Math.abs(bufferEnd - sl) / (a || 1),
       over: false,
@@ -234,12 +234,21 @@ export default async function handler(req, res) {
     const actionType = plan.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET';
     const sideText = dir === 1 ? 'BUY' : 'SELL';
     const cfgInfo = getAssetConfig(symbol);
+    const isGold = symbol.includes('XAU');
+    const isSilver = symbol.includes('XAG');
     
-    const setupLabelText = `Full-Digit Universal (${cfgInfo.type})`;
+    let setupLabelText = `Scale Digit (${cfgInfo.type})`;
+    if (isGold) setupLabelText = 'Gold Fixed SL (20~30 pip)';
+    if (isSilver) setupLabelText = 'Silver 2x Gold SL (40~60 pip)';
 
     const techReason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol}. Struktur multi-timeframe terkonfirmasi searah dengan Order Block / FVG aktif. Eksekusi ${actionType} dipetakan dengan presisi tinggi di area likuiditas terdekat. Target Take Profit (TP1-TP3) dihitung proporsional dari garis depan (entry) berdasarkan kelipatan rasio risiko 1:1, 1:2, dan 1:3.`;
     
-    const workflowNote = `[Catatan Sistem: Workflow Full-Digit Universal aktif untuk ${cfgInfo.type}. Stop Loss dan Buffer diukur berdasarkan skala digit angka utama harga instrumen agar proporsional dan terhindar dari noise market.]`;
+    let workflowNote = `[Catatan Sistem: Workflow Scale Digit aktif untuk ${cfgInfo.type}. Stop Loss diukur dari digit angka utama agar proporsional.]`;
+    if (isGold) {
+      workflowNote = `[Catatan Sistem: Workflow Gold aktif. Stop Loss dikunci di kisaran 20-30 pip/poin utama.]`;
+    } else if (isSilver) {
+      workflowNote = `[Catatan Sistem: Workflow Silver aktif. Stop Loss dikunci 2x lipat dari Gold (kisaran 40-60 pip/poin utama) sesuai karakteristik volatilitas silver.]`;
+    }
 
     const reason = `${techReason}\n\n${workflowNote}`;
 
@@ -261,7 +270,7 @@ export default async function handler(req, res) {
         setup: 'CONTINUATION',
         setupLabel: setupLabelText,
         zoneLabel: 'Order Block / FVG Structure',
-        zoneNote: `Full-Digit Range (${cfgInfo.type})`,
+        zoneNote: isSilver ? 'Silver 2x Gold SL Range' : (isGold ? 'Gold Fixed Range' : `Scale Digit (${cfgInfo.type})`),
         reason: reason
       }
     });
