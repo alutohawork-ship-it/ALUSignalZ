@@ -1,17 +1,14 @@
-// api/candles.js (Versi MT5 API XBTFX)
+// api/candles.js
 const BASE = process.env.XBTFX_BASE_URL || 'https://interface.xbtfx.com';
 
 const TF = { '1m': 'M1', '5m': 'M5', '15m': 'M15', '30m': 'M30', '1h': 'H1', '4h': 'H4', '1d': 'D1' };
 const TF_MS = { '1m': 60e3, '5m': 300e3, '15m': 900e3, '30m': 1800e3, '1h': 3600e3, '4h': 14400e3, '1d': 86400e3 };
 
 async function xfetch(path, opts = {}) {
-    // Menyesuaikan header untuk MT5 API Key (tergantung dokumentasi XBTFX, 
-    // biasanya menggunakan Bearer atau header khusus seperti x-api-key)
     const r = await fetch(`${BASE}${path}`, {
         ...opts,
         headers: {
             'Authorization': `Bearer ${process.env.XBTFX_TOKEN}`,
-            'x-mt5-account': '2121955946', // Menyertakan akun MT5 Anda jika diperlukan oleh API
             'Content-Type': 'application/json',
             ...(opts.headers || {})
         },
@@ -32,7 +29,7 @@ module.exports = async (req, res) => {
     const value = String(body?.value || '').trim();
     const symbol = String(body?.symbol || '').trim().toUpperCase();
     const interval = String(body?.interval || '');
-    const limit = Math.min(Math.max(parseInt(body?.limit, 10) || 500, 1), 1000);
+    const limit = Math.min(Math.max(parseInt(body?.limit, 10) || 200, 1), 1000);
 
     // Verifikasi sesi klien
     let session = {};
@@ -58,11 +55,11 @@ module.exports = async (req, res) => {
         return res.status(500).json({ msg: 'XBTFX_TOKEN belum diisi di Vercel.' });
     }
 
-    // Panggil endpoint chart MT5 langsung menggunakan nama simbol
-    const r = await xfetch('/v1/chart', {
+    // Sesuai standar XBTFX API: POST /v1/chart{symbol} atau menggunakan body simbol
+    // Contoh dokumentasi resmi: POST /v1/chartEURUSD dengan payload timeframe & limit
+    const r = await xfetch(`/v1/chart${symbol}`, {
         method: 'POST',
         body: JSON.stringify({ 
-            symbol: symbol, 
             timeframe: tf, 
             limit, 
             price_side: 'Bid' 
@@ -70,14 +67,14 @@ module.exports = async (req, res) => {
     });
 
     if (!r.ok) {
-        return res.status(502).json({ msg: r.data?.message || `MT5 Chart API gagal (HTTP ${r.status})` });
+        return res.status(502).json({ msg: r.data?.message || `Chart XBTFX gagal (HTTP ${r.status})` });
     }
 
     const now = Date.now();
     const tfMs = TF_MS[interval];
-    const candles = (r.data?.candles || [])
+    const candles = (r.data?.candles || r.data || [])
         .map(c => ({
-            openTime: Date.parse(c.open_time),
+            openTime: Date.parse(c.open_time || c.time),
             open: +c.open,
             high: +c.high,
             low: +c.low,
