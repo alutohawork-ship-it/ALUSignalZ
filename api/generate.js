@@ -1,5 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC Universal: Scalping Agresif (Fixed SL x3 / BTC 300-500 Pip), Day, Intraday, & Swing
+// Analisis Pure SMC Universal: Konsistensi Reason Teknikal & Skala Stop Loss
 
 const KV_KEY = 'alu_clients';
 
@@ -26,8 +26,8 @@ const PIP = {
 };
 
 const STYLES = {
-  'Scalping': { label: 'Scalping Agresif (Fixed SL x3 / BTC 300-500 Pip)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
-  'Day Trading': { label: 'Day Trading (Zona & Kontinuitas + EMA 14/20)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
+  'Scalping': { label: 'Scalping Agresif (EMA 5/9 + BB)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
+  'Day Trading': { label: 'Day Trading (EMA 14/20 + Zona & Kontinuitas)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
   'Intraday': { label: 'Intraday (Limit Order + EMA 20/50/100)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
   'Swing': { label: 'Swing Trading (Limit Order + EMA 20/50/100/200)', mode: 'LIMIT', kind: 'swing', rr: [2.0, 4.5, 8.5] },
 };
@@ -77,7 +77,6 @@ function structureDir(candles) {
   return last.c >= first.c ? 1 : -1;
 }
 
-// Konfigurasi Scale Digit & Buffer Khusus (BTC 300-500 Pip, Lainnya x3 untuk Scalp Agresif)
 function getAssetConfig(symbol, kind) {
   const s = symbol.toUpperCase();
   let mult = (kind === 'intraday' || kind === 'swing') ? 2.5 : 1.0;
@@ -87,7 +86,6 @@ function getAssetConfig(symbol, kind) {
   if (s.includes('XPT') || s.includes('PLATINUM')) return { bufferVal: 5.0 * mult, slVal: 12.0 * mult, type: 'METAL_XPT' };
   if (s.includes('XPD') || s.includes('PALLADIUM')) return { bufferVal: 5.0 * mult, slVal: 12.0 * mult, type: 'METAL_XPD' };
   
-  // Bitcoin (BTC) dikunci di kisaran 300-500 pip untuk agresif (atau proporsional horizon)
   if (s.includes('BTC')) {
     const btcMult = kind === 'scalp' ? 1.0 : mult;
     return { bufferVal: 120.0 * btcMult, slVal: 400.0 * btcMult, type: 'CRYPTO_BTC_300_500' };
@@ -96,7 +94,6 @@ function getAssetConfig(symbol, kind) {
   if (s.includes('ETH')) return { bufferVal: 45.0 * mult, slVal: 135.0 * mult, type: 'CRYPTO_ETH_3X' };
   if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP') || s.includes('LTC')) return { bufferVal: 9.0 * mult, slVal: 27.0 * mult, type: 'CRYPTO_ALT_3X' };
   
-  // Currency (Forex Major & JPY) - x3 standar
   if (s.includes('EUR') || s.includes('GBP') || s.includes('AUD') || s.includes('NZD') || s.includes('USD') || s.includes('CAD') || s.includes('CHF')) {
     if (s.includes('JPY')) return { bufferVal: 0.45 * mult, slVal: 1.20 * mult, type: 'CURRENCY_JPY_3X' };
     return { bufferVal: 0.0045 * mult, slVal: 0.0120 * mult, type: 'CURRENCY_MAJOR_3X' };
@@ -134,7 +131,7 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol) {
       sl: sl,
       tps: [tp1, tp2, tp3],
       zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
-      trigSrc: `Scalping Agresif (Fixed SL x3) [${cfg.type}]`,
+      trigSrc: `Scalping Agresif (EMA 5/9 + BB Ekstrem) [${cfg.type}]`,
       expireMs: 0,
     }
   };
@@ -170,6 +167,10 @@ function generalTradePlan({ mtfC, m5C, price, symbol, styleKind }) {
   const tp2 = entry + dir * rrList[1] * risk;
   const tp3 = entry + dir * rrList[2] * risk;
 
+  let trigName = 'Day Trading (Zona Utama & Kontinuitas + EMA 14/20)';
+  if (styleKind === 'intraday') trigName = 'Intraday (Limit Order + EMA 20/50/100)';
+  if (styleKind === 'swing') trigName = 'Swing Trading (Limit Order + EMA 20/50/100/200)';
+
   return {
     dir,
     plan: {
@@ -182,7 +183,7 @@ function generalTradePlan({ mtfC, m5C, price, symbol, styleKind }) {
       tps: [tp1, tp2, tp3],
       zone: { min: entry - a15, max: entry + a15 },
       expireMs: isLimit ? 360 * 60 * 1000 : 90 * 60 * 1000,
-      trigSrc: `${styleKind} [${cfg.type}]`,
+      trigSrc: `${trigName} [${cfg.type}]`,
       flags: [],
     }
   };
@@ -232,7 +233,12 @@ export default async function handler(req, res) {
     const sideText = dir === 1 ? 'BUY' : 'SELL';
     const cfgInfo = getAssetConfig(symbol, style.kind);
 
-    const techReason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol}. Jarak Stop Loss dan Buffer BTC dikunci pada rentang 300-500 pip, sementara pair lainnya menggunakan skala fixed SL x3 standar untuk ketahanan optimal terhadap noise market.`;
+    // PENYUSUNAN REASON TEKNIKAL YANG KUAT & KONSISTEN
+    const techReason = [
+      `Analisis Struktur Pure SMC ${sideText} (${style.label}) pada pair ${symbol}.`,
+      `Pijakan Analisis: Harga divalidasi melalui reaksi pada Zona Utama / Peta Struktur Berjalan menggunakan pemicu ${plan.trigSrc}.`,
+      `Manajemen Risiko: Jarak Stop Loss dan Buffer telah disesuaikan secara presisi (${cfgInfo.type}) untuk mengantisipasi volatilitas serta noise market secara optimal.`
+    ].join('\n\n');
 
     return res.status(200).json({
       ok: true,
