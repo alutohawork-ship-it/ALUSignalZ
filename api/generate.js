@@ -1,5 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC Universal: Koreksi Skala Pip Currency, Crypto, & Index
+// Analisis Pure SMC Universal: Fixed Range Pip Presisi untuk Currency & Crypto
 
 const KV_KEY = 'alu_clients';
 
@@ -66,7 +66,7 @@ function structureDir(candles) {
   return last.c >= first.c ? 1 : -1;
 }
 
-// Konfigurasi Presisi Jarak Buffer & SL Sesuai Permintaan
+// PENGATURAN FIXED RANGE & SL PRESISI SESUAI PERMINTAAN
 function getAssetConfig(symbol, kind, atrVal = 10) {
   const s = symbol.toUpperCase();
   let mult = (kind === 'intraday' || kind === 'swing') ? 2.0 : 1.0;
@@ -74,29 +74,29 @@ function getAssetConfig(symbol, kind, atrVal = 10) {
   if (s.includes('XAU')) return { bufferVal: 1.5 * mult, slVal: 3.0 * mult, type: 'GOLD_FIX' };
   if (s.includes('XAG')) return { bufferVal: 0.03 * mult, slVal: 0.06 * mult, type: 'SILVER_FIX' };
   
-  // Crypto (BTC, ETH, dll) - Disesuaikan agar kisaran 30-50 pip/poin untuk scalp
+  // Crypto (BTC, ETH, dll) -> Kisaran 30-50 pip/poin
   if (s.includes('BTC')) return { bufferVal: 35.0 * mult, slVal: 90.0 * mult, type: 'CRYPTO_BTC_RANGE' };
   if (s.includes('ETH')) return { bufferVal: 4.0 * mult, slVal: 12.0 * mult, type: 'CRYPTO_ETH_RANGE' };
   if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP') || s.includes('LTC')) return { bufferVal: 1.5 * mult, slVal: 4.0 * mult, type: 'CRYPTO_ALT_RANGE' };
   
-  // Currency Pairs (Sesuai Contoh Spesifik User)
+  // Currency Pairs (Fixed Range Sesuai Standar Baru)
   if (s.includes('USDJPY')) return { bufferVal: 0.05 * mult, slVal: 0.12 * mult, type: 'USDJPY_50PIP' };
   if (s.includes('GBPUSD')) return { bufferVal: 0.0005 * mult, slVal: 0.0012 * mult, type: 'GBPUSD_50PIP' };
   if (s.includes('AUDUSD')) return { bufferVal: 0.0003 * mult, slVal: 0.0008 * mult, type: 'AUDUSD_30PIP' };
   if (s.includes('USDCAD')) return { bufferVal: 0.0008 * mult, slVal: 0.0018 * mult, type: 'USDCAD_80PIP' };
   if (s.includes('USDCHF')) return { bufferVal: 0.0006 * mult, slVal: 0.0014 * mult, type: 'USDCHF_60PIP' };
   
-  // Currency Umum Lainnya
+  // EURUSD & Currency General Lainnya -> Dipatok di kisaran 50-60 pip (Buffer 0.0005, SL 0.0012)
   if (s.includes('EUR') || s.includes('NZD') || s.includes('CHF') || s.includes('CAD')) {
-    return { bufferVal: 0.0005 * mult, slVal: 0.0012 * mult, type: 'CURRENCY_GENERAL' };
+    return { bufferVal: 0.0005 * mult, slVal: 0.0012 * mult, type: 'CURRENCY_50_60_PIP' };
   }
   
-  // Index & Commodity (Berbasis ATR / Structure)
+  // Index & Commodity (Berbasis ATR)
   if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) {
     return { bufferVal: Math.max(atrVal * 0.4, 15.0) * mult, slVal: Math.max(atrVal * 1.2, 40.0) * mult, type: 'INDEX_ATR' };
   }
   
-  return { bufferVal: atrVal * 0.5, slVal: atrVal * 1.5, type: 'DEFAULT_ATR' };
+  return { bufferVal: 0.0005 * mult, slVal: 0.0012 * mult, type: 'DEFAULT_CURRENCY_FIX' };
 }
 
 function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol) {
@@ -126,7 +126,7 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol) {
       sl: sl,
       tps: [tp1, tp2, tp3],
       zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
-      trigSrc: `Scalping Agresif (Fixed Range & Structure) [${cfg.type}]`,
+      trigSrc: `Scalping Agresif (Fixed Range 50-60 Pip) [${cfg.type}]`,
       expireMs: 0,
     }
   };
@@ -235,7 +235,7 @@ export default async function handler(req, res) {
     const techReason = [
       `Analisis Teknikal Pure SMC ${sideText} (${style.label}) pada pair ${symbol}.`,
       `Alasan Eksekusi: Diputuskan ${actionDesc}. Pemicu utama didasarkan pada pembacaan struktur mikro dan filter indikator (${plan.trigSrc}).`,
-      `Manajemen Risiko: Jarak Stop Loss dan Buffer telah disesuaikan secara presisi (${cfgInfo.type}) mengikuti standar rentang pip/poin yang telah ditetapkan.`
+      `Manajemen Risiko: Jarak Stop Loss dan Buffer telah disesuaikan secara presisi (${cfgInfo.type}) mengikuti standar fixed range pip yang ditetapkan.`
     ].join('\n\n');
 
     return res.status(200).json({
