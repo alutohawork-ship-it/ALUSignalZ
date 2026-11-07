@@ -489,7 +489,6 @@
             : localStorage.getItem(SESSION_EMAIL_KEY);
         const r = await verifyLogin(credential || '');
 
-        // Koneksi putus: jangan hapus sesi, cukup beri tahu
         if (r.network) return alert(r.data.msg);
 
         const valid = type === 'admin_reg' ? r.data.role === 'admin' : r.data.role === 'client';
@@ -617,11 +616,7 @@
     const OFFSET_KEY = 'aluSignalZ_offsets_v1';
     const DEBUG = localStorage.getItem('alu_debug') === '1';
 
-    // Key = nilai dropdown (provider|KEY). coins = coin persis dari GET /v1/markets.
-    // decimals & pip harus sama dengan DECIMALS & PIP di api/generate.js.
-    // Pair dengan "base" adalah clone: tidak disubscribe, memakai tick pasangannya (base).
     const MARKETS = {
-        // Gold, Silver & Forex
         XAUUSD:     { provider: 'binance',     coins: ['XAUUSDT'],      decimals: 2, pip: 0.1 },
         XAGUSD:     { provider: 'binance',     coins: ['XAGUSDT'],      decimals: 3, pip: 0.01 },
         EURUSD:     { provider: 'veranta',     coins: ['EURUSD', 'EUR/USD', 'EURUSD.FX'], decimals: 5, pip: 0.0001 },
@@ -630,8 +625,6 @@
         AUDUSD:     { provider: 'veranta',     coins: ['AUDUSD'],       decimals: 5, pip: 0.0001 },
         USDCAD:     { provider: 'veranta',     coins: ['USDCAD'],       decimals: 5, pip: 0.0001 },
         USDCHF:     { provider: 'veranta',     coins: ['USDCHF'],       decimals: 5, pip: 0.0001 },
-
-        // Komoditas
         CLUSDT:     { provider: 'binance',     coins: ['CLUSDT'],       decimals: 2, pip: 0.01 },
         NATGASUSDT: { provider: 'binance',     coins: ['NATGASUSDT'],   decimals: 3, pip: 0.001 },
         COPPERUSDT: { provider: 'binance',     coins: ['COPPERUSDT'],   decimals: 4, pip: 0.0001 },
@@ -640,15 +633,11 @@
         BRENTOIL:   { provider: 'hyperliquid', coins: ['xyz:BRENTOIL'], decimals: 2, pip: 0.01 },
         PALLADIUM:  { provider: 'hyperliquid', coins: ['xyz:PALLADIUM'], decimals: 2, pip: 0.1 },
         PLATINUM:   { provider: 'hyperliquid', coins: ['xyz:PLATINUM'], decimals: 2, pip: 0.1 },
-
-        // Indeks
         DJI:        { provider: 'ostium',      coins: ['DJI', 'DJIUSD', 'DJI-USD', 'US30'], decimals: 2, pip: 1 },
         SP500:      { provider: 'hyperliquid', coins: ['xyz:SP500'],    decimals: 2, pip: 1 },
         XYZ100:     { provider: 'hyperliquid', coins: ['xyz:XYZ100'],   decimals: 2, pip: 1 },
         JP225:      { provider: 'hyperliquid', coins: ['xyz:JP225'],    decimals: 0, pip: 1 },
         QQQUSDT:    { provider: 'binance',     coins: ['QQQUSDT'],      decimals: 2, pip: 0.1 },
-
-        // Crypto
         BTCUSDT:    { provider: 'binance', coins: ['BTCUSDT'], decimals: 2, pip: 1 },
         ETHUSDT:    { provider: 'binance', coins: ['ETHUSDT'], decimals: 2, pip: 0.1 },
         SOLUSDT:    { provider: 'binance', coins: ['SOLUSDT'], decimals: 2, pip: 0.01 },
@@ -664,8 +653,6 @@
         LTCUSDT:    { provider: 'binance', coins: ['LTCUSDT'],  decimals: 2, pip: 0.01 },
         TAOUSDT:    { provider: 'binance', coins: ['TAOUSDT'],  decimals: 2, pip: 0.01 },
         HYPEUSDT:   { provider: 'binance', coins: ['HYPEUSDT'], decimals: 2, pip: 0.01 },
-
-        // Clone MT4/5 (memakai tick BTCUSDT / ETHUSDT, lalu dikurangi offset)
         BTCUSD:     { provider: 'binance', coins: ['BTCUSDT'], base: 'BTCUSDT', decimals: 2, pip: 1 },
         ETHUSD:     { provider: 'binance', coins: ['ETHUSDT'], base: 'ETHUSDT', decimals: 2, pip: 0.1 },
     };
@@ -681,7 +668,6 @@
     }
     const PROVIDERS = [...new Set(Object.values(ALIASES).flat().map(a => a.provider))];
 
-    // Satu coin bisa dipakai beberapa key (contoh: BTCUSDT dan BTCUSD)
     const COIN_KEY = new Map();
     for (const [key, list] of Object.entries(ALIASES))
         for (const a of list) {
@@ -691,11 +677,7 @@
             COIN_KEY.set(k, arr);
         }
 
-    // Hanya pair asli yang disubscribe. Clone tidak.
     const SUB_KEYS = Object.keys(MARKETS).filter(k => !MARKETS[k].base);
-
-    // true  = order pending dibatalkan jika SL tersentuh dulu sebelum entry (setup dianggap rusak)
-    // false = order pending hanya menunggu sampai harga masuk zona atau waktu habis
     const PENDING_SL_CANCEL = true;
 
     // ================= STATE =================
@@ -718,20 +700,17 @@
     const displayName = key => key.replace(/^xyz:/, '');
     const parseLevel = v => Number.isFinite(parseFloat(v)) ? parseFloat(v) : null;
 
-    // Offset bawaan per pair. Positif = tambah, negatif = kurang.
-    // Sumber: selisih TradingView (screenshot) terhadap harga app pada waktu yang sama.
-    // Kalibrasi manual (KALIBRASI) menimpa nilai ini. RESET mengembalikan ke nilai bawaan.
     const DEFAULT_OFFSETS = {
-        XAUUSD: -8.1,       // tebakan, kalibrasi ulang dengan harga MT
-        XAGUSD: -0.07,      // screenshot 07.19
-        EURUSD: -0.00053,   // screenshot 07.19
+        XAUUSD: -8.1,
+        XAGUSD: -0.07,
+        EURUSD: -0.00053,
         GBPUSD: -0.00045,
         USDJPY: 0.048,
         AUDUSD: 0.00004,
         USDCAD: 0.00006,
         USDCHF: 0.00003,
-        BTCUSD: -108.2,     // screenshot 07.34: BTCUSD 75.812,08 vs BTCUSDT 75.920,32
-        ETHUSD: -3.5,       // screenshot 07.34: ETHUSD 2.237,20 vs ETHUSDT 2.240,70
+        BTCUSD: -108.2,
+        ETHUSD: -3.5,
     };
 
     const offsets = (() => { try { return JSON.parse(localStorage.getItem(OFFSET_KEY)) || {}; } catch { return {}; } })();
@@ -1133,9 +1112,6 @@
     function evaluateTrade(t, price) {
         const d = t.dir;
 
-        // Order pending (WAITING ENTRY): menunggu harga masuk zona.
-        // TP1 yang tersentuh sebelum entry TIDAK membatalkan order.
-        // SL bisa membatalkan order jika PENDING_SL_CANCEL aktif. Waktu habis ditangani expirePending().
         if (t.status === 'PENDING') {
             const stopFill = t.fill === 'STOP';
             const filled = stopFill
@@ -1283,7 +1259,6 @@
             : (t.card?.entry_min ? `${t.card.entry_min} - ${t.card.entry_max}` : '--'));
         set('cardZoneNote', t.zoneNote || '');
 
-        // Label entry mengikuti setup (tidak lagi tertulis tetap)
         const lz = document.getElementById('lblEntryZone');
         if (lz) {
             const setupTxt = SETUP_SHORT[t.setup] || '';
@@ -1370,8 +1345,6 @@
     }
 
     // ================= KALENDER PNL =================
-    // Data kalender disimpan terpisah dari history. Hapus history tidak menghapus kalender.
-    // Hanya tombol RESET KALENDER yang mengosongkannya.
     const CAL_KEY = 'aluSignalZ_calendar_v1';
     const CAL_SINCE_KEY = 'aluSignalZ_calendar_since';
     const WEEKDAYS = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
@@ -1383,7 +1356,6 @@
     const calSave = obj => { try { localStorage.setItem(CAL_KEY, JSON.stringify(obj)); } catch {} };
     const calSince = () => Number(localStorage.getItem(CAL_SINCE_KEY)) || 0;
 
-    // Setiap trade dicatat pada tanggal generate signal. Hasil diperbarui saat trade tutup.
     function calEntryOf(t) {
         let res = 'OPEN', pips = 0;
         if (t.status === 'CLOSED') {
@@ -1466,7 +1438,6 @@
         }
         grid.innerHTML = html;
 
-        // Ringkasan bulan
         const m1 = calStats(monthEntries);
         const allStats = calStats(all);
         const openMonth = monthEntries.filter(e => e.res === 'OPEN').length;
@@ -1514,12 +1485,13 @@
     // ================= CHART =================
     const cv = document.getElementById('priceChart');
     const ctx = cv ? cv.getContext('2d') : null;
-    const CHART_GUT = 100; // lebar kolom label di kanan
+    const CHART_GUT = 100;
 
     function chartLevels(t) {
         const hits = t.hits || {};
         return [
             { label: 'ENTRY', value: t.entry, c: '#93c5fd', bg: 'rgba(147,197,253,0.14)', dash: [], hit: false },
+            { label: 'BUFFER', value: t.bufferEnd, c: '#fbbf24', bg: 'rgba(251,191,36,0.14)', dash: [3, 3], hit: false }, // Tambahan Garis Buffer Zone
             { label: 'SL', value: t.sl, c: '#f87171', bg: 'rgba(248,113,113,0.14)', dash: [5, 4], hit: t.result === 'SL' },
             { label: 'TP1', value: t.tp1, c: '#34d399', bg: 'rgba(52,211,153,0.14)', dash: [5, 4], hit: !!hits.tp1 },
             { label: 'TP2', value: t.tp2, c: '#34d399', bg: 'rgba(52,211,153,0.14)', dash: [5, 4], hit: !!hits.tp2 },
@@ -1581,12 +1553,9 @@
         const plotW = plotR - plotL, plotH = plotB - plotT;
         const now = Date.now();
 
-        // Kepala garis di ~82% lebar grafik, tidak mepet ke kolom label kanan
         const headX = plotL + plotW * 0.82;
         const last = arr[arr.length - 1];
 
-        // Jendela waktu adaptif: dimulai dari tick pertama (maks CHART_SPAN_MS),
-        // jadi garis selalu terbentang dari tepi kiri sampai kepala
         const span = Math.min(Math.max(now - arr[0].t, MIN_SPAN_MS), CHART_SPAN_MS);
         const xOfT = tm => headX - ((now - tm) / span) * (headX - plotL);
 
@@ -1596,18 +1565,14 @@
         const zMax = parseLevel(t.zone?.max ?? t.card?.entry_max);
         const hasZone = zMin != null && zMax != null;
 
-        // Skala harga: hanya dari level trade (entry, SL, TP, zona), BUKAN dari harga live.
-        // Dengan begitu garis entry/SL/TP tidak bergeser saat harga bergerak.
         let lo = Infinity, hi = -Infinity;
         for (const l of levels) { lo = Math.min(lo, l.value); hi = Math.max(hi, l.value); }
         if (hasZone) { lo = Math.min(lo, zMin, zMax); hi = Math.max(hi, zMin, zMax); }
         if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
         if (hi - lo <= 0) { const d = Math.abs(hi) * 0.001 || 1; lo -= d; hi += d; }
         const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
-        // Harga live yang keluar dari rentang ditahan di tepi chart (tidak memperbesar skala)
         const yOf = p => Math.max(plotT, Math.min(plotB, plotT + (1 - (p - lo) / (hi - lo)) * plotH));
 
-        // 1. Grid dan pemisah kolom label
         ctx.save();
         ctx.lineWidth = 1;
         ctx.strokeStyle = 'rgba(148,163,184,0.07)';
@@ -1619,7 +1584,6 @@
         ctx.beginPath(); ctx.moveTo(plotR + 0.5, plotT); ctx.lineTo(plotR + 0.5, plotB); ctx.stroke();
         ctx.restore();
 
-        // 2. Zona entry
         if (hasZone) {
             const top = yOf(Math.max(zMin, zMax)), bot = yOf(Math.min(zMin, zMax));
             const hgt = Math.max(bot - top, 2);
@@ -1638,7 +1602,6 @@
             ctx.fillText((t.zoneLabel || 'ZONE').toUpperCase(), plotL + 5, top + 3);
         }
 
-        // 3. Garis level entry, SL, dan TP
         for (const l of levels) {
             const y = yOf(l.value);
             ctx.save();
@@ -1650,7 +1613,6 @@
             ctx.restore();
         }
 
-        // 4. Area dan garis harga, disambung sampai kepala
         const P = pts.map(p => ({ x: xOfT(p.t), y: yOf(p.p) }));
         P.push({ x: headX, y: yOf(last.p) });
         const hx = headX, hy = yOf(last.p);
@@ -1682,7 +1644,6 @@
             ctx.restore();
         }
 
-        // 5. Marker TP yang sudah tersentuh
         for (const k of TP_KEYS) {
             const h = t.hits?.[k];
             if (!h || t[k] == null) continue;
@@ -1693,7 +1654,6 @@
             ctx.strokeStyle = '#0b0e14'; ctx.lineWidth = 1.5; ctx.stroke();
         }
 
-        // 6. Kepala garis: titik berdenyut
         const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 260);
         ctx.beginPath(); ctx.arc(hx, hy, 4 + pulse * 5, 0, Math.PI * 2);
         ctx.fillStyle = `rgba(59,130,246,${(0.38 - pulse * 0.28).toFixed(3)})`; ctx.fill();
@@ -1701,7 +1661,6 @@
         ctx.fillStyle = '#ffffff'; ctx.fill();
         ctx.lineWidth = 2; ctx.strokeStyle = '#3b82f6'; ctx.stroke();
 
-        // 7. Harga running di atas kepala garis
         const dirNow = prices[t.key]?.dir ?? 0;
         const pillColor = dirNow > 0 ? '#10b981' : dirNow < 0 ? '#ef4444' : '#3b82f6';
         const pillTxt = fmtP(last.p);
@@ -1717,7 +1676,6 @@
         ctx.fillStyle = '#ffffff';
         ctx.fillText(pillTxt, px + 6, py + ph / 2 + 0.5);
 
-        // 8. Label level di kolom kanan (dijaga agar tidak tumpang tindih)
         const tags = levels.map(l => ({
             text: `${l.hit ? '✓ ' : ''}${l.label} ${fmtP(l.value)}`,
             c: l.c, bg: l.bg, y: yOf(l.value),
@@ -1869,7 +1827,6 @@
     }
 
     // ================= AI SIGNAL =================
-    // Harus sama dengan STYLES di api/generate.js
     const STYLE_TF = {
         'Scalping':    { htf: '15m', mtf: '5m',  ltf: '1m' },
         'Day Trading': { htf: '1h',  mtf: '30m', ltf: '5m' },
@@ -1889,7 +1846,6 @@
         return rows;
     }
 
-    // Candle historis itu harga mentah. Tambahkan offset kalibrasi supaya sebanding dengan harga live.
     const shiftCandles = (rows, off) => rows.map(c => ({ t: c.t, o: c.o + off, h: c.h + off, l: c.l + off, c: c.c + off }));
 
     async function generateAISignal() {
@@ -1953,7 +1909,7 @@
                 id: Date.now().toString(36), key: symbolKey, style: tradingStyle,
                 signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
                 mode: s.mode, status: s.status, fill: s.fill || null,
-                entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
+                entry: s.entry, bufferEnd: s.bufferEnd, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
                 zone: s.zone,
                 expiresAt: s.expireMs ? Date.now() + s.expireMs : null,
                 confidence: s.confidence, risk: s.risk, setup: s.setup,
