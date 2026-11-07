@@ -629,7 +629,6 @@
     }
 
     // ================= KONFIG MARKET =================
-    // Token TIDAK disimpan di file ini. Diambil dari /api/stream-token (env XBTFX_TOKEN di Vercel).
     const WS_URL = 'wss://ws.xbtfx.com/v1/ws';
     let XBTFX_TOKEN = '';
     const HISTORY_MS = 10 * 60 * 1000;
@@ -888,7 +887,6 @@
         reconnectTimer = setTimeout(connect, base * (0.5 + Math.random() * 0.5));
     }
 
-    // Ambil token dari server. Hanya klien yang sudah login yang mendapatkannya.
     async function fetchStreamToken() {
         const email = localStorage.getItem(SESSION_EMAIL_KEY);
         if (!email) return { wait: true };
@@ -913,7 +911,7 @@
 
         setWsStatus('TOKEN...', 'yellow');
         const t = await fetchStreamToken();
-        if (myId !== connectId) return; // sudah ada connect baru
+        if (myId !== connectId) return;
 
         if (t.wait) {
             setWsStatus('LOGIN DULU', 'gray');
@@ -950,7 +948,6 @@
                 streamReady = true;
                 setWsStatus('CONNECTED', 'green');
                 subscribeAll(sock);
-                // Ping tiap 30 detik, server memutus koneksi jika 90 detik tanpa ping
                 clearInterval(pingTimer);
                 pingTimer = setInterval(() => sendJSON(sock, { action: 'ping' }), 30000);
                 setTimeout(() => { if (ws === sock) refreshBias(selectedKey(), true); }, 1500);
@@ -958,7 +955,6 @@
             }
 
             if (msg.action === 'pong') return;
-
             if (msg.channel === 'quote') { handleQuote(msg); return; }
 
             if (!streamReady && (msg.action === 'auth_error' || msg.action === 'error' || msg.error)) {
@@ -1759,7 +1755,6 @@
         return { bias, score };
     }
 
-    // Candle diambil lewat /api/candles (XBTFX POST /v1/chart) di server.
     async function fetchCandles(provider, symbol, interval) {
         const r = await api('/api/candles', {
             method: 'POST',
@@ -1838,7 +1833,7 @@
         info.textContent = `${bull} Bullish · ${bear} Bearish · ${neu} Netral${na ? ` · ${na} N/A` : ''} · update ${new Date(cache.at).toLocaleTimeString('id-ID', { hour12: false })}`;
     }
 
-    // ================= AI SIGNAL =================
+    // ================= AI SIGNAL (TickerLayer Backend + Fallback) =================
     const STYLE_TF = {
         'Scalping':    { htf: '15m', mtf: '5m',  ltf: '1m' },
         'Day Trading': { htf: '1h',  mtf: '30m', ltf: '5m' },
@@ -1850,12 +1845,47 @@
     async function loadCandles(key, interval) {
         const ck = `${key}|${interval}`;
         const hit = CANDLE_CACHE[ck];
-        if (hit && Date.now() - hit.at < 60000) return hit.rows;
-        const provider = providerOf[key] || ALIASES[key][0].provider;
-        const rows = await fetchCandles(provider, symbolOf[key], interval);
-        if (!rows.length) throw new Error(`data candle ${interval} kosong`);
-        CANDLE_CACHE[ck] = { at: Date.now(), rows };
-        return rows;
+        
+        // Cache browser diperpanjang 3 menit (180.000 ms) agar kuota TickerLayer sangat hemat
+        if (hit && Date.now() - hit.at < 180000) return hit.rows;
+
+        try {
+            const provider = providerOf[key] || ALIASES[key][0].provider;
+            const rows = await fetchCandles(provider, symbolOf[key], interval);
+            if (rows.length > 0) {
+                CANDLE_CACHE[ck] = { at: Date.now(), rows };
+                return rows;
+            }
+        } catch (err) {
+            console.warn('Gagal ambil data candle via backend/TickerLayer, beralih ke tick lokal:', err);
+        }
+
+        // --- FALLBACK KE LOKAL (Tick WebSocket / Agregator OHLC) ---
+        const tfMinutes = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 }[interval] || 1;
+        const tfKey = `${tfMinutes}m`;
+        let candles = (marketCandles[key]?.[tfKey] || []).map(c => ({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close }));
+
+        if (candles.length < 10) {
+            const rawTicks = history[key] || [];
+            if (rawTicks.length > 5) {
+                const intervalMs = tfMinutes * 60 * 1000;
+                const grouped = {};
+                for (const tick of rawTicks) {
+                    const bucketTime = Math.floor(tick.t / intervalMs) * intervalMs;
+                    if (!grouped[bucketTime]) {
+                        grouped[bucketTime] = { t: bucketTime, o: tick.p, h: tick.p, l: tick.p, c: tick.p };
+                    } else {
+                        grouped[bucketTime].h = Math.max(grouped[bucketTime].h, tick.p);
+                        grouped[bucketTime].l = Math.min(grouped[bucketTime].l, tick.p);
+                        grouped[bucketTime].c = tick.p;
+                    }
+                }
+                candles = Object.values(grouped).sort((a, b) => a.t - b.t);
+            }
+        }
+
+        CANDLE_CACHE[ck] = { at: Date.now(), rows: candles };
+        return candles;
     }
 
     const shiftCandles = (rows, off) => rows.map(c => ({ t: c.t, o: c.o + off, h: c.h + off, l: c.l + off, c: c.c + off }));
