@@ -368,7 +368,7 @@
                             <p id="calOpen" class="text-[7px] text-gray-500 font-mono">0 berjalan</p>
                         </div>
                         <div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5">
-                            <p class="text-[8px] font-bold text-gray-400">WIN RATE</p>
+                            <p class="text-[8px] font-bold text-gray-400">WIN RATIO</p>
                             <p id="calWR" class="text-[11px] font-extrabold text-accentblue font-mono">0%</p>
                             <p id="calWRSub" class="text-[7px] text-gray-500 font-mono">0W / 0L</p>
                         </div>
@@ -832,7 +832,7 @@
 
     const isLive = key => prices[key] && Date.now() - prices[key].recv < 30000;
 
-    // ================= STREAM (xbtfx) =================
+    // ================= STREAM (xbtfx dengan Batching Limit Fix) =================
     const sendJSON = (sock, obj) => { if (sock && sock.readyState === WebSocket.OPEN) sock.send(JSON.stringify(obj)); };
 
     const pickPrice = (...vals) => {
@@ -848,12 +848,23 @@
         return [...new Set([...(COIN_KEY.get(`xbtfx|${n}`) || []), ...(COIN_KEY.get(`*|${n}`) || [])])];
     };
 
+    // FUNGSI SUBSCRIBE DENGAN BATCHING DIBUTUHKAN AGAR INDEKS/ALTCOIN TIDAK TERBENTUR LIMIT
     function subscribeAll(sock) {
-        SUB_KEYS.forEach((key, i) => setTimeout(() => {
-            if (ws !== sock || sock.readyState !== WebSocket.OPEN) return;
-            sendJSON(sock, { action: 'subscribe', channel: 'quotes', symbols: [STREAM_SYMBOL(key)] });
-            markSrc(key, 'SUB', 'text-gray-500');
-        }, i * 40));
+        const batchSize = 10;
+        for (let i = 0; i < SUB_KEYS.length; i += batchSize) {
+            const chunk = SUB_KEYS.slice(i, i + batchSize);
+            const symbolsToSub = chunk.map(key => STREAM_SYMBOL(key));
+            
+            setTimeout(() => {
+                if (ws !== sock || sock.readyState !== WebSocket.OPEN) return;
+                sendJSON(sock, { 
+                    action: 'subscribe', 
+                    channel: 'quotes', 
+                    symbols: symbolsToSub 
+                });
+                chunk.forEach(key => markSrc(key, 'SUB', 'text-gray-500'));
+            }, (i / batchSize) * 250);
+        }
     }
 
     function handleQuote(msg) {
@@ -1480,7 +1491,7 @@
         renderCalendar();
     }
 
-    // ================= CHART (PROFESSIONAL CANDLESTICK) =================
+    // ================= CHART (LINE CHART KLASIK) =================
     const cv = document.getElementById('priceChart');
     const ctx = cv ? cv.getContext('2d') : null;
     const CHART_GUT = 100;
@@ -1545,28 +1556,13 @@
         const span = Math.min(Math.max(now - arr[0].t, MIN_SPAN_MS), CHART_SPAN_MS);
         const xOfT = tm => headX - ((now - tm) / span) * (headX - plotL);
 
-        // Agregasi tick ke candlestick real-time (3 detik per lilin)
-        const tfMs = 3000;
-        const bucketMap = {};
-        for (const p of arr) {
-            const bTime = Math.floor(p.t / tfMs) * tfMs;
-            if (!bucketMap[bTime]) {
-                bucketMap[bTime] = { t: bTime, o: p.p, h: p.p, l: p.p, c: p.p };
-            } else {
-                bucketMap[bTime].h = Math.max(bucketMap[bTime].h, p.p);
-                bucketMap[bTime].l = Math.min(bucketMap[bTime].l, p.p);
-                bucketMap[bTime].c = p.p;
-            }
-        }
-        const candles = Object.values(bucketMap).sort((a, b) => a.t - b.t);
-
         const levels = chartLevels(t);
         const zMin = parseLevel(t.zone?.min ?? t.card?.entry_min);
         const zMax = parseLevel(t.zone?.max ?? t.card?.entry_max);
         const hasZone = zMin != null && zMax != null;
 
         let lo = Infinity, hi = -Infinity;
-        for (const c of candles) { lo = Math.min(lo, c.l); hi = Math.max(hi, c.h); }
+        for (const pt of arr) { lo = Math.min(lo, pt.p); hi = Math.max(hi, pt.p); }
         for (const l of levels) { lo = Math.min(lo, l.value); hi = Math.max(hi, l.value); }
         if (hasZone) { lo = Math.min(lo, zMin, zMax); hi = Math.max(hi, zMin, zMax); }
         if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
@@ -1617,35 +1613,24 @@
             ctx.restore();
         }
 
-        // Render Candlestick (Batang Lilin) Profesional
-        const candleWidth = Math.max(3, Math.min(10, (plotW / candles.length) * 0.6));
-        for (const c of candles) {
-            const x = xOfT(c.t);
-            if (x < plotL - 10 || x > plotR + 10) continue;
-
-            const isGreen = c.c >= c.o;
-            const color = isGreen ? '#10b981' : '#ef4444';
-
-            ctx.save();
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 1.2;
-            ctx.beginPath();
-            ctx.moveTo(x, yOf(c.h));
-            ctx.lineTo(x, yOf(c.l));
-            ctx.stroke();
-
-            const topBody = yOf(Math.max(c.o, c.c));
-            const botBody = yOf(Math.min(c.o, c.c));
-            const bodyHeight = Math.max(botBody - topBody, 1);
-
-            ctx.fillStyle = color;
-            ctx.fillRect(x - candleWidth / 2, topBody, candleWidth, bodyHeight);
-            ctx.restore();
+        // Render Line Chart Utama
+        ctx.save();
+        ctx.lineWidth = 2;
+        const dirNow = prices[t.key]?.dir ?? 0;
+        ctx.strokeStyle = dirNow > 0 ? '#10b981' : dirNow < 0 ? '#ef4444' : '#3b82f6';
+        ctx.beginPath();
+        let started = false;
+        for (const pt of arr) {
+            const x = xOfT(pt.t), y = yOf(pt.p);
+            if (x < plotL - 20 || x > plotR + 20) continue;
+            if (!started) { ctx.moveTo(x, y); started = true; }
+            else { ctx.lineTo(x, y); }
         }
+        ctx.stroke();
+        ctx.restore();
 
         const last = arr[arr.length - 1];
         const hx = headX, hy = yOf(last.p);
-        const dirNow = prices[t.key]?.dir ?? 0;
         const pillColor = dirNow > 0 ? '#10b981' : dirNow < 0 ? '#ef4444' : '#3b82f6';
         const pillTxt = fmtP(last.p);
 
