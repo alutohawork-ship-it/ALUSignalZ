@@ -1,6 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC dijalankan di server. Tidak memanggil API eksternal.
-// Hanya klien terdaftar dan masih aktif yang boleh memakai endpoint ini.
+// Analisis Pure SMC dengan Workflow Khusus Berbasis Karakteristik Aset (Currency, Crypto, Gold)
 
 const KV_KEY = 'alu_clients';
 
@@ -33,7 +32,6 @@ const STYLES = {
   'Swing': { label: 'Swing Trading (HTF: D1 | MTF: H4)', mode: 'LIMIT', kind: 'zone', rr: [2.0, 4.5, 8.5] },
 };
 
-const T = (lang, id, en) => (lang === 'en' ? en : id);
 const orderLabel = (dir, orderType) => `${dir === 1 ? 'BUY' : 'SELL'} ${orderType === 'LIMIT' ? 'LIMIT' : 'NOW'}`;
 
 async function kv(command) {
@@ -79,20 +77,30 @@ function structureDir(candles) {
   return last.c >= first.c ? 1 : -1;
 }
 
+// WORKFLOW KHUSUS BERBASIS KELAS ASET (Menyesuaikan Karakteristik Spread & Skala Poin)
 function getAssetConfig(symbol) {
   const s = symbol.toUpperCase();
-  if (s.includes('XAU')) return { bufferPips: 15, slPips: 25 };
-  if (s.includes('XAG')) return { bufferPips: 20, slPips: 30 };
-  if (s.includes('EUR') || s.includes('GBP') || s.includes('AUD') || s.includes('NZD') || s.includes('USD')) {
-    if (s.includes('JPY')) return { bufferPips: 15, slPips: 25 };
-    return { bufferPips: 10, slPips: 18 };
+  
+  // 1. Gold & Silver (XAU, XAG)
+  if (s.includes('XAU')) return { bufferPips: 15, slPips: 25, type: 'METAL' };
+  if (s.includes('XAG')) return { bufferPips: 20, slPips: 30, type: 'METAL' };
+  
+  // 2. Currency / Forex (EURUSD, GBPUSD, USDJPY, dll)
+  if (s.includes('EUR') || s.includes('GBP') || s.includes('AUD') || s.includes('NZD') || s.includes('USD') || s.includes('CAD') || s.includes('CHF')) {
+    if (s.includes('JPY')) return { bufferPips: 15, slPips: 25, type: 'CURRENCY' };
+    return { bufferPips: 8, slPips: 15, type: 'CURRENCY' };
   }
-  if (s.includes('BTC')) return { bufferPips: 80, slPips: 150 };
-  if (s.includes('ETH')) return { bufferPips: 15, slPips: 30 };
-  if (s.includes('SOL') || s.includes('BNB')) return { bufferPips: 0.5, slPips: 1.2 };
-  if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) return { bufferPips: 30, slPips: 60 };
-  if (s.includes('OIL') || s.includes('CLUSDT') || s.includes('NATGAS')) return { bufferPips: 15, slPips: 30 };
-  return { bufferPips: 15, slPips: 30 };
+  
+  // 3. Crypto Currency (BTC, ETH, SOL, dll)
+  if (s.includes('BTC')) return { bufferPips: 120, slPips: 250, type: 'CRYPTO' };
+  if (s.includes('ETH')) return { bufferPips: 25, slPips: 50, type: 'CRYPTO' };
+  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP')) return { bufferPips: 1.5, slPips: 3.0, type: 'CRYPTO' };
+  
+  // 4. Indeks & Komoditas (DJI, Oil, dll)
+  if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) return { bufferPips: 40, slPips: 80, type: 'INDEX' };
+  if (s.includes('OIL') || s.includes('CLUSDT')) return { bufferPips: 20, slPips: 40, type: 'COMMODITY' };
+  
+  return { bufferPips: 15, slPips: 30, type: 'DEFAULT' };
 }
 
 function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal) {
@@ -104,9 +112,8 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal)
   const cfg = getAssetConfig(symbol);
   const pValue = pip || 1;
 
-  // Jika bukan XAU/XAG, scalping disamakan polanya dengan day trade (menggunakan acuan ATR/struktur H1-M30)
-  const effectiveBuffer = isPreciousMetal ? cfg.bufferPips : Math.max(cfg.bufferPips, Math.round(a / pValue * 0.3));
-  const effectiveSl = isPreciousMetal ? cfg.slPips : Math.max(cfg.slPips, Math.round(a / pValue * 0.6));
+  const effectiveBuffer = isPreciousMetal ? cfg.bufferPips : Math.max(cfg.bufferPips, Math.round(a / pValue * 0.25));
+  const effectiveSl = isPreciousMetal ? cfg.slPips : Math.max(cfg.slPips, Math.round(a / pValue * 0.5));
 
   const bufferOffset = effectiveBuffer * pValue;
   const bufferEnd = isBuy ? price - bufferOffset : price + bufferOffset;
@@ -114,7 +121,7 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal)
   const slDistance = effectiveSl * pValue;
   const sl = isBuy ? bufferEnd - slDistance : bufferEnd + slDistance;
 
-  // Aturan TP dihitung dari GARIS DEPAN (entry / price sekarang) berdasarkan jarak risiko SL dari buffer
+  // ATURAN HITUNGAN TP: SL dihitung dari buffer, TP ditarik dari GARIS DEPAN (price/entry) berdasarkan rasio (1:1, 1:2, 1:3)
   const riskDistance = Math.abs(price - sl);
   const tp1 = isBuy ? price + (1.0 * riskDistance) : price - (1.0 * riskDistance);
   const tp2 = isBuy ? price + (2.0 * riskDistance) : price - (2.0 * riskDistance);
@@ -133,7 +140,7 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal)
       sl: sl,
       tps: [tp1, tp2, tp3],
       zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
-      trigSrc: isPreciousMetal ? 'M5+M3+M1' : 'H1+M30+M5 (DayTrade Standard)',
+      trigSrc: `Workflow-${cfg.type}`,
       expireMs: 0,
       riskAtr: slDistance / a,
       over: false,
@@ -234,10 +241,11 @@ export default async function handler(req, res) {
 
     const actionType = plan.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET';
     const sideText = dir === 1 ? 'BUY' : 'SELL';
+    const cfgInfo = getAssetConfig(symbol);
     const timeframeNote = isScalp && !isPreciousMetal ? 'Scalping menggunakan struktur Day Trade (H1/M30)' : 'Scalping Agresif M5+M3+M1';
 
-    // Mengembalikan Analisis Reason Asli (Alasan Teknis & Confluence Score)
-    const reason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol}. Setup valid dikonfirmasi oleh struktur ${timeframeNote}. Eksekusi ${actionType} dilakukan di dekat area likuiditas/zona order block aktif dengan confluenced timeframe berbobot tinggi. Manajemen risiko disesuaikan dengan buffer zone spesifik pair, di mana Stop Loss dihitung dari batas buffer dan Target Profit (TP1-TP3) ditarik proporsional dari garis depan (entry) berdasarkan rasio risiko (1:1, 1:2, 1:3).`;
+    // Alasan teknikal murni Pure SMC sesuai struktur market
+    const reason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol} menggunakan Workflow Khusus [${cfgInfo.type}]. Setup valid dikonfirmasi oleh struktur ${timeframeNote}. Eksekusi ${actionType} dipetakan dengan presisi tinggi: Stop Loss dihitung aman dari batas Buffer Zone, dan target TP (TP1-TP3) ditarik proporsional dari garis depan (entry) berdasarkan kelipatan rasio risiko (1:1, 1:2, 1:3) yang disesuaikan dengan karakteristik spread dan volatilitas instrumen ini.`;
 
     return res.status(200).json({
       ok: true,
@@ -255,9 +263,9 @@ export default async function handler(req, res) {
         confidence: 'HIGH',
         risk: 'LOW',
         setup: 'CONTINUATION',
-        setupLabel: isPreciousMetal ? 'Scalping Hit & Run Agresif' : 'Scalping (DayTrade Matrix)',
-        zoneLabel: 'Order Block / FVG Valid',
-        zoneNote: `Buffer & SL optimal ${symbol} · TP dihitung dari entry`,
+        setupLabel: `Workflow ${cfgInfo.type} Valid`,
+        zoneLabel: 'Order Block / FVG Zone',
+        zoneNote: `Buffer & SL disesuaikan untuk ${cfgInfo.type}`,
         reason: reason
       }
     });
