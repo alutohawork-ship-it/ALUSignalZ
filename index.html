@@ -730,6 +730,7 @@
     let ws = null, reconnectTimer = null, pingTimer = null;
     let retryCount = 0, lastIn = 0;
     let trades = [], activeId = null;
+    let dbgCount = 0;
     const prices = {}, history = {}, rawPrices = {}, marketCandles = {};
     const symbolOf = {}, providerOf = {}, kindLock = {}, mstate = {};
     const subOwner = new Map();
@@ -878,19 +879,40 @@
         markSrc(key, `TRY ${idx + 1}/${list.length}`, 'text-gray-500');
     }
 
+    // Ambil angka harga pertama yang valid dari beberapa kemungkinan nama field
+    const pickPrice = (...vals) => {
+        for (const v of vals) {
+            const n = parseFloat(v);
+            if (n > 0) return n;
+        }
+        return NaN;
+    };
+
     function handleEvents(f) {
-        for (const ev of f.events || []) {
-            if (!ev || !ev.symbol) continue;
-            const prov = String(ev.provider ?? '').toLowerCase();
-            const normSym = norm(ev.symbol);
-            const keys = [...(COIN_KEY.get(`${prov}|${normSym}`) || []), ...(COIN_KEY.get(`*|${normSym}`) || [])];
-            const p0 = parseFloat(ev.price ?? ev.bid ?? ev.mid);
+        const list = f.events || f.data || f.payload?.events || [];
+        for (const ev of list) {
+            if (!ev) continue;
+            const sym = ev.symbol ?? ev.coin ?? ev.s ?? ev.instrument;
+            if (!sym) continue;
+
+            const prov = String(ev.provider ?? ev.venue ?? ev.source ?? '').toLowerCase();
+            const normSym = norm(sym);
+            const keys = [
+                ...(COIN_KEY.get(`${prov}|${normSym}`) || []),
+                ...(COIN_KEY.get(`*|${normSym}`) || []),
+            ];
+
+            const p0 = pickPrice(ev.price, ev.bid, ev.mid, ev.last, ev.close, ev.p, ev.ask);
             if (!(p0 > 0)) continue;
+
             for (const key of keys) {
-                kindLock[key] ??= ev.kind;
-                if (ev.kind && ev.kind !== kindLock[key]) continue;
-                symbolOf[key] = ev.symbol;
-                providerOf[key] = prov;
+                // Kunci 'kind' hanya berlaku selama feed masih segar (15 detik)
+                const fresh = Date.now() - (prices[key]?.recv ?? 0) < 15000;
+                if (ev.kind && kindLock[key] && ev.kind !== kindLock[key] && fresh) continue;
+                if (ev.kind) kindLock[key] = ev.kind;
+
+                symbolOf[key] = sym;
+                providerOf[key] = prov || providerOf[key] || 'xbtfx';
                 rawPrices[key] = p0;
                 markSrc(key, 'LIVE', 'text-emerald-400');
                 updatePrice(key, p0 + getOffset(key), ev);
@@ -949,7 +971,10 @@
             lastIn = Date.now();
             setWsStatus('CONNECTED', 'green');
             sendJSON(sock, { op: 'sub', id: nextId(), channel: 'status', payload: { providers: PROVIDERS } });
-            for (const key of SUB_KEYS) subscribeMarket(sock, key, 0);
+            // Sebar subscribe supaya tidak semua dikirim sekaligus
+            SUB_KEYS.forEach((key, i) => setTimeout(() => {
+                if (ws === sock && sock.readyState === WebSocket.OPEN) subscribeMarket(sock, key, 0);
+            }, i * 40));
             setTimeout(() => { if (ws === sock) refreshBias(selectedKey(), true); }, 1500);
 
             pingTimer = setInterval(() => {
@@ -963,6 +988,7 @@
             lastIn = Date.now();
             retryCount = 0;
             let f; try { f = JSON.parse(e.data); } catch { return; }
+            if (DEBUG && dbgCount < 20) { dbgCount++; console.log('[WS]', e.data.slice(0, 400)); }
             if (!seenOps.has(f.op)) { seenOps.add(f.op); }
 
             switch (f.op) {
@@ -1995,6 +2021,6 @@
         setInterval(() => { watchdog(); expirePending(); }, 1000);
         setInterval(() => refreshBias(selectedKey()), 60000);
     };
-        </script>
+    </script>
 </body>
 </html>
