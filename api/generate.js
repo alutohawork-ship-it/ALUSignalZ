@@ -237,7 +237,7 @@ function structureDir(candles) {
 
 const expireFor = tf => Math.min(Math.max(EXPIRE_BARS * TF_MS[tf], EXPIRE_MIN_MS), EXPIRE_MAX_MS);
 
-// ---------- Impuls & kandidat zona (Day, Intraday, Swing) ----------
+// ---------- Impuls & kandidat zona (Intraday, Swing, zona Day Trading) ----------
 
 // Cari impuls terakhir searah dir, lalu kumpulkan FVG, OB, dan OTE (retracement 62-79%).
 function impulseZones(candles, isBuy, a) {
