@@ -1,5 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC Universal dengan Skala Digit Utama untuk Semua Pair
+// Analisis Pure SMC Universal dengan Perbaikan Skala Logam Mulia (XPT, XPD, dll) & Universal Aset
 
 const KV_KEY = 'alu_clients';
 
@@ -92,18 +92,22 @@ function getStructuralExtremes(candles, isBuy) {
   return extreme;
 }
 
-// Konfigurasi Skala Digit Utama Berdasarkan Karakteristik Setiap Aset
+// Konfigurasi Skala Digit Utama yang Akurat Berdasarkan Jenis Aset
 function getAssetConfig(symbol) {
   const s = symbol.toUpperCase();
-  if (s.includes('XAU')) return { bufferVal: 1.5, slVal: 2.5, type: 'GOLD_FIX_25' };
-  if (s.includes('XAG')) return { bufferVal: 3.0, slVal: 5.0, type: 'SILVER_2X_GOLD' }; // XAG diset 2x dari Gold
+  if (s.includes('XAU')) return { bufferVal: 1.5, slVal: 2.5, type: 'GOLD_FIX' };
+  if (s.includes('XAG')) return { bufferVal: 3.0, slVal: 5.0, type: 'SILVER_2X_GOLD' };
+  if (s.includes('XPT') || s.includes('PLATINUM')) return { bufferVal: 5.0, slVal: 12.0, type: 'METAL_XPT' };
+  if (s.includes('XPD') || s.includes('PALLADIUM')) return { bufferVal: 5.0, slVal: 12.0, type: 'METAL_XPD' };
   if (s.includes('BTC')) return { bufferVal: 15.0, slVal: 45.0, type: 'CRYPTO_BTC' };
   if (s.includes('ETH')) return { bufferVal: 5.0, slVal: 15.0, type: 'CRYPTO_ETH' };
+  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP') || s.includes('LTC')) return { bufferVal: 1.0, slVal: 3.0, type: 'CRYPTO_ALT' };
   if (s.includes('EUR') || s.includes('GBP') || s.includes('AUD') || s.includes('NZD') || s.includes('USD') || s.includes('CAD') || s.includes('CHF')) {
     if (s.includes('JPY')) return { bufferVal: 0.15, slVal: 0.40, type: 'CURRENCY_JPY' };
     return { bufferVal: 0.0015, slVal: 0.0040, type: 'CURRENCY_MAJOR' };
   }
   if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) return { bufferVal: 10.0, slVal: 30.0, type: 'INDEX' };
+  if (s.includes('OIL') || s.includes('NATGAS') || s.includes('COPPER')) return { bufferVal: 0.5, slVal: 1.5, type: 'COMMODITY' };
   return { bufferVal: 1.0, slVal: 3.0, type: 'DEFAULT_UNIVERSAL' };
 }
 
@@ -197,9 +201,9 @@ export default async function handler(req, res) {
     const lang = body.lang === 'en' ? 'en' : 'id';
     const style = STYLES[body.tradingStyle];
     const symbol = String(body.marketId || '').split('|').pop().toUpperCase();
-    const dec = DECIMALS[symbol] ?? 4;
+    const dec = DECIMALS[symbol] ?? 2;
     const price = Number(body.currentPrice);
-    const pip = PIP[symbol];
+    const pip = PIP[symbol] || 0.1;
 
     const access = await checkAccess(email);
     if (!access.ok) return res.status(403).json({ error: access.msg });
@@ -213,7 +217,7 @@ export default async function handler(req, res) {
     const refAtr = atr(mtfC, 14) || 1;
     const htfDir = structureDir(htfC);
     const isScalp = style.kind === 'scalp';
-    const isPreciousMetal = symbol.includes('XAU') || symbol.includes('XAG');
+    const isPreciousMetal = symbol.includes('XAU') || symbol.includes('XAG') || symbol.includes('XPT') || symbol.includes('XPD');
 
     let dir = 0, plan = null;
 
@@ -234,21 +238,12 @@ export default async function handler(req, res) {
     const actionType = plan.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET';
     const sideText = dir === 1 ? 'BUY' : 'SELL';
     const cfgInfo = getAssetConfig(symbol);
-    const isGold = symbol.includes('XAU');
-    const isSilver = symbol.includes('XAG');
     
-    let setupLabelText = `Scale Digit (${cfgInfo.type})`;
-    if (isGold) setupLabelText = 'Gold Fixed SL (20~30 pip)';
-    if (isSilver) setupLabelText = 'Silver 2x Gold SL (40~60 pip)';
+    const setupLabelText = `Scale Digit (${cfgInfo.type})`;
 
     const techReason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol}. Struktur multi-timeframe terkonfirmasi searah dengan Order Block / FVG aktif. Eksekusi ${actionType} dipetakan dengan presisi tinggi di area likuiditas terdekat. Target Take Profit (TP1-TP3) dihitung proporsional dari garis depan (entry) berdasarkan kelipatan rasio risiko 1:1, 1:2, dan 1:3.`;
     
-    let workflowNote = `[Catatan Sistem: Workflow Scale Digit aktif untuk ${cfgInfo.type}. Stop Loss diukur dari digit angka utama agar proporsional.]`;
-    if (isGold) {
-      workflowNote = `[Catatan Sistem: Workflow Gold aktif. Stop Loss dikunci di kisaran 20-30 pip/poin utama.]`;
-    } else if (isSilver) {
-      workflowNote = `[Catatan Sistem: Workflow Silver aktif. Stop Loss dikunci 2x lipat dari Gold (kisaran 40-60 pip/poin utama) sesuai karakteristik volatilitas silver.]`;
-    }
+    const workflowNote = `[Catatan Sistem: Workflow Scale Digit aktif untuk ${cfgInfo.type}. Stop Loss dan Buffer diukur berdasarkan skala digit angka utama harga instrumen agar proporsional dan terhindar dari noise market.]`;
 
     const reason = `${techReason}\n\n${workflowNote}`;
 
@@ -270,7 +265,7 @@ export default async function handler(req, res) {
         setup: 'CONTINUATION',
         setupLabel: setupLabelText,
         zoneLabel: 'Order Block / FVG Structure',
-        zoneNote: isSilver ? 'Silver 2x Gold SL Range' : (isGold ? 'Gold Fixed Range' : `Scale Digit (${cfgInfo.type})`),
+        zoneNote: `Scale Digit Range (${cfgInfo.type})`,
         reason: reason
       }
     });
