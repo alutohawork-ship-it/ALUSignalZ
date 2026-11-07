@@ -1,5 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC dengan Workflow Khusus Berbasis Karakteristik Aset (Currency, Crypto, Gold)
+// Analisis Pure SMC dengan SL Berbasis Struktur dan Konfigurasi Spesifik Per Aset
 
 const KV_KEY = 'alu_clients';
 
@@ -26,7 +26,7 @@ const PIP = {
 };
 
 const STYLES = {
-  'Scalping': { label: 'Scalping Hit & Run (Buffer Zone)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
+  'Scalping': { label: 'Scalping Hit & Run (Structure SL)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
   'Day Trading': { label: 'Day Trading Zone (HTF: H1 | MTF: M30)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
   'Intraday': { label: 'Intraday (HTF: H4 | MTF: H1)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
   'Swing': { label: 'Swing Trading (HTF: D1 | MTF: H4)', mode: 'LIMIT', kind: 'zone', rr: [2.0, 4.5, 8.5] },
@@ -77,30 +77,46 @@ function structureDir(candles) {
   return last.c >= first.c ? 1 : -1;
 }
 
-// WORKFLOW KHUSUS BERBASIS KELAS ASET (Menyesuaikan Karakteristik Spread & Skala Poin)
+// Mencari swing high & low dari struktur candle (untuk SL berbasis struktur)
+function getStructuralExtremes(candles, isBuy) {
+  if (!candles || candles.length < 10) return null;
+  let extreme = candles[candles.length - 1][isBuy ? 'l' : 'h'];
+  const lookback = Math.min(candles.length, 20);
+  for (let i = candles.length - lookback; i < candles.length; i++) {
+    const c = candles[i];
+    if (isBuy) {
+      if (c.l < extreme) extreme = c.l;
+    } else {
+      if (c.h > extreme) extreme = c.h;
+    }
+  }
+  return extreme;
+}
+
+// ATURAN SPESIFIK: Tidak disamakan dengan Gold. Setiap pair punya struktur & pengali SL sendiri.
 function getAssetConfig(symbol) {
   const s = symbol.toUpperCase();
   
-  // 1. Gold & Silver (XAU, XAG)
-  if (s.includes('XAU')) return { bufferPips: 15, slPips: 25, type: 'METAL' };
-  if (s.includes('XAG')) return { bufferPips: 20, slPips: 30, type: 'METAL' };
+  // 1. Gold & Silver (XAU, XAG) -> Standar ketat berbasis ATR/Struktur murni
+  if (s.includes('XAU')) return { bufferMultiplier: 0.8, slMultiplier: 1.8, type: 'METAL' };
+  if (s.includes('XAG')) return { bufferMultiplier: 1.0, slMultiplier: 2.0, type: 'METAL' };
   
-  // 2. Currency / Forex (EURUSD, GBPUSD, USDJPY, dll)
+  // 2. Currency / Forex (EURUSD, GBPUSD, USDJPY, dll) -> SL Disesuaikan agar tahan spread & struktur kecil (2x struktur)
   if (s.includes('EUR') || s.includes('GBP') || s.includes('AUD') || s.includes('NZD') || s.includes('USD') || s.includes('CAD') || s.includes('CHF')) {
-    if (s.includes('JPY')) return { bufferPips: 15, slPips: 25, type: 'CURRENCY' };
-    return { bufferPips: 8, slPips: 15, type: 'CURRENCY' };
+    if (s.includes('JPY')) return { bufferMultiplier: 1.2, slMultiplier: 2.2, type: 'CURRENCY' };
+    return { bufferMultiplier: 1.0, slMultiplier: 2.0, type: 'CURRENCY' }; // 2x lipat dari struktur dasar forex
   }
   
-  // 3. Crypto Currency (BTC, ETH, SOL, dll)
-  if (s.includes('BTC')) return { bufferPips: 120, slPips: 250, type: 'CRYPTO' };
-  if (s.includes('ETH')) return { bufferPips: 25, slPips: 50, type: 'CRYPTO' };
-  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP')) return { bufferPips: 1.5, slPips: 3.0, type: 'CRYPTO' };
+  // 3. Crypto Currency (BTC, ETH, SOL) -> Volatilitas tinggi, SL ditarik lebih aman di luar struktur
+  if (s.includes('BTC')) return { bufferMultiplier: 1.5, slMultiplier: 2.5, type: 'CRYPTO' };
+  if (s.includes('ETH')) return { bufferMultiplier: 1.2, slMultiplier: 2.2, type: 'CRYPTO' };
+  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP')) return { bufferMultiplier: 1.2, slMultiplier: 2.0, type: 'CRYPTO' };
   
   // 4. Indeks & Komoditas (DJI, Oil, dll)
-  if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) return { bufferPips: 40, slPips: 80, type: 'INDEX' };
-  if (s.includes('OIL') || s.includes('CLUSDT')) return { bufferPips: 20, slPips: 40, type: 'COMMODITY' };
+  if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) return { bufferMultiplier: 1.5, slMultiplier: 2.5, type: 'INDEX' };
+  if (s.includes('OIL') || s.includes('CLUSDT')) return { bufferMultiplier: 1.2, slMultiplier: 2.2, type: 'COMMODITY' };
   
-  return { bufferPips: 15, slPips: 30, type: 'DEFAULT' };
+  return { bufferMultiplier: 1.0, slMultiplier: 2.0, type: 'DEFAULT' };
 }
 
 function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal) {
@@ -110,18 +126,22 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal)
   const isBuy = activeDir === 1;
 
   const cfg = getAssetConfig(symbol);
-  const pValue = pip || 1;
+  
+  // Hitung buffer berdasarkan struktur ATR & pengali spesifik pair
+  const bufferDist = a * cfg.bufferMultiplier;
+  const bufferEnd = isBuy ? price - bufferDist : price + bufferDist;
 
-  const effectiveBuffer = isPreciousMetal ? cfg.bufferPips : Math.max(cfg.bufferPips, Math.round(a / pValue * 0.25));
-  const effectiveSl = isPreciousMetal ? cfg.slPips : Math.max(cfg.slPips, Math.round(a / pValue * 0.5));
+  // SL BERBASIS STRUKTUR: Mengambil swing high/low dari candle, lalu dikali pengali pair (misal 2x struktur)
+  const structExtreme = getStructuralExtremes(mtfC, isBuy);
+  let sl = structExtreme != null 
+    ? (isBuy ? structExtreme - (a * 0.3) : structExtreme + (a * 0.3))
+    : (isBuy ? bufferEnd - (a * cfg.slMultiplier) : bufferEnd + (a * cfg.slMultiplier));
 
-  const bufferOffset = effectiveBuffer * pValue;
-  const bufferEnd = isBuy ? price - bufferOffset : price + bufferOffset;
+  // Validasi pengaman agar SL tidak terbalik arah
+  if (isBuy && sl >= bufferEnd) sl = bufferEnd - (a * cfg.slMultiplier);
+  if (!isBuy && sl <= bufferEnd) sl = bufferEnd + (a * cfg.slMultiplier);
 
-  const slDistance = effectiveSl * pValue;
-  const sl = isBuy ? bufferEnd - slDistance : bufferEnd + slDistance;
-
-  // ATURAN HITUNGAN TP: SL dihitung dari buffer, TP ditarik dari GARIS DEPAN (price/entry) berdasarkan rasio (1:1, 1:2, 1:3)
+  // ATURAN HITUNGAN TP: SL dari buffer, TP ditarik dari GARIS DEPAN (price/entry) berdasarkan rasio (1:1, 1:2, 1:3)
   const riskDistance = Math.abs(price - sl);
   const tp1 = isBuy ? price + (1.0 * riskDistance) : price - (1.0 * riskDistance);
   const tp2 = isBuy ? price + (2.0 * riskDistance) : price - (2.0 * riskDistance);
@@ -140,9 +160,9 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal)
       sl: sl,
       tps: [tp1, tp2, tp3],
       zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
-      trigSrc: `Workflow-${cfg.type}`,
+      trigSrc: `Structural-${cfg.type}`,
       expireMs: 0,
-      riskAtr: slDistance / a,
+      riskAtr: Math.abs(bufferEnd - sl) / a,
       over: false,
     }
   };
@@ -165,16 +185,20 @@ function generalTradePlan({ htfC, mtfC, m5C, price, symbol, pip, dec, lang, styl
   const isBuy = dir === 1;
 
   const cfg = getAssetConfig(symbol);
-  const pValue = pip || 1;
   const entry = price;
 
-  const bufferOffset = (cfg.bufferPips * 1.5) * pValue;
-  const bufferEnd = isBuy ? entry - bufferOffset : entry + bufferOffset;
+  const bufferDist = a15 * cfg.bufferMultiplier * 1.2;
+  const bufferEnd = isBuy ? entry - bufferDist : entry + bufferDist;
 
-  const slDistance = (cfg.slPips * 1.5) * pValue;
-  const sl = isBuy ? bufferEnd - slDistance : bufferEnd + slDistance;
-  const risk = Math.abs(bufferEnd - sl);
+  const structExtreme = getStructuralExtremes(mtfC, isBuy);
+  let sl = structExtreme != null
+    ? (isBuy ? structExtreme - (a15 * 0.4) : structExtreme + (a15 * 0.4))
+    : (isBuy ? bufferEnd - (a15 * cfg.slMultiplier) : bufferEnd + (a15 * cfg.slMultiplier));
 
+  if (isBuy && sl >= bufferEnd) sl = bufferEnd - (a15 * cfg.slMultiplier);
+  if (!isBuy && sl <= bufferEnd) sl = bufferEnd + (a15 * cfg.slMultiplier);
+
+  const risk = Math.abs(price - sl);
   const tp1 = entry + dir * 1.0 * risk;
   const tp2 = entry + dir * 2.0 * risk;
   const tp3 = entry + dir * 3.0 * risk;
@@ -244,8 +268,7 @@ export default async function handler(req, res) {
     const cfgInfo = getAssetConfig(symbol);
     const timeframeNote = isScalp && !isPreciousMetal ? 'Scalping menggunakan struktur Day Trade (H1/M30)' : 'Scalping Agresif M5+M3+M1';
 
-    // Alasan teknikal murni Pure SMC sesuai struktur market
-    const reason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol} menggunakan Workflow Khusus [${cfgInfo.type}]. Setup valid dikonfirmasi oleh struktur ${timeframeNote}. Eksekusi ${actionType} dipetakan dengan presisi tinggi: Stop Loss dihitung aman dari batas Buffer Zone, dan target TP (TP1-TP3) ditarik proporsional dari garis depan (entry) berdasarkan kelipatan rasio risiko (1:1, 1:2, 1:3) yang disesuaikan dengan karakteristik spread dan volatilitas instrumen ini.`;
+    const reason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol} menggunakan Workflow Struktur Berbasis Aset [${cfgInfo.type}]. Setup divalidasi oleh struktur ${timeframeNote}. Stop Loss disesuaikan secara dinamis berdasarkan swing high/low struktur market ditambah pengali khusus instrumen (tidak disamakan dengan Gold). Target TP1-TP3 ditarik proporsional dari garis depan (entry) berdasarkan rasio risiko (1:1, 1:2, 1:3) demi mengantisipasi spread tinggi dan volatilitas unikan pair ini.`;
 
     return res.status(200).json({
       ok: true,
@@ -263,9 +286,9 @@ export default async function handler(req, res) {
         confidence: 'HIGH',
         risk: 'LOW',
         setup: 'CONTINUATION',
-        setupLabel: `Workflow ${cfgInfo.type} Valid`,
-        zoneLabel: 'Order Block / FVG Zone',
-        zoneNote: `Buffer & SL disesuaikan untuk ${cfgInfo.type}`,
+        setupLabel: `Structural SL (${cfgInfo.type})`,
+        zoneLabel: 'Order Block / FVG Structure',
+        zoneNote: `SL Berbasis Struktur & Pengali ${cfgInfo.type}`,
         reason: reason
       }
     });
