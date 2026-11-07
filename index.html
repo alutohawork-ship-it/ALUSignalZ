@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Alu Signal Z & Terminal</title>
+    <title>Alu Signal Z & Terminal (MT5 #2121955946)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -121,7 +121,7 @@
                     <i class="fa-solid fa-chart-line text-xs"></i>
                 </div>
                 <div class="min-w-0">
-                    <h1 class="font-bold text-xs text-white">Alu <span class="text-accentblue">Signal Z</span></h1>
+                    <h1 class="font-bold text-xs text-white">Alu <span class="text-accentblue">Signal Z</span> <span class="text-[9px] text-amber-400 font-mono font-normal">(MT5: #2121955946)</span></h1>
                     <p id="txtSubHeader" class="text-[8px] text-gray-400 truncate">Pure SMC 3-Layer Terminal</p>
                 </div>
             </div>
@@ -140,55 +140,78 @@
                 <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
                     <div class="flex justify-between items-center">
                         <label id="lblTargetAsset" class="text-[9px] font-bold text-gray-400">TARGET ASET AKTIF</label>
-                        <span id="selectedPairBadge" class="text-[9px] font-mono text-accentblue font-bold">binance|XAUUSD</span>
+                        <span id="selectedPairBadge" class="text-[9px] font-mono text-accentblue font-bold">xbtfx|XAUUSD</span>
                     </div>
 
                     <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                        <optgroup label="Gold, Silver & Forex">
-                            <option value="binance|XAUUSD">XAUUSD / Gold (Binance)</option>
-                            <option value="binance|XAGUSD">XAGUSD / Silver (Binance)</option>
-                            <option value="veranta|EURUSD">EUR/USD (Veranta)</option>
-                            <option value="veranta|USDJPY">USD/JPY (Veranta)</option>
-                            <option value="veranta|GBPUSD">GBP/USD (Veranta)</option>
-                            <option value="veranta|AUDUSD">AUD/USD (Veranta)</option>
-                            <option value="veranta|USDCAD">USD/CAD (Veranta)</option>
-                            <option value="veranta|USDCHF">USD/CHF (Veranta)</option>
+                        <optgroup label="XBTFX Dollar Index & Majors">
+                            <option value="xbtfx|DXY">DXY / US Dollar Index</option>
+                            <option value="xbtfx|EURUSD">EUR/USD</option>
+                            <option value="xbtfx|GBPUSD">GBP/USD</option>
+                            <option value="xbtfx|USDJPY">USD/JPY</option>
+                            <option value="xbtfx|AUDUSD">AUD/USD</option>
+                            <option value="xbtfx|USDCAD">USD/CAD</option>
+                            <option value="xbtfx|USDCHF">USD/CHF</option>
+                            <option value="xbtfx|NZDUSD">NZD/USD</option>
                         </optgroup>
-                        <optgroup label="Komoditas">
-                            <option value="binance|CLUSDT">Crude Oil WTI (Binance)</option>
-                            <option value="binance|NATGASUSDT">Natural Gas (Binance)</option>
-                            <option value="binance|COPPERUSDT">Copper (Binance)</option>
-                            <option value="binance|XPDUSDT">Palladium (Binance)</option>
-                            <option value="binance|XPTUSDT">Platinum (Binance)</option>
-                            <option value="hyperliquid|BRENTOIL">Brent Oil (Hyperliquid)</option>
-                            <option value="hyperliquid|PALLADIUM">Palladium (Hyperliquid)</option>
-                            <option value="hyperliquid|PLATINUM">Platinum (Hyperliquid)</option>
+                        <optgroup label="XBTFX Cross Forex">
+                            <option value="xbtfx|EURGBP">EUR/GBP</option>
+                            <option value="xbtfx|EURJPY">EUR/JPY</option>
+                            <option value="xbtfx|GBPJPY">GBP/JPY</option>
+                            <option value="xbtfx|AUDJPY">AUD/JPY</option>
+                            <option value="xbtfx|EURAUD">EUR/AUD</option>
+                            <option value="xbtfx|GBPAUD">GBP/AUD</option>
+                            <option value="xbtfx|AUDNZD">AUD/NZD</option>
+                            <option value="xbtfx|CADJPY">CAD/JPY</option>
+                            <option value="xbtfx|CHFJPY">CHF/JPY</option>
+                            <option value="xbtfx|EURNZD">EUR/NZD</option>
                         </optgroup>
-                        <optgroup label="Indices / Indeks Global">
-                            <option value="ostium|DJI">Dow Jones / US30 (Ostium)</option>
-                            <option value="hyperliquid|SP500">S&amp;P 500 (Hyperliquid)</option>
-                            <option value="hyperliquid|XYZ100">Nasdaq 100 (Hyperliquid)</option>
-                            <option value="hyperliquid|JP225">Nikkei 225 (Hyperliquid)</option>
-                            <option value="binance|QQQUSDT">QQQ (Binance)</option>
+                        <optgroup label="XBTFX Metals & Precious">
+                            <option value="xbtfx|XAUUSD">XAUUSD / Gold</option>
+                            <option value="xbtfx|XAGUSD">XAGUSD / Silver</option>
+                            <option value="xbtfx|XPTUSD">XPTUSD / Platinum</option>
+                            <option value="xbtfx|XPDUSD">XPDUSD / Palladium</option>
+                            <option value="xbtfx|XAUEUR">XAUEUR / Gold in EUR</option>
+                            <option value="xbtfx|XAGEUR">XAGEUR / Silver in EUR</option>
                         </optgroup>
-                        <optgroup label="Crypto">
-                            <option value="binance|BTCUSD">BTCUSD / Bitcoin (MT4/5)</option>
-                            <option value="binance|ETHUSD">ETHUSD / Ethereum (MT4/5)</option>
-                            <option value="binance|BTCUSDT">BTC/USDT (Binance)</option>
-                            <option value="binance|ETHUSDT">ETH/USDT (Binance)</option>
-                            <option value="binance|SOLUSDT">SOL/USDT (Binance)</option>
-                            <option value="binance|XRPUSDT">XRP/USDT (Binance)</option>
-                            <option value="binance|BNBUSDT">BNB/USDT (Binance)</option>
-                            <option value="binance|ADAUSDT">ADA/USDT (Binance)</option>
-                            <option value="binance|LINKUSDT">LINK/USDT (Binance)</option>
-                            <option value="binance|AVAXUSDT">AVAX/USDT (Binance)</option>
-                            <option value="binance|DOGEUSDT">DOGE/USDT (Binance)</option>
-                            <option value="binance|SUIUSDT">SUI/USDT (Binance)</option>
-                            <option value="binance|NEARUSDT">NEAR/USDT (Binance)</option>
-                            <option value="binance|DOTUSDT">DOT/USDT (Binance)</option>
-                            <option value="binance|LTCUSDT">LTC/USDT (Binance)</option>
-                            <option value="binance|TAOUSDT">TAO/USDT (Binance)</option>
-                            <option value="binance|HYPEUSDT">HYPE/USDT (Binance)</option>
+                        <optgroup label="XBTFX Energy & Commodities">
+                            <option value="xbtfx|BRENT">Brent Oil (BRENT)</option>
+                            <option value="xbtfx|WTI">Crude Oil WTI (WTI)</option>
+                            <option value="xbtfx|NATGAS">Natural Gas (NATGAS)</option>
+                            <option value="xbtfx|COPPER">Copper</option>
+                            <option value="xbtfx|COFFEE">Coffee</option>
+                            <option value="xbtfx|SUGAR">Sugar</option>
+                        </optgroup>
+                        <optgroup label="XBTFX Global Indices">
+                            <option value="xbtfx|US30">Dow Jones / US30</option>
+                            <option value="xbtfx|NAS100">Nasdaq 100 / NAS100</option>
+                            <option value="xbtfx|SPX500">S&amp;P 500 / SPX500</option>
+                            <option value="xbtfx|GER40">DAX / GER40</option>
+                            <option value="xbtfx|UK100">FTSE 100 / UK100</option>
+                            <option value="xbtfx|JPN225">Nikkei / JPN225</option>
+                            <option value="xbtfx|FRA40">CAC 40 / FRA40</option>
+                            <option value="xbtfx|AUS200">ASX 200 / AUS200</option>
+                        </optgroup>
+                        <optgroup label="XBTFX Crypto">
+                            <option value="xbtfx|BTCUSD">BTCUSD / Bitcoin</option>
+                            <option value="xbtfx|ETHUSD">ETHUSD / Ethereum</option>
+                            <option value="xbtfx|SOLUSD">SOLUSD / Solana</option>
+                            <option value="xbtfx|XRPUSD">XRPUSD / Ripple</option>
+                            <option value="xbtfx|BNBUSD">BNBUSD</option>
+                            <option value="xbtfx|ADAUSD">ADAUSD</option>
+                            <option value="xbtfx|DOGEUSD">DOGEUSD</option>
+                            <option value="xbtfx|AVAXUSD">AVAXUSD</option>
+                            <option value="xbtfx|LINKUSD">LINKUSD</option>
+                            <option value="xbtfx|DOTUSD">DOTUSD</option>
+                            <option value="xbtfx|MATICUSD">MATICUSD</option>
+                            <option value="xbtfx|UNIUSD">UNIUSD</option>
+                        </optgroup>
+                        <optgroup label="XBTFX Synthetic / Custom Pairs">
+                            <option value="xbtfx|BTCXAU">BTC/XAU (Crypto-Gold Synthetic)</option>
+                            <option value="xbtfx|ETHBTC">ETH/BTC (Cross Crypto Synthetic)</option>
+                            <option value="xbtfx|SOLBTC">SOL/BTC (Cross Crypto Synthetic)</option>
+                            <option value="xbtfx|US30BTC">US30/BTC (Index-Crypto Synthetic)</option>
+                            <option value="xbtfx|XAUUSDX">XAUUSD.X (Synthetic Gold Index)</option>
                         </optgroup>
                     </select>
 
@@ -204,8 +227,8 @@
                     <div>
                         <label id="lblTradingStyle" class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
                         <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                            <option value="Scalping">Scalping (Agresif eksekusi)</option>
-                            <option value="Day Trading">Day Trading (Konservatif scalping)</option>
+                            <option value="Scalping">Scalping (M1+M3+M5)</option>
+                            <option value="Day Trading">Day Trading (M5+M15+M30/H1)</option>
                             <option value="Intraday">Intraday</option>
                             <option value="Swing">Swing</option>
                         </select>
@@ -313,7 +336,7 @@
             <!-- ============ KOLOM KANAN: KALENDER, HISTORY & STREAM ============ -->
             <div class="flex flex-col gap-2 min-w-0">
 
-                <!-- KALENDER PNL (dibuka lewat tombol 📅 PNL) -->
+                <!-- KALENDER PNL -->
                 <div id="calCard" class="hidden bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
                     <div class="flex justify-between items-center gap-2">
                         <div class="flex items-center gap-1">
@@ -416,7 +439,7 @@
         </main>
 
         <footer class="max-w-md md:max-w-6xl mx-auto w-full pt-4 pb-2 border-t border-panelborder/60 text-center space-y-1">
-            <p class="text-[10px] text-gray-400">Punya pertanyaan atau ingin perpanjang langganan?</p>
+            <p class="text-[10px] text-gray-400">Punya pertanyaan atau ingin perpanjang langganan? (MT5 ID: #2121955946)</p>
             <a href="https://wa.me/6285817038501?text=Halo%20Admin%20Alu%20Signal%20Z,%20saya%20ingin%20berlangganan" target="_blank" class="inline-flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full text-xs font-bold font-mono transition">
                 <i class="fa-brands fa-whatsapp text-sm text-emerald-400"></i> Admin WhatsApp: +6285817038501
             </a>
@@ -617,44 +640,61 @@
     const DEBUG = localStorage.getItem('alu_debug') === '1';
 
     const MARKETS = {
-        XAUUSD:     { provider: 'binance',     coins: ['XAUUSDT'],      decimals: 2, pip: 0.1 },
-        XAGUSD:     { provider: 'binance',     coins: ['XAGUSDT'],      decimals: 3, pip: 0.01 },
-        EURUSD:     { provider: 'veranta',     coins: ['EURUSD', 'EUR/USD', 'EURUSD.FX'], decimals: 5, pip: 0.0001 },
-        USDJPY:     { provider: 'veranta',     coins: ['USDJPY', 'USD/JPY', 'USDJPY.FX'], decimals: 3, pip: 0.01 },
-        GBPUSD:     { provider: 'veranta',     coins: ['GBPUSD', 'GBP/USD', 'GBPUSD.FX'], decimals: 5, pip: 0.0001 },
-        AUDUSD:     { provider: 'veranta',     coins: ['AUDUSD'],       decimals: 5, pip: 0.0001 },
-        USDCAD:     { provider: 'veranta',     coins: ['USDCAD'],       decimals: 5, pip: 0.0001 },
-        USDCHF:     { provider: 'veranta',     coins: ['USDCHF'],       decimals: 5, pip: 0.0001 },
-        CLUSDT:     { provider: 'binance',     coins: ['CLUSDT'],       decimals: 2, pip: 0.01 },
-        NATGASUSDT: { provider: 'binance',     coins: ['NATGASUSDT'],   decimals: 3, pip: 0.001 },
-        COPPERUSDT: { provider: 'binance',     coins: ['COPPERUSDT'],   decimals: 4, pip: 0.0001 },
-        XPDUSDT:    { provider: 'binance',     coins: ['XPDUSDT'],      decimals: 2, pip: 0.1 },
-        XPTUSDT:    { provider: 'binance',     coins: ['XPTUSDT'],      decimals: 2, pip: 0.1 },
-        BRENTOIL:   { provider: 'hyperliquid', coins: ['xyz:BRENTOIL'], decimals: 2, pip: 0.01 },
-        PALLADIUM:  { provider: 'hyperliquid', coins: ['xyz:PALLADIUM'], decimals: 2, pip: 0.1 },
-        PLATINUM:   { provider: 'hyperliquid', coins: ['xyz:PLATINUM'], decimals: 2, pip: 0.1 },
-        DJI:        { provider: 'ostium',      coins: ['DJI', 'DJIUSD', 'DJI-USD', 'US30'], decimals: 2, pip: 1 },
-        SP500:      { provider: 'hyperliquid', coins: ['xyz:SP500'],    decimals: 2, pip: 1 },
-        XYZ100:     { provider: 'hyperliquid', coins: ['xyz:XYZ100'],   decimals: 2, pip: 1 },
-        JP225:      { provider: 'hyperliquid', coins: ['xyz:JP225'],    decimals: 0, pip: 1 },
-        QQQUSDT:    { provider: 'binance',     coins: ['QQQUSDT'],      decimals: 2, pip: 0.1 },
-        BTCUSDT:    { provider: 'binance', coins: ['BTCUSDT'], decimals: 2, pip: 1 },
-        ETHUSDT:    { provider: 'binance', coins: ['ETHUSDT'], decimals: 2, pip: 0.1 },
-        SOLUSDT:    { provider: 'binance', coins: ['SOLUSDT'], decimals: 2, pip: 0.01 },
-        XRPUSDT:    { provider: 'binance', coins: ['XRPUSDT'], decimals: 4, pip: 0.0001 },
-        BNBUSDT:    { provider: 'binance', coins: ['BNBUSDT'], decimals: 2, pip: 0.1 },
-        ADAUSDT:    { provider: 'binance', coins: ['ADAUSDT'], decimals: 4, pip: 0.0001 },
-        LINKUSDT:   { provider: 'binance', coins: ['LINKUSDT'], decimals: 3, pip: 0.001 },
-        AVAXUSDT:   { provider: 'binance', coins: ['AVAXUSDT'], decimals: 3, pip: 0.001 },
-        DOGEUSDT:   { provider: 'binance', coins: ['DOGEUSDT'], decimals: 5, pip: 0.00001 },
-        SUIUSDT:    { provider: 'binance', coins: ['SUIUSDT'],  decimals: 4, pip: 0.0001 },
-        NEARUSDT:   { provider: 'binance', coins: ['NEARUSDT'], decimals: 4, pip: 0.0001 },
-        DOTUSDT:    { provider: 'binance', coins: ['DOTUSDT'],  decimals: 4, pip: 0.0001 },
-        LTCUSDT:    { provider: 'binance', coins: ['LTCUSDT'],  decimals: 2, pip: 0.01 },
-        TAOUSDT:    { provider: 'binance', coins: ['TAOUSDT'],  decimals: 2, pip: 0.01 },
-        HYPEUSDT:   { provider: 'binance', coins: ['HYPEUSDT'], decimals: 2, pip: 0.01 },
-        BTCUSD:     { provider: 'binance', coins: ['BTCUSDT'], base: 'BTCUSDT', decimals: 2, pip: 1 },
-        ETHUSD:     { provider: 'binance', coins: ['ETHUSDT'], base: 'ETHUSDT', decimals: 2, pip: 0.1 },
+        DXY:        { provider: 'xbtfx', coins: ['DXY'], decimals: 2, pip: 0.01 },
+        EURUSD:     { provider: 'xbtfx', coins: ['EURUSD'], decimals: 5, pip: 0.0001 },
+        GBPUSD:     { provider: 'xbtfx', coins: ['GBPUSD'], decimals: 5, pip: 0.0001 },
+        USDJPY:     { provider: 'xbtfx', coins: ['USDJPY'], decimals: 3, pip: 0.01 },
+        AUDUSD:     { provider: 'xbtfx', coins: ['AUDUSD'], decimals: 5, pip: 0.0001 },
+        USDCAD:     { provider: 'xbtfx', coins: ['USDCAD'], decimals: 5, pip: 0.0001 },
+        USDCHF:     { provider: 'xbtfx', coins: ['USDCHF'], decimals: 5, pip: 0.0001 },
+        NZDUSD:     { provider: 'xbtfx', coins: ['NZDUSD'], decimals: 5, pip: 0.0001 },
+        EURGBP:     { provider: 'xbtfx', coins: ['EURGBP'], decimals: 5, pip: 0.0001 },
+        EURJPY:     { provider: 'xbtfx', coins: ['EURJPY'], decimals: 3, pip: 0.01 },
+        GBPJPY:     { provider: 'xbtfx', coins: ['GBPJPY'], decimals: 3, pip: 0.01 },
+        AUDJPY:     { provider: 'xbtfx', coins: ['AUDJPY'], decimals: 3, pip: 0.01 },
+        EURAUD:     { provider: 'xbtfx', coins: ['EURAUD'], decimals: 5, pip: 0.0001 },
+        GBPAUD:     { provider: 'xbtfx', coins: ['GBPAUD'], decimals: 5, pip: 0.0001 },
+        AUDNZD:     { provider: 'xbtfx', coins: ['AUDNZD'], decimals: 5, pip: 0.0001 },
+        CADJPY:     { provider: 'xbtfx', coins: ['CADJPY'], decimals: 3, pip: 0.01 },
+        CHFJPY:     { provider: 'xbtfx', coins: ['CHFJPY'], decimals: 3, pip: 0.01 },
+        EURNZD:     { provider: 'xbtfx', coins: ['EURNZD'], decimals: 5, pip: 0.0001 },
+        XAUUSD:     { provider: 'xbtfx', coins: ['XAUUSD'], decimals: 2, pip: 0.1 },
+        XAGUSD:     { provider: 'xbtfx', coins: ['XAGUSD'], decimals: 3, pip: 0.01 },
+        XPTUSD:     { provider: 'xbtfx', coins: ['XPTUSD'], decimals: 2, pip: 0.1 },
+        XPDUSD:     { provider: 'xbtfx', coins: ['XPDUSD'], decimals: 2, pip: 0.1 },
+        XAUEUR:     { provider: 'xbtfx', coins: ['XAUEUR'], decimals: 2, pip: 0.1 },
+        XAGEUR:     { provider: 'xbtfx', coins: ['XAGEUR'], decimals: 3, pip: 0.01 },
+        BRENT:      { provider: 'xbtfx', coins: ['BRENT'], decimals: 2, pip: 0.01 },
+        WTI:        { provider: 'xbtfx', coins: ['WTI'], decimals: 2, pip: 0.01 },
+        NATGAS:     { provider: 'xbtfx', coins: ['NATGAS'], decimals: 3, pip: 0.001 },
+        COPPER:     { provider: 'xbtfx', coins: ['COPPER'], decimals: 4, pip: 0.0001 },
+        COFFEE:     { provider: 'xbtfx', coins: ['COFFEE'], decimals: 2, pip: 0.01 },
+        SUGAR:      { provider: 'xbtfx', coins: ['SUGAR'], decimals: 2, pip: 0.01 },
+        US30:       { provider: 'xbtfx', coins: ['US30'], decimals: 2, pip: 1 },
+        NAS100:     { provider: 'xbtfx', coins: ['NAS100'], decimals: 2, pip: 1 },
+        SPX500:     { provider: 'xbtfx', coins: ['SPX500'], decimals: 2, pip: 1 },
+        GER40:      { provider: 'xbtfx', coins: ['GER40'], decimals: 2, pip: 1 },
+        UK100:      { provider: 'xbtfx', coins: ['UK100'], decimals: 2, pip: 1 },
+        JPN225:     { provider: 'xbtfx', coins: ['JPN225'], decimals: 0, pip: 1 },
+        FRA40:      { provider: 'xbtfx', coins: ['FRA40'], decimals: 2, pip: 1 },
+        AUS200:     { provider: 'xbtfx', coins: ['AUS200'], decimals: 2, pip: 1 },
+        BTCUSD:     { provider: 'xbtfx', coins: ['BTCUSD'], decimals: 2, pip: 1 },
+        ETHUSD:     { provider: 'xbtfx', coins: ['ETHUSD'], decimals: 2, pip: 0.1 },
+        SOLUSD:     { provider: 'xbtfx', coins: ['SOLUSD'], decimals: 2, pip: 0.01 },
+        XRPUSD:     { provider: 'xbtfx', coins: ['XRPUSD'], decimals: 4, pip: 0.0001 },
+        BNBUSD:     { provider: 'xbtfx', coins: ['BNBUSD'], decimals: 2, pip: 0.1 },
+        ADAUSD:     { provider: 'xbtfx', coins: ['ADAUSD'], decimals: 4, pip: 0.0001 },
+        DOGEUSD:    { provider: 'xbtfx', coins: ['DOGEUSD'], decimals: 5, pip: 0.00001 },
+        AVAXUSD:    { provider: 'xbtfx', coins: ['AVAXUSD'], decimals: 3, pip: 0.001 },
+        LINKUSD:    { provider: 'xbtfx', coins: ['LINKUSD'], decimals: 3, pip: 0.001 },
+        DOTUSD:     { provider: 'xbtfx', coins: ['DOTUSD'], decimals: 4, pip: 0.0001 },
+        MATICUSD:   { provider: 'xbtfx', coins: ['MATICUSD'], decimals: 4, pip: 0.0001 },
+        UNIUSD:     { provider: 'xbtfx', coins: ['UNIUSD'], decimals: 3, pip: 0.001 },
+        BTCXAU:     { provider: 'xbtfx', coins: ['BTCXAU'], decimals: 2, pip: 0.1 },
+        ETHBTC:     { provider: 'xbtfx', coins: ['ETHBTC'], decimals: 5, pip: 0.00001 },
+        SOLBTC:     { provider: 'xbtfx', coins: ['SOLBTC'], decimals: 5, pip: 0.00001 },
+        US30BTC:    { provider: 'xbtfx', coins: ['US30BTC'], decimals: 2, pip: 1 },
+        XAUUSDX:    { provider: 'xbtfx', coins: ['XAUUSDX'], decimals: 2, pip: 0.1 },
     };
 
     const norm = s => String(s ?? '').toUpperCase().replace(/^XYZ:/, '').replace(/\.[A-Z]+$/, '').replace(/[^A-Z0-9]/g, '');
@@ -748,7 +788,7 @@
     }
 
     // ================= TICKER & UI =================
-    const PROV_COLOR = { hyperliquid: 'text-yellow-400', veranta: 'text-blue-400', ostium: 'text-orange-400', binance: 'text-emerald-400' };
+    const PROV_COLOR = { hyperliquid: 'text-yellow-400', veranta: 'text-blue-400', ostium: 'text-orange-400', binance: 'text-emerald-400', xbtfx: 'text-emerald-400' };
     function buildTicker() {
         const opts = [...document.querySelectorAll('#marketSelect option')];
         document.getElementById('tickerListContainer').innerHTML = opts.map(o => {
@@ -1491,7 +1531,7 @@
         const hits = t.hits || {};
         return [
             { label: 'ENTRY', value: t.entry, c: '#93c5fd', bg: 'rgba(147,197,253,0.14)', dash: [], hit: false },
-            { label: 'BUFFER', value: t.bufferEnd, c: '#fbbf24', bg: 'rgba(251,191,36,0.14)', dash: [3, 3], hit: false }, // Tambahan Garis Buffer Zone
+            { label: 'BUFFER', value: t.bufferEnd, c: '#fbbf24', bg: 'rgba(251,191,36,0.14)', dash: [3, 3], hit: false },
             { label: 'SL', value: t.sl, c: '#f87171', bg: 'rgba(248,113,113,0.14)', dash: [5, 4], hit: t.result === 'SL' },
             { label: 'TP1', value: t.tp1, c: '#34d399', bg: 'rgba(52,211,153,0.14)', dash: [5, 4], hit: !!hits.tp1 },
             { label: 'TP2', value: t.tp2, c: '#34d399', bg: 'rgba(52,211,153,0.14)', dash: [5, 4], hit: !!hits.tp2 },
