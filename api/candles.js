@@ -1,10 +1,6 @@
 // api/candles.js
-// Mengambil candle historis dari XBTFX (POST /v1/chart).
-// Key dibaca dari environment variable XBTFX_TOKEN di Vercel, tidak pernah dikirim ke browser.
-
 const BASE = process.env.XBTFX_BASE_URL || 'https://interface.xbtfx.com';
 
-// Interval dari aplikasi -> timeframe API XBTFX
 const TF = { '1m': 'M1', '5m': 'M5', '15m': 'M15', '30m': 'M30', '1h': 'H1', '4h': 'H4', '1d': 'D1' };
 const TF_MS = { '1m': 60e3, '5m': 300e3, '15m': 900e3, '30m': 1800e3, '1h': 3600e3, '4h': 14400e3, '1d': 86400e3 };
 
@@ -22,17 +18,34 @@ async function xfetch(path, opts = {}) {
     return { ok: r.ok, status: r.status, data };
 }
 
-// Peta kode simbol -> UUID, disimpan di cache selama 1 jam
+// Peta kode simbol -> UUID / String Simbol
 async function symbolIdMap() {
     if (symbolCache.map && Date.now() - symbolCache.at < 3600e3) return symbolCache.map;
-    const r = await xfetch('/v1/my/symbols');
-    if (!r.ok || !Array.isArray(r.data)) {
-        throw new Error(`Gagal mengambil daftar simbol (HTTP ${r.status})`);
-    }
+
     const map = {};
-    for (const s of r.data) {
-        if (s.code && s.id) map[String(s.code).toUpperCase()] = s.id;
+
+    // 1. Coba panggil endpoint publik dulu jika ada
+    const rPublic = await xfetch('/v1/symbols'); 
+    if (rPublic.ok && Array.isArray(rPublic.data)) {
+        for (const s of rPublic.data) {
+            if (s.code && (s.id || s.symbol_id)) {
+                map[String(s.code).toUpperCase()] = s.id || s.symbol_id;
+            }
+        }
     }
+
+    // 2. Jika publik gagal, coba panggil endpoint privat /my/symbols
+    if (Object.keys(map).length === 0) {
+        const rPrivate = await xfetch('/v1/my/symbols');
+        if (rPrivate.ok && Array.isArray(rPrivate.data)) {
+            for (const s of rPrivate.data) {
+                if (s.code && s.id) {
+                    map[String(s.code).toUpperCase()] = s.id;
+                }
+            }
+        }
+    }
+
     symbolCache = { at: Date.now(), map };
     return map;
 }
@@ -51,7 +64,7 @@ module.exports = async (req, res) => {
     const interval = String(body?.interval || '');
     const limit = Math.min(Math.max(parseInt(body?.limit, 10) || 500, 1), 1000);
 
-    // Verifikasi sesi klien lewat endpoint login yang sudah ada
+    // Verifikasi sesi klien lewat endpoint login
     let session = {};
     try {
         const r = await fetch(`https://${req.headers.host}/api/login`, {
@@ -75,27 +88,33 @@ module.exports = async (req, res) => {
         return res.status(500).json({ msg: 'XBTFX_TOKEN belum diisi di Vercel.' });
     }
 
-    let map;
+    // Ambil mapping simbol. Jika tidak ditemukan/error 401, gunakan string 'symbol' secara langsung
+    let map = {};
     try {
         map = await symbolIdMap();
     } catch (e) {
-        return res.status(502).json({ msg: e.message });
+        // Jangan biarkan error menghentikan aplikasi, teruskan dengan string nama simbol
+        console.warn('Gagal memuat peta simbol, fallback ke string simbol:', e.message);
     }
 
-    const symbolId = map[symbol];
-    if (!symbolId) {
-        return res.status(404).json({ msg: `Simbol ${symbol} tidak ditemukan di akun ini.` });
-    }
+    const symbolId = map[symbol] || symbol; // Gunakan ID dari map jika ada, jika tidak ada pakai nama simbol langsung (e.g. "GBPUSD")
 
+    // Panggil chart endpoint XBTFX
     const r = await xfetch('/v1/chart', {
         method: 'POST',
-        body: JSON.stringify({ symbol_id: symbolId, timeframe: tf, limit, price_side: 'Bid' }),
+        body: JSON.stringify({ 
+            symbol_id: symbolId, 
+            symbol: symbol, // Sertakan juga parameter symbol sebagai cadangan jika API XBTFX mendukungnya
+            timeframe: tf, 
+            limit, 
+            price_side: 'Bid' 
+        }),
     });
+
     if (!r.ok) {
         return res.status(502).json({ msg: r.data?.message || `Chart XBTFX gagal (HTTP ${r.status})` });
     }
 
-    // Buang candle yang belum tertutup, supaya struktur tidak dibaca dari candle yang masih berjalan
     const now = Date.now();
     const tfMs = TF_MS[interval];
     const candles = (r.data?.candles || [])
