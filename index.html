@@ -140,26 +140,55 @@
                 <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
                     <div class="flex justify-between items-center">
                         <label id="lblTargetAsset" class="text-[9px] font-bold text-gray-400">TARGET ASET AKTIF</label>
-                        <span id="selectedPairBadge" class="text-[9px] font-mono text-accentblue font-bold">hyperliquid|XAUUSD</span>
+                        <span id="selectedPairBadge" class="text-[9px] font-mono text-accentblue font-bold">binance|XAUUSD</span>
                     </div>
 
                     <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
                         <optgroup label="Gold, Silver & Forex">
-                            <option value="hyperliquid|XAUUSD">XAUUSD / Gold (Hyperliquid)</option>
-                            <option value="hyperliquid|XAGUSD">XAGUSD / Silver (Hyperliquid)</option>
+                            <option value="binance|XAUUSD">XAUUSD / Gold (Binance)</option>
+                            <option value="binance|XAGUSD">XAGUSD / Silver (Binance)</option>
                             <option value="veranta|EURUSD">EUR/USD (Veranta)</option>
                             <option value="veranta|USDJPY">USD/JPY (Veranta)</option>
                             <option value="veranta|GBPUSD">GBP/USD (Veranta)</option>
+                            <option value="veranta|AUDUSD">AUD/USD (Veranta)</option>
+                            <option value="veranta|USDCAD">USD/CAD (Veranta)</option>
+                            <option value="veranta|USDCHF">USD/CHF (Veranta)</option>
+                        </optgroup>
+                        <optgroup label="Komoditas">
+                            <option value="binance|CLUSDT">Crude Oil WTI (Binance)</option>
+                            <option value="binance|NATGASUSDT">Natural Gas (Binance)</option>
+                            <option value="binance|COPPERUSDT">Copper (Binance)</option>
+                            <option value="binance|XPDUSDT">Palladium (Binance)</option>
+                            <option value="binance|XPTUSDT">Platinum (Binance)</option>
+                            <option value="hyperliquid|BRENTOIL">Brent Oil (Hyperliquid)</option>
+                            <option value="hyperliquid|PALLADIUM">Palladium (Hyperliquid)</option>
+                            <option value="hyperliquid|PLATINUM">Platinum (Hyperliquid)</option>
                         </optgroup>
                         <optgroup label="Indices / Indeks Global">
                             <option value="ostium|DJI">Dow Jones / US30 (Ostium)</option>
-                            <option value="ostium|DAX">DAX 40 / Eropa (Ostium)</option>
+                            <option value="hyperliquid|SP500">S&amp;P 500 (Hyperliquid)</option>
+                            <option value="hyperliquid|XYZ100">Nasdaq 100 (Hyperliquid)</option>
+                            <option value="hyperliquid|JP225">Nikkei 225 (Hyperliquid)</option>
+                            <option value="binance|QQQUSDT">QQQ (Binance)</option>
                         </optgroup>
                         <optgroup label="Crypto">
+                            <option value="binance|BTCUSD">BTCUSD / Bitcoin (MT4/5)</option>
+                            <option value="binance|ETHUSD">ETHUSD / Ethereum (MT4/5)</option>
                             <option value="binance|BTCUSDT">BTC/USDT (Binance)</option>
                             <option value="binance|ETHUSDT">ETH/USDT (Binance)</option>
                             <option value="binance|SOLUSDT">SOL/USDT (Binance)</option>
                             <option value="binance|XRPUSDT">XRP/USDT (Binance)</option>
+                            <option value="binance|BNBUSDT">BNB/USDT (Binance)</option>
+                            <option value="binance|ADAUSDT">ADA/USDT (Binance)</option>
+                            <option value="binance|LINKUSDT">LINK/USDT (Binance)</option>
+                            <option value="binance|AVAXUSDT">AVAX/USDT (Binance)</option>
+                            <option value="binance|DOGEUSDT">DOGE/USDT (Binance)</option>
+                            <option value="binance|SUIUSDT">SUI/USDT (Binance)</option>
+                            <option value="binance|NEARUSDT">NEAR/USDT (Binance)</option>
+                            <option value="binance|DOTUSDT">DOT/USDT (Binance)</option>
+                            <option value="binance|LTCUSDT">LTC/USDT (Binance)</option>
+                            <option value="binance|TAOUSDT">TAO/USDT (Binance)</option>
+                            <option value="binance|HYPEUSDT">HYPE/USDT (Binance)</option>
                         </optgroup>
                     </select>
 
@@ -175,10 +204,10 @@
                     <div>
                         <label id="lblTradingStyle" class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
                         <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                            <option value="Scalping">Scalping (HTF: M15 | MTF: M5 | LTF: M1/M3)</option>
-                            <option value="Day Trading">Day Trading (HTF: H1 | MTF: M30 | LTF: M5)</option>
-                            <option value="Intraday">Intraday (HTF: H4 | MTF: H1 | LTF: M15+M5)</option>
-                            <option value="Swing">Swing Trading (HTF: W1 | MTF: H4 | LTF: H1+M15)</option>
+                            <option value="Scalping">Scalping (Agresif eksekusi)</option>
+                            <option value="Day Trading">Day Trading (Konservatif scalping)</option>
+                            <option value="Intraday">Intraday</option>
+                            <option value="Swing">Swing</option>
                         </select>
                     </div>
 
@@ -588,18 +617,57 @@
     const OFFSET_KEY = 'aluSignalZ_offsets_v1';
     const DEBUG = localStorage.getItem('alu_debug') === '1';
 
+    // Key = nilai dropdown (provider|KEY). coins = coin persis dari GET /v1/markets.
+    // decimals & pip harus sama dengan DECIMALS & PIP di api/generate.js.
+    // Pair dengan "base" adalah clone: tidak disubscribe, memakai tick pasangannya (base).
     const MARKETS = {
-        XAUUSD:  { provider: 'hyperliquid', coins: ['xyz:GOLD', 'xyz:XAU', 'GOLD', 'XAUUSD'], decimals: 2, pip: 0.1 },
-        XAGUSD:  { provider: 'hyperliquid', coins: ['xyz:SILVER', 'xyz:XAG', 'SILVER', 'XAGUSD'], decimals: 3, pip: 0.01 },
-        EURUSD:  { provider: 'veranta', coins: ['EURUSD', 'EUR/USD', 'EURUSD.FX'], decimals: 5, pip: 0.0001 },
-        USDJPY:  { provider: 'veranta', coins: ['USDJPY', 'USD/JPY', 'USDJPY.FX'], decimals: 3, pip: 0.01 },
-        GBPUSD:  { provider: 'veranta', coins: ['GBPUSD', 'GBP/USD', 'GBPUSD.FX'], decimals: 5, pip: 0.0001 },
-        BTCUSDT: { provider: 'binance', coins: ['BTCUSDT'], decimals: 2, pip: 1 },
-        ETHUSDT: { provider: 'binance', coins: ['ETHUSDT'], decimals: 2, pip: 0.1 },
-        SOLUSDT: { provider: 'binance', coins: ['SOLUSDT'], decimals: 2, pip: 0.01 },
-        XRPUSDT: { provider: 'binance', coins: ['XRPUSDT'], decimals: 4, pip: 0.0001 },
-        DJI:     { provider: 'ostium', coins: ['DJI', 'DJIUSD', 'DJI-USD', 'US30'], decimals: 2, pip: 1 },
-        DAX:     { provider: 'ostium', coins: ['DAX', 'GER40', 'DE40'], decimals: 2, pip: 1 },
+        // Gold, Silver & Forex
+        XAUUSD:     { provider: 'binance',     coins: ['XAUUSDT'],      decimals: 2, pip: 0.1 },
+        XAGUSD:     { provider: 'binance',     coins: ['XAGUSDT'],      decimals: 3, pip: 0.01 },
+        EURUSD:     { provider: 'veranta',     coins: ['EURUSD', 'EUR/USD', 'EURUSD.FX'], decimals: 5, pip: 0.0001 },
+        USDJPY:     { provider: 'veranta',     coins: ['USDJPY', 'USD/JPY', 'USDJPY.FX'], decimals: 3, pip: 0.01 },
+        GBPUSD:     { provider: 'veranta',     coins: ['GBPUSD', 'GBP/USD', 'GBPUSD.FX'], decimals: 5, pip: 0.0001 },
+        AUDUSD:     { provider: 'veranta',     coins: ['AUDUSD'],       decimals: 5, pip: 0.0001 },
+        USDCAD:     { provider: 'veranta',     coins: ['USDCAD'],       decimals: 5, pip: 0.0001 },
+        USDCHF:     { provider: 'veranta',     coins: ['USDCHF'],       decimals: 5, pip: 0.0001 },
+
+        // Komoditas
+        CLUSDT:     { provider: 'binance',     coins: ['CLUSDT'],       decimals: 2, pip: 0.01 },
+        NATGASUSDT: { provider: 'binance',     coins: ['NATGASUSDT'],   decimals: 3, pip: 0.001 },
+        COPPERUSDT: { provider: 'binance',     coins: ['COPPERUSDT'],   decimals: 4, pip: 0.0001 },
+        XPDUSDT:    { provider: 'binance',     coins: ['XPDUSDT'],      decimals: 2, pip: 0.1 },
+        XPTUSDT:    { provider: 'binance',     coins: ['XPTUSDT'],      decimals: 2, pip: 0.1 },
+        BRENTOIL:   { provider: 'hyperliquid', coins: ['xyz:BRENTOIL'], decimals: 2, pip: 0.01 },
+        PALLADIUM:  { provider: 'hyperliquid', coins: ['xyz:PALLADIUM'], decimals: 2, pip: 0.1 },
+        PLATINUM:   { provider: 'hyperliquid', coins: ['xyz:PLATINUM'], decimals: 2, pip: 0.1 },
+
+        // Indeks
+        DJI:        { provider: 'ostium',      coins: ['DJI', 'DJIUSD', 'DJI-USD', 'US30'], decimals: 2, pip: 1 },
+        SP500:      { provider: 'hyperliquid', coins: ['xyz:SP500'],    decimals: 2, pip: 1 },
+        XYZ100:     { provider: 'hyperliquid', coins: ['xyz:XYZ100'],   decimals: 2, pip: 1 },
+        JP225:      { provider: 'hyperliquid', coins: ['xyz:JP225'],    decimals: 0, pip: 1 },
+        QQQUSDT:    { provider: 'binance',     coins: ['QQQUSDT'],      decimals: 2, pip: 0.1 },
+
+        // Crypto
+        BTCUSDT:    { provider: 'binance', coins: ['BTCUSDT'], decimals: 2, pip: 1 },
+        ETHUSDT:    { provider: 'binance', coins: ['ETHUSDT'], decimals: 2, pip: 0.1 },
+        SOLUSDT:    { provider: 'binance', coins: ['SOLUSDT'], decimals: 2, pip: 0.01 },
+        XRPUSDT:    { provider: 'binance', coins: ['XRPUSDT'], decimals: 4, pip: 0.0001 },
+        BNBUSDT:    { provider: 'binance', coins: ['BNBUSDT'], decimals: 2, pip: 0.1 },
+        ADAUSDT:    { provider: 'binance', coins: ['ADAUSDT'], decimals: 4, pip: 0.0001 },
+        LINKUSDT:   { provider: 'binance', coins: ['LINKUSDT'], decimals: 3, pip: 0.001 },
+        AVAXUSDT:   { provider: 'binance', coins: ['AVAXUSDT'], decimals: 3, pip: 0.001 },
+        DOGEUSDT:   { provider: 'binance', coins: ['DOGEUSDT'], decimals: 5, pip: 0.00001 },
+        SUIUSDT:    { provider: 'binance', coins: ['SUIUSDT'],  decimals: 4, pip: 0.0001 },
+        NEARUSDT:   { provider: 'binance', coins: ['NEARUSDT'], decimals: 4, pip: 0.0001 },
+        DOTUSDT:    { provider: 'binance', coins: ['DOTUSDT'],  decimals: 4, pip: 0.0001 },
+        LTCUSDT:    { provider: 'binance', coins: ['LTCUSDT'],  decimals: 2, pip: 0.01 },
+        TAOUSDT:    { provider: 'binance', coins: ['TAOUSDT'],  decimals: 2, pip: 0.01 },
+        HYPEUSDT:   { provider: 'binance', coins: ['HYPEUSDT'], decimals: 2, pip: 0.01 },
+
+        // Clone MT4/5 (memakai tick BTCUSDT / ETHUSDT, lalu dikurangi offset)
+        BTCUSD:     { provider: 'binance', coins: ['BTCUSDT'], base: 'BTCUSDT', decimals: 2, pip: 1 },
+        ETHUSD:     { provider: 'binance', coins: ['ETHUSDT'], base: 'ETHUSDT', decimals: 2, pip: 0.1 },
     };
 
     const norm = s => String(s ?? '').toUpperCase().replace(/^XYZ:/, '').replace(/\.[A-Z]+$/, '').replace(/[^A-Z0-9]/g, '');
@@ -612,9 +680,23 @@
         });
     }
     const PROVIDERS = [...new Set(Object.values(ALIASES).flat().map(a => a.provider))];
+
+    // Satu coin bisa dipakai beberapa key (contoh: BTCUSDT dan BTCUSD)
     const COIN_KEY = new Map();
     for (const [key, list] of Object.entries(ALIASES))
-        for (const a of list) COIN_KEY.set(`${a.provider.toLowerCase()}|${norm(a.coin)}`, key);
+        for (const a of list) {
+            const k = `${a.provider.toLowerCase()}|${norm(a.coin)}`;
+            const arr = COIN_KEY.get(k) || [];
+            if (!arr.includes(key)) arr.push(key);
+            COIN_KEY.set(k, arr);
+        }
+
+    // Hanya pair asli yang disubscribe. Clone tidak.
+    const SUB_KEYS = Object.keys(MARKETS).filter(k => !MARKETS[k].base);
+
+    // true  = order pending dibatalkan jika SL tersentuh dulu sebelum entry (setup dianggap rusak)
+    // false = order pending hanya menunggu sampai harga masuk zona atau waktu habis
+    const PENDING_SL_CANCEL = true;
 
     // ================= STATE =================
     let ws = null, reconnectTimer = null, pingTimer = null;
@@ -626,7 +708,6 @@
     const pendingReq = new Map();
     const dirty = new Set();
     const seenOps = new Set();
-    const unmapped = new Set();
     let seq = 10;
     const nextId = () => seq++;
 
@@ -637,7 +718,24 @@
     const displayName = key => key.replace(/^xyz:/, '');
     const parseLevel = v => Number.isFinite(parseFloat(v)) ? parseFloat(v) : null;
 
+    // Offset bawaan per pair. Positif = tambah, negatif = kurang.
+    // Sumber: selisih TradingView (screenshot) terhadap harga app pada waktu yang sama.
+    // Kalibrasi manual (KALIBRASI) menimpa nilai ini. RESET mengembalikan ke nilai bawaan.
+    const DEFAULT_OFFSETS = {
+        XAUUSD: -8.1,       // tebakan, kalibrasi ulang dengan harga MT
+        XAGUSD: -0.07,      // screenshot 07.19
+        EURUSD: -0.00053,   // screenshot 07.19
+        GBPUSD: -0.00045,
+        USDJPY: 0.048,
+        AUDUSD: 0.00004,
+        USDCAD: 0.00006,
+        USDCHF: 0.00003,
+        BTCUSD: -108.2,     // screenshot 07.34: BTCUSD 75.812,08 vs BTCUSDT 75.920,32
+        ETHUSD: -3.5,       // screenshot 07.34: ETHUSD 2.237,20 vs ETHUSDT 2.240,70
+    };
+
     const offsets = (() => { try { return JSON.parse(localStorage.getItem(OFFSET_KEY)) || {}; } catch { return {}; } })();
+    const getOffset = key => offsets[key] ?? DEFAULT_OFFSETS[key] ?? 0;
 
     function pushHistory(key, p) {
         const arr = history[key] ??= [];
@@ -648,8 +746,11 @@
 
     // ================= KALIBRASI =================
     function updateCalibInfo() {
-        const key = selectedKey(), off = offsets[key] || 0;
-        document.getElementById('calibInfo').textContent = `Offset ${displayName(key)}: ${off >= 0 ? '+' : ''}${off.toFixed(MARKETS[key]?.decimals ?? 2)}`;
+        const key = selectedKey(), off = getOffset(key);
+        const m = MARKETS[key];
+        const dec = m?.decimals ?? 2;
+        const pipTxt = m?.pip ? ` (${(off / m.pip).toFixed(1)} pip)` : '';
+        document.getElementById('calibInfo').textContent = `Offset ${displayName(key)}: ${off >= 0 ? '+' : ''}${off.toFixed(dec)}${pipTxt}`;
     }
     function calibrate() {
         const key = selectedKey(), raw = rawPrices[key];
@@ -756,25 +857,25 @@
         for (const ev of f.events || []) {
             if (!ev || !ev.symbol) continue;
             const prov = String(ev.provider ?? '').toLowerCase();
-            const key = COIN_KEY.get(`${prov}|${norm(ev.symbol)}`);
-            if (!key) continue;
-            const p = parseFloat(ev.price ?? ev.bid ?? ev.mid);
-            if (!(p > 0)) continue;
-            kindLock[key] ??= ev.kind;
-            if (ev.kind && ev.kind !== kindLock[key]) continue;
-
-            symbolOf[key] = ev.symbol;
-            providerOf[key] = prov;
-            rawPrices[key] = p;
-            markSrc(key, 'LIVE', 'text-emerald-400');
-            updatePrice(key, p + (offsets[key] || 0), ev);
+            const keys = COIN_KEY.get(`${prov}|${norm(ev.symbol)}`) || [];
+            const p0 = parseFloat(ev.price ?? ev.bid ?? ev.mid);
+            if (!(p0 > 0)) continue;
+            for (const key of keys) {
+                kindLock[key] ??= ev.kind;
+                if (ev.kind && ev.kind !== kindLock[key]) continue;
+                symbolOf[key] = ev.symbol;
+                providerOf[key] = prov;
+                rawPrices[key] = p0;
+                markSrc(key, 'LIVE', 'text-emerald-400');
+                updatePrice(key, p0 + getOffset(key), ev);
+            }
         }
     }
 
     function watchdog() {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
         const now = Date.now();
-        for (const key of Object.keys(MARKETS)) {
+        for (const key of SUB_KEYS) {
             const st = mstate[key];
             if (!st) continue;
             if (st.id == null) {
@@ -822,7 +923,7 @@
             lastIn = Date.now();
             setWsStatus('CONNECTED', 'green');
             sendJSON(sock, { op: 'sub', id: nextId(), channel: 'status', payload: { providers: PROVIDERS } });
-            for (const key of Object.keys(MARKETS)) subscribeMarket(sock, key, 0);
+            for (const key of SUB_KEYS) subscribeMarket(sock, key, 0);
             setTimeout(() => { if (ws === sock) refreshBias(selectedKey(), true); }, 1500);
 
             pingTimer = setInterval(() => {
@@ -964,7 +1065,7 @@
             if (t.result === 'CANCEL') return { text: 'BATAL', color: 'gray' };
             return { text: resultLabel(t), color: t.pips > 0 ? 'green' : t.pips < 0 ? 'red' : 'gray' };
         }
-        if (t.status === 'PENDING') return { text: 'MENUNGGU ZONA', color: 'yellow' };
+        if (t.status === 'PENDING') return { text: 'WAITING ENTRY', color: 'yellow' };
         return { text: maxHitIndex(t) ? `TP${maxHitIndex(t)} HIT` : 'RUNNING', color: 'blue' };
     }
 
@@ -1032,18 +1133,25 @@
     function evaluateTrade(t, price) {
         const d = t.dir;
 
-        // Entry limit: menunggu harga menyentuh level entry (tepi zona)
+        // Order pending (WAITING ENTRY): menunggu harga masuk zona.
+        // TP1 yang tersentuh sebelum entry TIDAK membatalkan order.
+        // SL bisa membatalkan order jika PENDING_SL_CANCEL aktif. Waktu habis ditangani expirePending().
         if (t.status === 'PENDING') {
-            if (d > 0 ? price <= t.entry : price >= t.entry) {
+            const stopFill = t.fill === 'STOP';
+            const filled = stopFill
+                ? (d > 0 ? price >= t.entry : price <= t.entry)
+                : (d > 0 ? price <= t.entry : price >= t.entry);
+            if (filled) {
                 t.status = 'RUNNING';
                 t.filledAt = Date.now();
                 return true;
             }
-            const slHit = d > 0 ? price <= t.sl : price >= t.sl;
-            const tp1Hit = t.tp1 != null && (d > 0 ? price >= t.tp1 : price <= t.tp1);
-            if (slHit || tp1Hit) {
-                cancelTrade(t, 'SL atau TP1 tersentuh sebelum zona');
-                return true;
+            if (PENDING_SL_CANCEL) {
+                const slHit = d > 0 ? price <= t.sl : price >= t.sl;
+                if (slHit) {
+                    cancelTrade(t, 'SL tersentuh sebelum entry');
+                    return true;
+                }
             }
             return false;
         }
@@ -1488,14 +1596,16 @@
         const zMax = parseLevel(t.zone?.max ?? t.card?.entry_max);
         const hasZone = zMin != null && zMax != null;
 
-        // Skala harga
+        // Skala harga: hanya dari level trade (entry, SL, TP, zona), BUKAN dari harga live.
+        // Dengan begitu garis entry/SL/TP tidak bergeser saat harga bergerak.
         let lo = Infinity, hi = -Infinity;
-        for (const p of pts) { if (p.p < lo) lo = p.p; if (p.p > hi) hi = p.p; }
         for (const l of levels) { lo = Math.min(lo, l.value); hi = Math.max(hi, l.value); }
         if (hasZone) { lo = Math.min(lo, zMin, zMax); hi = Math.max(hi, zMin, zMax); }
+        if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
         if (hi - lo <= 0) { const d = Math.abs(hi) * 0.001 || 1; lo -= d; hi += d; }
         const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
-        const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * plotH;
+        // Harga live yang keluar dari rentang ditahan di tepi chart (tidak memperbesar skala)
+        const yOf = p => Math.max(plotT, Math.min(plotB, plotT + (1 - (p - lo) / (hi - lo)) * plotH));
 
         // 1. Grid dan pemisah kolom label
         ctx.save();
@@ -1761,7 +1871,7 @@
     // ================= AI SIGNAL =================
     // Harus sama dengan STYLES di api/generate.js
     const STYLE_TF = {
-        'Scalping':    { htf: '15m', mtf: '5m' },
+        'Scalping':    { htf: '15m', mtf: '5m',  ltf: '1m' },
         'Day Trading': { htf: '1h',  mtf: '30m', ltf: '5m' },
         'Intraday':    { htf: '4h',  mtf: '1h',  ltf: '15m' },
         'Swing':       { htf: '1d',  mtf: '4h',  ltf: '1h' },
@@ -1802,7 +1912,7 @@
             const tf = STYLE_TF[tradingStyle];
             if (!tf) throw new Error('gaya trading tidak dikenal');
 
-            const off = offsets[symbolKey] || 0;
+            const off = getOffset(symbolKey);
             const [htfRows, mtfRows, ltfRows] = await Promise.all([
                 loadCandles(symbolKey, tf.htf),
                 loadCandles(symbolKey, tf.mtf),
@@ -1842,7 +1952,7 @@
             const t = {
                 id: Date.now().toString(36), key: symbolKey, style: tradingStyle,
                 signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
-                mode: s.mode, status: s.status,
+                mode: s.mode, status: s.status, fill: s.fill || null,
                 entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
                 zone: s.zone,
                 expiresAt: s.expireMs ? Date.now() + s.expireMs : null,
