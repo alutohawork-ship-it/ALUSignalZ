@@ -1480,7 +1480,7 @@
         renderCalendar();
     }
 
-    // ================= CHART =================
+    // ================= CHART (PROFESSIONAL CANDLESTICK) =================
     const cv = document.getElementById('priceChart');
     const ctx = cv ? cv.getContext('2d') : null;
     const CHART_GUT = 100;
@@ -1505,16 +1505,6 @@
         ctx.arcTo(x, y + h, x, y, r);
         ctx.arcTo(x, y, x + w, y, r);
         ctx.closePath();
-    }
-
-    function tracePath(P) {
-        ctx.moveTo(P[0].x, P[0].y);
-        for (let i = 1; i < P.length - 1; i++) {
-            const mx = (P[i].x + P[i + 1].x) / 2, my = (P[i].y + P[i + 1].y) / 2;
-            ctx.quadraticCurveTo(P[i].x, P[i].y, mx, my);
-        }
-        const L = P[P.length - 1];
-        ctx.lineTo(L.x, L.y);
     }
 
     function drawChart() {
@@ -1542,7 +1532,7 @@
             return;
         }
 
-        const MIN_SPAN_MS = 15000;
+        const MIN_SPAN_MS = 60000;
         const dec = MARKETS[t.key]?.decimals ?? 2;
         const fmtP = v => Number(v).toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
 
@@ -1551,19 +1541,32 @@
         const plotW = plotR - plotL, plotH = plotB - plotT;
         const now = Date.now();
 
-        const headX = plotL + plotW * 0.82;
-        const last = arr[arr.length - 1];
-
+        const headX = plotL + plotW * 0.85;
         const span = Math.min(Math.max(now - arr[0].t, MIN_SPAN_MS), CHART_SPAN_MS);
         const xOfT = tm => headX - ((now - tm) / span) * (headX - plotL);
 
-        const pts = arr.filter(p => xOfT(p.t) >= plotL);
+        // Agregasi tick ke candlestick real-time (3 detik per lilin)
+        const tfMs = 3000;
+        const bucketMap = {};
+        for (const p of arr) {
+            const bTime = Math.floor(p.t / tfMs) * tfMs;
+            if (!bucketMap[bTime]) {
+                bucketMap[bTime] = { t: bTime, o: p.p, h: p.p, l: p.p, c: p.p };
+            } else {
+                bucketMap[bTime].h = Math.max(bucketMap[bTime].h, p.p);
+                bucketMap[bTime].l = Math.min(bucketMap[bTime].l, p.p);
+                bucketMap[bTime].c = p.p;
+            }
+        }
+        const candles = Object.values(bucketMap).sort((a, b) => a.t - b.t);
+
         const levels = chartLevels(t);
         const zMin = parseLevel(t.zone?.min ?? t.card?.entry_min);
         const zMax = parseLevel(t.zone?.max ?? t.card?.entry_max);
         const hasZone = zMin != null && zMax != null;
 
         let lo = Infinity, hi = -Infinity;
+        for (const c of candles) { lo = Math.min(lo, c.l); hi = Math.max(hi, c.h); }
         for (const l of levels) { lo = Math.min(lo, l.value); hi = Math.max(hi, l.value); }
         if (hasZone) { lo = Math.min(lo, zMin, zMax); hi = Math.max(hi, zMin, zMax); }
         if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
@@ -1571,6 +1574,7 @@
         const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
         const yOf = p => Math.max(plotT, Math.min(plotB, plotT + (1 - (p - lo) / (hi - lo)) * plotH));
 
+        // Render Grid Latar Belakang
         ctx.save();
         ctx.lineWidth = 1;
         ctx.strokeStyle = 'rgba(148,163,184,0.07)';
@@ -1582,6 +1586,7 @@
         ctx.beginPath(); ctx.moveTo(plotR + 0.5, plotT); ctx.lineTo(plotR + 0.5, plotB); ctx.stroke();
         ctx.restore();
 
+        // Render Zona Order Block / FVG jika ada
         if (hasZone) {
             const top = yOf(Math.max(zMin, zMax)), bot = yOf(Math.min(zMin, zMax));
             const hgt = Math.max(bot - top, 2);
@@ -1600,6 +1605,7 @@
             ctx.fillText((t.zoneLabel || 'ZONE').toUpperCase(), plotL + 5, top + 3);
         }
 
+        // Render Garis Level (Entry, SL, TP)
         for (const l of levels) {
             const y = yOf(l.value);
             ctx.save();
@@ -1611,57 +1617,38 @@
             ctx.restore();
         }
 
-        const P = pts.map(p => ({ x: xOfT(p.t), y: yOf(p.p) }));
-        P.push({ x: headX, y: yOf(last.p) });
-        const hx = headX, hy = yOf(last.p);
+        // Render Candlestick (Batang Lilin) Profesional
+        const candleWidth = Math.max(3, Math.min(10, (plotW / candles.length) * 0.6));
+        for (const c of candles) {
+            const x = xOfT(c.t);
+            if (x < plotL - 10 || x > plotR + 10) continue;
 
-        if (P.length >= 2) {
-            ctx.save();
-            ctx.beginPath();
-            tracePath(P);
-            ctx.lineTo(P[P.length - 1].x, plotB);
-            ctx.lineTo(P[0].x, plotB);
-            ctx.closePath();
-            const ag = ctx.createLinearGradient(0, plotT, 0, plotB);
-            ag.addColorStop(0, 'rgba(41,98,255,0.30)');
-            ag.addColorStop(1, 'rgba(41,98,255,0)');
-            ctx.fillStyle = ag;
-            ctx.fill();
-            ctx.restore();
+            const isGreen = c.c >= c.o;
+            const color = isGreen ? '#10b981' : '#ef4444';
 
             ctx.save();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.2;
             ctx.beginPath();
-            tracePath(P);
-            ctx.strokeStyle = '#3b82f6';
-            ctx.lineWidth = 2;
-            ctx.lineJoin = 'round';
-            ctx.lineCap = 'round';
-            ctx.shadowColor = 'rgba(59,130,246,0.6)';
-            ctx.shadowBlur = 8;
+            ctx.moveTo(x, yOf(c.h));
+            ctx.lineTo(x, yOf(c.l));
             ctx.stroke();
+
+            const topBody = yOf(Math.max(c.o, c.c));
+            const botBody = yOf(Math.min(c.o, c.c));
+            const bodyHeight = Math.max(botBody - topBody, 1);
+
+            ctx.fillStyle = color;
+            ctx.fillRect(x - candleWidth / 2, topBody, candleWidth, bodyHeight);
             ctx.restore();
         }
 
-        for (const k of TP_KEYS) {
-            const h = t.hits?.[k];
-            if (!h || t[k] == null) continue;
-            const x = xOfT(h.at);
-            if (x < plotL || x > plotR) continue;
-            ctx.beginPath(); ctx.arc(x, yOf(t[k]), 4, 0, Math.PI * 2);
-            ctx.fillStyle = '#34d399'; ctx.fill();
-            ctx.strokeStyle = '#0b0e14'; ctx.lineWidth = 1.5; ctx.stroke();
-        }
-
-        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 260);
-        ctx.beginPath(); ctx.arc(hx, hy, 4 + pulse * 5, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(59,130,246,${(0.38 - pulse * 0.28).toFixed(3)})`; ctx.fill();
-        ctx.beginPath(); ctx.arc(hx, hy, 3.5, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffffff'; ctx.fill();
-        ctx.lineWidth = 2; ctx.strokeStyle = '#3b82f6'; ctx.stroke();
-
+        const last = arr[arr.length - 1];
+        const hx = headX, hy = yOf(last.p);
         const dirNow = prices[t.key]?.dir ?? 0;
         const pillColor = dirNow > 0 ? '#10b981' : dirNow < 0 ? '#ef4444' : '#3b82f6';
         const pillTxt = fmtP(last.p);
+
         ctx.font = 'bold 10px ui-monospace, monospace';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
@@ -1669,11 +1656,13 @@
         const px = Math.max(plotL, Math.min(hx - pw / 2, plotR - pw));
         let py = hy - ph - 9;
         if (py < plotT - 4) py = hy + 9;
+
         rrPath(px, py, pw, ph, 4);
         ctx.fillStyle = pillColor; ctx.fill();
         ctx.fillStyle = '#ffffff';
         ctx.fillText(pillTxt, px + 6, py + ph / 2 + 0.5);
 
+        // Render Label Harga Samping Kanan (Y-Axis)
         const tags = levels.map(l => ({
             text: `${l.hit ? '✓ ' : ''}${l.label} ${fmtP(l.value)}`,
             c: l.c, bg: l.bg, y: yOf(l.value),
@@ -1846,7 +1835,6 @@
         const ck = `${key}|${interval}`;
         const hit = CANDLE_CACHE[ck];
         
-        // Cache browser diperpanjang 3 menit (180.000 ms) agar kuota TickerLayer sangat hemat
         if (hit && Date.now() - hit.at < 180000) return hit.rows;
 
         try {
@@ -1860,7 +1848,6 @@
             console.warn('Gagal ambil data candle via backend/TickerLayer, beralih ke tick lokal:', err);
         }
 
-        // --- FALLBACK KE LOKAL (Tick WebSocket / Agregator OHLC) ---
         const tfMinutes = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 }[interval] || 1;
         const tfKey = `${tfMinutes}m`;
         let candles = (marketCandles[key]?.[tfKey] || []).map(c => ({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close }));
@@ -1977,7 +1964,6 @@
     // ================= BOOT =================
     window.onload = () => {
         checkSession();
-
         buildTicker();
         updateCalibInfo();
         trades = loadTrades();
