@@ -33,27 +33,34 @@
 
     <!-- ================= HALAMAN LOGIN ================= -->
     <div id="authScreen" class="fixed inset-0 z-50 bg-darkbg/95 backdrop-blur-md flex flex-col items-center justify-center p-4">
+
+        <!-- Tombol Tentang dan Bahasa (bisa dipakai sebelum login) -->
+        <div class="absolute top-3 right-3 flex items-center gap-1.5">
+            <button id="authAboutBtn" data-ui="aboutBtn" onclick="openAbout()" class="text-[9px] font-mono font-bold px-2.5 py-1 rounded bg-accentblue/20 text-accentblue border border-accentblue/40 hover:bg-accentblue/30">TENTANG</button>
+            <button id="authLangBtn" onclick="toggleLang()" class="text-[9px] font-mono font-bold px-2.5 py-1 rounded bg-panelborder text-gray-300 border border-panelborder hover:border-accentblue">ID 🌐</button>
+        </div>
+
         <div class="bg-cardbg border border-panelborder rounded-2xl p-6 max-w-sm w-full space-y-5 shadow-2xl">
             <div class="text-center space-y-1">
                 <div class="bg-accentblue w-12 h-12 rounded-xl flex items-center justify-center text-white mx-auto text-xl shadow-lg shadow-accentblue/30">
                     <i class="fa-solid fa-chart-line"></i>
                 </div>
-                <h1 class="text-xl font-extrabold text-white pt-2 tracking-tight">Welcome, Alu Signal Z</h1>
-                <p class="text-[11px] text-gray-400">Silakan masukkan email terdaftar atau kode admin</p>
+                <h1 class="text-xl font-extrabold text-white pt-2 tracking-tight" data-ui="authTitle">Welcome, Alu Signal Z</h1>
+                <p class="text-[11px] text-gray-400" data-ui="authSub">Silakan masukkan email terdaftar atau kode admin</p>
             </div>
 
             <form id="authForm" onsubmit="handleUniversalLogin(event)" class="space-y-4 pt-2">
                 <div>
-                    <label class="text-[10px] font-bold text-gray-400 block mb-1 tracking-wider">ACCESS LOGIN</label>
-                    <input type="text" id="authInput" required class="w-full bg-darkbg border border-panelborder rounded-xl p-3 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="nama@email.com atau Kode Admin">
+                    <label class="text-[10px] font-bold text-gray-400 block mb-1 tracking-wider" data-ui="authLabel">ACCESS LOGIN</label>
+                    <input type="text" id="authInput" required data-ui-ph="authPh" class="w-full bg-darkbg border border-panelborder rounded-xl p-3 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="nama@email.com atau Kode Admin">
                 </div>
                 <button type="submit" class="w-full bg-accentblue hover:bg-blue-600 text-white font-bold py-3 rounded-xl text-xs transition shadow-lg shadow-accentblue/20 flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-right-to-bracket"></i> MASUK SISTEM
+                    <i class="fa-solid fa-right-to-bracket"></i> <span data-ui="authBtn">MASUK SISTEM</span>
                 </button>
             </form>
 
             <div class="pt-4 border-t border-panelborder/60 text-center space-y-1.5">
-                <p class="text-[10px] text-gray-400 font-medium">Bantuan & Informasi Admin:</p>
+                <p class="text-[10px] text-gray-400 font-medium" data-ui="authHelp">Bantuan & Informasi Admin:</p>
                 <a href="https://wa.me/6285817038501?text=Halo%20Admin%20Alu%20Signal%20Z,%20saya%20ingin%20bertanya" target="_blank" class="inline-flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-full text-xs font-bold font-mono transition">
                     <i class="fa-brands fa-whatsapp text-sm text-emerald-400"></i> +6285817038501
                 </a>
@@ -154,15 +161,41 @@
                             <option value="veranta|USDCAD">USD/CAD (Veranta)</option>
                             <option value="veranta|USDCHF">USD/CHF (Veranta)</option>
                         </optgroup>
+                        <optgroup label="Komoditas">
+                            <option value="binance|CLUSDT">Crude Oil WTI (Binance)</option>
+                            <option value="binance|NATGASUSDT">Natural Gas (Binance)</option>
+                            <option value="binance|COPPERUSDT">Copper (Binance)</option>
+                            <option value="binance|XPDUSDT">Palladium (Binance)</option>
+                            <option value="binance|XPTUSDT">Platinum (Binance)</option>
+                            <option value="hyperliquid|BRENTOIL">Brent Oil (Hyperliquid)</option>
+                            <option value="hyperliquid|PALLADIUM">Palladium (Hyperliquid)</option>
+                            <option value="hyperliquid|PLATINUM">Platinum (Hyperliquid)</option>
+                        </optgroup>
                         <optgroup label="Indices / Indeks Global">
                             <option value="ostium|DJI">Dow Jones / US30 (Ostium)</option>
-                            <option value="ostium|DAX">DAX 40 / Eropa (Ostium)</option>
+                            <option value="hyperliquid|SP500">S&amp;P 500 (Hyperliquid)</option>
+                            <option value="hyperliquid|XYZ100">Nasdaq 100 (Hyperliquid)</option>
+                            <option value="hyperliquid|JP225">Nikkei 225 (Hyperliquid)</option>
+                            <option value="binance|QQQUSDT">QQQ (Binance)</option>
                         </optgroup>
                         <optgroup label="Crypto">
+                            <option value="binance|BTCUSD">BTCUSD / Bitcoin (MT4/5)</option>
+                            <option value="binance|ETHUSD">ETHUSD / Ethereum (MT4/5)</option>
                             <option value="binance|BTCUSDT">BTC/USDT (Binance)</option>
                             <option value="binance|ETHUSDT">ETH/USDT (Binance)</option>
                             <option value="binance|SOLUSDT">SOL/USDT (Binance)</option>
                             <option value="binance|XRPUSDT">XRP/USDT (Binance)</option>
+                            <option value="binance|BNBUSDT">BNB/USDT (Binance)</option>
+                            <option value="binance|ADAUSDT">ADA/USDT (Binance)</option>
+                            <option value="binance|LINKUSDT">LINK/USDT (Binance)</option>
+                            <option value="binance|AVAXUSDT">AVAX/USDT (Binance)</option>
+                            <option value="binance|DOGEUSDT">DOGE/USDT (Binance)</option>
+                            <option value="binance|SUIUSDT">SUI/USDT (Binance)</option>
+                            <option value="binance|NEARUSDT">NEAR/USDT (Binance)</option>
+                            <option value="binance|DOTUSDT">DOT/USDT (Binance)</option>
+                            <option value="binance|LTCUSDT">LTC/USDT (Binance)</option>
+                            <option value="binance|TAOUSDT">TAO/USDT (Binance)</option>
+                            <option value="binance|HYPEUSDT">HYPE/USDT (Binance)</option>
                         </optgroup>
                     </select>
 
@@ -178,10 +211,10 @@
                     <div>
                         <label id="lblTradingStyle" class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
                         <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                            <option value="Scalping">Scalping (HTF: M15 | MTF: M5 | LTF: M1/M3)</option>
-                            <option value="Day Trading">Day Trading (HTF: H1 | MTF: M30 | LTF: M5)</option>
-                            <option value="Intraday">Intraday (HTF: H4 | MTF: H1 | LTF: M15+M5)</option>
-                            <option value="Swing">Swing Trading (HTF: W1 | MTF: H4 | LTF: H1+M15)</option>
+                            <option value="Scalping">Scalping (Agresif eksekusi)</option>
+                            <option value="Day Trading">Day Trading (Konservatif scalping)</option>
+                            <option value="Intraday">Intraday</option>
+                            <option value="Swing">Swing</option>
                         </select>
                     </div>
 
@@ -398,6 +431,27 @@
         </footer>
     </div>
 
+    <!-- ================= MODAL TENTANG ================= -->
+    <div id="aboutModal" class="hidden fixed inset-0 z-[60] bg-darkbg/95 backdrop-blur-md flex items-center justify-center p-4" onclick="if (event.target === this) closeAbout()">
+        <div class="bg-cardbg border border-panelborder rounded-2xl p-5 max-w-md w-full max-h-[85vh] overflow-y-auto space-y-4 shadow-2xl">
+            <div class="flex justify-between items-center border-b border-panelborder pb-3">
+                <div class="flex items-center gap-2">
+                    <div class="bg-accentblue w-8 h-8 rounded-lg flex items-center justify-center text-white">
+                        <i class="fa-solid fa-circle-info text-sm"></i>
+                    </div>
+                    <h2 class="text-sm font-extrabold text-white" data-ui="aboutTitle">Tentang Alu Signal Z</h2>
+                </div>
+                <button onclick="closeAbout()" aria-label="Tutup" class="text-gray-400 hover:text-white px-2 py-1">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div id="aboutBody" class="space-y-3"></div>
+
+            <button onclick="closeAbout()" data-ui="aboutClose" class="w-full bg-accentblue hover:bg-blue-600 text-white font-bold py-2.5 rounded-xl text-xs transition">Tutup</button>
+        </div>
+    </div>
+
     <!-- ================= SCRIPT ================= -->
     <script>
     // ================= LOGIN & ADMIN (server-side via /api) =================
@@ -552,15 +606,92 @@
 
     // ================= BAHASA =================
     let currentLang = 'id';
+
     const DICT = {
         id: { subHeader: "Pure SMC 3-Layer Terminal", targetAsset: "TARGET ASET AKTIF", tradingStyle: "GAYA TRADING / STRATEGI", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE PRICE MAP", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "Belum ada history.", running: "berjalan", liveStream: "LIVE MARKET STREAM", disclaimer: "Aktivitas trading beresiko dan tidak ada jaminan profit. Aplikasi ini bukan financial advisor dan sinyal bukan ajakan untuk membeli atau menjual. Atur risiko dan ukuran posisi sesuai kemampuanmu sendiri." },
         en: { subHeader: "Pure SMC 3-Layer Terminal", targetAsset: "ACTIVE TARGET ASSET", tradingStyle: "TRADING STYLE / STRATEGY", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE PRICE MAP", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "No trading history yet.", running: "running", liveStream: "LIVE MARKET STREAM", disclaimer: "Trading involves risk and there is no guarantee of profit. This app is not a financial advisor and signals are not an invitation to buy or sell. Manage your risk and position size according to your own ability." }
     };
+
+    // Teks halaman login dan modal Tentang
+    const UI = {
+        id: {
+            authTitle: 'Selamat datang di Alu Signal Z',
+            authSub: 'Silakan masukkan email terdaftar atau kode admin',
+            authLabel: 'AKSES LOGIN',
+            authPh: 'nama@email.com atau Kode Admin',
+            authBtn: 'MASUK SISTEM',
+            authHelp: 'Bantuan & Informasi Admin:',
+            aboutBtn: 'TENTANG',
+            aboutTitle: 'Tentang Alu Signal Z',
+            aboutClose: 'Tutup',
+            about: [
+                { h: 'Scalping', p: 'Agresif. Entry mengikuti pergerakan struktur M5 dan M1.' },
+                { h: 'Day Trading', p: 'Konservatif. Entry berdasarkan area zona H1 dan M30.' },
+                { h: 'Fitur', p: '1. PNL Calendar\n2. History Trading' }
+            ]
+        },
+        en: {
+            authTitle: 'Welcome to Alu Signal Z',
+            authSub: 'Please enter your registered email or admin code',
+            authLabel: 'ACCESS LOGIN',
+            authPh: 'name@email.com or Admin Code',
+            authBtn: 'SIGN IN',
+            authHelp: 'Support & Admin Information:',
+            aboutBtn: 'ABOUT',
+            aboutTitle: 'About Alu Signal Z',
+            aboutClose: 'Close',
+            about: [
+                { h: 'Scalping', p: 'Aggressive. Entry follows M5 and M1 structure movement.' },
+                { h: 'Day Trading', p: 'Conservative. Entry based on H1 and M30 zone areas.' },
+                { h: 'Features', p: '1. PNL Calendar\n2. Trading History' }
+            ]
+        }
+    };
+
+    // Terapkan bahasa ke halaman login dan modal Tentang
+    function applyAuthLang() {
+        const d = UI[currentLang];
+        document.querySelectorAll('[data-ui]').forEach(el => {
+            const key = el.dataset.ui;
+            if (d[key] !== undefined) el.textContent = d[key];
+        });
+        document.querySelectorAll('[data-ui-ph]').forEach(el => {
+            el.placeholder = d[el.dataset.uiPh];
+        });
+        document.getElementById('authLangBtn').textContent = `${currentLang.toUpperCase()} 🌐`;
+        document.getElementById('langBtn').textContent = `${currentLang.toUpperCase()} 🌐`;
+        renderAbout();
+    }
+
+    function renderAbout() {
+        const d = UI[currentLang];
+        document.getElementById('aboutBody').innerHTML = d.about.map(s => `
+            <div class="space-y-1">
+                <p class="text-[11px] font-bold text-white">${s.h}</p>
+                <p class="text-[10px] text-gray-400 leading-relaxed whitespace-pre-line">${s.p}</p>
+            </div>`).join('');
+    }
+
+    function openAbout() {
+        renderAbout();
+        document.getElementById('aboutModal').classList.remove('hidden');
+    }
+
+    function closeAbout() {
+        document.getElementById('aboutModal').classList.add('hidden');
+    }
+
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') closeAbout();
+    });
+
+    // Ganti bahasa. Dipakai dari halaman login maupun dari header setelah masuk.
     function toggleLang() {
         currentLang = currentLang === 'id' ? 'en' : 'id';
-        document.getElementById('langBtn').textContent = `${currentLang.toUpperCase()} 🌐`;
+        applyAuthLang();
         updateTexts();
     }
+
     function updateTexts() {
         const d = DICT[currentLang];
         document.getElementById('txtSubHeader').textContent = d.subHeader;
@@ -591,21 +722,57 @@
     const OFFSET_KEY = 'aluSignalZ_offsets_v1';
     const DEBUG = localStorage.getItem('alu_debug') === '1';
 
+    // Key = nilai dropdown (provider|KEY). coins = coin persis dari GET /v1/markets.
+    // decimals & pip harus sama dengan DECIMALS & PIP di api/generate.js.
+    // Pair dengan "base" adalah clone: tidak disubscribe, memakai tick pasangannya (base).
     const MARKETS = {
-        XAUUSD:  { provider: 'hyperliquid', coins: ['binance|XAUUSDT', 'xyz:GOLD', 'xyz:XAU', 'GOLD', 'XAUUSD'], decimals: 2, pip: 0.1 },
-        XAGUSD:  { provider: 'hyperliquid', coins: ['binance|XAGUSDT', 'xyz:SILVER', 'xyz:XAG', 'SILVER', 'XAGUSD'], decimals: 3, pip: 0.01 },
-        EURUSD:  { provider: 'veranta', coins: ['EURUSD', 'EUR/USD', 'EURUSD.FX'], decimals: 5, pip: 0.0001 },
-        USDJPY:  { provider: 'veranta', coins: ['USDJPY', 'USD/JPY', 'USDJPY.FX'], decimals: 3, pip: 0.01 },
-        GBPUSD:  { provider: 'veranta', coins: ['GBPUSD', 'GBP/USD', 'GBPUSD.FX'], decimals: 5, pip: 0.0001 },
-        AUDUSD:  { provider: 'veranta', coins: ['AUDUSD', 'AUD/USD', 'AUDUSD.FX'], decimals: 5, pip: 0.0001 },
-        USDCAD:  { provider: 'veranta', coins: ['USDCAD', 'USD/CAD', 'USDCAD.FX'], decimals: 5, pip: 0.0001 },
-        USDCHF:  { provider: 'veranta', coins: ['USDCHF', 'USD/CHF', 'USDCHF.FX'], decimals: 5, pip: 0.0001 },
-        BTCUSDT: { provider: 'binance', coins: ['BTCUSDT'], decimals: 2, pip: 1 },
-        ETHUSDT: { provider: 'binance', coins: ['ETHUSDT'], decimals: 2, pip: 0.1 },
-        SOLUSDT: { provider: 'binance', coins: ['SOLUSDT'], decimals: 2, pip: 0.01 },
-        XRPUSDT: { provider: 'binance', coins: ['XRPUSDT'], decimals: 4, pip: 0.0001 },
-        DJI:     { provider: 'ostium', coins: ['DJI', 'DJIUSD', 'DJI-USD', 'US30'], decimals: 2, pip: 1 },
-        DAX:     { provider: 'ostium', coins: ['DAX', 'GER40', 'DE40'], decimals: 2, pip: 1 },
+        // Gold, Silver & Forex
+        XAUUSD:     { provider: 'binance',     coins: ['XAUUSDT'],      decimals: 2, pip: 0.1 },
+        XAGUSD:     { provider: 'binance',     coins: ['XAGUSDT'],      decimals: 3, pip: 0.01 },
+        EURUSD:     { provider: 'veranta',     coins: ['EURUSD', 'EUR/USD', 'EURUSD.FX'], decimals: 5, pip: 0.0001 },
+        USDJPY:     { provider: 'veranta',     coins: ['USDJPY', 'USD/JPY', 'USDJPY.FX'], decimals: 3, pip: 0.01 },
+        GBPUSD:     { provider: 'veranta',     coins: ['GBPUSD', 'GBP/USD', 'GBPUSD.FX'], decimals: 5, pip: 0.0001 },
+        AUDUSD:     { provider: 'veranta',     coins: ['AUDUSD'],       decimals: 5, pip: 0.0001 },
+        USDCAD:     { provider: 'veranta',     coins: ['USDCAD'],       decimals: 5, pip: 0.0001 },
+        USDCHF:     { provider: 'veranta',     coins: ['USDCHF'],       decimals: 5, pip: 0.0001 },
+
+        // Komoditas
+        CLUSDT:     { provider: 'binance',     coins: ['CLUSDT'],       decimals: 2, pip: 0.01 },
+        NATGASUSDT: { provider: 'binance',     coins: ['NATGASUSDT'],   decimals: 3, pip: 0.001 },
+        COPPERUSDT: { provider: 'binance',     coins: ['COPPERUSDT'],   decimals: 4, pip: 0.0001 },
+        XPDUSDT:    { provider: 'binance',     coins: ['XPDUSDT'],      decimals: 2, pip: 0.1 },
+        XPTUSDT:    { provider: 'binance',     coins: ['XPTUSDT'],      decimals: 2, pip: 0.1 },
+        BRENTOIL:   { provider: 'hyperliquid', coins: ['xyz:BRENTOIL'], decimals: 2, pip: 0.01 },
+        PALLADIUM:  { provider: 'hyperliquid', coins: ['xyz:PALLADIUM'], decimals: 2, pip: 0.1 },
+        PLATINUM:   { provider: 'hyperliquid', coins: ['xyz:PLATINUM'], decimals: 2, pip: 0.1 },
+
+        // Indeks
+        DJI:        { provider: 'ostium',      coins: ['DJI', 'DJIUSD', 'DJI-USD', 'US30'], decimals: 2, pip: 1 },
+        SP500:      { provider: 'hyperliquid', coins: ['xyz:SP500'],    decimals: 2, pip: 1 },
+        XYZ100:     { provider: 'hyperliquid', coins: ['xyz:XYZ100'],   decimals: 2, pip: 1 },
+        JP225:      { provider: 'hyperliquid', coins: ['xyz:JP225'],    decimals: 0, pip: 1 },
+        QQQUSDT:    { provider: 'binance',     coins: ['QQQUSDT'],      decimals: 2, pip: 0.1 },
+
+        // Crypto
+        BTCUSDT:    { provider: 'binance', coins: ['BTCUSDT'], decimals: 2, pip: 1 },
+        ETHUSDT:    { provider: 'binance', coins: ['ETHUSDT'], decimals: 2, pip: 0.1 },
+        SOLUSDT:    { provider: 'binance', coins: ['SOLUSDT'], decimals: 2, pip: 0.01 },
+        XRPUSDT:    { provider: 'binance', coins: ['XRPUSDT'], decimals: 4, pip: 0.0001 },
+        BNBUSDT:    { provider: 'binance', coins: ['BNBUSDT'], decimals: 2, pip: 0.1 },
+        ADAUSDT:    { provider: 'binance', coins: ['ADAUSDT'], decimals: 4, pip: 0.0001 },
+        LINKUSDT:   { provider: 'binance', coins: ['LINKUSDT'], decimals: 3, pip: 0.001 },
+        AVAXUSDT:   { provider: 'binance', coins: ['AVAXUSDT'], decimals: 3, pip: 0.001 },
+        DOGEUSDT:   { provider: 'binance', coins: ['DOGEUSDT'], decimals: 5, pip: 0.00001 },
+        SUIUSDT:    { provider: 'binance', coins: ['SUIUSDT'],  decimals: 4, pip: 0.0001 },
+        NEARUSDT:   { provider: 'binance', coins: ['NEARUSDT'], decimals: 4, pip: 0.0001 },
+        DOTUSDT:    { provider: 'binance', coins: ['DOTUSDT'],  decimals: 4, pip: 0.0001 },
+        LTCUSDT:    { provider: 'binance', coins: ['LTCUSDT'],  decimals: 2, pip: 0.01 },
+        TAOUSDT:    { provider: 'binance', coins: ['TAOUSDT'],  decimals: 2, pip: 0.01 },
+        HYPEUSDT:   { provider: 'binance', coins: ['HYPEUSDT'], decimals: 2, pip: 0.01 },
+
+        // Clone MT4/5 (memakai tick BTCUSDT / ETHUSDT, lalu dikurangi offset)
+        BTCUSD:     { provider: 'binance', coins: ['BTCUSDT'], base: 'BTCUSDT', decimals: 2, pip: 1 },
+        ETHUSD:     { provider: 'binance', coins: ['ETHUSDT'], base: 'ETHUSDT', decimals: 2, pip: 0.1 },
     };
 
     const norm = s => String(s ?? '').toUpperCase().replace(/^XYZ:/, '').replace(/\.[A-Z]+$/, '').replace(/[^A-Z0-9]/g, '');
@@ -618,9 +785,23 @@
         });
     }
     const PROVIDERS = [...new Set(Object.values(ALIASES).flat().map(a => a.provider))];
+
+    // Satu coin bisa dipakai beberapa key (contoh: BTCUSDT dan BTCUSD)
     const COIN_KEY = new Map();
     for (const [key, list] of Object.entries(ALIASES))
-        for (const a of list) COIN_KEY.set(`${a.provider.toLowerCase()}|${norm(a.coin)}`, key);
+        for (const a of list) {
+            const k = `${a.provider.toLowerCase()}|${norm(a.coin)}`;
+            const arr = COIN_KEY.get(k) || [];
+            if (!arr.includes(key)) arr.push(key);
+            COIN_KEY.set(k, arr);
+        }
+
+    // Hanya pair asli yang disubscribe. Clone tidak.
+    const SUB_KEYS = Object.keys(MARKETS).filter(k => !MARKETS[k].base);
+
+    // true  = order pending dibatalkan jika SL tersentuh dulu sebelum entry (setup dianggap rusak)
+    // false = order pending hanya menunggu sampai harga masuk zona atau waktu habis
+    const PENDING_SL_CANCEL = true;
 
     // ================= STATE =================
     let ws = null, reconnectTimer = null, pingTimer = null;
@@ -632,7 +813,6 @@
     const pendingReq = new Map();
     const dirty = new Set();
     const seenOps = new Set();
-    const unmapped = new Set();
     let seq = 10;
     const nextId = () => seq++;
 
@@ -643,11 +823,23 @@
     const displayName = key => key.replace(/^xyz:/, '');
     const parseLevel = v => Number.isFinite(parseFloat(v)) ? parseFloat(v) : null;
 
-    const offsets = (() => { try { return JSON.parse(localStorage.getItem(OFFSET_KEY)) || {}; } catch { return {}; } })();
+    // Offset bawaan per pair. Positif = tambah, negatif = kurang.
+    // Sumber: selisih TradingView (screenshot) terhadap harga app pada waktu yang sama.
+    // Kalibrasi manual (KALIBRASI) menimpa nilai ini. RESET mengembalikan ke nilai bawaan.
+    const DEFAULT_OFFSETS = {
+        XAUUSD: -8.1,       // tebakan, kalibrasi ulang dengan harga MT
+        XAGUSD: -0.07,      // screenshot 07.19
+        EURUSD: -0.00053,   // screenshot 07.19
+        GBPUSD: -0.00045,
+        USDJPY: 0.048,
+        AUDUSD: 0.00004,
+        USDCAD: 0.00006,
+        USDCHF: 0.00003,
+        BTCUSD: -108.2,     // screenshot 07.34: BTCUSD 75.812,08 vs BTCUSDT 75.920,32
+        ETHUSD: -3.5,       // screenshot 07.34: ETHUSD 2.237,20 vs ETHUSDT 2.240,70
+    };
 
-    // Offset bawaan per pair untuk menyetarakan harga feed dengan harga spot/MT.
-    // Kalibrasi manual (tombol KALIBRASI) menimpa nilai ini. RESET mengembalikan ke nilai bawaan.
-    const DEFAULT_OFFSETS = { XAUUSD: -8.1, XAGUSD: -0.11 };
+    const offsets = (() => { try { return JSON.parse(localStorage.getItem(OFFSET_KEY)) || {}; } catch { return {}; } })();
     const getOffset = key => offsets[key] ?? DEFAULT_OFFSETS[key] ?? 0;
 
     function pushHistory(key, p) {
@@ -660,7 +852,10 @@
     // ================= KALIBRASI =================
     function updateCalibInfo() {
         const key = selectedKey(), off = getOffset(key);
-        document.getElementById('calibInfo').textContent = `Offset ${displayName(key)}: ${off >= 0 ? '+' : ''}${off.toFixed(MARKETS[key]?.decimals ?? 2)}`;
+        const m = MARKETS[key];
+        const dec = m?.decimals ?? 2;
+        const pipTxt = m?.pip ? ` (${(off / m.pip).toFixed(1)} pip)` : '';
+        document.getElementById('calibInfo').textContent = `Offset ${displayName(key)}: ${off >= 0 ? '+' : ''}${off.toFixed(dec)}${pipTxt}`;
     }
     function calibrate() {
         const key = selectedKey(), raw = rawPrices[key];
@@ -767,25 +962,25 @@
         for (const ev of f.events || []) {
             if (!ev || !ev.symbol) continue;
             const prov = String(ev.provider ?? '').toLowerCase();
-            const key = COIN_KEY.get(`${prov}|${norm(ev.symbol)}`);
-            if (!key) continue;
-            const p = parseFloat(ev.price ?? ev.bid ?? ev.mid);
-            if (!(p > 0)) continue;
-            kindLock[key] ??= ev.kind;
-            if (ev.kind && ev.kind !== kindLock[key]) continue;
-
-            symbolOf[key] = ev.symbol;
-            providerOf[key] = prov;
-            rawPrices[key] = p;
-            markSrc(key, 'LIVE', 'text-emerald-400');
-            updatePrice(key, p + getOffset(key), ev);
+            const keys = COIN_KEY.get(`${prov}|${norm(ev.symbol)}`) || [];
+            const p0 = parseFloat(ev.price ?? ev.bid ?? ev.mid);
+            if (!(p0 > 0)) continue;
+            for (const key of keys) {
+                kindLock[key] ??= ev.kind;
+                if (ev.kind && ev.kind !== kindLock[key]) continue;
+                symbolOf[key] = ev.symbol;
+                providerOf[key] = prov;
+                rawPrices[key] = p0;
+                markSrc(key, 'LIVE', 'text-emerald-400');
+                updatePrice(key, p0 + getOffset(key), ev);
+            }
         }
     }
 
     function watchdog() {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
         const now = Date.now();
-        for (const key of Object.keys(MARKETS)) {
+        for (const key of SUB_KEYS) {
             const st = mstate[key];
             if (!st) continue;
             if (st.id == null) {
@@ -833,7 +1028,7 @@
             lastIn = Date.now();
             setWsStatus('CONNECTED', 'green');
             sendJSON(sock, { op: 'sub', id: nextId(), channel: 'status', payload: { providers: PROVIDERS } });
-            for (const key of Object.keys(MARKETS)) subscribeMarket(sock, key, 0);
+            for (const key of SUB_KEYS) subscribeMarket(sock, key, 0);
             setTimeout(() => { if (ws === sock) refreshBias(selectedKey(), true); }, 1500);
 
             pingTimer = setInterval(() => {
@@ -975,7 +1170,7 @@
             if (t.result === 'CANCEL') return { text: 'BATAL', color: 'gray' };
             return { text: resultLabel(t), color: t.pips > 0 ? 'green' : t.pips < 0 ? 'red' : 'gray' };
         }
-        if (t.status === 'PENDING') return { text: 'MENUNGGU ZONA', color: 'yellow' };
+        if (t.status === 'PENDING') return { text: 'WAITING ENTRY', color: 'yellow' };
         return { text: maxHitIndex(t) ? `TP${maxHitIndex(t)} HIT` : 'RUNNING', color: 'blue' };
     }
 
@@ -1043,8 +1238,9 @@
     function evaluateTrade(t, price) {
         const d = t.dir;
 
-        // Entry pending: LIMIT menunggu harga turun/naik ke entry (pullback),
-        // STOP menunggu harga bergerak searah ke entry (harga belum sampai zona).
+        // Order pending (WAITING ENTRY): menunggu harga masuk zona.
+        // TP1 yang tersentuh sebelum entry TIDAK membatalkan order.
+        // SL bisa membatalkan order jika PENDING_SL_CANCEL aktif. Waktu habis ditangani expirePending().
         if (t.status === 'PENDING') {
             const stopFill = t.fill === 'STOP';
             const filled = stopFill
@@ -1055,11 +1251,12 @@
                 t.filledAt = Date.now();
                 return true;
             }
-            const slHit = d > 0 ? price <= t.sl : price >= t.sl;
-            const tp1Hit = t.tp1 != null && (d > 0 ? price >= t.tp1 : price <= t.tp1);
-            if (slHit || tp1Hit) {
-                cancelTrade(t, 'SL atau TP1 tersentuh sebelum zona');
-                return true;
+            if (PENDING_SL_CANCEL) {
+                const slHit = d > 0 ? price <= t.sl : price >= t.sl;
+                if (slHit) {
+                    cancelTrade(t, 'SL tersentuh sebelum entry');
+                    return true;
+                }
             }
             return false;
         }
@@ -1504,14 +1701,16 @@
         const zMax = parseLevel(t.zone?.max ?? t.card?.entry_max);
         const hasZone = zMin != null && zMax != null;
 
-        // Skala harga
+        // Skala harga: hanya dari level trade (entry, SL, TP, zona), BUKAN dari harga live.
+        // Dengan begitu garis entry/SL/TP tidak bergeser saat harga bergerak.
         let lo = Infinity, hi = -Infinity;
-        for (const p of pts) { if (p.p < lo) lo = p.p; if (p.p > hi) hi = p.p; }
         for (const l of levels) { lo = Math.min(lo, l.value); hi = Math.max(hi, l.value); }
         if (hasZone) { lo = Math.min(lo, zMin, zMax); hi = Math.max(hi, zMin, zMax); }
+        if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
         if (hi - lo <= 0) { const d = Math.abs(hi) * 0.001 || 1; lo -= d; hi += d; }
         const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
-        const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * plotH;
+        // Harga live yang keluar dari rentang ditahan di tepi chart (tidak memperbesar skala)
+        const yOf = p => Math.max(plotT, Math.min(plotB, plotT + (1 - (p - lo) / (hi - lo)) * plotH));
 
         // 1. Grid dan pemisah kolom label
         ctx.save();
@@ -1641,263 +1840,4 @@
         ctx.textBaseline = 'middle';
         ctx.textAlign = 'left';
         for (const tg of tags) {
-            const bx = plotR + 7, bw = CHART_GUT - 12, bh = 15, by = tg.y - bh / 2;
-            rrPath(bx, by, bw, bh, 3);
-            ctx.fillStyle = tg.bg; ctx.fill();
-            ctx.strokeStyle = tg.c; ctx.lineWidth = 0.8; ctx.stroke();
-            ctx.fillStyle = tg.c;
-            ctx.fillText(tg.text, bx + 5, tg.y + 0.5);
-        }
-    }
-
-    let lastHistPaint = 0;
-    function uiFrame() {
-        requestAnimationFrame(uiFrame);
-        if (dirty.size) {
-            for (const key of dirty) paintTicker(key);
-            const t = getActive();
-            if (t && dirty.has(t.key)) refreshActiveUI();
-            dirty.clear();
-        }
-        const nowMs = performance.now();
-        if (nowMs - lastHistPaint > 500 && trades.some(t => t.status !== 'CLOSED')) {
-            lastHistPaint = nowMs;
-            renderHistory();
-        }
-        drawChart();
-    }
-
-    // ================= BIAS MULTI-TIMEFRAME =================
-    const BIAS_TF = [
-        { label: 'M5', interval: '5m' },
-        { label: 'M15', interval: '15m' },
-        { label: 'M30', interval: '30m' },
-        { label: 'H1', interval: '1h' },
-        { label: 'H4', interval: '4h' },
-        { label: 'Daily', interval: '1d' },
-    ];
-    const BIAS_STYLE = {
-        BULLISH: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40',
-        BEARISH: 'bg-red-500/20 text-red-400 border-red-500/40',
-        NETRAL:  'bg-yellow-500/20 text-yellow-400 border-yellow-500/40',
-        'N/A':   'bg-gray-500/20 text-gray-400 border-gray-500/40',
-    };
-    const BIAS_LABEL = { BULLISH: 'Bullish', BEARISH: 'Bearish', NETRAL: 'Netral', 'N/A': 'N/A' };
-    const biasCache = {};
-    let biasBusy = false;
-
-    function emaSeries(values, period) {
-        const k = 2 / (period + 1);
-        let e = values[0];
-        return values.map(v => (e = v * k + e * (1 - k)));
-    }
-
-    function calcBias(candles) {
-        if (!candles || candles.length < 60) return { bias: 'N/A', score: null };
-        const closes = candles.map(c => c.c);
-        const e20 = emaSeries(closes, 20), e50 = emaSeries(closes, 50);
-        const i = closes.length - 1;
-        let score = 0;
-        score += closes[i] > e20[i] ? 1 : -1;
-        score += e20[i] > e50[i] ? 1 : -1;
-        score += e20[i] > e20[i - 5] ? 1 : -1;
-        const bias = score >= 2 ? 'BULLISH' : score <= -2 ? 'BEARISH' : 'NETRAL';
-        return { bias, score };
-    }
-
-    async function fetchCandles(provider, symbol, interval) {
-        const rows = await wsReq('candles.history', { provider, symbol, interval, limit: 300 });
-        if (!Array.isArray(rows)) return [];
-        return rows
-            .filter(x => x && x.isFinal !== false)
-            .map(x => ({ t: +x.openTime, o: +x.open, h: +x.high, l: +x.low, c: +x.close }))
-            .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite))
-            .sort((a, b) => a.t - b.t);
-    }
-
-    async function refreshBias(key, force = false) {
-        const m = MARKETS[key];
-        if (!m) return;
-        const cached = biasCache[key];
-        if (!force && cached && Date.now() - cached.at < 60000) return renderBias(key);
-        if (!ws || ws.readyState !== WebSocket.OPEN || biasBusy) return;
-        if (!symbolOf[key]) return renderBias(key);
-
-        biasBusy = true;
-        const symbol = symbolOf[key];
-        const provider = providerOf[key] || ALIASES[key][0].provider;
-        const rows = {};
-        try {
-            for (const tf of BIAS_TF) {
-                try {
-                    const candles = await fetchCandles(provider, symbol, tf.interval);
-                    rows[tf.label] = calcBias(candles);
-                } catch (e) {
-                    rows[tf.label] = { bias: 'N/A', score: null, err: e.message };
-                }
-            }
-            biasCache[key] = { at: Date.now(), rows };
-        } finally {
-            biasBusy = false;
-        }
-        renderBias(key);
-    }
-
-    function renderBias(key) {
-        if (key !== selectedKey()) return;
-        const box = document.getElementById('biasGrid');
-        const info = document.getElementById('biasInfo');
-        if (!box) return;
-        const cache = biasCache[key];
-        const rows = cache?.rows;
-
-        box.innerHTML = BIAS_TF.map(tf => {
-            const b = rows?.[tf.label];
-            const name = b ? b.bias : null;
-            const cls = BIAS_STYLE[name] || 'bg-gray-500/20 text-gray-400 border-gray-500/40';
-            const text = name ? BIAS_LABEL[name] : (rows ? 'N/A' : '...');
-            const score = b?.score != null ? `skor ${b.score > 0 ? '+' : ''}${b.score}/3` : '';
-            return `
-              <div class="bg-darkbg border border-panelborder rounded-lg p-1.5 text-center space-y-0.5">
-                <p class="text-[8px] font-bold text-gray-400">${tf.label}</p>
-                <span class="inline-block text-[9px] font-black px-2 py-0.5 rounded border ${cls}">${text}</span>
-                <p class="text-[7px] text-gray-500 font-mono">${score}</p>
-              </div>`;
-        }).join('');
-
-        if (!rows) { info.textContent = symbolOf[key] ? 'memuat bias...' : 'TIDAK TERSAMBUNG / menunggu harga live...'; return; }
-        const vals = Object.values(rows).map(r => r.bias);
-        const bull = vals.filter(v => v === 'BULLISH').length;
-        const bear = vals.filter(v => v === 'BEARISH').length;
-        const neu = vals.filter(v => v === 'NETRAL').length;
-        const na = vals.filter(v => v === 'N/A').length;
-        info.textContent = `${bull} Bullish · ${bear} Bearish · ${neu} Netral${na ? ` · ${na} N/A` : ''} · update ${new Date(cache.at).toLocaleTimeString('id-ID', { hour12: false })}`;
-    }
-
-    // ================= AI SIGNAL =================
-    // Harus sama dengan STYLES di api/generate.js
-    const STYLE_TF = {
-        'Scalping':    { htf: '15m', mtf: '5m' },
-        'Day Trading': { htf: '1h',  mtf: '30m', ltf: '5m' },
-        'Intraday':    { htf: '4h',  mtf: '1h',  ltf: '15m' },
-        'Swing':       { htf: '1d',  mtf: '4h',  ltf: '1h' },
-    };
-    const CANDLE_CACHE = {};
-
-    async function loadCandles(key, interval) {
-        const ck = `${key}|${interval}`;
-        const hit = CANDLE_CACHE[ck];
-        if (hit && Date.now() - hit.at < 60000) return hit.rows;
-        const provider = providerOf[key] || ALIASES[key][0].provider;
-        const rows = await fetchCandles(provider, symbolOf[key], interval);
-        if (!rows.length) throw new Error(`data candle ${interval} kosong`);
-        CANDLE_CACHE[ck] = { at: Date.now(), rows };
-        return rows;
-    }
-
-    // Candle historis itu harga mentah. Tambahkan offset kalibrasi supaya sebanding dengan harga live.
-    const shiftCandles = (rows, off) => rows.map(c => ({ t: c.t, o: c.o + off, h: c.h + off, l: c.l + off, c: c.c + off }));
-
-    async function generateAISignal() {
-        const marketId = document.getElementById('marketSelect').value;
-        const tradingStyle = document.getElementById('tradingStyleSelect').value;
-        const symbolKey = marketId.split('|').pop();
-        const live = prices[symbolKey];
-        if (!live || !isLive(symbolKey)) {
-            return alert(`${displayName(symbolKey)} TIDAK TERSAMBUNG ke stream. Pilih pair lain atau tunggu harga masuk.`);
-        }
-
-        const email = localStorage.getItem(SESSION_EMAIL_KEY);
-        if (!email) return alert('Sesi tidak ditemukan. Silakan login ulang.');
-
-        const btn = document.getElementById('signalBtn');
-        btn.disabled = true;
-        btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> Menganalisis Struktur SMC...`;
-
-        try {
-            const tf = STYLE_TF[tradingStyle];
-            if (!tf) throw new Error('gaya trading tidak dikenal');
-
-            const off = getOffset(symbolKey);
-            const [htfRows, mtfRows, ltfRows] = await Promise.all([
-                loadCandles(symbolKey, tf.htf),
-                loadCandles(symbolKey, tf.mtf),
-                tf.ltf ? loadCandles(symbolKey, tf.ltf).catch(() => []) : Promise.resolve([]),
-            ]);
-
-            const res = await fetch('/api/generate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    email,
-                    marketId,
-                    tradingStyle,
-                    currentPrice: live.price,
-                    lang: currentLang,
-                    candles: {
-                        htf: shiftCandles(htfRows, off).slice(-200),
-                        mtf: shiftCandles(mtfRows, off).slice(-200),
-                        ltf: shiftCandles(ltfRows, off).slice(-200),
-                    },
-                }),
-            });
-
-            const txt = await res.text();
-            let data = {};
-            try {
-                data = JSON.parse(txt);
-            } catch {
-                const snippet = txt.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
-                data = { error: `Server tidak mengirim JSON (HTTP ${res.status}). ${snippet}` };
-            }
-            if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-
-            if (!data.signal) return alert('Belum ada setup valid.\n\n' + (data.reason || ''));
-
-            const s = data.signal;
-            const t = {
-                id: Date.now().toString(36), key: symbolKey, style: tradingStyle,
-                signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
-                mode: s.mode, status: s.status, fill: s.fill || null,
-                entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
-                zone: s.zone,
-                expiresAt: s.expireMs ? Date.now() + s.expireMs : null,
-                confidence: s.confidence, risk: s.risk, setup: s.setup,
-                setupLabel: s.setupLabel, zoneLabel: s.zoneLabel, zoneNote: s.zoneNote,
-                createdAt: Date.now(), hits: {},
-                card: { reason: s.reason }, no: nextNo(),
-            };
-
-            trades.push(t);
-            activeId = t.id;
-            saveTrades();
-            renderSignalCard(t);
-            renderHistory();
-            refreshActiveUI();
-        } catch (e) {
-            alert('Gagal generate sinyal: ' + e.message);
-        } finally {
-            btn.disabled = false;
-            btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnGenText">${DICT[currentLang].genBtn}</span>`;
-        }
-    }
-
-    // ================= BOOT =================
-    window.onload = () => {
-        checkSession();
-
-        buildTicker();
-        updateCalibInfo();
-        trades = loadTrades();
-        saveTrades();
-        renderHistory();
-        if (trades.length) viewTrade(trades[trades.length - 1].id);
-        renderBias(selectedKey());
-        requestAnimationFrame(uiFrame);
-        connect();
-        setInterval(() => { watchdog(); expirePending(); }, 1000);
-        setInterval(() => refreshBias(selectedKey()), 60000);
-    };
-    </script>
-</body>
-</html>
+            const bx = plotR + 7, bw = CHART_
