@@ -1,5 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC Universal dengan Skala Digit Utama & Multi-Strategy (Scalping Agresif & Day Trading)
+// Analisis Pure SMC Universal dengan Penyesuaian SL & Buffer (3x Standar untuk Crypto & Currency)
 
 const KV_KEY = 'alu_clients';
 
@@ -26,8 +26,8 @@ const PIP = {
 };
 
 const STYLES = {
-  'Scalping': { label: 'Scalping Agresif (M1+M3+M5 + BB + EMA 5/9)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
-  'Day Trading': { label: 'Day Trading Zone (M5+M15+M30/H1 Structural)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
+  'Scalping': { label: 'Scalping Agresif (3x Buffer & SL)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
+  'Day Trading': { label: 'Day Trading Zone (Structural Multi-TF)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
   'Intraday': { label: 'Intraday (HTF: H4 | MTF: H1)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
   'Swing': { label: 'Swing Trading (HTF: D1 | MTF: H4)', mode: 'LIMIT', kind: 'zone', rr: [2.0, 4.5, 8.5] },
 };
@@ -77,38 +77,28 @@ function structureDir(candles) {
   return last.c >= first.c ? 1 : -1;
 }
 
-function getStructuralExtremes(candles, isBuy) {
-  if (!candles || candles.length < 10) return null;
-  let extreme = candles[candles.length - 1][isBuy ? 'l' : 'h'];
-  const lookback = Math.min(candles.length, 20);
-  for (let i = candles.length - lookback; i < candles.length; i++) {
-    const c = candles[i];
-    if (isBuy) {
-      if (c.l < extreme) extreme = c.l;
-    } else {
-      if (c.h > extreme) extreme = c.h;
-    }
-  }
-  return extreme;
-}
-
-// Konfigurasi Skala Digit Utama (Scale Digit) Berdasarkan Karakteristik Setiap Aset
+// Konfigurasi Aset dengan SL & Buffer diperbesar 3x untuk Kripto & Currency
 function getAssetConfig(symbol) {
   const s = symbol.toUpperCase();
   if (s.includes('XAU')) return { bufferVal: 1.5, slVal: 2.5, type: 'GOLD_FIX' };
   if (s.includes('XAG')) return { bufferVal: 3.0, slVal: 5.0, type: 'SILVER_2X_GOLD' };
   if (s.includes('XPT') || s.includes('PLATINUM')) return { bufferVal: 5.0, slVal: 12.0, type: 'METAL_XPT' };
   if (s.includes('XPD') || s.includes('PALLADIUM')) return { bufferVal: 5.0, slVal: 12.0, type: 'METAL_XPD' };
-  if (s.includes('BTC')) return { bufferVal: 15.0, slVal: 45.0, type: 'CRYPTO_BTC' };
-  if (s.includes('ETH')) return { bufferVal: 5.0, slVal: 15.0, type: 'CRYPTO_ETH' };
-  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP') || s.includes('LTC')) return { bufferVal: 1.0, slVal: 3.0, type: 'CRYPTO_ALT' };
+  
+  // Kripto (BTC, ETH, Altcoins) - Diperbesar 3x lipat untuk keamanan spread & noise
+  if (s.includes('BTC')) return { bufferVal: 45.0, slVal: 135.0, type: 'CRYPTO_BTC_3X' };
+  if (s.includes('ETH')) return { bufferVal: 15.0, slVal: 45.0, type: 'CRYPTO_ETH_3X' };
+  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP') || s.includes('LTC')) return { bufferVal: 3.0, slVal: 9.0, type: 'CRYPTO_ALT_3X' };
+  
+  // Currency (Forex Major & JPY) - Diperbesar 3x lipat
   if (s.includes('EUR') || s.includes('GBP') || s.includes('AUD') || s.includes('NZD') || s.includes('USD') || s.includes('CAD') || s.includes('CHF')) {
-    if (s.includes('JPY')) return { bufferVal: 0.15, slVal: 0.40, type: 'CURRENCY_JPY' };
-    return { bufferVal: 0.0015, slVal: 0.0040, type: 'CURRENCY_MAJOR' };
+    if (s.includes('JPY')) return { bufferVal: 0.45, slVal: 1.20, type: 'CURRENCY_JPY_3X' };
+    return { bufferVal: 0.0045, slVal: 0.0120, type: 'CURRENCY_MAJOR_3X' };
   }
-  if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) return { bufferVal: 10.0, slVal: 30.0, type: 'INDEX' };
-  if (s.includes('OIL') || s.includes('NATGAS') || s.includes('COPPER')) return { bufferVal: 0.5, slVal: 1.5, type: 'COMMODITY' };
-  return { bufferVal: 1.0, slVal: 3.0, type: 'DEFAULT_UNIVERSAL' };
+  
+  if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) return { bufferVal: 15.0, slVal: 45.0, type: 'INDEX' };
+  if (s.includes('OIL') || s.includes('NATGAS') || s.includes('COPPER')) return { bufferVal: 1.5, slVal: 4.5, type: 'COMMODITY_3X' };
+  return { bufferVal: 3.0, slVal: 9.0, type: 'DEFAULT_3X' };
 }
 
 function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal) {
@@ -140,7 +130,7 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal)
       sl: sl,
       tps: [tp1, tp2, tp3],
       zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
-      trigSrc: `ScaleDigit (${cfg.type})`,
+      trigSrc: `ScaleDigit 3x (${cfg.type})`,
       expireMs: 0,
       riskAtr: Math.abs(bufferEnd - sl) / (a || 1),
       over: false,
@@ -239,16 +229,11 @@ export default async function handler(req, res) {
     const sideText = dir === 1 ? 'BUY' : 'SELL';
     const cfgInfo = getAssetConfig(symbol);
     
-    let setupLabelText = `Scale Digit (${cfgInfo.type})`;
-    if (isScalp) {
-      setupLabelText = `Scalping Agresif (${cfgInfo.type})`;
-    } else {
-      setupLabelText = `Day Trading Structural (${cfgInfo.type})`;
-    }
+    const setupLabelText = isScalp ? `Scalping Agresif (3x SL & Buffer)` : `Day Trading Structural (3x SL)`;
 
-    const techReason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol}. Struktur multi-timeframe terkonfirmasi searah dengan Order Block / FVG aktif. Eksekusi ${actionType} dipetakan dengan presisi tinggi di area likuiditas terdekat. Target Take Profit (TP1-TP3) dihitung proporsional dari garis depan (entry) berdasarkan kelipatan rasio risiko yang disesuaikan.`;
+    const techReason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol}. Struktur multi-timeframe terkonfirmasi searah dengan Order Block / FVG aktif. Eksekusi ${actionType} dipetakan dengan presisi tinggi di area likuiditas terdekat dengan jarak SL dan Buffer 3x lebih aman dari noise market.`;
     
-    const workflowNote = `[Catatan Sistem: Workflow Scale Digit & Strategy aktif untuk ${cfgInfo.type}. Stop Loss dan Buffer diukur berdasarkan skala digit angka utama harga instrumen agar proporsional dan terhindar dari noise market.]`;
+    const workflowNote = `[Catatan Sistem: Workflow Scale Digit 3x aktif untuk ${cfgInfo.type}. Stop Loss dan Buffer diperlebar 3x lipat dari standar untuk mengantisipasi spread dan volatilitas instrumen.]`;
 
     const reason = `${techReason}\n\n${workflowNote}`;
 
@@ -270,7 +255,7 @@ export default async function handler(req, res) {
         setup: 'CONTINUATION',
         setupLabel: setupLabelText,
         zoneLabel: 'Order Block / FVG Structure',
-        zoneNote: `Scale Digit Range (${cfgInfo.type})`,
+        zoneNote: `Scale Digit 3x Range (${cfgInfo.type})`,
         reason: reason
       }
     });
