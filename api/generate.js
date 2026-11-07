@@ -1,17 +1,23 @@
 // api/generate.js
-// Analisis Pure SMC Universal: Crypto 30-50 Pip & Currency Fixed Range UI Fix
+// Analisis Pure SMC Universal: XBTFX 60% Pairs + DXY Support & Fixed Range
 
 const KV_KEY = 'alu_clients';
 
 const DECIMALS = {
-  XAUUSD: 2, XAGUSD: 3, EURUSD: 5, USDJPY: 3, GBPUSD: 5, DJI: 2,
-  AUDUSD: 5, USDCAD: 5, USDCHF: 5,
-  CLUSDT: 2, NATGASUSDT: 3, COPPERUSDT: 4, XPDUSDT: 2, XPTUSDT: 2,
-  BRENTOIL: 2, PALLADIUM: 2, PLATINUM: 2, SP500: 2, XYZ100: 2, JP225: 0, QQQUSDT: 2,
-  BTCUSDT: 2, ETHUSDT: 2, SOLUSDT: 2, XRPUSDT: 4, BNBUSDT: 2, ADAUSDT: 4,
-  LINKUSDT: 3, AVAXUSDT: 3, DOGEUSDT: 5, SUIUSDT: 4, NEARUSDT: 4, DOTUSDT: 4,
-  LTCUSDT: 2, TAOUSDT: 2, HYPEUSDT: 2,
-  BTCUSD: 2, ETHUSD: 2,
+  // DXY & Majors
+  DXY: 2, EURUSD: 5, GBPUSD: 5, USDJPY: 3, AUDUSD: 5, USDCAD: 5, USDCHF: 5, NZDUSD: 5,
+  // Cross Forex
+  EURGBP: 5, EURJPY: 3, GBPJPY: 3, AUDJPY: 3, EURAUD: 5, GBPAUD: 5, AUDNZD: 5, CADJPY: 3, CHFJPY: 3, EURNZD: 5,
+  // Metals & Precious
+  XAUUSD: 2, XAGUSD: 3, XPTUSD: 2, XPDUSD: 2, XAUEUR: 2, XAGEUR: 3,
+  // Energy & Commodities
+  BRENT: 2, WTI: 2, NATGAS: 3, COPPER: 4, COFFEE: 2, SUGAR: 2,
+  // Global Indices
+  US30: 2, NAS100: 2, SPX500: 2, GER40: 2, UK100: 2, JPN225: 0, FRA40: 2, AUS200: 2,
+  // Crypto
+  BTCUSD: 2, ETHUSD: 2, SOLUSD: 2, XRPUSD: 4, BNBUSD: 2, ADAUSD: 4, DOGEUSD: 5, AVAXUSD: 3, LINKUSD: 3, DOTUSD: 4, MATICUSD: 4, UNIUSD: 3,
+  // Synthetic / Custom
+  BTCXAU: 2, ETHBTC: 5, SOLBTC: 5, US30BTC: 2, XAUUSDX: 2,
 };
 
 const STYLES = {
@@ -66,35 +72,33 @@ function structureDir(candles) {
   return last.c >= first.c ? 1 : -1;
 }
 
-// OFFSET ABSOLUT TERSTRUKTUR (XAU, XAG, CRYPTO 30-50 PIP, & CURRENCY)
+// OFFSET ABSOLUT TERSTRUKTUR (XAU, DXY, FOREX, & CRYPTO)
 function getAbsoluteScalpOffsets(symbol) {
   const s = symbol.toUpperCase();
 
-  // XAUUSD: Target SL 20-30 pip -> Offset 2.8
   if (s.includes('XAU')) return { buffer: 1.0, sl: 2.8, type: 'XAU_20_30_PIP' };
-  // XAGUSD: 2x XAUUSD
   if (s.includes('XAG')) return { buffer: 2.0, sl: 5.6, type: 'XAG_2X_XAU' };
+  if (s.includes('DXY')) return { buffer: 0.10, sl: 0.30, type: 'DXY_FIX' };
   
-  // Crypto (Disesuaikan agar rentang tampilan di UI menjadi 30-50 pip/poin)
   if (s.includes('BTC')) return { buffer: 12.0, sl: 35.0, type: 'BTC_30_50_PIP' };
   if (s.includes('ETH')) return { buffer: 1.5, sl: 4.5, type: 'ETH_30_50_PIP' };
-  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP') || s.includes('LTC')) {
+  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP') || s.includes('LTC') || s.includes('AVAX') || s.includes('LINK')) {
     return { buffer: 1.0, sl: 3.5, type: 'ALT_30_50_PIP' };
   }
   
-  // Currency Pairs (Target 30 - 80 pip sesuai permintaan spesifik)
-  if (s.includes('USDJPY')) return { buffer: 0.20, sl: 0.50, type: 'USDJPY_50PIP' };   // 50 pip
-  if (s.includes('GBPUSD')) return { buffer: 0.0020, sl: 0.0050, type: 'GBPUSD_50PIP' }; // 50 pip
-  if (s.includes('AUDUSD')) return { buffer: 0.0012, sl: 0.0035, type: 'AUDUSD_30PIP' }; // 30-40 pip
-  if (s.includes('USDCAD')) return { buffer: 0.0030, sl: 0.0080, type: 'USDCAD_80PIP' }; // 60-80 pip
-  if (s.includes('USDCHF')) return { buffer: 0.0022, sl: 0.0060, type: 'USDCHF_60PIP' }; // 50-60 pip
+  if (s.includes('USDJPY') || s.includes('GBPJPY') || s.includes('EURJPY') || s.includes('AUDJPY') || s.includes('CADJPY') || s.includes('CHFJPY')) {
+    return { buffer: 0.20, sl: 0.50, type: 'JPY_CROSS_50PIP' };
+  }
+  if (s.includes('GBPUSD')) return { buffer: 0.0020, sl: 0.0050, type: 'GBPUSD_50PIP' };
+  if (s.includes('AUDUSD')) return { buffer: 0.0012, sl: 0.0035, type: 'AUDUSD_30PIP' };
+  if (s.includes('USDCAD')) return { buffer: 0.0030, sl: 0.0080, type: 'USDCAD_80PIP' };
+  if (s.includes('USDCHF')) return { buffer: 0.0022, sl: 0.0060, type: 'USDCHF_60PIP' };
   
-  // EURUSD & Currency General (Target 50-60 pip)
   if (s.includes('EUR') || s.includes('NZD') || s.includes('CHF') || s.includes('CAD')) {
     return { buffer: 0.0020, sl: 0.0055, type: 'CURRENCY_50_60_PIP' };
   }
   
-  if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) {
+  if (s.includes('US30') || s.includes('NAS100') || s.includes('SP500') || s.includes('GER40') || s.includes('UK100') || s.includes('JPN225')) {
     return { buffer: 20.0, sl: 60.0, type: 'INDEX_FIX' };
   }
   
@@ -129,7 +133,7 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, symbol) {
       sl: sl,
       tps: [tp1, tp2, tp3],
       zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
-      trigSrc: `Scalping Agresif (Crypto 30-50 Pip Fixed) [${offsets.type}]`,
+      trigSrc: `Scalping Agresif (XBTFX 60% Fixed) [${offsets.type}]`,
       expireMs: 0,
     }
   };
@@ -234,13 +238,13 @@ export default async function handler(req, res) {
     const offsets = getAbsoluteScalpOffsets(symbol);
 
     const actionDesc = sideText === 'BUY' 
-      ? 'mengambil posisi BELI (BUY) karena harga merespons area Demand / Batas Bawah Bollinger Bands dengan reaksi penolakan (wick rejection) yang kuat' 
-      : 'mengambil posisi JUAL (SELL) karena harga menabrak area Supply / Batas Atas Bollinger Bands dengan konfirmasi penolakan harga secara real-time';
+      ? 'mengambil posisi BELI (BUY) karena harga merespons area Demand / Batas Bawah dengan reaksi penolakan (wick rejection) yang kuat' 
+      : 'mengambil posisi JUAL (SELL) karena harga menabrak area Supply / Batas Atas dengan konfirmasi penolakan harga secara real-time';
 
     const techReason = [
       `Analisis Teknikal Pure SMC ${sideText} (${style.label}) pada pair ${symbol}.`,
       `Alasan Eksekusi: Diputuskan ${actionDesc}. Pemicu utama didasarkan pada pembacaan struktur mikro dan filter indikator (${plan.trigSrc}).`,
-      `Manajemen Risiko: Jarak Stop Loss dan Buffer telah disesuaikan secara presisi (${offsets.type}) agar laporan rentang pip kripto maupun mata uang tampil ideal sesuai target.`
+      `Manajemen Risiko: Jarak Stop Loss dan Buffer telah disesuaikan secara presisi (${offsets.type}) agar laporan rentang pip/poin tampil ideal sesuai target.`
     ].join('\n\n');
 
     return res.status(200).json({
@@ -261,7 +265,7 @@ export default async function handler(req, res) {
         setup: 'CONTINUATION / REVERSAL',
         setupLabel: style.label,
         zoneLabel: 'Order Block / FVG / Structure Zone',
-        zoneNote: `Crypto/Currency Range (${offsets.type})`,
+        zoneNote: `Range Mode (${offsets.type})`,
         reason: techReason
       }
     });
