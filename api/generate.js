@@ -1,5 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC dengan Workflow Khusus: Gold Normal, Lainnya by Structure + 2x Spread
+// Analisis Pure SMC dengan Fix Range SL Gold (20-30 pip) & Proteksi Pair Lain
 
 const KV_KEY = 'alu_clients';
 
@@ -26,7 +26,7 @@ const PIP = {
 };
 
 const STYLES = {
-  'Scalping': { label: 'Scalping Hit & Run (Optimized)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
+  'Scalping': { label: 'Scalping Hit & Run (Fixed Gold SL)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
   'Day Trading': { label: 'Day Trading Zone (HTF: H1 | MTF: M30)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
   'Intraday': { label: 'Intraday (HTF: H4 | MTF: H1)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
   'Swing': { label: 'Swing Trading (HTF: D1 | MTF: H4)', mode: 'LIMIT', kind: 'zone', rr: [2.0, 4.5, 8.5] },
@@ -95,7 +95,7 @@ function getStructuralExtremes(candles, isBuy) {
 function getEstimatedSpread(symbol, pip) {
   const s = symbol.toUpperCase();
   const p = pip || 1;
-  if (s.includes('XAU')) return 20 * p; // Gold normal spread
+  if (s.includes('XAU')) return 20 * p;
   if (s.includes('BTC')) return 100 * p;
   if (s.includes('EUR') || s.includes('GBP')) return 1.2 * p;
   return 5 * p;
@@ -103,10 +103,10 @@ function getEstimatedSpread(symbol, pip) {
 
 function getAssetConfig(symbol) {
   const s = symbol.toUpperCase();
-  if (s.includes('XAU')) return { bufferMultiplier: 0.6, slMultiplier: 1.5, type: 'GOLD_NORMAL' };
-  if (s.includes('XAG')) return { bufferMultiplier: 0.8, slMultiplier: 1.8, type: 'METAL' };
+  if (s.includes('XAU')) return { bufferMultiplier: 1.0, slMultiplier: 2.5, type: 'GOLD_FIX_20_30' };
+  if (s.includes('XAG')) return { bufferMultiplier: 1.0, slMultiplier: 2.0, type: 'METAL' };
   if (s.includes('EUR') || s.includes('GBP') || s.includes('AUD') || s.includes('NZD') || s.includes('USD') || s.includes('CAD') || s.includes('CHF')) {
-    if (s.includes('JPY')) return { bufferMultiplier: 1.0, slMultiplier: 2.0, type: 'CURRENCY' };
+    if (s.includes('JPY')) return { bufferMultiplier: 1.2, slMultiplier: 2.2, type: 'CURRENCY' };
     return { bufferMultiplier: 0.8, slMultiplier: 1.8, type: 'CURRENCY' };
   }
   if (s.includes('BTC')) return { bufferMultiplier: 1.2, slMultiplier: 2.2, type: 'CRYPTO' };
@@ -124,23 +124,30 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal)
   const isBuy = activeDir === 1;
 
   const cfg = getAssetConfig(symbol);
+  const isGold = symbol.toUpperCase().includes('XAU');
+
   const bufferDist = a * cfg.bufferMultiplier;
   const bufferEnd = isBuy ? price - bufferDist : price + bufferDist;
 
-  const structExtreme = getStructuralExtremes(mtfC, isBuy);
-  let sl = structExtreme != null 
-    ? (isBuy ? structExtreme - (a * 0.2) : structExtreme + (a * 0.2))
-    : (isBuy ? bufferEnd - (a * cfg.slMultiplier) : bufferEnd + (a * cfg.slMultiplier));
+  let sl;
+  if (isGold) {
+    // KHUSUS GOLD: Fix range SL di kisaran 25 pip dari buffer (di dalam range 20~30 pip)
+    const fixedGoldSlPips = 25 * (pip || 0.1);
+    sl = isBuy ? bufferEnd - fixedGoldSlPips : bufferEnd + fixedGoldSlPips;
+  } else {
+    // PAIR LAIN: Berbasis struktur + 2x spread protection
+    const structExtreme = getStructuralExtremes(mtfC, isBuy);
+    sl = structExtreme != null 
+      ? (isBuy ? structExtreme - (a * 0.2) : structExtreme + (a * 0.2))
+      : (isBuy ? bufferEnd - (a * cfg.slMultiplier) : bufferEnd + (a * cfg.slMultiplier));
 
-  // Jika bukan Gold, tambahkan pengaman 2x spread broker agar aman dari noise
-  if (!symbol.toUpperCase().includes('XAU')) {
     const estSpread = getEstimatedSpread(symbol, pip);
     const spreadPadding = estSpread * 2.0;
     sl = isBuy ? sl - spreadPadding : sl + spreadPadding;
   }
 
-  if (isBuy && sl >= bufferEnd) sl = bufferEnd - (a * cfg.slMultiplier);
-  if (!isBuy && sl <= bufferEnd) sl = bufferEnd + (a * cfg.slMultiplier);
+  if (isBuy && sl >= bufferEnd) sl = bufferEnd - (a * 1.5);
+  if (!isBuy && sl <= bufferEnd) sl = bufferEnd + (a * 1.5);
 
   const riskDistance = Math.abs(price - sl);
   const tp1 = isBuy ? price + (1.0 * riskDistance) : price - (1.0 * riskDistance);
@@ -185,23 +192,28 @@ function generalTradePlan({ htfC, mtfC, m5C, price, symbol, pip, dec, lang, styl
   const isBuy = dir === 1;
 
   const cfg = getAssetConfig(symbol);
+  const isGold = symbol.toUpperCase().includes('XAU');
   const entry = price;
 
   const bufferDist = a15 * cfg.bufferMultiplier * 1.2;
   const bufferEnd = isBuy ? entry - bufferDist : entry + bufferDist;
 
-  const structExtreme = getStructuralExtremes(mtfC, isBuy);
-  let sl = structExtreme != null
-    ? (isBuy ? structExtreme - (a15 * 0.3) : structExtreme + (a15 * 0.3))
-    : (isBuy ? bufferEnd - (a15 * cfg.slMultiplier) : bufferEnd + (a15 * cfg.slMultiplier));
+  let sl;
+  if (isGold) {
+    const fixedGoldSlPips = 25 * (pip || 0.1);
+    sl = isBuy ? bufferEnd - fixedGoldSlPips : bufferEnd + fixedGoldSlPips;
+  } else {
+    const structExtreme = getStructuralExtremes(mtfC, isBuy);
+    sl = structExtreme != null
+      ? (isBuy ? structExtreme - (a15 * 0.3) : structExtreme + (a15 * 0.3))
+      : (isBuy ? bufferEnd - (a15 * cfg.slMultiplier) : bufferEnd + (a15 * cfg.slMultiplier));
 
-  if (!symbol.toUpperCase().includes('XAU')) {
     const estSpread = getEstimatedSpread(symbol, pip);
     sl = isBuy ? sl - (estSpread * 2.0) : sl + (estSpread * 2.0);
   }
 
-  if (isBuy && sl >= bufferEnd) sl = bufferEnd - (a15 * cfg.slMultiplier);
-  if (!isBuy && sl <= bufferEnd) sl = bufferEnd + (a15 * cfg.slMultiplier);
+  if (isBuy && sl >= bufferEnd) sl = bufferEnd - (a15 * 1.5);
+  if (!isBuy && sl <= bufferEnd) sl = bufferEnd + (a15 * 1.5);
 
   const risk = Math.abs(price - sl);
   const tp1 = entry + dir * 1.0 * risk;
@@ -271,9 +283,10 @@ export default async function handler(req, res) {
     const actionType = plan.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET';
     const sideText = dir === 1 ? 'BUY' : 'SELL';
     const cfgInfo = getAssetConfig(symbol);
-    const noteText = isPreciousMetal ? 'Gold / Metal Standard Setup' : 'Structural SL + 2x Spread Protection';
+    const isGold = symbol.includes('XAU');
+    const setupLabelText = isGold ? 'Gold Fixed SL (20~30 pip)' : `Structural SL + 2x Spread (${cfgInfo.type})`;
 
-    const reason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol} menggunakan Workflow [${cfgInfo.type}]. Setup dikonfirmasi oleh struktur market aktif. Untuk Gold menggunakan parameter standar emas yang ideal, sementara pair lain dilindungi oleh buffer struktur dan tambahan proteksi 2x spread untuk menghindari stop hunting. Target TP1-TP3 ditarik proporsional dari garis depan (entry) dengan rasio 1:1, 1:2, dan 1:3.`;
+    const reason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol} menggunakan Workflow [${cfgInfo.type}]. Untuk instrumen Gold, Stop Loss dikunci fix pada rentang ideal 20-30 pip dari buffer zone berdasarkan struktur market, sementara instrumen lain menggunakan proteksi berbasis struktur dan 2x spread. Target TP1-TP3 dihitung proporsional dari entry dengan rasio risiko 1:1, 1:2, dan 1:3.`;
 
     return res.status(200).json({
       ok: true,
@@ -291,9 +304,9 @@ export default async function handler(req, res) {
         confidence: 'HIGH',
         risk: 'LOW',
         setup: 'CONTINUATION',
-        setupLabel: noteText,
+        setupLabel: setupLabelText,
         zoneLabel: 'Order Block / FVG Structure',
-        zoneNote: `Konfigurasi Optimal (${cfgInfo.type})`,
+        zoneNote: isGold ? 'Gold Fixed Range 20~30 pip' : `Konfigurasi Optimal (${cfgInfo.type})`,
         reason: reason
       }
     });
