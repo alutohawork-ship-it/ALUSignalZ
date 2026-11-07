@@ -53,7 +53,7 @@ async function checkAccess(email) {
 function cleanCandles(rows) {
   if (!Array.isArray(rows)) return [];
   return rows.map(c => ({ t: Number(c?.t), o: Number(c?.o), h: Number(c?.h), l: Number(c?.l), c: Number(c?.c) }))
-    .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite)).sort((a, b) => a.t - b.t).slice(-200);
+    .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite)).sort((a, b) => a.t - b.t).slice(-1000);
 }
 
 function atr(candles, period = 14) {
@@ -72,7 +72,6 @@ function structureDir(candles) {
   return last.c >= first.c ? 1 : -1;
 }
 
-// OFFSET ABSOLUT TERSTRUKTUR (XAU, DXY, FOREX, & CRYPTO)
 function getAbsoluteScalpOffsets(symbol) {
   const s = symbol.toUpperCase();
 
@@ -199,7 +198,7 @@ export default async function handler(req, res) {
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
-    const email = String(body.email || '').trim().toLowerCase();
+    const email = String(body.email || req.headers['x-user-email'] || '').trim().toLowerCase();
     const style = STYLES[body.tradingStyle];
     const symbol = String(body.marketId || '').split('|').pop().toUpperCase();
     const dec = DECIMALS[symbol] ?? 2;
