@@ -1,5 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC dengan SL Berbasis Struktur + Pengaman Buffer Spread 2x
+// Analisis Pure SMC dengan Workflow Khusus: Gold Normal, Lainnya by Structure + 2x Spread
 
 const KV_KEY = 'alu_clients';
 
@@ -26,7 +26,7 @@ const PIP = {
 };
 
 const STYLES = {
-  'Scalping': { label: 'Scalping Hit & Run (Spread-Buffered Structure SL)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
+  'Scalping': { label: 'Scalping Hit & Run (Optimized)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
   'Day Trading': { label: 'Day Trading Zone (HTF: H1 | MTF: M30)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
   'Intraday': { label: 'Intraday (HTF: H4 | MTF: H1)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
   'Swing': { label: 'Swing Trading (HTF: D1 | MTF: H4)', mode: 'LIMIT', kind: 'zone', rr: [2.0, 4.5, 8.5] },
@@ -92,30 +92,29 @@ function getStructuralExtremes(candles, isBuy) {
   return extreme;
 }
 
-// SIMULASI ESTIMASI SPREAD RATA-RATA BROKER PER KELAS ASET
 function getEstimatedSpread(symbol, pip) {
   const s = symbol.toUpperCase();
   const p = pip || 1;
-  if (s.includes('XAU')) return 30 * p;       // Gold spread ~30 poin
-  if (s.includes('BTC')) return 150 * p;     // Crypto spread besar (~150-200 poin)
-  if (s.includes('EUR') || s.includes('GBP')) return 1.5 * p; // Forex major spread tipis (~1.5 pips)
-  return 10 * p;
+  if (s.includes('XAU')) return 20 * p; // Gold normal spread
+  if (s.includes('BTC')) return 100 * p;
+  if (s.includes('EUR') || s.includes('GBP')) return 1.2 * p;
+  return 5 * p;
 }
 
 function getAssetConfig(symbol) {
   const s = symbol.toUpperCase();
-  if (s.includes('XAU')) return { bufferMultiplier: 0.8, slMultiplier: 1.8, type: 'METAL' };
-  if (s.includes('XAG')) return { bufferMultiplier: 1.0, slMultiplier: 2.0, type: 'METAL' };
+  if (s.includes('XAU')) return { bufferMultiplier: 0.6, slMultiplier: 1.5, type: 'GOLD_NORMAL' };
+  if (s.includes('XAG')) return { bufferMultiplier: 0.8, slMultiplier: 1.8, type: 'METAL' };
   if (s.includes('EUR') || s.includes('GBP') || s.includes('AUD') || s.includes('NZD') || s.includes('USD') || s.includes('CAD') || s.includes('CHF')) {
-    if (s.includes('JPY')) return { bufferMultiplier: 1.2, slMultiplier: 2.2, type: 'CURRENCY' };
-    return { bufferMultiplier: 1.0, slMultiplier: 2.0, type: 'CURRENCY' };
+    if (s.includes('JPY')) return { bufferMultiplier: 1.0, slMultiplier: 2.0, type: 'CURRENCY' };
+    return { bufferMultiplier: 0.8, slMultiplier: 1.8, type: 'CURRENCY' };
   }
-  if (s.includes('BTC')) return { bufferMultiplier: 1.5, slMultiplier: 2.5, type: 'CRYPTO' };
-  if (s.includes('ETH')) return { bufferMultiplier: 1.2, slMultiplier: 2.2, type: 'CRYPTO' };
-  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP')) return { bufferMultiplier: 1.2, slMultiplier: 2.0, type: 'CRYPTO' };
-  if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) return { bufferMultiplier: 1.5, slMultiplier: 2.5, type: 'INDEX' };
-  if (s.includes('OIL') || s.includes('CLUSDT')) return { bufferMultiplier: 1.2, slMultiplier: 2.2, type: 'COMMODITY' };
-  return { bufferMultiplier: 1.0, slMultiplier: 2.0, type: 'DEFAULT' };
+  if (s.includes('BTC')) return { bufferMultiplier: 1.2, slMultiplier: 2.2, type: 'CRYPTO' };
+  if (s.includes('ETH')) return { bufferMultiplier: 1.0, slMultiplier: 2.0, type: 'CRYPTO' };
+  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP')) return { bufferMultiplier: 1.0, slMultiplier: 1.8, type: 'CRYPTO' };
+  if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) return { bufferMultiplier: 1.2, slMultiplier: 2.2, type: 'INDEX' };
+  if (s.includes('OIL') || s.includes('CLUSDT')) return { bufferMultiplier: 1.0, slMultiplier: 2.0, type: 'COMMODITY' };
+  return { bufferMultiplier: 0.8, slMultiplier: 1.8, type: 'DEFAULT' };
 }
 
 function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal) {
@@ -128,21 +127,21 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal)
   const bufferDist = a * cfg.bufferMultiplier;
   const bufferEnd = isBuy ? price - bufferDist : price + bufferDist;
 
-  // 1. Ambil SL berbasis struktur (swing high / low)
   const structExtreme = getStructuralExtremes(mtfC, isBuy);
   let sl = structExtreme != null 
-    ? (isBuy ? structExtreme - (a * 0.3) : structExtreme + (a * 0.3))
+    ? (isBuy ? structExtreme - (a * 0.2) : structExtreme + (a * 0.2))
     : (isBuy ? bufferEnd - (a * cfg.slMultiplier) : bufferEnd + (a * cfg.slMultiplier));
 
-  // 2. SIMULASI TAMBAHAN 2x BUFFER SPREAD BROKER DI LUAR SL STRUKTUR AGAR AMAN DARI NOISE
-  const estSpread = getEstimatedSpread(symbol, pip);
-  const spreadPadding = estSpread * 2.0;
-  sl = isBuy ? sl - spreadPadding : sl + spreadPadding;
+  // Jika bukan Gold, tambahkan pengaman 2x spread broker agar aman dari noise
+  if (!symbol.toUpperCase().includes('XAU')) {
+    const estSpread = getEstimatedSpread(symbol, pip);
+    const spreadPadding = estSpread * 2.0;
+    sl = isBuy ? sl - spreadPadding : sl + spreadPadding;
+  }
 
   if (isBuy && sl >= bufferEnd) sl = bufferEnd - (a * cfg.slMultiplier);
   if (!isBuy && sl <= bufferEnd) sl = bufferEnd + (a * cfg.slMultiplier);
 
-  // 3. ATURAN HITUNGAN TP: SL dari buffer, TP ditarik dari GARIS DEPAN (price/entry) berdasarkan rasio (1:1, 1:2, 1:3)
   const riskDistance = Math.abs(price - sl);
   const tp1 = isBuy ? price + (1.0 * riskDistance) : price - (1.0 * riskDistance);
   const tp2 = isBuy ? price + (2.0 * riskDistance) : price - (2.0 * riskDistance);
@@ -161,7 +160,7 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal)
       sl: sl,
       tps: [tp1, tp2, tp3],
       zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
-      trigSrc: `Structural+2xSpread-${cfg.type}`,
+      trigSrc: `Workflow-${cfg.type}`,
       expireMs: 0,
       riskAtr: Math.abs(bufferEnd - sl) / a,
       over: false,
@@ -193,11 +192,13 @@ function generalTradePlan({ htfC, mtfC, m5C, price, symbol, pip, dec, lang, styl
 
   const structExtreme = getStructuralExtremes(mtfC, isBuy);
   let sl = structExtreme != null
-    ? (isBuy ? structExtreme - (a15 * 0.4) : structExtreme + (a15 * 0.4))
+    ? (isBuy ? structExtreme - (a15 * 0.3) : structExtreme + (a15 * 0.3))
     : (isBuy ? bufferEnd - (a15 * cfg.slMultiplier) : bufferEnd + (a15 * cfg.slMultiplier));
 
-  const estSpread = getEstimatedSpread(symbol, pip);
-  sl = isBuy ? sl - (estSpread * 2.0) : sl + (estSpread * 2.0);
+  if (!symbol.toUpperCase().includes('XAU')) {
+    const estSpread = getEstimatedSpread(symbol, pip);
+    sl = isBuy ? sl - (estSpread * 2.0) : sl + (estSpread * 2.0);
+  }
 
   if (isBuy && sl >= bufferEnd) sl = bufferEnd - (a15 * cfg.slMultiplier);
   if (!isBuy && sl <= bufferEnd) sl = bufferEnd + (a15 * cfg.slMultiplier);
@@ -270,9 +271,9 @@ export default async function handler(req, res) {
     const actionType = plan.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET';
     const sideText = dir === 1 ? 'BUY' : 'SELL';
     const cfgInfo = getAssetConfig(symbol);
-    const timeframeNote = isScalp && !isPreciousMetal ? 'Scalping menggunakan struktur Day Trade (H1/M30)' : 'Scalping Agresif M5+M3+M1';
+    const noteText = isPreciousMetal ? 'Gold / Metal Standard Setup' : 'Structural SL + 2x Spread Protection';
 
-    const reason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol} menggunakan Workflow Struktur Berbasis Aset [${cfgInfo.type}] ditambah proteksi 2x Spread Buffer. Setup divalidasi oleh struktur ${timeframeNote}. Stop Loss diletakkan di luar swing struktur pasar ditambah padding 2x perkiraan spread broker untuk menghindari false trigger/stop hunting. Target TP1-TP3 ditarik proporsional dari garis depan (entry) berdasarkan rasio risiko (1:1, 1:2, 1:3).`;
+    const reason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol} menggunakan Workflow [${cfgInfo.type}]. Setup dikonfirmasi oleh struktur market aktif. Untuk Gold menggunakan parameter standar emas yang ideal, sementara pair lain dilindungi oleh buffer struktur dan tambahan proteksi 2x spread untuk menghindari stop hunting. Target TP1-TP3 ditarik proporsional dari garis depan (entry) dengan rasio 1:1, 1:2, dan 1:3.`;
 
     return res.status(200).json({
       ok: true,
@@ -290,9 +291,9 @@ export default async function handler(req, res) {
         confidence: 'HIGH',
         risk: 'LOW',
         setup: 'CONTINUATION',
-        setupLabel: `Structural SL + 2x Spread (${cfgInfo.type})`,
+        setupLabel: noteText,
         zoneLabel: 'Order Block / FVG Structure',
-        zoneNote: `SL Berbasis Struktur + Proteksi 2x Spread`,
+        zoneNote: `Konfigurasi Optimal (${cfgInfo.type})`,
         reason: reason
       }
     });
