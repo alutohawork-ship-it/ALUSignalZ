@@ -431,7 +431,7 @@
                         <span id="lblLiveStream" class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
                             <i class="fa-solid fa-tower-broadcast text-accentblue"></i> LIVE MARKET STREAM
                         </span>
-                        <span id="livePulse" class="text-[8px] text-emerald-400 font-mono animate-pulse">● Live Stream</span>
+                        <span id="livePulse" class="text-[8px] text-emerald-400 font-mono animate-pulse">● Live Stream (Dual Socket)</span>
                     </div>
                     <div id="tickerListContainer" class="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-[360px] overflow-y-auto pr-1"></div>
                 </div>
@@ -723,11 +723,18 @@
     const STREAM_SYMBOL = key => MARKETS[key].coins[0];
     const PENDING_SL_CANCEL = true;
 
+    // PEMBAGIAN SIMBOL UNTUK DOUBLE SOCKET
+    const HALF_INDEX = Math.ceil(SUB_KEYS.length / 2);
+    const KEYS_SOCKET_1 = SUB_KEYS.slice(0, HALF_INDEX); // Forex & Metals
+    const KEYS_SOCKET_2 = SUB_KEYS.slice(HALF_INDEX);   // Commodities, Indices, Cryptos
+
     // ================= STATE =================
-    let ws = null, reconnectTimer = null, pingTimer = null;
-    let retryCount = 0, streamReady = false, authFailed = false;
+    let ws1 = null, ws2 = null;
+    let reconnectTimer1 = null, reconnectTimer2 = null;
+    let pingTimer1 = null, pingTimer2 = null;
+    let streamReady1 = false, streamReady2 = false;
+    let authFailed = false;
     let connectId = 0;
-    let dbgCount = 0;
     let trades = [], activeId = null;
     const prices = {}, history = {}, rawPrices = {}, marketCandles = {};
     const symbolOf = {}, providerOf = {};
@@ -832,7 +839,7 @@
 
     const isLive = key => prices[key] && Date.now() - prices[key].recv < 30000;
 
-    // ================= STREAM (xbtfx dengan Batching Limit Fix) =================
+    // ================= DOUBLE WEBSOCKET ENGINE =================
     const sendJSON = (sock, obj) => { if (sock && sock.readyState === WebSocket.OPEN) sock.send(JSON.stringify(obj)); };
 
     const pickPrice = (...vals) => {
@@ -848,22 +855,17 @@
         return [...new Set([...(COIN_KEY.get(`xbtfx|${n}`) || []), ...(COIN_KEY.get(`*|${n}`) || [])])];
     };
 
-    // FUNGSI SUBSCRIBE DENGAN BATCHING DIBUTUHKAN AGAR INDEKS/ALTCOIN TIDAK TERBENTUR LIMIT
-    function subscribeAll(sock) {
-        const batchSize = 10;
-        for (let i = 0; i < SUB_KEYS.length; i += batchSize) {
-            const chunk = SUB_KEYS.slice(i, i + batchSize);
+    function subscribeBatch(sock, keyList) {
+        const batchSize = 8;
+        for (let i = 0; i < keyList.length; i += batchSize) {
+            const chunk = keyList.slice(i, i + batchSize);
             const symbolsToSub = chunk.map(key => STREAM_SYMBOL(key));
             
             setTimeout(() => {
-                if (ws !== sock || sock.readyState !== WebSocket.OPEN) return;
-                sendJSON(sock, { 
-                    action: 'subscribe', 
-                    channel: 'quotes', 
-                    symbols: symbolsToSub 
-                });
+                if (!sock || sock.readyState !== WebSocket.OPEN) return;
+                sendJSON(sock, { action: 'subscribe', channel: 'quotes', symbols: symbolsToSub });
                 chunk.forEach(key => markSrc(key, 'SUB', 'text-gray-500'));
-            }, (i / batchSize) * 250);
+            }, (i / batchSize) * 200);
         }
     }
 
@@ -884,18 +886,11 @@
         for (const key of SUB_KEYS) {
             const p = prices[key];
             if (!p) {
-                if (streamReady) markSrc(key, 'MENUNGGU', 'text-gray-500');
+                if (streamReady1 || streamReady2) markSrc(key, 'MENUNGGU', 'text-gray-500');
                 continue;
             }
             if (now - p.recv > STALE_MS) markSrc(key, 'SEPI', 'text-gray-500');
         }
-    }
-
-    function scheduleReconnect() {
-        clearTimeout(reconnectTimer);
-        const base = Math.min(30000, 1000 * 2 ** Math.min(retryCount, 5));
-        retryCount++;
-        reconnectTimer = setTimeout(connect, base * (0.5 + Math.random() * 0.5));
     }
 
     async function fetchStreamToken() {
@@ -913,10 +908,13 @@
     }
 
     async function connect() {
-        clearTimeout(reconnectTimer);
-        clearInterval(pingTimer);
-        if (ws) { const old = ws; ws = null; old.onclose = null; old.onmessage = null; old.close(); }
-        streamReady = false;
+        clearTimeout(reconnectTimer1); clearTimeout(reconnectTimer2);
+        clearInterval(pingTimer1); clearInterval(pingTimer2);
+        
+        if (ws1) { const old = ws1; ws1 = null; old.onclose = null; old.close(); }
+        if (ws2) { const old = ws2; ws2 = null; old.onclose = null; old.close(); }
+        
+        streamReady1 = false; streamReady2 = false;
         authFailed = false;
         const myId = ++connectId;
 
@@ -924,70 +922,50 @@
         const t = await fetchStreamToken();
         if (myId !== connectId) return;
 
-        if (t.wait) {
-            setWsStatus('LOGIN DULU', 'gray');
-            reconnectTimer = setTimeout(connect, 2000);
-            return;
-        }
-        if (t.fatal) {
-            authFailed = true;
-            setWsStatus('SESI TIDAK VALID', 'red');
-            return;
-        }
-        if (t.error) {
-            setWsStatus('TOKEN GAGAL', 'red');
-            scheduleReconnect();
-            return;
-        }
+        if (t.wait) { setWsStatus('LOGIN DULU', 'gray'); reconnectTimer1 = setTimeout(connect, 2000); return; }
+        if (t.fatal) { authFailed = true; setWsStatus('SESI TIDAK VALID', 'red'); return; }
+        if (t.error) { setWsStatus('TOKEN GAGAL', 'red'); reconnectTimer1 = setTimeout(connect, 5000); return; }
 
         XBTFX_TOKEN = t.token;
-        setWsStatus('CONNECTING', 'yellow');
-        const sock = new WebSocket(WS_URL);
-        ws = sock;
+        setWsStatus('CONNECTING (2x)', 'yellow');
 
-        sock.onopen = () => {
-            setWsStatus('AUTH...', 'yellow');
-            sendJSON(sock, { action: 'auth', token: XBTFX_TOKEN });
-        };
-
-        sock.onmessage = e => {
-            retryCount = 0;
+        // SOKET 1 (Forex & Precious Metals)
+        const sock1 = new WebSocket(WS_URL);
+        ws1 = sock1;
+        sock1.onopen = () => sendJSON(sock1, { action: 'auth', token: XBTFX_TOKEN });
+        sock1.onmessage = e => {
             let msg; try { msg = JSON.parse(e.data); } catch { return; }
-            if (DEBUG && dbgCount < 40) { dbgCount++; console.log('[WS]', e.data.slice(0, 400)); }
-
             if (msg.action === 'auth_ok') {
-                streamReady = true;
-                setWsStatus('CONNECTED', 'green');
-                subscribeAll(sock);
-                clearInterval(pingTimer);
-                pingTimer = setInterval(() => sendJSON(sock, { action: 'ping' }), 30000);
-                setTimeout(() => { if (ws === sock) refreshBias(selectedKey(), true); }, 1500);
+                streamReady1 = true;
+                setWsStatus('CONNECTED (DUAL)', 'green');
+                subscribeBatch(sock1, KEYS_SOCKET_1);
+                clearInterval(pingTimer1);
+                pingTimer1 = setInterval(() => sendJSON(sock1, { action: 'ping' }), 30000);
                 return;
             }
-
-            if (msg.action === 'pong') return;
-            if (msg.channel === 'quote') { handleQuote(msg); return; }
-
-            if (!streamReady && (msg.action === 'auth_error' || msg.action === 'error' || msg.error)) {
-                authFailed = true;
-                setWsStatus('AUTH GAGAL', 'red');
-                return;
-            }
-
-            if (msg.action === 'error' && msg.symbol) {
-                for (const key of keysOf(msg.symbol)) markSrc(key, 'ERR', 'text-red-400');
-            }
+            if (msg.channel === 'quote') handleQuote(msg);
         };
+        sock1.onclose = () => { if (ws1 === sock1 && !authFailed) reconnectTimer1 = setTimeout(connect, 4000); };
 
-        sock.onerror = () => setWsStatus('ERROR', 'red');
-        sock.onclose = () => {
-            if (ws !== sock) return;
-            clearInterval(pingTimer);
-            streamReady = false;
-            setWsStatus('DISCONNECTED', 'red');
-            for (const k of Object.keys(MARKETS)) markSrc(k, 'OFF', 'text-gray-600');
-            if (!authFailed) scheduleReconnect();
-        };
+        // SOKET 2 (Commodities, Indices, Cryptos)
+        setTimeout(() => {
+            if (myId !== connectId) return;
+            const sock2 = new WebSocket(WS_URL);
+            ws2 = sock2;
+            sock2.onopen = () => sendJSON(sock2, { action: 'auth', token: XBTFX_TOKEN });
+            sock2.onmessage = e => {
+                let msg; try { msg = JSON.parse(e.data); } catch { return; }
+                if (msg.action === 'auth_ok') {
+                    streamReady2 = true;
+                    subscribeBatch(sock2, KEYS_SOCKET_2);
+                    clearInterval(pingTimer2);
+                    pingTimer2 = setInterval(() => sendJSON(sock2, { action: 'ping' }), 30000);
+                    return;
+                }
+                if (msg.channel === 'quote') handleQuote(msg);
+            };
+            sock2.onclose = () => { if (ws2 === sock2 && !authFailed) reconnectTimer2 = setTimeout(connect, 5000); };
+        }, 500); // Beri jeda 500ms agar server tidak memblokir koneksi kedua
     }
 
     // ================= AGREGATOR TICK =================
