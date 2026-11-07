@@ -1,5 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC Universal: Absolute Fixed Range (XAU 20-30 pip, XAG 2x XAU, Currency & Crypto)
+// Analisis Pure SMC Universal: Crypto 30-50 Pip & Currency Fixed Range UI Fix
 
 const KV_KEY = 'alu_clients';
 
@@ -15,7 +15,7 @@ const DECIMALS = {
 };
 
 const STYLES = {
-  'Scalping': { label: 'Scalping Agresif (Absolute Fixed Range)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
+  'Scalping': { label: 'Scalping Agresif (Crypto 30-50 Pip & Currency Fix)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
   'Day Trading': { label: 'Day Trading (Zona & Kontinuitas + EMA 14/20)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
   'Intraday': { label: 'Intraday (Limit Order + EMA 20/50/100)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
   'Swing': { label: 'Swing Trading (Limit Order + EMA 20/50/100/200)', mode: 'LIMIT', kind: 'swing', rr: [2.0, 4.5, 8.5] },
@@ -66,37 +66,39 @@ function structureDir(candles) {
   return last.c >= first.c ? 1 : -1;
 }
 
-// DEFINISI JARAK ABSOLUT (BUFFER & SL) UNTUK SCALPING AGRESIF
+// OFFSET ABSOLUT TERSTRUKTUR (XAU, XAG, CRYPTO 30-50 PIP, & CURRENCY)
 function getAbsoluteScalpOffsets(symbol) {
   const s = symbol.toUpperCase();
 
-  // XAUUSD: SL 2.5 (masuk kisaran 20-30 pip), XAGUSD: 2x XAUUSD
-  if (s.includes('XAU')) return { buffer: 1.0, sl: 2.5, type: 'XAU_20_30_PIP' };
-  if (s.includes('XAG')) return { buffer: 2.0, sl: 5.0, type: 'XAG_2X_XAU' };
+  // XAUUSD: Target SL 20-30 pip -> Offset 2.8
+  if (s.includes('XAU')) return { buffer: 1.0, sl: 2.8, type: 'XAU_20_30_PIP' };
+  // XAGUSD: 2x XAUUSD
+  if (s.includes('XAG')) return { buffer: 2.0, sl: 5.6, type: 'XAG_2X_XAU' };
   
-  // Crypto (30 - 50 Poin/Pip ideal)
-  if (s.includes('BTC')) return { buffer: 35.0, sl: 100.0, type: 'BTC_100PIP' };
-  if (s.includes('ETH')) return { buffer: 4.0, sl: 12.0, type: 'ETH_40PIP' };
-  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP') || s.includes('LTC')) return { buffer: 1.5, sl: 4.5, type: 'ALT_FIX' };
-  
-  // Currency Pairs (Sesuai Permintaan Presisi Anda)
-  if (s.includes('USDJPY')) return { buffer: 0.05, sl: 0.15, type: 'USDJPY_50PIP' };   // 50 pip
-  if (s.includes('GBPUSD')) return { buffer: 0.0005, sl: 0.0015, type: 'GBPUSD_50PIP' }; // 50 pip
-  if (s.includes('AUDUSD')) return { buffer: 0.0003, sl: 0.0010, type: 'AUDUSD_30PIP' }; // 30-40 pip
-  if (s.includes('USDCAD')) return { buffer: 0.0008, sl: 0.0024, type: 'USDCAD_80PIP' }; // 60-80 pip
-  if (s.includes('USDCHF')) return { buffer: 0.0006, sl: 0.0018, type: 'USDCHF_60PIP' }; // 50-60 pip
-  
-  // EURUSD & Major Lainnya (50-60 pip)
-  if (s.includes('EUR') || s.includes('NZD') || s.includes('CHF') || s.includes('CAD')) {
-    return { buffer: 0.0005, sl: 0.0015, type: 'CURRENCY_50_60_PIP' };
+  // Crypto (Disesuaikan agar rentang tampilan di UI menjadi 30-50 pip/poin)
+  if (s.includes('BTC')) return { buffer: 12.0, sl: 35.0, type: 'BTC_30_50_PIP' };
+  if (s.includes('ETH')) return { buffer: 1.5, sl: 4.5, type: 'ETH_30_50_PIP' };
+  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP') || s.includes('LTC')) {
+    return { buffer: 1.0, sl: 3.5, type: 'ALT_30_50_PIP' };
   }
   
-  // Index & Lainnya
+  // Currency Pairs (Target 30 - 80 pip sesuai permintaan spesifik)
+  if (s.includes('USDJPY')) return { buffer: 0.20, sl: 0.50, type: 'USDJPY_50PIP' };   // 50 pip
+  if (s.includes('GBPUSD')) return { buffer: 0.0020, sl: 0.0050, type: 'GBPUSD_50PIP' }; // 50 pip
+  if (s.includes('AUDUSD')) return { buffer: 0.0012, sl: 0.0035, type: 'AUDUSD_30PIP' }; // 30-40 pip
+  if (s.includes('USDCAD')) return { buffer: 0.0030, sl: 0.0080, type: 'USDCAD_80PIP' }; // 60-80 pip
+  if (s.includes('USDCHF')) return { buffer: 0.0022, sl: 0.0060, type: 'USDCHF_60PIP' }; // 50-60 pip
+  
+  // EURUSD & Currency General (Target 50-60 pip)
+  if (s.includes('EUR') || s.includes('NZD') || s.includes('CHF') || s.includes('CAD')) {
+    return { buffer: 0.0020, sl: 0.0055, type: 'CURRENCY_50_60_PIP' };
+  }
+  
   if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) {
     return { buffer: 20.0, sl: 60.0, type: 'INDEX_FIX' };
   }
   
-  return { buffer: 0.0005, sl: 0.0015, type: 'DEFAULT_FIX' };
+  return { buffer: 0.0020, sl: 0.0055, type: 'DEFAULT_FIX' };
 }
 
 function scalpHitRun(mtfC, ltfC, htfDir, price, symbol) {
@@ -127,7 +129,7 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, symbol) {
       sl: sl,
       tps: [tp1, tp2, tp3],
       zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
-      trigSrc: `Scalping Agresif (Absolute Fixed Range) [${offsets.type}]`,
+      trigSrc: `Scalping Agresif (Crypto 30-50 Pip Fixed) [${offsets.type}]`,
       expireMs: 0,
     }
   };
@@ -238,7 +240,7 @@ export default async function handler(req, res) {
     const techReason = [
       `Analisis Teknikal Pure SMC ${sideText} (${style.label}) pada pair ${symbol}.`,
       `Alasan Eksekusi: Diputuskan ${actionDesc}. Pemicu utama didasarkan pada pembacaan struktur mikro dan filter indikator (${plan.trigSrc}).`,
-      `Manajemen Risiko: Jarak Stop Loss dan Buffer telah dikunci secara absolut mengikuti standar fixed range (${offsets.type}).`
+      `Manajemen Risiko: Jarak Stop Loss dan Buffer telah disesuaikan secara presisi (${offsets.type}) agar laporan rentang pip kripto maupun mata uang tampil ideal sesuai target.`
     ].join('\n\n');
 
     return res.status(200).json({
@@ -259,7 +261,7 @@ export default async function handler(req, res) {
         setup: 'CONTINUATION / REVERSAL',
         setupLabel: style.label,
         zoneLabel: 'Order Block / FVG / Structure Zone',
-        zoneNote: `Absolute Range (${offsets.type})`,
+        zoneNote: `Crypto/Currency Range (${offsets.type})`,
         reason: techReason
       }
     });
