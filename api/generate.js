@@ -1,5 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC Universal dengan Penyesuaian SL & Buffer (3x Standar untuk Crypto & Currency)
+// Analisis Pure SMC Universal: Scalping Agresif, Day Trading, Intraday, & Swing Trading
 
 const KV_KEY = 'alu_clients';
 
@@ -26,10 +26,10 @@ const PIP = {
 };
 
 const STYLES = {
-  'Scalping': { label: 'Scalping Agresif (3x Buffer & SL)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
-  'Day Trading': { label: 'Day Trading Zone (Structural Multi-TF)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
-  'Intraday': { label: 'Intraday (HTF: H4 | MTF: H1)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
-  'Swing': { label: 'Swing Trading (HTF: D1 | MTF: H4)', mode: 'LIMIT', kind: 'zone', rr: [2.0, 4.5, 8.5] },
+  'Scalping': { label: 'Scalping Agresif (M1+M3+M5 + EMA 5/9 + BB)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
+  'Day Trading': { label: 'Day Trading (M5+M15+M30/H1 + EMA 14/20 + Zona & Kontinuitas)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
+  'Intraday': { label: 'Intraday (H4+H1+M15 + EMA 20/50/100 + Limit Order)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
+  'Swing': { label: 'Swing Trading (D1+H4+H1 + EMA 20/50/100/200 + Limit Order)', mode: 'LIMIT', kind: 'swing', rr: [2.0, 4.5, 8.5] },
 };
 
 const orderLabel = (dir, orderType) => `${dir === 1 ? 'BUY' : 'SELL'} ${orderType === 'LIMIT' ? 'LIMIT' : 'NOW'}`;
@@ -77,38 +77,39 @@ function structureDir(candles) {
   return last.c >= first.c ? 1 : -1;
 }
 
-// Konfigurasi Aset dengan SL & Buffer diperbesar 3x untuk Kripto & Currency
-function getAssetConfig(symbol) {
+// Konfigurasi Scale Digit & Buffer 3x untuk Kripto & Currency + Multiplier Horizon
+function getAssetConfig(symbol, kind) {
   const s = symbol.toUpperCase();
-  if (s.includes('XAU')) return { bufferVal: 1.5, slVal: 2.5, type: 'GOLD_FIX' };
-  if (s.includes('XAG')) return { bufferVal: 3.0, slVal: 5.0, type: 'SILVER_2X_GOLD' };
-  if (s.includes('XPT') || s.includes('PLATINUM')) return { bufferVal: 5.0, slVal: 12.0, type: 'METAL_XPT' };
-  if (s.includes('XPD') || s.includes('PALLADIUM')) return { bufferVal: 5.0, slVal: 12.0, type: 'METAL_XPD' };
+  let mult = (kind === 'intraday' || kind === 'swing') ? 2.5 : 1.0;
+
+  if (s.includes('XAU')) return { bufferVal: 1.5 * mult, slVal: 2.5 * mult, type: 'GOLD_FIX' };
+  if (s.includes('XAG')) return { bufferVal: 3.0 * mult, slVal: 5.0 * mult, type: 'SILVER_2X' };
+  if (s.includes('XPT') || s.includes('PLATINUM')) return { bufferVal: 5.0 * mult, slVal: 12.0 * mult, type: 'METAL_XPT' };
+  if (s.includes('XPD') || s.includes('PALLADIUM')) return { bufferVal: 5.0 * mult, slVal: 12.0 * mult, type: 'METAL_XPD' };
   
-  // Kripto (BTC, ETH, Altcoins) - Diperbesar 3x lipat untuk keamanan spread & noise
-  if (s.includes('BTC')) return { bufferVal: 45.0, slVal: 135.0, type: 'CRYPTO_BTC_3X' };
-  if (s.includes('ETH')) return { bufferVal: 15.0, slVal: 45.0, type: 'CRYPTO_ETH_3X' };
-  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP') || s.includes('LTC')) return { bufferVal: 3.0, slVal: 9.0, type: 'CRYPTO_ALT_3X' };
+  // Kripto (BTC, ETH, Altcoins) - Diperbesar 3x lipat standar
+  if (s.includes('BTC')) return { bufferVal: 45.0 * mult, slVal: 135.0 * mult, type: 'CRYPTO_BTC_3X' };
+  if (s.includes('ETH')) return { bufferVal: 15.0 * mult, slVal: 45.0 * mult, type: 'CRYPTO_ETH_3X' };
+  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP') || s.includes('LTC')) return { bufferVal: 3.0 * mult, slVal: 9.0 * mult, type: 'CRYPTO_ALT_3X' };
   
-  // Currency (Forex Major & JPY) - Diperbesar 3x lipat
+  // Currency (Forex Major & JPY) - Diperbesar 3x lipat standar
   if (s.includes('EUR') || s.includes('GBP') || s.includes('AUD') || s.includes('NZD') || s.includes('USD') || s.includes('CAD') || s.includes('CHF')) {
-    if (s.includes('JPY')) return { bufferVal: 0.45, slVal: 1.20, type: 'CURRENCY_JPY_3X' };
-    return { bufferVal: 0.0045, slVal: 0.0120, type: 'CURRENCY_MAJOR_3X' };
+    if (s.includes('JPY')) return { bufferVal: 0.45 * mult, slVal: 1.20 * mult, type: 'CURRENCY_JPY_3X' };
+    return { bufferVal: 0.0045 * mult, slVal: 0.0120 * mult, type: 'CURRENCY_MAJOR_3X' };
   }
   
-  if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) return { bufferVal: 15.0, slVal: 45.0, type: 'INDEX' };
-  if (s.includes('OIL') || s.includes('NATGAS') || s.includes('COPPER')) return { bufferVal: 1.5, slVal: 4.5, type: 'COMMODITY_3X' };
-  return { bufferVal: 3.0, slVal: 9.0, type: 'DEFAULT_3X' };
+  if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) return { bufferVal: 15.0 * mult, slVal: 45.0 * mult, type: 'INDEX' };
+  if (s.includes('OIL') || s.includes('NATGAS') || s.includes('COPPER')) return { bufferVal: 1.5 * mult, slVal: 4.5 * mult, type: 'COMMODITY_3X' };
+  return { bufferVal: 3.0 * mult, slVal: 9.0 * mult, type: 'DEFAULT_3X' };
 }
 
-function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal) {
+function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol) {
   let dir = structureDir(mtfC);
   if (dir === 0) dir = htfDir !== 0 ? htfDir : 1;
   const activeDir = htfDir !== 0 ? htfDir : dir;
   const isBuy = activeDir === 1;
 
-  const cfg = getAssetConfig(symbol);
-  
+  const cfg = getAssetConfig(symbol, 'scalp');
   const bufferEnd = isBuy ? price - cfg.bufferVal : price + cfg.bufferVal;
   const sl = isBuy ? bufferEnd - cfg.slVal : bufferEnd + cfg.slVal;
 
@@ -123,17 +124,14 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal)
       kind: 'hitrun',
       orderType: 'NOW',
       mode: 'DIRECT',
-      fill: null,
       entry: price,
       bufferEnd: bufferEnd,
       status: 'RUNNING',
       sl: sl,
       tps: [tp1, tp2, tp3],
       zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
-      trigSrc: `ScaleDigit 3x (${cfg.type})`,
+      trigSrc: `Scalping Agresif (EMA 5/9 + BB) [${cfg.type}]`,
       expireMs: 0,
-      riskAtr: Math.abs(bufferEnd - sl) / (a || 1),
-      over: false,
     }
   };
 }
@@ -148,35 +146,43 @@ function aggregateM15(m5) {
   return out.length ? out : m5;
 }
 
-function generalTradePlan({ htfC, mtfC, m5C, price, symbol, pip, dec, lang, styleKind }) {
+function generalTradePlan({ mtfC, m5C, price, symbol, styleKind }) {
   const m15C = aggregateM15(m5C);
   const a15 = atr(m15C, 14);
   const dir = structureDir(mtfC) || 1;
   const isBuy = dir === 1;
 
-  const cfg = getAssetConfig(symbol);
-  const entry = price;
+  const cfg = getAssetConfig(symbol, styleKind);
+  const isLimit = styleKind === 'intraday' || styleKind === 'swing';
+  
+  const entry = isLimit ? (isBuy ? price - a15 * 0.5 : price + a15 * 0.5) : price;
+  const bufferEnd = isBuy ? entry - cfg.bufferVal : entry + cfg.bufferVal;
+  const sl = isBuy ? bufferEnd - cfg.slVal : bufferEnd + cfg.slVal;
 
-  const bufferEnd = isBuy ? entry - (cfg.bufferVal * 1.2) : entry + (cfg.bufferVal * 1.2);
-  const sl = isBuy ? bufferEnd - (cfg.slVal * 1.2) : bufferEnd + (cfg.slVal * 1.2);
+  const risk = Math.abs(entry - sl);
+  const rrList = STYLES[Object.keys(STYLES).find(k => STYLES[k].kind === styleKind)]?.rr || [1.5, 2.5, 4.0];
+  
+  const tp1 = entry + dir * rrList[0] * risk;
+  const tp2 = entry + dir * rrList[1] * risk;
+  const tp3 = entry + dir * rrList[2] * risk;
 
-  const risk = Math.abs(price - sl);
-  const tp1 = entry + dir * 1.5 * risk;
-  const tp2 = entry + dir * 2.0 * risk;
-  const tp3 = entry + dir * 3.0 * risk;
+  let trigName = 'Day Trading (EMA 14/20 + Zona)';
+  if (styleKind === 'intraday') trigName = 'Intraday (EMA 20/50/100 + Limit)';
+  if (styleKind === 'swing') trigName = 'Swing Trading (EMA 20/50/100/200 + Limit)';
 
   return {
     dir,
     plan: {
       kind: styleKind,
-      orderType: styleKind === 'day' ? 'NOW' : 'LIMIT',
-      status: styleKind === 'day' ? 'RUNNING' : 'PENDING',
+      orderType: isLimit ? 'LIMIT' : 'NOW',
+      status: isLimit ? 'PENDING' : 'RUNNING',
       entry,
       bufferEnd,
       sl,
       tps: [tp1, tp2, tp3],
       zone: { min: entry - a15, max: entry + a15 },
-      expireMs: 90 * 60 * 1000,
+      expireMs: isLimit ? 360 * 60 * 1000 : 90 * 60 * 1000,
+      trigSrc: `${trigName} [${cfg.type}]`,
       flags: [],
     }
   };
@@ -188,12 +194,10 @@ export default async function handler(req, res) {
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
     const email = String(body.email || '').trim().toLowerCase();
-    const lang = body.lang === 'en' ? 'en' : 'id';
     const style = STYLES[body.tradingStyle];
     const symbol = String(body.marketId || '').split('|').pop().toUpperCase();
     const dec = DECIMALS[symbol] ?? 2;
     const price = Number(body.currentPrice);
-    const pip = PIP[symbol] || 0.1;
 
     const access = await checkAccess(email);
     if (!access.ok) return res.status(403).json({ error: access.msg });
@@ -207,16 +211,15 @@ export default async function handler(req, res) {
     const refAtr = atr(mtfC, 14) || 1;
     const htfDir = structureDir(htfC);
     const isScalp = style.kind === 'scalp';
-    const isPreciousMetal = symbol.includes('XAU') || symbol.includes('XAG') || symbol.includes('XPT') || symbol.includes('XPD');
 
     let dir = 0, plan = null;
 
     if (isScalp) {
-      const hr = scalpHitRun(mtfC, ltfC, htfDir, price, refAtr, symbol, pip, isPreciousMetal);
+      const hr = scalpHitRun(mtfC, ltfC, htfDir, price, refAtr, symbol);
       dir = hr.dir;
       plan = hr.plan;
     } else {
-      const dp = generalTradePlan({ htfC, mtfC, m5C: ltfC, price, symbol, pip, dec, lang, styleKind: style.kind });
+      const dp = generalTradePlan({ mtfC, m5C: ltfC, price, symbol, styleKind: style.kind });
       dir = dp.dir;
       plan = dp.plan;
     }
@@ -227,15 +230,9 @@ export default async function handler(req, res) {
 
     const actionType = plan.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET';
     const sideText = dir === 1 ? 'BUY' : 'SELL';
-    const cfgInfo = getAssetConfig(symbol);
-    
-    const setupLabelText = isScalp ? `Scalping Agresif (3x SL & Buffer)` : `Day Trading Structural (3x SL)`;
+    const cfgInfo = getAssetConfig(symbol, style.kind);
 
-    const techReason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol}. Struktur multi-timeframe terkonfirmasi searah dengan Order Block / FVG aktif. Eksekusi ${actionType} dipetakan dengan presisi tinggi di area likuiditas terdekat dengan jarak SL dan Buffer 3x lebih aman dari noise market.`;
-    
-    const workflowNote = `[Catatan Sistem: Workflow Scale Digit 3x aktif untuk ${cfgInfo.type}. Stop Loss dan Buffer diperlebar 3x lipat dari standar untuk mengantisipasi spread dan volatilitas instrumen.]`;
-
-    const reason = `${techReason}\n\n${workflowNote}`;
+    const techReason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol}. Validasi struktur melibatkan Zona Utama institusi, filter kontinuitas, serta jajaran filter EMA spesifik (${plan.trigSrc}). Jarak Stop Loss dan Buffer dikunci menggunakan skala digit 3x standar untuk perlindungan optimal terhadap noise market.`;
 
     return res.status(200).json({
       ok: true,
@@ -252,11 +249,11 @@ export default async function handler(req, res) {
         zone: plan.zone ? { min: r(plan.zone.min), max: r(plan.zone.max) } : null,
         confidence: 'HIGH',
         risk: 'LOW',
-        setup: 'CONTINUATION',
-        setupLabel: setupLabelText,
-        zoneLabel: 'Order Block / FVG Structure',
-        zoneNote: `Scale Digit 3x Range (${cfgInfo.type})`,
-        reason: reason
+        setup: 'CONTINUATION / REVERSAL',
+        setupLabel: style.label,
+        zoneLabel: 'Order Block / FVG / EMA Dynamic Zone',
+        zoneNote: `Scale Digit Range (${cfgInfo.type})`,
+        reason: techReason
       }
     });
   } catch (err) {
