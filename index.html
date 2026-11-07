@@ -629,8 +629,9 @@
     }
 
     // ================= KONFIG MARKET =================
+    // Token TIDAK disimpan di file ini. Diambil dari /api/stream-token (env XBTFX_TOKEN di Vercel).
     const WS_URL = 'wss://ws.xbtfx.com/v1/ws';
-    const XBTFX_TOKEN = 'xbtfx_live_00ed4a87dadb4cdd89bf7a3c18713a3c';
+    let XBTFX_TOKEN = '';
     const HISTORY_MS = 10 * 60 * 1000;
     const CHART_SPAN_MS = 3 * 60 * 1000;
     const STALE_MS = 30000;
@@ -724,8 +725,9 @@
     const PENDING_SL_CANCEL = true;
 
     // ================= STATE =================
-    let ws = null, reconnectTimer = null;
+    let ws = null, reconnectTimer = null, pingTimer = null;
     let retryCount = 0, streamReady = false, authFailed = false;
+    let connectId = 0;
     let dbgCount = 0;
     let trades = [], activeId = null;
     const prices = {}, history = {}, rawPrices = {}, marketCandles = {};
@@ -886,11 +888,50 @@
         reconnectTimer = setTimeout(connect, base * (0.5 + Math.random() * 0.5));
     }
 
-    function connect() {
+    // Ambil token dari server. Hanya klien yang sudah login yang mendapatkannya.
+    async function fetchStreamToken() {
+        const email = localStorage.getItem(SESSION_EMAIL_KEY);
+        if (!email) return { wait: true };
+
+        const r = await api('/api/stream-token', {
+            method: 'POST',
+            headers: JSON_HEADERS,
+            body: JSON.stringify({ value: email }),
+        });
+        if (r.ok && r.data.token) return { token: r.data.token };
+        if (r.status === 401) return { fatal: true, msg: r.data.msg };
+        return { error: r.data.msg || 'Gagal mengambil token' };
+    }
+
+    async function connect() {
         clearTimeout(reconnectTimer);
+        clearInterval(pingTimer);
         if (ws) { const old = ws; ws = null; old.onclose = null; old.onmessage = null; old.close(); }
         streamReady = false;
+        authFailed = false;
+        const myId = ++connectId;
 
+        setWsStatus('TOKEN...', 'yellow');
+        const t = await fetchStreamToken();
+        if (myId !== connectId) return; // sudah ada connect baru
+
+        if (t.wait) {
+            setWsStatus('LOGIN DULU', 'gray');
+            reconnectTimer = setTimeout(connect, 2000);
+            return;
+        }
+        if (t.fatal) {
+            authFailed = true;
+            setWsStatus('SESI TIDAK VALID', 'red');
+            return;
+        }
+        if (t.error) {
+            setWsStatus('TOKEN GAGAL', 'red');
+            scheduleReconnect();
+            return;
+        }
+
+        XBTFX_TOKEN = t.token;
         setWsStatus('CONNECTING', 'yellow');
         const sock = new WebSocket(WS_URL);
         ws = sock;
@@ -909,9 +950,14 @@
                 streamReady = true;
                 setWsStatus('CONNECTED', 'green');
                 subscribeAll(sock);
+                // Ping tiap 30 detik, server memutus koneksi jika 90 detik tanpa ping
+                clearInterval(pingTimer);
+                pingTimer = setInterval(() => sendJSON(sock, { action: 'ping' }), 30000);
                 setTimeout(() => { if (ws === sock) refreshBias(selectedKey(), true); }, 1500);
                 return;
             }
+
+            if (msg.action === 'pong') return;
 
             if (msg.channel === 'quote') { handleQuote(msg); return; }
 
@@ -929,15 +975,12 @@
         sock.onerror = () => setWsStatus('ERROR', 'red');
         sock.onclose = () => {
             if (ws !== sock) return;
+            clearInterval(pingTimer);
             streamReady = false;
             setWsStatus('DISCONNECTED', 'red');
             for (const k of Object.keys(MARKETS)) markSrc(k, 'OFF', 'text-gray-600');
             if (!authFailed) scheduleReconnect();
         };
-    }
-
-    function wsReq(method) {
-        return Promise.reject(new Error(`Data candle xbtfx belum dihubungkan (${method})`));
     }
 
     // ================= AGREGATOR TICK =================
@@ -1716,12 +1759,22 @@
         return { bias, score };
     }
 
+    // Candle diambil lewat /api/candles (XBTFX POST /v1/chart) di server.
     async function fetchCandles(provider, symbol, interval) {
-        const rows = await wsReq('candles.history', { provider, symbol, interval, limit: 300 });
-        if (!Array.isArray(rows)) return [];
-        return rows
-            .filter(x => x && x.isFinal !== false)
-            .map(x => ({ t: +x.openTime, o: +x.open, h: +x.high, l: +x.low, c: +x.close }))
+        const r = await api('/api/candles', {
+            method: 'POST',
+            headers: JSON_HEADERS,
+            body: JSON.stringify({
+                value: localStorage.getItem(SESSION_EMAIL_KEY) || '',
+                symbol,
+                interval,
+                limit: 1000,
+            }),
+        });
+        if (!r.ok) throw new Error(r.data.msg || `Gagal mengambil candle (HTTP ${r.status})`);
+
+        return (r.data.candles || [])
+            .map(c => ({ t: c.openTime, o: c.open, h: c.high, l: c.low, c: c.close }))
             .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite))
             .sort((a, b) => a.t - b.t);
     }
@@ -1731,7 +1784,7 @@
         if (!m) return;
         const cached = biasCache[key];
         if (!force && cached && Date.now() - cached.at < 60000) return renderBias(key);
-        if (!ws || ws.readyState !== WebSocket.OPEN || biasBusy) return;
+        if (biasBusy) return;
         if (!symbolOf[key]) return renderBias(key);
 
         biasBusy = true;
