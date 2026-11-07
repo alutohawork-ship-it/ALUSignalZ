@@ -431,7 +431,7 @@
                         <span id="lblLiveStream" class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
                             <i class="fa-solid fa-tower-broadcast text-accentblue"></i> LIVE MARKET STREAM
                         </span>
-                        <span id="livePulse" class="text-[8px] text-emerald-400 font-mono animate-pulse">● Live Stream (Dual Socket)</span>
+                        <span id="livePulse" class="text-[8px] text-emerald-400 font-mono animate-pulse">● Dual Socket Stream</span>
                     </div>
                     <div id="tickerListContainer" class="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-[360px] overflow-y-auto pr-1"></div>
                 </div>
@@ -723,10 +723,9 @@
     const STREAM_SYMBOL = key => MARKETS[key].coins[0];
     const PENDING_SL_CANCEL = true;
 
-    // PEMBAGIAN SIMBOL UNTUK DOUBLE SOCKET
     const HALF_INDEX = Math.ceil(SUB_KEYS.length / 2);
-    const KEYS_SOCKET_1 = SUB_KEYS.slice(0, HALF_INDEX); // Forex & Metals
-    const KEYS_SOCKET_2 = SUB_KEYS.slice(HALF_INDEX);   // Commodities, Indices, Cryptos
+    const KEYS_SOCKET_1 = SUB_KEYS.slice(0, HALF_INDEX);
+    const KEYS_SOCKET_2 = SUB_KEYS.slice(HALF_INDEX);
 
     // ================= STATE =================
     let ws1 = null, ws2 = null;
@@ -929,7 +928,6 @@
         XBTFX_TOKEN = t.token;
         setWsStatus('CONNECTING (2x)', 'yellow');
 
-        // SOKET 1 (Forex & Precious Metals)
         const sock1 = new WebSocket(WS_URL);
         ws1 = sock1;
         sock1.onopen = () => sendJSON(sock1, { action: 'auth', token: XBTFX_TOKEN });
@@ -947,7 +945,6 @@
         };
         sock1.onclose = () => { if (ws1 === sock1 && !authFailed) reconnectTimer1 = setTimeout(connect, 4000); };
 
-        // SOKET 2 (Commodities, Indices, Cryptos)
         setTimeout(() => {
             if (myId !== connectId) return;
             const sock2 = new WebSocket(WS_URL);
@@ -965,7 +962,7 @@
                 if (msg.channel === 'quote') handleQuote(msg);
             };
             sock2.onclose = () => { if (ws2 === sock2 && !authFailed) reconnectTimer2 = setTimeout(connect, 5000); };
-        }, 500); // Beri jeda 500ms agar server tidak memblokir koneksi kedua
+        }, 500);
     }
 
     // ================= AGREGATOR TICK =================
@@ -1469,7 +1466,7 @@
         renderCalendar();
     }
 
-    // ================= CHART (LINE CHART KLASIK) =================
+    // ================= CHART (LINE CHART DENGAN AREA GRADIEN) =================
     const cv = document.getElementById('priceChart');
     const ctx = cv ? cv.getContext('2d') : null;
     const CHART_GUT = 100;
@@ -1591,11 +1588,37 @@
             ctx.restore();
         }
 
-        // Render Line Chart Utama
+        // Render Area Gradien di Bawah Line Chart
+        ctx.save();
+        const dirNow = prices[t.key]?.dir ?? 0;
+        const lineColor = dirNow > 0 ? '#10b981' : dirNow < 0 ? '#ef4444' : '#3b82f6';
+        
+        if (arr.length > 1) {
+            ctx.beginPath();
+            let firstX = null;
+            for (let i = 0; i < arr.length; i++) {
+                const x = xOfT(arr[i].t), y = yOf(arr[i].p);
+                if (x < plotL - 20 || x > plotR + 20) continue;
+                if (firstX === null) { firstX = x; ctx.moveTo(x, y); }
+                else { ctx.lineTo(x, y); }
+            }
+            const lastX = xOfT(arr[arr.length - 1].t);
+            ctx.lineTo(lastX, plotB);
+            ctx.lineTo(firstX, plotB);
+            ctx.closePath();
+
+            const grad = ctx.createLinearGradient(0, plotT, 0, plotB);
+            grad.addColorStop(0, dirNow > 0 ? 'rgba(16,185,129,0.25)' : dirNow < 0 ? 'rgba(239,68,68,0.25)' : 'rgba(59,130,246,0.25)');
+            grad.addColorStop(1, 'rgba(11,14,20,0.0)');
+            ctx.fillStyle = grad;
+            ctx.fill();
+        }
+        ctx.restore();
+
+        // Render Garis Line Chart Utama
         ctx.save();
         ctx.lineWidth = 2;
-        const dirNow = prices[t.key]?.dir ?? 0;
-        ctx.strokeStyle = dirNow > 0 ? '#10b981' : dirNow < 0 ? '#ef4444' : '#3b82f6';
+        ctx.strokeStyle = lineColor;
         ctx.beginPath();
         let started = false;
         for (const pt of arr) {
@@ -1609,7 +1632,6 @@
 
         const last = arr[arr.length - 1];
         const hx = headX, hy = yOf(last.p);
-        const pillColor = dirNow > 0 ? '#10b981' : dirNow < 0 ? '#ef4444' : '#3b82f6';
         const pillTxt = fmtP(last.p);
 
         ctx.font = 'bold 10px ui-monospace, monospace';
@@ -1621,7 +1643,7 @@
         if (py < plotT - 4) py = hy + 9;
 
         rrPath(px, py, pw, ph, 4);
-        ctx.fillStyle = pillColor; ctx.fill();
+        ctx.fillStyle = lineColor; ctx.fill();
         ctx.fillStyle = '#ffffff';
         ctx.fillText(pillTxt, px + 6, py + ph / 2 + 0.5);
 
