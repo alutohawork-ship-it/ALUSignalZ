@@ -1,5 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC dengan Kombinasi ATR + Structure & Penyusunan Teks Reason
+// Analisis Pure SMC Universal dengan Perhitungan Jarak Berbasis Angka Utama (Full Digits) untuk Semua Pair
 
 const KV_KEY = 'alu_clients';
 
@@ -26,7 +26,7 @@ const PIP = {
 };
 
 const STYLES = {
-  'Scalping': { label: 'Scalping Hit & Run (ATR + Structure)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
+  'Scalping': { label: 'Scalping Hit & Run (Full Digit Universal)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
   'Day Trading': { label: 'Day Trading Zone (HTF: H1 | MTF: M30)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
   'Intraday': { label: 'Intraday (HTF: H4 | MTF: H1)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
   'Swing': { label: 'Swing Trading (HTF: D1 | MTF: H4)', mode: 'LIMIT', kind: 'zone', rr: [2.0, 4.5, 8.5] },
@@ -94,18 +94,16 @@ function getStructuralExtremes(candles, isBuy) {
 
 function getAssetConfig(symbol) {
   const s = symbol.toUpperCase();
-  if (s.includes('XAU')) return { bufferMultiplier: 0.8, atrMultiplier: 0.5, type: 'GOLD_ATR_STRUCTURE' };
-  if (s.includes('XAG')) return { bufferMultiplier: 1.0, atrMultiplier: 0.6, type: 'METAL' };
+  if (s.includes('XAU')) return { bufferVal: 1.5, slVal: 3.5, type: 'GOLD_FULL_DIGIT' };
+  if (s.includes('XAG')) return { bufferVal: 0.8, slVal: 2.0, type: 'SILVER_FULL_DIGIT' };
+  if (s.includes('BTC')) return { bufferVal: 15.0, slVal: 45.0, type: 'CRYPTO_BTC' };
+  if (s.includes('ETH')) return { bufferVal: 5.0, slVal: 15.0, type: 'CRYPTO_ETH' };
   if (s.includes('EUR') || s.includes('GBP') || s.includes('AUD') || s.includes('NZD') || s.includes('USD') || s.includes('CAD') || s.includes('CHF')) {
-    if (s.includes('JPY')) return { bufferMultiplier: 1.0, atrMultiplier: 0.8, type: 'CURRENCY' };
-    return { bufferMultiplier: 0.8, atrMultiplier: 0.6, type: 'CURRENCY' };
+    if (s.includes('JPY')) return { bufferVal: 0.15, slVal: 0.40, type: 'CURRENCY_JPY' };
+    return { bufferVal: 0.0015, slVal: 0.0040, type: 'CURRENCY_MAJOR' };
   }
-  if (s.includes('BTC')) return { bufferMultiplier: 1.2, atrMultiplier: 1.0, type: 'CRYPTO' };
-  if (s.includes('ETH')) return { bufferMultiplier: 1.0, atrMultiplier: 0.8, type: 'CRYPTO' };
-  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP')) return { bufferMultiplier: 1.0, atrMultiplier: 0.8, type: 'CRYPTO' };
-  if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) return { bufferMultiplier: 1.2, atrMultiplier: 1.0, type: 'INDEX' };
-  if (s.includes('OIL') || s.includes('CLUSDT')) return { bufferMultiplier: 1.0, atrMultiplier: 0.8, type: 'COMMODITY' };
-  return { bufferMultiplier: 0.8, atrMultiplier: 0.6, type: 'DEFAULT' };
+  if (s.includes('DJI') || s.includes('SP500') || s.includes('JP225')) return { bufferVal: 10.0, slVal: 30.0, type: 'INDEX' };
+  return { bufferVal: 1.0, slVal: 3.0, type: 'DEFAULT_UNIVERSAL' };
 }
 
 function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal) {
@@ -115,31 +113,10 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal)
   const isBuy = activeDir === 1;
 
   const cfg = getAssetConfig(symbol);
-  const isGold = symbol.toUpperCase().includes('XAU');
-
-  const bufferDist = a * cfg.bufferMultiplier;
-  const bufferEnd = isBuy ? price - bufferDist : price + bufferDist;
-
-  let sl;
-  if (isGold) {
-    const structExtreme = getStructuralExtremes(mtfC, isBuy);
-    const baseSl = structExtreme != null ? structExtreme : (isBuy ? price - (a * 1.5) : price + (a * 1.5));
-    const atrBuffer = a * cfg.atrMultiplier;
-    sl = isBuy ? baseSl - atrBuffer : baseSl + atrBuffer;
-    
-    const distancePips = Math.abs(bufferEnd - sl) / (pip || 0.1);
-    if (distancePips < 20) {
-      sl = isBuy ? bufferEnd - (25 * (pip || 0.1)) : bufferEnd + (25 * (pip || 0.1));
-    }
-  } else {
-    const structExtreme = getStructuralExtremes(mtfC, isBuy);
-    const baseSl = structExtreme != null ? structExtreme : (isBuy ? bufferEnd - (a * 1.2) : bufferEnd + (a * 1.2));
-    const atrPadding = a * cfg.atrMultiplier;
-    sl = isBuy ? baseSl - atrPadding : baseSl + atrPadding;
-  }
-
-  if (isBuy && sl >= bufferEnd) sl = bufferEnd - (a * 1.0);
-  if (!isBuy && sl <= bufferEnd) sl = bufferEnd + (a * 1.0);
+  
+  // Menggunakan skala berbasis digit utama harga agar jarak proporsional dan tidak mepet
+  const bufferEnd = isBuy ? price - cfg.bufferVal : price + cfg.bufferVal;
+  const sl = isBuy ? bufferEnd - cfg.slVal : bufferEnd + cfg.slVal;
 
   const riskDistance = Math.abs(price - sl);
   const tp1 = isBuy ? price + (1.0 * riskDistance) : price - (1.0 * riskDistance);
@@ -159,9 +136,9 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal)
       sl: sl,
       tps: [tp1, tp2, tp3],
       zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
-      trigSrc: `ATR+Structure (${cfg.type})`,
+      trigSrc: `FullDigitUniversal (${cfg.type})`,
       expireMs: 0,
-      riskAtr: Math.abs(bufferEnd - sl) / a,
+      riskAtr: Math.abs(bufferEnd - sl) / (a || 1),
       over: false,
     }
   };
@@ -184,24 +161,10 @@ function generalTradePlan({ htfC, mtfC, m5C, price, symbol, pip, dec, lang, styl
   const isBuy = dir === 1;
 
   const cfg = getAssetConfig(symbol);
-  const isGold = symbol.toUpperCase().includes('XAU');
   const entry = price;
 
-  const bufferDist = a15 * cfg.bufferMultiplier * 1.2;
-  const bufferEnd = isBuy ? entry - bufferDist : entry + bufferDist;
-
-  const structExtreme = getStructuralExtremes(mtfC, isBuy);
-  const baseSl = structExtreme != null ? structExtreme : (isBuy ? bufferEnd - (a15 * 1.5) : bufferEnd + (a15 * 1.5));
-  const atrPadding = a15 * cfg.atrMultiplier;
-  
-  let sl = isBuy ? baseSl - atrPadding : baseSl + atrPadding;
-  if (isGold) {
-    const fixedGoldSlPips = 25 * (pip || 0.1);
-    sl = isBuy ? bufferEnd - fixedGoldSlPips : bufferEnd + fixedGoldSlPips;
-  }
-
-  if (isBuy && sl >= bufferEnd) sl = bufferEnd - (a15 * 1.2);
-  if (!isBuy && sl <= bufferEnd) sl = bufferEnd + (a15 * 1.2);
+  const bufferEnd = isBuy ? entry - (cfg.bufferVal * 1.2) : entry + (cfg.bufferVal * 1.2);
+  const sl = isBuy ? bufferEnd - (cfg.slVal * 1.2) : bufferEnd + (cfg.slVal * 1.2);
 
   const risk = Math.abs(price - sl);
   const tp1 = entry + dir * 1.0 * risk;
@@ -271,15 +234,12 @@ export default async function handler(req, res) {
     const actionType = plan.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET';
     const sideText = dir === 1 ? 'BUY' : 'SELL';
     const cfgInfo = getAssetConfig(symbol);
-    const isGold = symbol.includes('XAU');
-    const setupLabelText = isGold ? 'Gold ATR + Structure (20~30 pip)' : `ATR + Structure (${cfgInfo.type})`;
+    
+    const setupLabelText = `Full-Digit Universal (${cfgInfo.type})`;
 
-    // PENYUSUNAN REASON: Analisis Teknikal Murni di Atas, Catatan Aturan/Workflow di Bawah
     const techReason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol}. Struktur multi-timeframe terkonfirmasi searah dengan Order Block / FVG aktif. Eksekusi ${actionType} dipetakan dengan presisi tinggi di area likuiditas terdekat. Target Take Profit (TP1-TP3) dihitung proporsional dari garis depan (entry) berdasarkan kelipatan rasio risiko 1:1, 1:2, dan 1:3.`;
     
-    const workflowNote = isGold 
-      ? `[Catatan Sistem: Workflow ATR+Structure aktif. Stop Loss dihitung dari swing struktur market emas ditambah padding ATR, dikunci fix pada rentang ideal 20-30 pip.]` 
-      : `[Catatan Sistem: Workflow ATR+Structure aktif untuk ${cfgInfo.type}. Stop Loss diletakkan di luar titik ekstrem struktur (Swing High/Low) digabungkan dengan pengali volatilitas ATR agar aman dari noise market.]`;
+    const workflowNote = `[Catatan Sistem: Workflow Full-Digit Universal aktif untuk ${cfgInfo.type}. Stop Loss dan Buffer diukur berdasarkan skala digit angka utama harga instrumen agar proporsional dan terhindar dari noise market.]`;
 
     const reason = `${techReason}\n\n${workflowNote}`;
 
@@ -301,7 +261,7 @@ export default async function handler(req, res) {
         setup: 'CONTINUATION',
         setupLabel: setupLabelText,
         zoneLabel: 'Order Block / FVG Structure',
-        zoneNote: isGold ? 'Gold ATR+Structure (20~30 pip)' : `ATR + Structure (${cfgInfo.type})`,
+        zoneNote: `Full-Digit Range (${cfgInfo.type})`,
         reason: reason
       }
     });
