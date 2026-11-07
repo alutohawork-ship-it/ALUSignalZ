@@ -1,5 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC Universal dengan Perbaikan Skala Logam Mulia (XPT, XPD, dll) & Universal Aset
+// Analisis Pure SMC Universal dengan Skala Digit Utama & Multi-Strategy (Scalping Agresif & Day Trading)
 
 const KV_KEY = 'alu_clients';
 
@@ -26,8 +26,8 @@ const PIP = {
 };
 
 const STYLES = {
-  'Scalping': { label: 'Scalping Hit & Run (Scale Digit)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
-  'Day Trading': { label: 'Day Trading Zone (HTF: H1 | MTF: M30)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
+  'Scalping': { label: 'Scalping Agresif (M1+M3+M5 + BB + EMA 5/9)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
+  'Day Trading': { label: 'Day Trading Zone (M5+M15+M30/H1 Structural)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
   'Intraday': { label: 'Intraday (HTF: H4 | MTF: H1)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
   'Swing': { label: 'Swing Trading (HTF: D1 | MTF: H4)', mode: 'LIMIT', kind: 'zone', rr: [2.0, 4.5, 8.5] },
 };
@@ -92,7 +92,7 @@ function getStructuralExtremes(candles, isBuy) {
   return extreme;
 }
 
-// Konfigurasi Skala Digit Utama yang Akurat Berdasarkan Jenis Aset
+// Konfigurasi Skala Digit Utama (Scale Digit) Berdasarkan Karakteristik Setiap Aset
 function getAssetConfig(symbol) {
   const s = symbol.toUpperCase();
   if (s.includes('XAU')) return { bufferVal: 1.5, slVal: 2.5, type: 'GOLD_FIX' };
@@ -171,7 +171,7 @@ function generalTradePlan({ htfC, mtfC, m5C, price, symbol, pip, dec, lang, styl
   const sl = isBuy ? bufferEnd - (cfg.slVal * 1.2) : bufferEnd + (cfg.slVal * 1.2);
 
   const risk = Math.abs(price - sl);
-  const tp1 = entry + dir * 1.0 * risk;
+  const tp1 = entry + dir * 1.5 * risk;
   const tp2 = entry + dir * 2.0 * risk;
   const tp3 = entry + dir * 3.0 * risk;
 
@@ -239,11 +239,16 @@ export default async function handler(req, res) {
     const sideText = dir === 1 ? 'BUY' : 'SELL';
     const cfgInfo = getAssetConfig(symbol);
     
-    const setupLabelText = `Scale Digit (${cfgInfo.type})`;
+    let setupLabelText = `Scale Digit (${cfgInfo.type})`;
+    if (isScalp) {
+      setupLabelText = `Scalping Agresif (${cfgInfo.type})`;
+    } else {
+      setupLabelText = `Day Trading Structural (${cfgInfo.type})`;
+    }
 
-    const techReason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol}. Struktur multi-timeframe terkonfirmasi searah dengan Order Block / FVG aktif. Eksekusi ${actionType} dipetakan dengan presisi tinggi di area likuiditas terdekat. Target Take Profit (TP1-TP3) dihitung proporsional dari garis depan (entry) berdasarkan kelipatan rasio risiko 1:1, 1:2, dan 1:3.`;
+    const techReason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol}. Struktur multi-timeframe terkonfirmasi searah dengan Order Block / FVG aktif. Eksekusi ${actionType} dipetakan dengan presisi tinggi di area likuiditas terdekat. Target Take Profit (TP1-TP3) dihitung proporsional dari garis depan (entry) berdasarkan kelipatan rasio risiko yang disesuaikan.`;
     
-    const workflowNote = `[Catatan Sistem: Workflow Scale Digit aktif untuk ${cfgInfo.type}. Stop Loss dan Buffer diukur berdasarkan skala digit angka utama harga instrumen agar proporsional dan terhindar dari noise market.]`;
+    const workflowNote = `[Catatan Sistem: Workflow Scale Digit & Strategy aktif untuk ${cfgInfo.type}. Stop Loss dan Buffer diukur berdasarkan skala digit angka utama harga instrumen agar proporsional dan terhindar dari noise market.]`;
 
     const reason = `${techReason}\n\n${workflowNote}`;
 
