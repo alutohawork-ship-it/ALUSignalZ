@@ -1,5 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC dengan Fix Range SL Gold (20-30 pip) & Proteksi Pair Lain
+// Analisis Pure SMC dengan Penyusunan Ulang Teks Reason (Analisis Teknikal di Atas, Catatan Sistem di Bawah)
 
 const KV_KEY = 'alu_clients';
 
@@ -131,11 +131,9 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, a, symbol, pip, isPreciousMetal)
 
   let sl;
   if (isGold) {
-    // KHUSUS GOLD: Fix range SL di kisaran 25 pip dari buffer (di dalam range 20~30 pip)
     const fixedGoldSlPips = 25 * (pip || 0.1);
     sl = isBuy ? bufferEnd - fixedGoldSlPips : bufferEnd + fixedGoldSlPips;
   } else {
-    // PAIR LAIN: Berbasis struktur + 2x spread protection
     const structExtreme = getStructuralExtremes(mtfC, isBuy);
     sl = structExtreme != null 
       ? (isBuy ? structExtreme - (a * 0.2) : structExtreme + (a * 0.2))
@@ -286,7 +284,14 @@ export default async function handler(req, res) {
     const isGold = symbol.includes('XAU');
     const setupLabelText = isGold ? 'Gold Fixed SL (20~30 pip)' : `Structural SL + 2x Spread (${cfgInfo.type})`;
 
-    const reason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol} menggunakan Workflow [${cfgInfo.type}]. Untuk instrumen Gold, Stop Loss dikunci fix pada rentang ideal 20-30 pip dari buffer zone berdasarkan struktur market, sementara instrumen lain menggunakan proteksi berbasis struktur dan 2x spread. Target TP1-TP3 dihitung proporsional dari entry dengan rasio risiko 1:1, 1:2, dan 1:3.`;
+    // PENYUSUNAN ULANG REASON: Analisis Teknikal Murni di Atas, Catatan Aturan/Workflow di Bawah
+    const techReason = `Analisis Pure SMC ${sideText} (${style.label}) pada ${symbol}. Struktur multi-timeframe terkonfirmasi searah dengan Order Block / FVG aktif. Eksekusi ${actionType} dipetakan dengan presisi tinggi di area likuiditas terdekat. Target Take Profit (TP1-TP3) dihitung proporsional dari garis depan (entry) berdasarkan kelipatan rasio risiko 1:1, 1:2, dan 1:3.`;
+    
+    const workflowNote = isGold 
+      ? `[Catatan Sistem: Workflow GOLD_FIX_20_30 aktif. Stop Loss dikunci fix pada rentang ideal 20-30 pip dari buffer zone berdasarkan struktur market emas.]` 
+      : `[Catatan Sistem: Workflow ${cfgInfo.type} aktif. Stop Loss dihitung berbasis struktur market ditambah proteksi 2x spread broker untuk menghindari false trigger/stop hunting.]`;
+
+    const reason = `${techReason}\n\n${workflowNote}`;
 
     return res.status(200).json({
       ok: true,
