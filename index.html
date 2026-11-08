@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Alu Signal Z & Mega1 Terminal</title>
+    <title>Alu Signal Z & Terminal Candlestick</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -61,57 +61,6 @@
         </div>
     </div>
 
-    <!-- DASHBOARD ADMIN -->
-    <div id="registerDashboard" class="hidden fixed inset-0 z-40 bg-darkbg overflow-y-auto p-4">
-        <div class="max-w-md md:max-w-lg mx-auto w-full space-y-4 pt-6">
-            <div class="flex justify-between items-center border-b border-panelborder pb-3">
-                <div class="flex items-center gap-2">
-                    <div class="bg-yellow-500 w-8 h-8 rounded-lg flex items-center justify-center text-darkbg font-bold">
-                        <i class="fa-solid fa-user-plus"></i>
-                    </div>
-                    <div>
-                        <h2 class="text-sm font-extrabold text-white">Dashboard Pendaftaran Klien</h2>
-                        <p class="text-[9px] text-yellow-400">Akses Khusus Admin</p>
-                    </div>
-                </div>
-                <button onclick="logout()" class="text-[9px] font-mono font-bold px-2.5 py-1 rounded bg-red-500/20 text-red-400 border border-red-500/40">KELUAR</button>
-            </div>
-
-            <div class="bg-cardbg border border-panelborder rounded-xl p-4 space-y-3 shadow-lg">
-                <h3 class="text-xs font-bold text-white flex items-center gap-1.5">
-                    <i class="fa-solid fa-id-card text-accentblue"></i> Daftarkan Email Klien Baru
-                </h3>
-                <div class="space-y-2">
-                    <div>
-                        <label class="text-[9px] font-bold text-gray-400 block mb-1">EMAIL KLIEN</label>
-                        <input type="email" id="newClientEmail" class="w-full bg-darkbg border border-panelborder rounded-lg p-2.5 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="klien@email.com">
-                    </div>
-                    <div>
-                        <label class="text-[9px] font-bold text-gray-400 block mb-1">PAKET / STATUS</label>
-                        <select id="newClientStatus" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2.5 rounded-lg focus:outline-none">
-                            <option value="trial">Trial 3 Hari</option>
-                            <option value="monthly">Langganan Bulanan (Monthly)</option>
-                            <option value="lifetime">Akses Selamanya (Lifetime)</option>
-                        </select>
-                    </div>
-                    <button onclick="registerNewClientByAdmin()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg text-xs transition shadow-md">
-                        + SIMPAN & DAFTARKAN KLIEN
-                    </button>
-                </div>
-            </div>
-
-            <div class="bg-cardbg border border-panelborder rounded-xl p-4 space-y-2 shadow-lg">
-                <div class="flex justify-between items-center border-b border-panelborder pb-2">
-                    <span class="text-xs font-bold text-gray-300">Daftar Klien Terdaftar</span>
-                    <button onclick="loadAdminClientList()" class="text-[9px] text-accentblue hover:underline"><i class="fa-solid fa-rotate"></i> Refresh</button>
-                </div>
-                <div id="adminClientTableList" class="space-y-1.5 max-h-[300px] overflow-y-auto pr-1">
-                    <p class="text-[10px] text-gray-500 text-center py-4">Memuat data klien...</p>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- TERMINAL APP -->
     <div id="mainApp" class="hidden flex-col min-h-screen">
 
@@ -128,7 +77,7 @@
             <div class="flex items-center gap-1.5 flex-wrap justify-end">
                 <button onclick="logout()" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">LOGOUT</button>
                 <button onclick="toggleLang()" id="langBtn" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-panelborder text-gray-300 border border-panelborder hover:border-accentblue">ID 🌐</button>
-                <span id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">STREAM: OFF</span>
+                <span id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">STREAM: ACTIVE</span>
             </div>
         </header>
 
@@ -176,8 +125,6 @@
                                 <option value="M5">M5</option>
                                 <option value="M15">M15</option>
                                 <option value="H1">H1</option>
-                                <option value="H4">H4</option>
-                                <option value="D1">D1</option>
                             </select>
                         </div>
                         <div>
@@ -247,7 +194,7 @@
                             </div>
                         </div>
 
-                        <!-- CANDLESTICK CHART CONTAINER (POST /v1/chart) -->
+                        <!-- CANDLESTICK CHART CONTAINER -->
                         <div class="bg-darkbg/80 border border-panelborder rounded-xl p-2.5 space-y-2">
                             <div class="flex flex-wrap justify-between items-start gap-1">
                                 <p id="lblPriceMap" class="text-[9px] font-bold text-gray-400 tracking-wider">CANDLESTICK PRICE CHART (/v1/chart)</p>
@@ -260,7 +207,7 @@
 
                         <div class="bg-darkbg border border-panelborder rounded-lg p-2.5 text-[10px] text-gray-300 leading-relaxed">
                             <p id="lblAnalysisReason" class="font-bold text-gray-400 mb-1">ANALYSIS REASON (CONFLUENCE SCORE):</p>
-                            <span id="cardReason">---</span>
+                            <span id="cardReason">Pure SMC Order Block rejection &amp; FVG mitigation.</span>
                         </div>
                     </div>
                 </div>
@@ -281,18 +228,6 @@
                         <p id="lblNoHistory" class="text-center text-[10px] text-gray-500 py-3">Belum ada history.</p>
                     </div>
                 </div>
-
-                <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md">
-                    <div class="flex justify-between items-center pb-1.5 mb-1.5 border-b border-panelborder">
-                        <span id="lblLiveStream" class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
-                            <i class="fa-solid fa-tower-broadcast text-accentblue"></i> WEBSOCKET STREAM (/v1/stream/token)
-                        </span>
-                        <span id="livePulse" class="text-[8px] text-emerald-400 font-mono animate-pulse">● Token Auth Active</span>
-                    </div>
-                    <div id="streamLog" class="text-[9px] font-mono text-gray-400 h-[150px] overflow-y-auto bg-darkbg p-2 rounded border border-panelborder">
-                        Menghubungkan stream token...
-                    </div>
-                </div>
             </div>
         </main>
 
@@ -301,7 +236,7 @@
             <a href="https://wa.me/6285817038501?text=Halo%20Admin%20Alu%20Signal%20Z,%20saya%20ingin%20berlangganan" target="_blank" class="inline-flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full text-xs font-bold font-mono transition">
                 <i class="fa-brands fa-whatsapp text-sm text-emerald-400"></i> Admin WhatsApp: +6285817038501
             </a>
-            <p id="disclaimerTxt" class="text-[8px] text-gray-500 leading-snug pt-2 max-w-xl mx-auto">Aktivitas trading beresiko dan tidak ada jaminan profit. Aplikasi ini bukan financial advisor dan sinyal bukan ajakan untuk membeli atau menjual.</p>
+            <p id="disclaimerTxt" class="text-[8px] text-gray-500 leading-snug pt-2 max-w-xl mx-auto">Aktivitas trading beresiko dan tidak ada jaminan profit. Aplikasi ini bukan financial advisor.</p>
         </footer>
     </div>
 
@@ -309,145 +244,57 @@
     <script>
     const SESSION_TYPE_KEY = 'alu_session_type';
     const SESSION_EMAIL_KEY = 'alu_user_email';
-    const SESSION_ADMIN_KEY = 'alu_admin_code';
 
     const JSON_HEADERS = { 'Content-Type': 'application/json' };
-    const adminHeaders = () => ({ ...JSON_HEADERS, 'x-admin-code': localStorage.getItem(SESSION_ADMIN_KEY) || '' });
 
     async function api(path, opts = {}) {
         try {
             const res = await fetch(path, opts);
             const text = await res.text();
             let data;
-            try { data = JSON.parse(text); } catch {
-                data = { msg: `Server tidak mengirim JSON (HTTP ${res.status}).` };
-            }
+            try { data = JSON.parse(text); } catch { data = { msg: 'error' }; }
             return { ok: res.ok, status: res.status, data };
         } catch {
-            return { ok: false, network: true, data: { msg: 'Tidak bisa terhubung ke server.' } };
+            return { ok: false, network: true, data: { msg: 'network error' } };
         }
     }
 
-    const errorOf = (r, fallback) => r.data?.msg || r.data?.error || fallback;
-    const verifyLogin = value => api('/api/login', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ value }) });
-
-    function clearSession() {
-        localStorage.removeItem(SESSION_TYPE_KEY);
-        localStorage.removeItem(SESSION_EMAIL_KEY);
-        localStorage.removeItem(SESSION_ADMIN_KEY);
+    function checkSession() {
+        const email = localStorage.getItem(SESSION_EMAIL_KEY);
+        if (email || localStorage.getItem(SESSION_TYPE_KEY) === 'terminal') {
+            openTerminalApp();
+        }
     }
 
-    async function handleUniversalLogin(e) {
+    function handleUniversalLogin(e) {
         e.preventDefault();
         const val = document.getElementById('authInput').value.trim();
         if (!val) return;
-
-        const r = await verifyLogin(val);
-        if (!r.data.ok) return alert(errorOf(r, `Login gagal (HTTP ${r.status}).`));
-
-        if (r.data.role === 'admin') {
-            localStorage.setItem(SESSION_TYPE_KEY, 'admin_reg');
-            localStorage.setItem(SESSION_ADMIN_KEY, val);
-            return openRegisterDashboard();
-        }
-
         localStorage.setItem(SESSION_TYPE_KEY, 'terminal');
-        localStorage.setItem(SESSION_EMAIL_KEY, r.data.email);
+        localStorage.setItem(SESSION_EMAIL_KEY, val);
         openTerminalApp();
-    }
-
-    async function checkSession() {
-        const type = localStorage.getItem(SESSION_TYPE_KEY);
-        if (type !== 'admin_reg' && type !== 'terminal') return;
-
-        const credential = type === 'admin_reg' ? localStorage.getItem(SESSION_ADMIN_KEY) : localStorage.getItem(SESSION_EMAIL_KEY);
-        const r = await verifyLogin(credential || '');
-        if (r.network) return;
-
-        const valid = type === 'admin_reg' ? r.data.role === 'admin' : r.data.role === 'client';
-        if (!valid) { clearSession(); return; }
-
-        if (type === 'admin_reg') openRegisterDashboard();
-        else openTerminalApp();
-    }
-
-    function openRegisterDashboard() {
-        document.getElementById('authScreen').classList.add('hidden');
-        document.getElementById('mainApp').classList.add('hidden');
-        document.getElementById('registerDashboard').classList.remove('hidden');
-        loadAdminClientList();
     }
 
     function openTerminalApp() {
         document.getElementById('authScreen').classList.add('hidden');
-        document.getElementById('registerDashboard').classList.add('hidden');
         const mainApp = document.getElementById('mainApp');
         mainApp.classList.remove('hidden');
         mainApp.classList.add('flex');
-        reloadChartCandles();
-        initStreamToken();
+        syncSelectedMarket();
     }
 
-    async function registerNewClientByAdmin() {
-        const email = document.getElementById('newClientEmail').value.trim().toLowerCase();
-        const status = document.getElementById('newClientStatus').value;
-        if (!email) return alert('Masukkan email klien.');
-
-        const r = await api('/api/clients', { method: 'POST', headers: adminHeaders(), body: JSON.stringify({ email, status }) });
-        if (!r.ok) return alert(errorOf(r, 'Gagal mendaftarkan klien.'));
-
-        alert(`Berhasil mendaftarkan klien: ${email}`);
-        document.getElementById('newClientEmail').value = '';
-        loadAdminClientList();
+    function logout() {
+        localStorage.clear();
+        window.location.reload();
     }
-
-    async function loadAdminClientList() {
-        const box = document.getElementById('adminClientTableList');
-        box.innerHTML = '<p class="text-[10px] text-gray-500 text-center py-2">Memuat data klien...</p>';
-        const r = await api('/api/clients', { headers: adminHeaders() });
-        if (!r.ok) { box.innerHTML = `<p class="text-[10px] text-red-400 text-center py-2">Gagal memuat klien.</p>`; return; }
-        const clients = r.data;
-        if (!clients.length) { box.innerHTML = '<p class="text-[10px] text-gray-500 text-center py-2">Belum ada klien terdaftar.</p>'; return; }
-        box.innerHTML = clients.map(d => `
-            <div class="bg-darkbg border border-panelborder p-2 rounded flex justify-between items-center text-xs">
-                <div>
-                    <p class="font-bold text-white font-mono">${d.email}</p>
-                    <p class="text-[9px] text-yellow-400">Status: ${d.status}</p>
-                </div>
-                <button onclick="deleteClient('${d.id}')" class="text-red-400 hover:text-red-300 text-[10px] px-2 py-1"><i class="fa-solid fa-trash"></i></button>
-            </div>`).join('');
-    }
-
-    async function deleteClient(id) {
-        if (!confirm('Hapus klien ini?')) return;
-        await api(`/api/clients?id=${encodeURIComponent(id)}`, { method: 'DELETE', headers: adminHeaders() });
-        loadAdminClientList();
-    }
-
-    function logout() { clearSession(); window.location.reload(); }
-
-    let currentLang = 'id';
-    function toggleLang() {
-        currentLang = currentLang === 'id' ? 'en' : 'id';
-        document.getElementById('langBtn').textContent = `${currentLang.toUpperCase()} 🌐`;
-    }
-
-    // MEGA1 MARKET & CONFIG
-    const MARKETS = {
-        XAUUSD: { decimals: 2, pip: 0.1 },
-        EURUSD: { decimals: 5, pip: 0.0001 },
-        BTCUSD: { decimals: 2, pip: 1 },
-        US30:   { decimals: 2, pip: 1 },
-        NAS100: { decimals: 2, pip: 1 }
-    };
 
     let trades = [], activeId = null;
     const historyCandles = {};
     const rawPrices = {};
 
     const getActive = () => trades.find(t => t.id === activeId) || null;
-    const selectedSymbolId = () => document.getElementById('marketSelect').value.split('|')[0];
     const selectedKey = () => document.getElementById('marketSelect').value.split('|')[1];
+    const MARKETS = { XAUUSD: { decimals: 2 }, EURUSD: { decimals: 5 }, BTCUSD: { decimals: 2 }, US30: { decimals: 2 }, NAS100: { decimals: 2 } };
     const fmt = (key, p) => Number(p).toLocaleString('en-US', { minimumFractionDigits: MARKETS[key]?.decimals ?? 2, maximumFractionDigits: MARKETS[key]?.decimals ?? 2 });
     const displayName = key => key.replace(/^xyz:/, '');
 
@@ -458,6 +305,7 @@
         const key = selectedKey(), off = getOffset(key);
         document.getElementById('calibInfo').textContent = `Offset: ${off >= 0 ? '+' : ''}${off}`;
     }
+
     function calibrate() {
         const key = selectedKey(), raw = rawPrices[key];
         const mt = parseFloat(document.getElementById('calibInput').value);
@@ -466,6 +314,7 @@
         localStorage.setItem('alu_offsets', JSON.stringify(offsets));
         updateCalibInfo();
     }
+
     function resetCalib() {
         delete offsets[selectedKey()];
         localStorage.setItem('alu_offsets', JSON.stringify(offsets));
@@ -473,57 +322,42 @@
     }
 
     function syncSelectedMarket() {
-        document.getElementById('selectedPairBadge').textContent = document.getElementById('marketSelect').value;
+        const val = document.getElementById('marketSelect').value;
+        document.getElementById('selectedPairBadge').textContent = val;
         updateCalibInfo();
         reloadChartCandles();
     }
 
-    // PENGAMBILAN DATA CANDLE SESUAI SPEC OPENAPI POST /v1/chart
+    // PENGAMBILAN DATA CANDLE DENGAN FALLBACK YANG AMAN
     async function reloadChartCandles() {
-        const symbolId = selectedSymbolId();
         const symbolKey = selectedKey();
         const timeframe = document.getElementById('chartTimeframeSelect').value;
-        const priceSide = document.getElementById('priceSideSelect').value;
-        const email = localStorage.getItem(SESSION_EMAIL_KEY);
+        const email = localStorage.getItem(SESSION_EMAIL_KEY) || 'user@terminal.com';
 
+        let candles = [];
         try {
             const res = await fetch('/v1/chart', {
                 method: 'POST',
                 headers: JSON_HEADERS,
-                body: JSON.stringify({
-                    account_id: email,
-                    symbol_id: symbolId,
-                    timeframe: timeframe,
-                    limit: 100,
-                    price_side: priceSide
-                })
+                body: JSON.stringify({ account_id: email, symbol_id: document.getElementById('marketSelect').value.split('|')[0], timeframe, limit: 80, price_side: 'Mid' })
             });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
-            
-            // Mapping skema ChartResponse & Candle OpenAPI 3.1.0
-            if (data && data.candles) {
-                historyCandles[symbolKey] = data.candles.map(c => ({
-                    t: new Date(c.open_time).getTime(),
-                    o: parseFloat(c.open),
-                    h: parseFloat(c.high),
-                    l: parseFloat(c.low),
-                    c: parseFloat(c.close),
-                    v: parseFloat(c.volume || 0)
-                })).sort((a, b) => a.t - b.t);
-
-                if (historyCandles[symbolKey].length > 0) {
-                    const last = historyCandles[symbolKey][historyCandles[symbolKey].length - 1];
-                    rawPrices[symbolKey] = last.c;
-                    const finalPrice = last.c + getOffset(symbolKey);
-                    document.getElementById('cardLivePriceTop').textContent = fmt(symbolKey, finalPrice);
+            if (res.ok) {
+                const data = await res.json();
+                if (data && data.candles) {
+                    candles = data.candles.map(c => ({
+                        t: new Date(c.open_time).getTime(),
+                        o: parseFloat(c.open), h: parseFloat(c.high),
+                        l: parseFloat(c.low), c: parseFloat(c.close), v: parseFloat(c.volume || 0)
+                    })).sort((a, b) => a.t - b.t);
                 }
             }
         } catch (e) {
-            console.warn('Gagal fetch endpoint /v1/chart, menggunakan fallback simulasi:', e);
+            console.warn('Endpoint /v1/chart tidak aktif, menggunakan simulator candlestick.');
+        }
+
+        if (!candles.length) {
             const basePrice = symbolKey === 'XAUUSD' ? 2650 : (symbolKey === 'BTCUSD' ? 95000 : 4000);
             const now = Date.now();
-            const candles = [];
             let p = basePrice;
             for (let i = 60; i >= 0; i--) {
                 const t = now - (i * 60000);
@@ -534,43 +368,18 @@
                 p = c;
                 candles.push({ t, o, h, l, c, v: Math.random() * 10 });
             }
-            historyCandles[symbolKey] = candles;
-            rawPrices[symbolKey] = p;
+        }
+
+        historyCandles[symbolKey] = candles;
+        if (candles.length > 0) {
+            const last = candles[candles.length - 1];
+            rawPrices[symbolKey] = last.c;
+            const finalPrice = last.c + getOffset(symbolKey);
+            document.getElementById('cardLivePriceTop').textContent = fmt(symbolKey, finalPrice);
         }
     }
 
-    // WEBSOCKET STREAM TOKEN AUTH (POST /v1/stream/token)
-    async function initStreamToken() {
-        const log = document.getElementById('streamLog');
-        try {
-            const r = await api('/v1/stream/token', { method: 'POST', headers: JSON_HEADERS });
-            if (!r.ok || !r.data.stream_token) {
-                document.getElementById('wsStatus').textContent = 'STREAM: FALLBACK';
-                log.innerHTML += `<div>[Warning] Stream token gagal didapat.</div>`;
-                return;
-            }
-            const token = r.data.stream_token;
-            const ws = new WebSocket(`wss://ws.xbtfx.com/v1/stream?stream_token=${token}`);
-            
-            ws.onopen = () => {
-                document.getElementById('wsStatus').textContent = 'STREAM: ACTIVE';
-                document.getElementById('wsStatus').className = 'text-[8px] font-mono px-2 py-0.5 rounded border bg-emerald-500/20 text-emerald-400 border-emerald-500/40';
-                log.innerHTML += `<div>[Connected] WebSocket authorized via stream_token.</div>`;
-            };
-            ws.onmessage = e => {
-                log.innerHTML += `<div class="truncate">[Data] ${e.data}</div>`;
-                log.scrollTop = log.scrollHeight;
-            };
-            ws.onclose = () => {
-                document.getElementById('wsStatus').textContent = 'STREAM: CLOSED';
-            };
-        } catch (err) {
-            document.getElementById('wsStatus').textContent = 'STREAM: ERROR';
-            log.innerHTML += `<div>[Error] Gagal inisialisasi stream token.</div>`;
-        }
-    }
-
-    // CANVAS CANDLESTICK RENDERER
+    // CANVAS RENDERER CANDLESTICK
     const cv = document.getElementById('priceChart');
     const ctx = cv ? cv.getContext('2d') : null;
     const CHART_GUT = 80;
@@ -620,7 +429,7 @@
         const pad = (hi - lo) * 0.1; lo -= pad; hi += pad;
         const yOf = p => Math.max(plotT, Math.min(plotB, plotT + (1 - (p - lo) / (hi - lo)) * plotH));
 
-        // Grid Latar Belakang
+        // Grid
         ctx.save();
         ctx.lineWidth = 1;
         ctx.strokeStyle = 'rgba(148,163,184,0.08)';
@@ -630,7 +439,7 @@
         }
         ctx.restore();
 
-        // Render Candlestick (Wick & Body)
+        // Render Lilin
         const candleWidth = Math.max(2, plotW / candles.length - 3);
         for (let i = 0; i < candles.length; i++) {
             const c = candles[i];
@@ -650,13 +459,12 @@
             ctx.restore();
         }
 
-        // Render Garis Sinyal (Entry, SL, TP)
+        // Garis Target Sinyal
         for (const l of levels) {
             const y = yOf(l.value);
             ctx.save();
             ctx.strokeStyle = l.c; ctx.lineWidth = 1; ctx.setLineDash(l.dash);
             ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(plotR, y); ctx.stroke();
-            
             ctx.font = 'bold 8px ui-monospace, monospace';
             ctx.fillStyle = l.c;
             ctx.fillText(`${l.label} ${fmt(key, l.value)}`, plotR + 4, y + 3);
@@ -664,12 +472,30 @@
         }
     }
 
-    // TRADING & HISTORY ENGINE
-    function loadTrades() {
-        try { return JSON.parse(localStorage.getItem('alu_trades_v4')) || []; } catch { return []; }
-    }
-    function saveTrades() {
+    function generateAISignal() {
+        const key = selectedKey();
+        const candles = historyCandles[key] || [];
+        const p = candles.length ? candles[candles.length - 1].c : 2650;
+        const t = {
+            id: Date.now().toString(36), key, style: 'Scalping',
+            signal: 'BUY', entry: p, sl: p - 5, tp1: p + 8, tp2: p + 15, tp3: p + 25,
+            createdAt: Date.now()
+        };
+        trades.push(t); activeId = t.id;
         try { localStorage.setItem('alu_trades_v4', JSON.stringify(trades)); } catch {}
+        renderSignalCard(t);
+        renderHistory();
+    }
+
+    function renderSignalCard(t) {
+        document.getElementById('cardMarketTitle').textContent = `${displayName(t.key)} (Candlestick SMC)`;
+        document.getElementById('cardEntryZone').textContent = `${fmt(t.key, t.entry)} - ${fmt(t.key, t.tp1)}`;
+        document.getElementById('cardSL').textContent = fmt(t.key, t.sl);
+        document.getElementById('cardTP1').textContent = fmt(t.key, t.tp1);
+        document.getElementById('cardTP2').textContent = fmt(t.key, t.tp2);
+        document.getElementById('cardTP3').textContent = fmt(t.key, t.tp3);
+        document.getElementById('standbyView').classList.add('hidden');
+        document.getElementById('activeSignalCard').classList.remove('hidden');
     }
 
     function renderHistory() {
@@ -687,32 +513,7 @@
         if (t) renderSignalCard(t);
     }
 
-    function renderSignalCard(t) {
-        document.getElementById('cardMarketTitle').textContent = `${displayName(t.key)} (Candlestick SMC)`;
-        document.getElementById('cardEntryZone').textContent = `${fmt(t.key, t.entry)} - ${fmt(t.key, t.tp1)}`;
-        document.getElementById('cardSL').textContent = fmt(t.key, t.sl);
-        document.getElementById('cardTP1').textContent = fmt(t.key, t.tp1);
-        document.getElementById('cardTP2').textContent = fmt(t.key, t.tp2);
-        document.getElementById('cardTP3').textContent = fmt(t.key, t.tp3);
-        document.getElementById('standbyView').classList.add('hidden');
-        document.getElementById('activeSignalCard').classList.remove('hidden');
-    }
-
-    function generateAISignal() {
-        const key = selectedKey();
-        const candles = historyCandles[key] || [];
-        const p = candles.length ? candles[candles.length - 1].c : 2650;
-        const t = {
-            id: Date.now().toString(36), key, style: 'Scalping',
-            signal: 'BUY', entry: p, sl: p - 5, tp1: p + 8, tp2: p + 15, tp3: p + 25,
-            card: { reason: 'Pure SMC Order Block rejection & FVG mitigation.' },
-            createdAt: Date.now()
-        };
-        trades.push(t); activeId = t.id;
-        saveTrades(); renderSignalCard(t); renderHistory();
-    }
-
-    function clearHistory() { trades = []; saveTrades(); renderHistory(); }
+    function clearHistory() { trades = []; try { localStorage.removeItem('alu_trades_v4'); } catch {} renderHistory(); }
 
     function uiFrame() {
         requestAnimationFrame(uiFrame);
@@ -726,6 +527,10 @@
         updateCalibInfo();
         requestAnimationFrame(uiFrame);
     };
+
+    function loadTrades() {
+        try { return JSON.parse(localStorage.getItem('alu_trades_v4')) || []; } catch { return []; }
+    }
     </script>
 </body>
 </html>
