@@ -105,9 +105,11 @@ function structureDir(candles, emaFilter = {}, bbFilter = {}) {
     }
   }
 
-  if (bbFilter && bbFilter.lower && bbFilter.upper && bbFilter.middle) {
-    if (last.c <= bbFilter.lower * 1.002) return 1;  
-    if (last.c >= bbFilter.upper * 0.998) return -1; 
+  const low = Number(bbFilter.lower || 0);
+  const up = Number(bbFilter.upper || 0);
+  if (low > 0 && up > 0) {
+    if (last.c <= low * 1.002) return 1;  
+    if (last.c >= up * 0.998) return -1; 
   }
 
   return baseDir;
@@ -256,8 +258,12 @@ export default async function handler(req, res) {
     const ltfC = cleanCandles(cnd.ltf);
 
     const incomingBb = body.bbFilter;
-    const bbFilter = (incomingBb && typeof incomingBb.middle === 'number' && incomingBb.middle > 0)
-      ? incomingBb
+    const bbFilter = (incomingBb && Number(incomingBb.middle) > 0)
+      ? {
+          upper: Number(incomingBb.upper || 0),
+          middle: Number(incomingBb.middle || 0),
+          lower: Number(incomingBb.lower || 0)
+        }
       : calculateBollingerBands(mtfC.length > 0 ? mtfC : ltfC);
 
     const htfDir = structureDir(htfC, emaFilter, bbFilter);
@@ -284,7 +290,7 @@ export default async function handler(req, res) {
     const offsets = getAbsoluteScalpOffsets(symbol);
 
     const emaSummary = Object.entries(emaFilter).map(([k, v]) => `${k}: ${v}`).join(' | ');
-    const bbSummary = `Upper: ${bbFilter.upper ?? 0} | Mid: ${bbFilter.middle ?? 0} | Lower: ${bbFilter.lower ?? 0}`;
+    const bbSummary = `Upper: ${bbFilter.upper} | Mid: ${bbFilter.middle} | Lower: ${bbFilter.lower}`;
 
     const actionDesc = sideText === 'BUY' 
       ? 'mengambil posisi BELI (BUY) karena pantulan harga di area Bollinger Band Bawah & konfirmasi struktur Demand' 
@@ -294,32 +300,3 @@ export default async function handler(req, res) {
       `Analisis Teknikal Pure SMC ${sideText} (${style.label}) pada pair ${symbol}.`,
       `Alasan Eksekusi: Diputuskan ${actionDesc}. Indikator EMA (${emaSummary}) serta Bollinger Bands (${bbSummary}) bekerja bersama menyaring titik jenuh harga.`,
       `Manajemen Risiko: Jarak Stop Loss dan Buffer telah disesuaikan secara presisi (${offsets.type}) dengan target profit optimal.`
-    ].join('\n\n');
-
-    return res.status(200).json({
-      ok: true,
-      signal: {
-        signal: sideText,
-        mode: actionType,
-        orderType: plan.orderType,
-        orderLabel: orderLabel(dir, plan.orderType),
-        status: plan.status,
-        entry: r(entry),
-        bufferEnd: r(plan.bufferEnd || entry),
-        sl: r(plan.sl),
-        tp1: r(tps[0]), tp2: r(tps[1]), tp3: r(tps[2]),
-        zone: plan.zone ? { min: r(plan.zone.min), max: r(plan.zone.max) } : null,
-        confidence: 'HIGH',
-        risk: 'LOW',
-        setup: 'CONTINUATION / REVERSAL (BB + SMC)',
-        setupLabel: style.label,
-        zoneLabel: 'Order Block / FVG / Bollinger Confluence',
-        zoneNote: `Range Mode (${offsets.type})`,
-        reason: techReason
-      }
-    });
-  } catch (err) {
-    console.error('generate error:', err);
-    return res.status(200).json({ ok: false, error: 'Server error: ' + err.message });
-  }
-}
