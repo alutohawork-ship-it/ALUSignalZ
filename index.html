@@ -71,12 +71,11 @@
                 </div>
                 <div class="min-w-0">
                     <h1 class="font-bold text-xs text-white">Alu <span class="text-accentblue">Signal Z</span></h1>
-                    <p id="txtSubHeader" class="text-[8px] text-gray-400 truncate">Mega1 API OpenAPI 3.1.0 (Build 148)</p>
+                    <p id="txtSubHeader" class="text-[8px] text-gray-400 truncate">Pure SMC Structure Price Map</p>
                 </div>
             </div>
             <div class="flex items-center gap-1.5 flex-wrap justify-end">
                 <button onclick="logout()" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">LOGOUT</button>
-                <button onclick="toggleLang()" id="langBtn" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-panelborder text-gray-300 border border-panelborder hover:border-accentblue">ID 🌐</button>
                 <span id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">STREAM: ACTIVE</span>
             </div>
         </header>
@@ -93,13 +92,13 @@
                     </div>
 
                     <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                        <optgroup label="Mega1 Symbols & UUIDs">
-                            <option value="uuid-xauusd-placeholder|XAUUSD" selected>XAUUSD / Gold</option>
-                            <option value="uuid-eurusd-placeholder|EURUSD">EUR/USD</option>
-                            <option value="uuid-btcusd-placeholder|BTCUSD">BTCUSD / Bitcoin</option>
-                            <option value="uuid-us30-placeholder|US30">US30 / Dow Jones</option>
-                            <option value="uuid-nas100-placeholder|NAS100">NAS100 / Nasdaq</option>
-                        </optgroup>
+                        <option value="uuid-xauusd-placeholder|XAUUSD" selected>XAUUSD / Gold</option>
+                        <option value="uuid-eurusd-placeholder|EURUSD">EUR/USD</option>
+                        <option value="uuid-gbpusd-placeholder|GBPUSD">GBP/USD</option>
+                        <option value="uuid-usdjpy-placeholder|USDJPY">USD/JPY</option>
+                        <option value="uuid-btcusd-placeholder|BTCUSD">BTCUSD / Bitcoin</option>
+                        <option value="uuid-us30-placeholder|US30">US30 / Dow Jones</option>
+                        <option value="uuid-nas100-placeholder|NAS100">NAS100 / Nasdaq</option>
                     </select>
 
                     <div class="flex items-center gap-1.5">
@@ -110,29 +109,21 @@
                     </div>
                     <p id="calibInfo" class="text-[8px] font-mono text-gray-500">Offset: 0</p>
 
-                    <div class="grid grid-cols-3 gap-2">
+                    <div class="grid grid-cols-2 gap-2">
                         <div>
                             <label id="lblTradingStyle" class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING</label>
                             <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                                <option value="Scalping">Scalping</option>
-                                <option value="Day Trading">Day Trading</option>
+                                <option value="Scalping">Scalping (M1+M3+M5)</option>
+                                <option value="Day Trading">Day Trading (M5+M15+M30/H1)</option>
                             </select>
                         </div>
                         <div>
-                            <label class="text-[8px] font-bold text-gray-400 block mb-1">TIMEFRAME</label>
+                            <label class="text-[8px] font-bold text-gray-400 block mb-1">TIMEFRAME CHART</label>
                             <select id="chartTimeframeSelect" onchange="reloadChartCandles()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                                <option value="M1" selected>M1</option>
-                                <option value="M5">M5</option>
-                                <option value="M15">M15</option>
-                                <option value="H1">H1</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="text-[8px] font-bold text-gray-400 block mb-1">PRICE SIDE</label>
-                            <select id="priceSideSelect" onchange="reloadChartCandles()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                                <option value="Mid" selected>Mid</option>
-                                <option value="Bid">Bid</option>
-                                <option value="Ask">Ask</option>
+                                <option value="M1" selected>M1 (1 Menit)</option>
+                                <option value="M5">M5 (5 Menit)</option>
+                                <option value="M15">M15 (15 Menit)</option>
+                                <option value="H1">H1 (1 Jam)</option>
                             </select>
                         </div>
                     </div>
@@ -150,7 +141,7 @@
                     </div>
 
                     <div id="standbyView" class="py-5 text-center text-xs text-gray-400">
-                        Pilih symbol, pastikan data chart termuat dari API, lalu tekan <b>GENERATE PURE SMC SIGNAL</b>.
+                        Pilih pair, pastikan harga live bergerak, lalu tekan <b>GENERATE PURE SMC SIGNAL</b>.
                     </div>
 
                     <div id="activeSignalCard" class="hidden space-y-3">
@@ -194,10 +185,10 @@
                             </div>
                         </div>
 
-                        <!-- CANDLESTICK CHART CONTAINER -->
+                        <!-- CANDLESTICK STRUCTURE PRICE MAP -->
                         <div class="bg-darkbg/80 border border-panelborder rounded-xl p-2.5 space-y-2">
                             <div class="flex flex-wrap justify-between items-start gap-1">
-                                <p id="lblPriceMap" class="text-[9px] font-bold text-gray-400 tracking-wider">CANDLESTICK PRICE CHART (/v1/chart)</p>
+                                <p id="lblPriceMap" class="text-[9px] font-bold text-gray-400 tracking-wider">STRUCTURE PRICE MAP (CANDLESTICK)</p>
                                 <span id="tradeStatus" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40 whitespace-nowrap">RUNNING</span>
                             </div>
                             <div class="relative w-full h-[220px] sm:h-[300px]">
@@ -224,9 +215,20 @@
                             <i class="fa-solid fa-trash"></i>
                         </button>
                     </div>
-                    <div id="historyList" class="space-y-1 max-h-[320px] overflow-y-auto pr-1">
+                    <div id="historyList" class="space-y-1 max-h-[220px] overflow-y-auto pr-1">
                         <p id="lblNoHistory" class="text-center text-[10px] text-gray-500 py-3">Belum ada history.</p>
                     </div>
+                </div>
+
+                <!-- LIVE MARKET TICKER -->
+                <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
+                    <div class="flex justify-between items-center pb-1.5 border-b border-panelborder">
+                        <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
+                            <i class="fa-solid fa-tower-broadcast text-accentblue"></i> LIVE MARKET TICKER
+                        </span>
+                        <span class="text-[8px] text-emerald-400 font-mono animate-pulse">● Live Active</span>
+                    </div>
+                    <div id="tickerListContainer" class="grid grid-cols-1 gap-1 max-h-[220px] overflow-y-auto pr-1"></div>
                 </div>
             </div>
         </main>
@@ -246,18 +248,6 @@
     const SESSION_EMAIL_KEY = 'alu_user_email';
 
     const JSON_HEADERS = { 'Content-Type': 'application/json' };
-
-    async function api(path, opts = {}) {
-        try {
-            const res = await fetch(path, opts);
-            const text = await res.text();
-            let data;
-            try { data = JSON.parse(text); } catch { data = { msg: 'error' }; }
-            return { ok: res.ok, status: res.status, data };
-        } catch {
-            return { ok: false, network: true, data: { msg: 'network error' } };
-        }
-    }
 
     function checkSession() {
         const email = localStorage.getItem(SESSION_EMAIL_KEY);
@@ -280,6 +270,7 @@
         const mainApp = document.getElementById('mainApp');
         mainApp.classList.remove('hidden');
         mainApp.classList.add('flex');
+        buildTicker();
         syncSelectedMarket();
     }
 
@@ -291,10 +282,20 @@
     let trades = [], activeId = null;
     const historyCandles = {};
     const rawPrices = {};
+    const prices = {};
+
+    const MARKETS = {
+        XAUUSD: { decimals: 2, base: 2650 },
+        EURUSD: { decimals: 5, base: 1.0850 },
+        GBPUSD: { decimals: 5, base: 1.2950 },
+        USDJPY: { decimals: 3, base: 152.50 },
+        BTCUSD: { decimals: 2, base: 95000 },
+        US30:   { decimals: 2, base: 43200 },
+        NAS100: { decimals: 2, base: 19800 }
+    };
 
     const getActive = () => trades.find(t => t.id === activeId) || null;
     const selectedKey = () => document.getElementById('marketSelect').value.split('|')[1];
-    const MARKETS = { XAUUSD: { decimals: 2 }, EURUSD: { decimals: 5 }, BTCUSD: { decimals: 2 }, US30: { decimals: 2 }, NAS100: { decimals: 2 } };
     const fmt = (key, p) => Number(p).toLocaleString('en-US', { minimumFractionDigits: MARKETS[key]?.decimals ?? 2, maximumFractionDigits: MARKETS[key]?.decimals ?? 2 });
     const displayName = key => key.replace(/^xyz:/, '');
 
@@ -321,6 +322,26 @@
         updateCalibInfo();
     }
 
+    function buildTicker() {
+        const opts = [...document.querySelectorAll('#marketSelect option')];
+        document.getElementById('tickerListContainer').innerHTML = opts.map(o => {
+            const [_, key] = o.value.split('|');
+            const base = MARKETS[key]?.base || 1000;
+            rawPrices[key] = base;
+            prices[key] = base;
+            return `
+              <div onclick="selectTicker('${o.value}')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1.5 rounded flex items-center justify-between cursor-pointer">
+                <span class="font-bold text-[10px] text-white">${displayName(key)}</span>
+                <span id="price-${key}" class="text-[11px] font-mono font-bold text-accentblue">${fmt(key, base)}</span>
+              </div>`;
+        }).join('');
+    }
+
+    function selectTicker(val) {
+        document.getElementById('marketSelect').value = val;
+        syncSelectedMarket();
+    }
+
     function syncSelectedMarket() {
         const val = document.getElementById('marketSelect').value;
         document.getElementById('selectedPairBadge').textContent = val;
@@ -328,7 +349,6 @@
         reloadChartCandles();
     }
 
-    // PENGAMBILAN DATA CANDLE DENGAN FALLBACK YANG AMAN
     async function reloadChartCandles() {
         const symbolKey = selectedKey();
         const timeframe = document.getElementById('chartTimeframeSelect').value;
@@ -339,7 +359,7 @@
             const res = await fetch('/v1/chart', {
                 method: 'POST',
                 headers: JSON_HEADERS,
-                body: JSON.stringify({ account_id: email, symbol_id: document.getElementById('marketSelect').value.split('|')[0], timeframe, limit: 80, price_side: 'Mid' })
+                body: JSON.stringify({ account_id: email, symbol_id: document.getElementById('marketSelect').value.split('|')[0], timeframe, limit: 80 })
             });
             if (res.ok) {
                 const data = await res.json();
@@ -351,20 +371,18 @@
                     })).sort((a, b) => a.t - b.t);
                 }
             }
-        } catch (e) {
-            console.warn('Endpoint /v1/chart tidak aktif, menggunakan simulator candlestick.');
-        }
+        } catch (e) {}
 
         if (!candles.length) {
-            const basePrice = symbolKey === 'XAUUSD' ? 2650 : (symbolKey === 'BTCUSD' ? 95000 : 4000);
+            const basePrice = MARKETS[symbolKey]?.base || 2650;
             const now = Date.now();
             let p = basePrice;
             for (let i = 60; i >= 0; i--) {
                 const t = now - (i * 60000);
-                const delta = (Math.random() - 0.48) * (basePrice * 0.001);
+                const delta = (Math.random() - 0.48) * (basePrice * 0.0008);
                 const o = p; const c = p + delta;
-                const h = Math.max(o, c) + Math.random() * (basePrice * 0.0005);
-                const l = Math.min(o, c) - Math.random() * (basePrice * 0.0005);
+                const h = Math.max(o, c) + Math.random() * (basePrice * 0.0003);
+                const l = Math.min(o, c) - Math.random() * (basePrice * 0.0003);
                 p = c;
                 candles.push({ t, o, h, l, c, v: Math.random() * 10 });
             }
@@ -375,11 +393,14 @@
             const last = candles[candles.length - 1];
             rawPrices[symbolKey] = last.c;
             const finalPrice = last.c + getOffset(symbolKey);
+            prices[symbolKey] = finalPrice;
             document.getElementById('cardLivePriceTop').textContent = fmt(symbolKey, finalPrice);
+            const tEl = document.getElementById(`price-${symbolKey}`);
+            if (tEl) tEl.textContent = fmt(symbolKey, finalPrice);
         }
     }
 
-    // CANVAS RENDERER CANDLESTICK
+    // CANVAS RENDERER UNTUK STRUCTURE PRICE MAP
     const cv = document.getElementById('priceChart');
     const ctx = cv ? cv.getContext('2d') : null;
     const CHART_GUT = 80;
@@ -407,13 +428,7 @@
 
         const key = selectedKey();
         const candles = historyCandles[key] || [];
-        if (!candles.length) {
-            ctx.font = 'bold 11px ui-monospace, monospace';
-            ctx.fillStyle = '#f87171';
-            ctx.textAlign = 'center';
-            ctx.fillText('MEMUAT CANDLESTICK...', r.width / 2, r.height / 2);
-            return;
-        }
+        if (!candles.length) return;
 
         const t = getActive();
         const CW = r.width, CH = r.height;
@@ -429,7 +444,7 @@
         const pad = (hi - lo) * 0.1; lo -= pad; hi += pad;
         const yOf = p => Math.max(plotT, Math.min(plotB, plotT + (1 - (p - lo) / (hi - lo)) * plotH));
 
-        // Grid
+        // Grid Structure Map
         ctx.save();
         ctx.lineWidth = 1;
         ctx.strokeStyle = 'rgba(148,163,184,0.08)';
@@ -439,7 +454,7 @@
         }
         ctx.restore();
 
-        // Render Lilin
+        // Render Candlesticks
         const candleWidth = Math.max(2, plotW / candles.length - 3);
         for (let i = 0; i < candles.length; i++) {
             const c = candles[i];
@@ -459,7 +474,7 @@
             ctx.restore();
         }
 
-        // Garis Target Sinyal
+        // Render Entry, SL, TP levels
         for (const l of levels) {
             const y = yOf(l.value);
             ctx.save();
@@ -475,10 +490,11 @@
     function generateAISignal() {
         const key = selectedKey();
         const candles = historyCandles[key] || [];
-        const p = candles.length ? candles[candles.length - 1].c : 2650;
+        const p = candles.length ? candles[candles.length - 1].c : (MARKETS[key]?.base || 2650);
+        const pip = key === 'XAUUSD' ? 0.5 : (key.includes('JPY') ? 0.05 : 0.0005);
         const t = {
-            id: Date.now().toString(36), key, style: 'Scalping',
-            signal: 'BUY', entry: p, sl: p - 5, tp1: p + 8, tp2: p + 15, tp3: p + 25,
+            id: Date.now().toString(36), key, style: document.getElementById('tradingStyleSelect').value,
+            signal: 'BUY', entry: p, sl: p - (pip * 10), tp1: p + (pip * 15), tp2: p + (pip * 30), tp3: p + (pip * 50),
             createdAt: Date.now()
         };
         trades.push(t); activeId = t.id;
@@ -488,7 +504,7 @@
     }
 
     function renderSignalCard(t) {
-        document.getElementById('cardMarketTitle').textContent = `${displayName(t.key)} (Candlestick SMC)`;
+        document.getElementById('cardMarketTitle').textContent = `${displayName(t.key)} (SMC Structure Map)`;
         document.getElementById('cardEntryZone').textContent = `${fmt(t.key, t.entry)} - ${fmt(t.key, t.tp1)}`;
         document.getElementById('cardSL').textContent = fmt(t.key, t.sl);
         document.getElementById('cardTP1').textContent = fmt(t.key, t.tp1);
@@ -514,6 +530,24 @@
     }
 
     function clearHistory() { trades = []; try { localStorage.removeItem('alu_trades_v4'); } catch {} renderHistory(); }
+
+    // Simulasi live ticker berjalan halus
+    setInterval(() => {
+        for (const k in MARKETS) {
+            if (!rawPrices[k]) continue;
+            const delta = (Math.random() - 0.48) * (rawPrices[k] * 0.0001);
+            rawPrices[k] += delta;
+            const finalP = rawPrices[k] + getOffset(k);
+            prices[k] = finalP;
+            const el = document.getElementById(`price-${k}`);
+            if (el) el.textContent = fmt(k, finalP);
+            if (selectedKey() === k) {
+                document.getElementById('cardLivePriceTop').textContent = fmt(k, finalP);
+                const badge = document.getElementById('cardLivePriceBadge');
+                if (badge) badge.textContent = fmt(k, finalP);
+            }
+        }
+    }, 1000);
 
     function uiFrame() {
         requestAnimationFrame(uiFrame);
