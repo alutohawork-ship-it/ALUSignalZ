@@ -1,5 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC Universal: XBTFX 60% Pairs + DXY Support & Fixed Range + EMA & Bollinger Bands Filter
+// Analisis Pure SMC Universal: XBTFX 60% Pairs + DXY Support & Fixed Range + EMA & Bollinger Bands Filter + Konsistensi RRR
 
 const KV_KEY = 'alu_clients';
 
@@ -13,9 +13,10 @@ const DECIMALS = {
   BTCXAU: 2, ETHBTC: 5, SOLBTC: 5, US30BTC: 2, XAUUSDX: 2,
 };
 
+// Konsistensi RRR terstruktur untuk setiap gaya trading
 const STYLES = {
-  'Scalping': { label: 'Scalping Agresif (Crypto 30-50 Pip & Currency Fix)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
-  'Day Trading': { label: 'Day Trading (Zona, EMA & Bollinger Bands)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
+  'Scalping': { label: 'Scalping Agresif (Crypto 30-50 Pip & Currency Fix)', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0] },
+  'Day Trading': { label: 'Day Trading (Zona, EMA & Bollinger Bands)', mode: 'MARKET', kind: 'day', rr: [1.5, 2.5, 3.5] },
   'Intraday': { label: 'Intraday (Limit Order + EMA + BB)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
   'Swing': { label: 'Swing Trading (Limit Order + Multi EMA + BB)', mode: 'LIMIT', kind: 'swing', rr: [2.0, 4.5, 8.5] },
 };
@@ -38,14 +39,12 @@ async function checkAccess(email) {
   if (!email) return { ok: false, msg: 'Sesi tidak punya email. Silakan logout lalu login ulang.' };
   try {
     const raw = await kv(['GET', KV_KEY]);
-    if (!raw) return { ok: true }; // Bypass jika KV belum dikonfigurasi agar tidak crash
+    if (!raw) return { ok: true };
     const clients = JSON.parse(raw);
     const c = clients.find(x => x.email === email);
     if (!c) return { ok: false, msg: 'Email tidak terdaftar.' };
     if (new Date(c.expires_at) <= new Date()) return { ok: false, msg: 'Masa aktif habis.' };
-  } catch (e) {
-    // Jika gagal baca KV, tetap izinkan agar fungsi tidak error 500
-  }
+  } catch (e) {}
   return { ok: true };
 }
 
@@ -140,7 +139,7 @@ function getAbsoluteScalpOffsets(symbol) {
   return { buffer: 0.0020, sl: 0.0055, type: 'DEFAULT_FIX' };
 }
 
-function scalpHitRun(mtfC, ltfC, htfDir, price, symbol, emaFilter, bbFilter) {
+function scalpHitRun(mtfC, ltfC, htfDir, price, symbol, emaFilter, bbFilter, rrList) {
   let dir = structureDir(mtfC, emaFilter, bbFilter);
   if (dir === 0) dir = htfDir !== 0 ? htfDir : 1;
   const activeDir = htfDir !== 0 ? htfDir : dir;
@@ -151,9 +150,9 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, symbol, emaFilter, bbFilter) {
   const sl = isBuy ? price - offsets.sl : price + offsets.sl;
 
   const riskDistance = Math.abs(price - sl);
-  const tp1 = isBuy ? price + (1.0 * riskDistance) : price - (1.0 * riskDistance);
-  const tp2 = isBuy ? price + (2.0 * riskDistance) : price - (2.0 * riskDistance);
-  const tp3 = isBuy ? price + (3.0 * riskDistance) : price - (3.0 * riskDistance);
+  const tp1 = isBuy ? price + (rrList[0] * riskDistance) : price - (rrList[0] * riskDistance);
+  const tp2 = isBuy ? price + (rrList[1] * riskDistance) : price - (rrList[1] * riskDistance);
+  const tp3 = isBuy ? price + (rrList[2] * riskDistance) : price - (rrList[2] * riskDistance);
 
   return {
     dir: activeDir,
@@ -183,7 +182,7 @@ function aggregateM15(m5) {
   return out.length ? out : m5;
 }
 
-function generalTradePlan({ mtfC, m5C, price, symbol, styleKind, emaFilter, bbFilter }) {
+function generalTradePlan({ mtfC, m5C, price, symbol, styleKind, emaFilter, bbFilter, rrList }) {
   const m15C = aggregateM15(m5C);
   const a15 = atr(m15C, 14) || 10;
   const dir = structureDir(mtfC, emaFilter, bbFilter) || 1;
@@ -200,7 +199,6 @@ function generalTradePlan({ mtfC, m5C, price, symbol, styleKind, emaFilter, bbFi
   const sl = isBuy ? actualEntry - slVal : actualEntry + slVal;
 
   const risk = Math.abs(actualEntry - sl);
-  const rrList = STYLES[Object.keys(STYLES).find(k => STYLES[k].kind === styleKind)]?.rr || [1.5, 2.5, 4.0];
   
   const tp1 = actualEntry + dir * rrList[0] * risk;
   const tp2 = actualEntry + dir * rrList[1] * risk;
@@ -234,7 +232,8 @@ export default async function handler(req, res) {
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
     const email = String(body.email || req.headers['x-user-email'] || '').trim().toLowerCase();
-    const style = STYLES[body.tradingStyle];
+    const styleKey = body.tradingStyle || 'Scalping';
+    const style = STYLES[styleKey] || STYLES['Scalping'];
     const symbol = String(body.marketId || '').split('|').pop().toUpperCase();
     const dec = DECIMALS[symbol] ?? 2;
     const price = Number(body.currentPrice);
@@ -242,7 +241,6 @@ export default async function handler(req, res) {
 
     const access = await checkAccess(email);
     if (!access.ok) return res.status(403).json({ error: access.msg });
-    if (!style) return res.status(400).json({ error: 'Gaya trading tidak dikenal.' });
 
     const cnd = body.candles || {};
     const htfC = cleanCandles(cnd.htf);
@@ -260,15 +258,16 @@ export default async function handler(req, res) {
 
     const htfDir = structureDir(htfC, emaFilter, bbFilter);
     const isScalp = style.kind === 'scalp';
+    const rrList = style.rr; // Mengambil array RRR konsisten [TP1, TP2, TP3]
 
     let dir = 0, plan = null;
 
     if (isScalp) {
-      const hr = scalpHitRun(mtfC, ltfC, htfDir, price, symbol, emaFilter, bbFilter);
+      const hr = scalpHitRun(mtfC, ltfC, htfDir, price, symbol, emaFilter, bbFilter, rrList);
       dir = hr.dir;
       plan = hr.plan;
     } else {
-      const dp = generalTradePlan({ mtfC, m5C: ltfC, price, symbol, styleKind: style.kind, emaFilter, bbFilter });
+      const dp = generalTradePlan({ mtfC, m5C: ltfC, price, symbol, styleKind: style.kind, emaFilter, bbFilter, rrList });
       dir = dp.dir;
       plan = dp.plan;
     }
@@ -291,7 +290,7 @@ export default async function handler(req, res) {
     const techReason = [
       `Analisis Teknikal Pure SMC ${sideText} (${style.label}) pada pair ${symbol}.`,
       `Alasan Eksekusi: Diputuskan ${actionDesc}. Indikator EMA (${emaSummary}) serta Bollinger Bands (${bbSummary}) bekerja bersama menyaring titik jenuh harga.`,
-      `Manajemen Risiko: Jarak Stop Loss dan Buffer telah disesuaikan secara presisi (${offsets.type}) dengan target profit optimal.`
+      `Manajemen Risiko: Jarak Stop Loss dan Buffer disesuaikan presisi (${offsets.type}) dengan target RRR konsisten [TP1: 1:${rrList[0]}, TP2: 1:${rrList[1]}, TP3: 1:${rrList[2]}].`
     ].join('\n\n');
 
     return res.status(200).json({
@@ -309,7 +308,7 @@ export default async function handler(req, res) {
         zone: plan.zone ? { min: r(plan.zone.min), max: r(plan.zone.max) } : null,
         confidence: 'HIGH',
         risk: 'LOW',
-        setup: 'CONTINUATION / REVERSAL (BB + SMC)',
+        setup: `CONTINUATION / REVERSAL (RRR Target: 1:${rrList[0]} - 1:${rrList[2]})`,
         setupLabel: style.label,
         zoneLabel: 'Order Block / FVG / Bollinger Confluence',
         zoneNote: `Range Mode (${offsets.type})`,
