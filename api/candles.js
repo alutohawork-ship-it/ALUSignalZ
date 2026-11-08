@@ -1,16 +1,21 @@
 // api/candles.js
+// v2
 // Riwayat candle untuk grid bias dan loadCandles di frontend.
-// Urutan: cache KV (TTL per interval) → TickerLayer (native, atau dibentuk dari 15m) → simpan cache.
+// Urutan: cache KV (TTL per interval) → TickerLayer (native, atau dibentuk dari base) → simpan cache.
 // Akses dibatasi: email harus terdaftar dan masih aktif (sama seperti /api/generate).
 
 const KV_KEY = 'alu_clients';
 const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
+
+// Samakan dengan CRYPTO_LIST di api/generate.js
+const CRYPTO_LIST = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'BNBUSD', 'ADAUSD', 'DOGEUSD', 'AVAXUSD', 'LINKUSD', 'DOTUSD', 'MATICUSD', 'UNIUSD'];
 
 // native : request langsung ke TickerLayer (null = tidak dicoba)
 // base   : interval sumber untuk dibentuk ulang bila native gagal atau kurang
 // min    : menit per candle
 // ttl    : umur cache (detik)
 const TF = {
+  '1m':  { native: { mult: 1,  span: 'minute' }, base: null,  min: 1,    ttl: 120 },
   '5m':  { native: { mult: 5,  span: 'minute' }, base: null,  min: 5,    ttl: 600 },
   '15m': { native: { mult: 15, span: 'minute' }, base: null,  min: 15,   ttl: 900 },
   '30m': { native: null,                         base: '15m', min: 30,   ttl: 900 },
@@ -19,9 +24,8 @@ const TF = {
   '1d':  { native: { mult: 1,  span: 'day' },    base: null,  min: 1440, ttl: 7200 },
 };
 
-// Jumlah bar yang disimpan per interval.
-// 15m dibuat panjang karena dipakai untuk membentuk 30m, 1h, dan 4h.
-const BARS = { '5m': 300, '15m': 1600, '30m': 300, '1h': 300, '4h': 300, '1d': 300 };
+// Jumlah bar yang disimpan per interval. 15m dibuat panjang karena jadi sumber 30m, 1h, dan 4h.
+const BARS = { '1m': 300, '5m': 300, '15m': 1600, '30m': 300, '1h': 300, '4h': 300, '1d': 300 };
 const MIN_NATIVE = 60; // di bawah ini, coba bentuk ulang dari base
 
 async function kv(command) {
@@ -66,9 +70,7 @@ async function cacheSet(key, value, ttl) {
 
 function mapSymbolToTickerLayer(symbol) {
   const s = symbol.toUpperCase().trim();
-  if (['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'BNBUSD', 'ADAUSD', 'DOGEUSD', 'AVAXUSD', 'LINKUSD'].includes(s)) {
-    return { asset: 'crypto', symbol: s };
-  }
+  if (CRYPTO_LIST.includes(s)) return { asset: 'crypto', symbol: s };
   if (s === 'US30' || s === 'SPX500') return { asset: 'stocks', symbol: `US:${s}` };
   if (s === 'NAS100') return { asset: 'stocks', symbol: 'US:NDX' };
   return { asset: 'forex', symbol: s };
@@ -99,7 +101,7 @@ async function requestBars(symbol, native, bars, apiKey) {
   }
 
   const byT = new Map();
-  let status = 'OK';
+  const errors = [];
 
   await Promise.all(ranges.map(async ([from, to]) => {
     const url = `${TICKERLAYER_BASE_URL}/${mapped.asset}/agg/${mapped.symbol}/${native.mult}/${native.span}/${isoDate(new Date(from))}/${isoDate(new Date(to))}?sort=asc&limit=5000`;
@@ -108,7 +110,7 @@ async function requestBars(symbol, native, bars, apiKey) {
         method: 'GET',
         headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
       });
-      if (!r.ok) { status = `HTTP ${r.status}`; return; }
+      if (!r.ok) { errors.push(`HTTP ${r.status}`); return; }
       const data = await r.json();
       const rows = Array.isArray(data) ? data : (data.results || []);
       for (const c of rows) {
@@ -119,11 +121,14 @@ async function requestBars(symbol, native, bars, apiKey) {
         }
       }
     } catch (e) {
-      status = 'ERR';
+      errors.push('ERR');
     }
   }));
 
-  return { bars: [...byT.values()].sort((a, b) => a.t - b.t), status };
+  return {
+    bars: [...byT.values()].sort((a, b) => a.t - b.t),
+    status: errors.length ? errors[0] : 'OK',
+  };
 }
 
 function aggregateCandles(candles, tfMin) {
@@ -165,13 +170,13 @@ async function getSeries(symbol, interval, apiKey) {
   if (candles.length < MIN_NATIVE && cfg.base) {
     const base = await getSeries(symbol, cfg.base, apiKey);
     const agg = aggregateCandles(base.candles, cfg.min);
-    notes.push(`base ${cfg.base} ${base.candles.length} → ${interval} ${agg.length}`);
+    notes.push(`base ${cfg.base} ${base.candles.length} (${base.src}) → ${interval} ${agg.length}`);
     if (agg.length > candles.length) candles = agg;
   }
 
   candles = candles.slice(-BARS[interval]);
   await cacheSet(key, candles, candles.length ? cfg.ttl : 30);
-  return { candles, src: notes.join(' · ') };
+  return { candles, src: notes.join(' · ') || 'tidak ada sumber' };
 }
 
 export default async function handler(req, res) {
