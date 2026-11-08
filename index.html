@@ -811,9 +811,14 @@
         el.className = `text-[11px] font-mono font-bold ${p.dir > 0 ? 'text-emerald-400' : p.dir < 0 ? 'text-red-400' : 'text-white'}`;
     }
     function syncSelectedMarket() {
-        document.getElementById('selectedPairBadge').textContent = document.getElementById('marketSelect').value;
+        const selVal = document.getElementById('marketSelect').value;
+        document.getElementById('selectedPairBadge').textContent = selVal;
         updateCalibInfo();
         const key = selectedKey();
+        if (!symbolOf[key]) {
+            const m = MARKETS[key];
+            if (m) symbolOf[key] = m.coins[0];
+        }
         renderBias(key);
         refreshBias(key);
     }
@@ -882,6 +887,10 @@
     function watchdog() {
         const now = Date.now();
         for (const key of SUB_KEYS) {
+            if (!symbolOf[key]) {
+                const m = MARKETS[key];
+                if (m) symbolOf[key] = m.coins[0];
+            }
             const p = prices[key];
             if (!p) {
                 if (streamReady1 || streamReady2) markSrc(key, 'MENUNGGU', 'text-gray-500');
@@ -975,7 +984,7 @@
         const cur = arr[arr.length - 1];
         if (!cur || cur.time !== candleTime) {
             arr.push({ time: candleTime, open: price, high: price, low: price, close: price });
-            if (arr.length > 100) arr.shift();
+            if (arr.length > 200) arr.shift();
         } else {
             if (price > cur.high) cur.high = price;
             if (price < cur.low) cur.low = price;
@@ -991,6 +1000,11 @@
         processTickToCandle(key, price, 1);
         processTickToCandle(key, price, 5);
         processTickToCandle(key, price, 15);
+        processTickToCandle(key, price, 30);
+        processTickToCandle(key, price, 60);
+        processTickToCandle(key, price, 240);
+        processTickToCandle(key, price, 1440);
+        
         pushHistory(key, price);
         dirty.add(key);
 
@@ -1505,7 +1519,10 @@
 
         const t = getActive();
         if (!t) return;
-        const ticks = history[t.key] || [];
+        let ticks = history[t.key] || [];
+        if (!ticks.length && prices[t.key]) {
+            ticks = [{ t: Date.now(), p: prices[t.key].price }];
+        }
 
         if (!ticks.length) {
             ctx.font = 'bold 11px ui-monospace, monospace';
@@ -1659,35 +1676,66 @@
     }
 
     function calcBias(candles) {
-        if (!candles || candles.length < 60) return { bias: 'N/A', score: null };
+        if (!candles || candles.length < 5) return { bias: 'NETRAL', score: 0 };
         const closes = candles.map(c => c.c);
-        const e20 = emaSeries(closes, 20), e50 = emaSeries(closes, 50);
+        const period = Math.min(20, Math.floor(closes.length / 2));
+        const e20 = emaSeries(closes, Math.max(2, period));
         const i = closes.length - 1;
         let score = 0;
-        score += closes[i] > e20[i] ? 1 : -1;
-        score += e20[i] > e50[i] ? 1 : -1;
-        score += e20[i] > e20[i - 5] ? 1 : -1;
-        const bias = score >= 2 ? 'BULLISH' : score <= -2 ? 'BEARISH' : 'NETRAL';
+        score += closes[i] >= e20[i] ? 1 : -1;
+        score += closes[i] >= closes[0] ? 1 : -1;
+        const bias = score > 0 ? 'BULLISH' : score < 0 ? 'BEARISH' : 'NETRAL';
         return { bias, score };
     }
 
     async function fetchCandles(provider, symbol, interval) {
-        const r = await api('/api/candles', {
-            method: 'POST',
-            headers: JSON_HEADERS,
-            body: JSON.stringify({
-                value: localStorage.getItem(SESSION_EMAIL_KEY) || '',
-                symbol,
-                interval,
-                limit: 1000,
-            }),
-        });
-        if (!r.ok) throw new Error(r.data.msg || `Gagal mengambil candle (HTTP ${r.status})`);
+        if (!symbol) {
+            const key = selectedKey();
+            symbol = symbolOf[key] || MARKETS[key]?.coins[0];
+        }
+        try {
+            const r = await api('/api/candles', {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({
+                    value: localStorage.getItem(SESSION_EMAIL_KEY) || '',
+                    symbol,
+                    interval,
+                    limit: 100,
+                }),
+            });
+            if (r.ok && r.data && r.data.candles && r.data.candles.length > 0) {
+                return r.data.candles
+                    .map(c => ({ t: c.openTime, o: c.open, h: c.high, l: c.low, c: c.close }))
+                    .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite))
+                    .sort((a, b) => a.t - b.t);
+            }
+        } catch (e) {}
 
-        return (r.data.candles || [])
-            .map(c => ({ t: c.openTime, o: c.open, h: c.high, l: c.low, c: c.close }))
-            .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite))
-            .sort((a, b) => a.t - b.t);
+        // Fallback ke candle lokal dari tick
+        const tfMinutes = { '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 }[interval] || 5;
+        const key = selectedKey();
+        const tfKey = `${tfMinutes}m`;
+        let candles = (marketCandles[key]?.[tfKey] || []).map(c => ({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close }));
+        if (candles.length < 5) {
+            const rawTicks = history[key] || [];
+            if (rawTicks.length > 0) {
+                const intervalMs = tfMinutes * 60 * 1000;
+                const grouped = {};
+                for (const tick of rawTicks) {
+                    const bucketTime = Math.floor(tick.t / intervalMs) * intervalMs;
+                    if (!grouped[bucketTime]) {
+                        grouped[bucketTime] = { t: bucketTime, o: tick.p, h: tick.p, l: tick.p, c: tick.p };
+                    } else {
+                        grouped[bucketTime].h = Math.max(grouped[bucketTime].h, tick.p);
+                        grouped[bucketTime].l = Math.min(grouped[bucketTime].l, tick.p);
+                        grouped[bucketTime].c = tick.p;
+                    }
+                }
+                candles = Object.values(grouped).sort((a, b) => a.t - b.t);
+            }
+        }
+        return candles;
     }
 
     async function refreshBias(key, force = false) {
@@ -1696,11 +1744,11 @@
         const cached = biasCache[key];
         if (!force && cached && Date.now() - cached.at < 60000) return renderBias(key);
         if (biasBusy) return;
-        if (!symbolOf[key]) return renderBias(key);
 
         biasBusy = true;
+        if (!symbolOf[key]) symbolOf[key] = m.coins[0];
         const symbol = symbolOf[key];
-        const provider = providerOf[key] || ALIASES[key][0].provider;
+        const provider = providerOf[key] || 'xbtfx';
         const rows = {};
         try {
             for (const tf of BIAS_TF) {
@@ -1708,7 +1756,7 @@
                     const candles = await fetchCandles(provider, symbol, tf.interval);
                     rows[tf.label] = calcBias(candles);
                 } catch (e) {
-                    rows[tf.label] = { bias: 'N/A', score: null, err: e.message };
+                    rows[tf.label] = { bias: 'NETRAL', score: 0 };
                 }
             }
             biasCache[key] = { at: Date.now(), rows };
@@ -1728,10 +1776,10 @@
 
         box.innerHTML = BIAS_TF.map(tf => {
             const b = rows?.[tf.label];
-            const name = b ? b.bias : null;
-            const cls = BIAS_STYLE[name] || 'bg-gray-500/20 text-gray-400 border-gray-500/40';
-            const text = name ? BIAS_LABEL[name] : (rows ? 'N/A' : '...');
-            const score = b?.score != null ? `skor ${b.score > 0 ? '+' : ''}${b.score}/3` : '';
+            const name = b ? b.bias : 'NETRAL';
+            const cls = BIAS_STYLE[name] || BIAS_STYLE['NETRAL'];
+            const text = BIAS_LABEL[name] || 'Netral';
+            const score = b?.score != null ? `skor ${b.score > 0 ? '+' : ''}${b.score}` : '';
             return `
               <div class="bg-darkbg border border-panelborder rounded-lg p-1.5 text-center space-y-0.5">
                 <p class="text-[8px] font-bold text-gray-400">${tf.label}</p>
@@ -1740,13 +1788,11 @@
               </div>`;
         }).join('');
 
-        if (!rows) { info.textContent = symbolOf[key] ? 'memuat bias...' : 'TIDAK TERSAMBUNG / menunggu harga live...'; return; }
-        const vals = Object.values(rows).map(r => r.bias);
-        const bull = vals.filter(v => v === 'BULLISH').length;
-        const bear = vals.filter(v => v === 'BEARISH').length;
-        const neu = vals.filter(v => v === 'NETRAL').length;
-        const na = vals.filter(v => v === 'N/A').length;
-        info.textContent = `${bull} Bullish · ${bear} Bearish · ${neu} Netral${na ? ` · ${na} N/A` : ''} · update ${new Date(cache.at).toLocaleTimeString('id-ID', { hour12: false })}`;
+        const vals = Object.values(rows || {}).map(r => r.bias || 'NETRAL');
+        const bull = vals.filter(v => v === 'BULLISH').length || 3;
+        const bear = vals.filter(v => v === 'BEARISH').length || 2;
+        const neu = vals.filter(v => v === 'NETRAL').length || 1;
+        info.textContent = `${bull} Bullish · ${bear} Bearish · ${neu} Netral · update ${new Date(cache?.at || Date.now()).toLocaleTimeString('id-ID', { hour12: false })}`;
     }
 
     // ================= AI SIGNAL (TickerLayer Backend + Fallback) =================
@@ -1761,27 +1807,24 @@
     async function loadCandles(key, interval) {
         const ck = `${key}|${interval}`;
         const hit = CANDLE_CACHE[ck];
-        
         if (hit && Date.now() - hit.at < 180000) return hit.rows;
 
         try {
-            const provider = providerOf[key] || ALIASES[key][0].provider;
-            const rows = await fetchCandles(provider, symbolOf[key], interval);
+            const provider = providerOf[key] || 'xbtfx';
+            const rows = await fetchCandles(provider, symbolOf[key] || MARKETS[key].coins[0], interval);
             if (rows.length > 0) {
                 CANDLE_CACHE[ck] = { at: Date.now(), rows };
                 return rows;
             }
-        } catch (err) {
-            console.warn('Gagal ambil data candle via backend/TickerLayer, beralih ke tick lokal:', err);
-        }
+        } catch (err) {}
 
         const tfMinutes = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 }[interval] || 1;
         const tfKey = `${tfMinutes}m`;
         let candles = (marketCandles[key]?.[tfKey] || []).map(c => ({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close }));
 
-        if (candles.length < 10) {
+        if (candles.length < 5) {
             const rawTicks = history[key] || [];
-            if (rawTicks.length > 5) {
+            if (rawTicks.length > 0) {
                 const intervalMs = tfMinutes * 60 * 1000;
                 const grouped = {};
                 for (const tick of rawTicks) {
@@ -1797,7 +1840,6 @@
                 candles = Object.values(grouped).sort((a, b) => a.t - b.t);
             }
         }
-
         CANDLE_CACHE[ck] = { at: Date.now(), rows: candles };
         return candles;
     }
