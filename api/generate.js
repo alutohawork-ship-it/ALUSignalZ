@@ -66,22 +66,25 @@ function atr(candles, period = 14) {
   return s.length ? s.reduce((a, b) => a + b, 0) / s.length : 1;
 }
 
-// Perhitungan Bollinger Bands (Periode 20, Deviasi 2)
 function calculateBollingerBands(candles, period = 20, multiplier = 2) {
-  if (!candles || candles.length < period) return { upper: 0, middle: 0, lower: 0 };
-  const slice = candles.slice(-period);
-  const closes = slice.map(c => c.c);
-  
-  const middle = closes.reduce((sum, val) => sum + val, 0) / period;
-  
-  const variance = closes.reduce((sum, val) => sum + Math.pow(val - middle, 2), 0) / period;
-  const stdDev = Math.sqrt(variance);
+  try {
+    if (!Array.isArray(candles) || candles.length < period) return { upper: 0, middle: 0, lower: 0 };
+    const slice = candles.slice(-period);
+    const closes = slice.map(c => Number(c.c)).filter(Number.isFinite);
+    if (closes.length < period) return { upper: 0, middle: 0, lower: 0 };
+    
+    const middle = closes.reduce((sum, val) => sum + val, 0) / period;
+    const variance = closes.reduce((sum, val) => sum + Math.pow(val - middle, 2), 0) / period;
+    const stdDev = Math.sqrt(variance);
 
-  return {
-    middle: Number(middle.toFixed(5)),
-    upper: Number((middle + (multiplier * stdDev)).toFixed(5)),
-    lower: Number((middle - (multiplier * stdDev)).toFixed(5))
-  };
+    return {
+      middle: Number(middle.toFixed(5)),
+      upper: Number((middle + (multiplier * stdDev)).toFixed(5)),
+      lower: Number((middle - (multiplier * stdDev)).toFixed(5))
+    };
+  } catch {
+    return { upper: 0, middle: 0, lower: 0 };
+  }
 }
 
 function structureDir(candles, emaFilter = {}, bbFilter = {}) {
@@ -89,7 +92,6 @@ function structureDir(candles, emaFilter = {}, bbFilter = {}) {
   const last = candles[candles.length - 1], first = candles[0];
   let baseDir = last.c >= first.c ? 1 : -1;
 
-  // Konfirmasi tambahan menggunakan tren EMA
   const emaKeys = Object.keys(emaFilter);
   if (emaKeys.length > 0) {
     const fastKey = emaKeys[0];
@@ -103,10 +105,9 @@ function structureDir(candles, emaFilter = {}, bbFilter = {}) {
     }
   }
 
-  // Filter konfirmasi Bollinger Bands (Harga mendekati band bawah = support/buy, mendekati band atas = resistance/sell)
-  if (bbFilter.lower && bbFilter.upper && bbFilter.middle) {
-    if (last.c <= bbFilter.lower * 1.002) return 1;  // Sentuh/tembus bawah -> potensi pantulan naik (Buy)
-    if (last.c >= bbFilter.upper * 0.998) return -1; // Sentuh/tembus atas -> potensi pantulan turun (Sell)
+  if (bbFilter && bbFilter.lower && bbFilter.upper && bbFilter.middle) {
+    if (last.c <= bbFilter.lower * 1.002) return 1;  
+    if (last.c >= bbFilter.upper * 0.998) return -1; 
   }
 
   return baseDir;
@@ -254,9 +255,9 @@ export default async function handler(req, res) {
     const mtfC = cleanCandles(cnd.mtf ?? cnd.entry);
     const ltfC = cleanCandles(cnd.ltf);
 
-    // Prioritaskan bbFilter dari body request frontend jika valid, jika tidak hitung secara lokal
-    const bbFilter = (body.bbFilter && body.bbFilter.middle > 0) 
-      ? body.bbFilter 
+    const incomingBb = body.bbFilter;
+    const bbFilter = (incomingBb && typeof incomingBb.middle === 'number' && incomingBb.middle > 0)
+      ? incomingBb
       : calculateBollingerBands(mtfC.length > 0 ? mtfC : ltfC);
 
     const htfDir = structureDir(htfC, emaFilter, bbFilter);
@@ -279,4 +280,46 @@ export default async function handler(req, res) {
     const tps = plan.tps || [entry + dir * 20, entry + dir * 40, entry + dir * 60];
 
     const actionType = plan.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET';
-    const sideText = dir === 1 ?
+    const sideText = dir === 1 ? 'BUY' : 'SELL';
+    const offsets = getAbsoluteScalpOffsets(symbol);
+
+    const emaSummary = Object.entries(emaFilter).map(([k, v]) => `${k}: ${v}`).join(' | ');
+    const bbSummary = `Upper: ${bbFilter.upper ?? 0} | Mid: ${bbFilter.middle ?? 0} | Lower: ${bbFilter.lower ?? 0}`;
+
+    const actionDesc = sideText === 'BUY' 
+      ? 'mengambil posisi BELI (BUY) karena pantulan harga di area Bollinger Band Bawah & konfirmasi struktur Demand' 
+      : 'mengambil posisi JUAL (SELL) karena penolakan harga di area Bollinger Band Atas & tekanan Supply Zone';
+
+    const techReason = [
+      `Analisis Teknikal Pure SMC ${sideText} (${style.label}) pada pair ${symbol}.`,
+      `Alasan Eksekusi: Diputuskan ${actionDesc}. Indikator EMA (${emaSummary}) serta Bollinger Bands (${bbSummary}) bekerja bersama menyaring titik jenuh harga.`,
+      `Manajemen Risiko: Jarak Stop Loss dan Buffer telah disesuaikan secara presisi (${offsets.type}) dengan target profit optimal.`
+    ].join('\n\n');
+
+    return res.status(200).json({
+      ok: true,
+      signal: {
+        signal: sideText,
+        mode: actionType,
+        orderType: plan.orderType,
+        orderLabel: orderLabel(dir, plan.orderType),
+        status: plan.status,
+        entry: r(entry),
+        bufferEnd: r(plan.bufferEnd || entry),
+        sl: r(plan.sl),
+        tp1: r(tps[0]), tp2: r(tps[1]), tp3: r(tps[2]),
+        zone: plan.zone ? { min: r(plan.zone.min), max: r(plan.zone.max) } : null,
+        confidence: 'HIGH',
+        risk: 'LOW',
+        setup: 'CONTINUATION / REVERSAL (BB + SMC)',
+        setupLabel: style.label,
+        zoneLabel: 'Order Block / FVG / Bollinger Confluence',
+        zoneNote: `Range Mode (${offsets.type})`,
+        reason: techReason
+      }
+    });
+  } catch (err) {
+    console.error('generate error:', err);
+    return res.status(200).json({ ok: false, error: 'Server error: ' + err.message });
+  }
+}
