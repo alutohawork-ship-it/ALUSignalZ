@@ -1819,13 +1819,45 @@
         info.textContent = `${bull} Bullish · ${bear} Bearish · ${neu} Netral · update ${new Date(cache?.at || Date.now()).toLocaleTimeString('id-ID', { hour12: false })}`;
     }
 
-    // ================= AI SIGNAL & LOAD CANDLES (Server API + Local Fallback) =================
+    // ================= AI SIGNAL & EMA FILTER LOGIC =================
     const STYLE_TF = {
         'Scalping':    { htf: '15m', mtf: '5m',  ltf: '1m' },
         'Day Trading': { htf: '1h',  mtf: '30m', ltf: '5m' },
         'Intraday':    { htf: '4h',  mtf: '1h',  ltf: '15m' },
         'Swing':       { htf: '1d',  mtf: '4h',  ltf: '1h' },
     };
+
+    // Fungsi helper menghitung nilai EMA (Exponential Moving Average)
+    function calculateEMA(candles, period) {
+        if (!candles || candles.length === 0) return [];
+        const k = 2 / (period + 1);
+        let emaArray = [];
+        let prevEMA = candles[0].c;
+        
+        for (let i = 0; i < candles.length; i++) {
+            const close = candles[i].c;
+            if (i === 0) {
+                emaArray.push(prevEMA);
+            } else {
+                const currentEMA = (close * k) + (prevEMA * (1 - k));
+                emaArray.push(currentEMA);
+                prevEMA = currentEMA;
+            }
+        }
+        return emaArray;
+    }
+
+    // Menentukan periode EMA filter berdasarkan Gaya Trading
+    function getEmaPeriodsForStyle(style) {
+        switch (style) {
+            case 'Scalping': return [5, 9];          // Agresif / Eksekusi Langsung
+            case 'Day Trading': return [14, 20];     // Harian
+            case 'Intraday': return [20, 50, 100];   // Menengah
+            case 'Swing': return [20, 200];          // Panjang
+            default: return [5, 9];
+        }
+    }
+
     const CANDLE_CACHE = {};
 
     async function loadCandles(key, interval) {
@@ -1860,7 +1892,6 @@
             console.warn('Gagal ambil candles dari API server, beralih ke local aggregator:', err);
         }
 
-        // Fallback cerdas jika API server kosong atau gagal
         if (rows.length < 5) {
             const tfMinutes = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 }[interval] || 1;
             const tfKey = `${tfMinutes}m`;
@@ -1908,7 +1939,7 @@
 
         const btn = document.getElementById('signalBtn');
         btn.disabled = true;
-        btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> Menganalisis Struktur SMC...`;
+        btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> Menganalisis Struktur SMC + Filter EMA...`;
 
         try {
             const tf = STYLE_TF[tradingStyle];
@@ -1921,6 +1952,14 @@
                 tf.ltf ? loadCandles(symbolKey, tf.ltf).catch(() => []) : Promise.resolve([]),
             ]);
 
+            const shiftedLtf = shiftCandles(ltfRows, off);
+            const periods = getEmaPeriodsForStyle(tradingStyle);
+            const emaMetrics = {};
+            periods.forEach(p => {
+                const resEma = calculateEMA(shiftedLtf, p);
+                emaMetrics[`EMA_${p}`] = resEma.length ? Number(resEma[resEma.length - 1].toFixed(5)) : 0;
+            });
+
             const res = await fetch('/api/generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1930,10 +1969,11 @@
                     tradingStyle,
                     currentPrice: live.price,
                     lang: currentLang,
+                    emaFilter: emaMetrics, // Menyertakan data EMA sebagai filter kontinuitas/tertinggal
                     candles: {
                         htf: shiftCandles(htfRows, off).slice(-200),
                         mtf: shiftCandles(mtfRows, off).slice(-200),
-                        ltf: shiftCandles(ltfRows, off).slice(-200),
+                        ltf: shiftedLtf.slice(-200),
                     },
                 }),
             });
