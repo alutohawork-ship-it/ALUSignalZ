@@ -1819,7 +1819,7 @@
         info.textContent = `${bull} Bullish · ${bear} Bearish · ${neu} Netral · update ${new Date(cache?.at || Date.now()).toLocaleTimeString('id-ID', { hour12: false })}`;
     }
 
-    // ================= AI SIGNAL & EMA FILTER LOGIC =================
+    // ================= AI SIGNAL, EMA & BOLLINGER BANDS FILTER LOGIC =================
     const STYLE_TF = {
         'Scalping':    { htf: '15m', mtf: '5m',  ltf: '1m' },
         'Day Trading': { htf: '1h',  mtf: '30m', ltf: '5m' },
@@ -1845,6 +1845,23 @@
             }
         }
         return emaArray;
+    }
+
+    // Fungsi helper menghitung nilai Bollinger Bands (Periode 20, Deviasi 2)
+    function calculateBollingerBands(candles, period = 20, multiplier = 2) {
+        if (!candles || candles.length < period) return { upper: 0, middle: 0, lower: 0 };
+        const slice = candles.slice(-period);
+        const closes = slice.map(c => c.c);
+        
+        const middle = closes.reduce((sum, val) => sum + val, 0) / period;
+        const variance = closes.reduce((sum, val) => sum + Math.pow(val - middle, 2), 0) / period;
+        const stdDev = Math.sqrt(variance);
+
+        return {
+            middle: Number(middle.toFixed(5)),
+            upper: Number((middle + (multiplier * stdDev)).toFixed(5)),
+            lower: Number((middle - (multiplier * stdDev)).toFixed(5))
+        };
     }
 
     // Menentukan periode EMA filter berdasarkan Gaya Trading
@@ -1939,7 +1956,7 @@
 
         const btn = document.getElementById('signalBtn');
         btn.disabled = true;
-        btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> Menganalisis Struktur SMC + Filter EMA...`;
+        btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> Menganalisis SMC + EMA + Bollinger Bands...`;
 
         try {
             const tf = STYLE_TF[tradingStyle];
@@ -1953,12 +1970,18 @@
             ]);
 
             const shiftedLtf = shiftCandles(ltfRows, off);
+            const shiftedMtf = shiftCandles(mtfRows, off);
+            
+            // Hitung EMA Filter
             const periods = getEmaPeriodsForStyle(tradingStyle);
             const emaMetrics = {};
             periods.forEach(p => {
                 const resEma = calculateEMA(shiftedLtf, p);
                 emaMetrics[`EMA_${p}`] = resEma.length ? Number(resEma[resEma.length - 1].toFixed(5)) : 0;
             });
+
+            // Hitung Bollinger Bands Filter
+            const bbMetrics = calculateBollingerBands(shiftedMtf.length > 0 ? shiftedMtf : shiftedLtf);
 
             const res = await fetch('/api/generate', {
                 method: 'POST',
@@ -1969,10 +1992,11 @@
                     tradingStyle,
                     currentPrice: live.price,
                     lang: currentLang,
-                    emaFilter: emaMetrics, // Menyertakan data EMA sebagai filter kontinuitas/tertinggal
+                    emaFilter: emaMetrics,
+                    bbFilter: bbMetrics, // Menyertakan data Bollinger Bands ke backend
                     candles: {
                         htf: shiftCandles(htfRows, off).slice(-200),
-                        mtf: shiftCandles(mtfRows, off).slice(-200),
+                        mtf: shiftedMtf.slice(-200),
                         ltf: shiftedLtf.slice(-200),
                     },
                 }),
