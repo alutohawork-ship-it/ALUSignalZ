@@ -1,8 +1,9 @@
 // api/generate.js
-// Analisis Pure SMC Universal: XBTFX 60% Pairs + DXY Support & Fixed Range + EMA & Bollinger Bands Filter + Konsistensi RRR + XBTFX REST API Auto-Fetch
+// Analisis Pure SMC Universal: TickerLayer OHLC Bars + XBTFX Live Stream Support + EMA & Bollinger Bands Filter + Konsistensi RRR
 
 const KV_KEY = 'alu_clients';
 const XBTFX_BASE_URL = 'https://interface.xbtfx.com';
+const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
 
 const DECIMALS = {
   DXY: 2, EURUSD: 5, GBPUSD: 5, USDJPY: 3, AUDUSD: 5, USDCAD: 5, USDCHF: 5, NZDUSD: 5,
@@ -49,30 +50,48 @@ async function checkAccess(email) {
   return { ok: true };
 }
 
-// Fungsi pengambil data candle otomatis langsung dari XBTFX REST API jika frontend tidak mengirimkan candle
-async function fetchXBTFXCandles(symbol, timeframe, apiKey, count = 50) {
+// Deteksi kategori asset & pemetaan format simbol untuk TickerLayer
+function mapSymbolToTickerLayer(symbol) {
+  const s = symbol.toUpperCase().trim();
+  if (['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'BNBUSD', 'ADAUSD', 'DOGEUSD', 'AVAXUSD', 'LINKUSD'].includes(s)) {
+    return { asset: 'crypto', symbol: s };
+  }
+  if (s === 'US30' || s === 'SPX500') return { asset: 'stocks', symbol: `US:${s}` };
+  if (s === 'NAS100') return { asset: 'stocks', symbol: 'US:NDX' };
+  if (s.includes('XAU') || s.includes('XAG')) return { asset: 'forex', symbol: s };
+  return { asset: 'forex', symbol: s };
+}
+
+// Fungsi pengambil data bar OHLC dari TickerLayer REST API
+// Format: GET /{asset}/agg/{symbol}/prev?interval={interval} atau rentang waktu
+async function fetchTickerLayerOHLC(symbol, interval = '1h', apiKey, limit = 50) {
   if (!apiKey) return [];
   try {
-    const response = await fetch(`${XBTFX_BASE_URL}/v1/chart/${symbol}`, {
-      method: 'POST',
+    const mapped = mapSymbolToTickerLayer(symbol);
+    // Menggunakan endpoint /prev atau agg sesuai dokumentasi TickerLayer
+    const url = `${TICKERLAYER_BASE_URL}/${mapped.asset}/agg/${mapped.symbol}/prev?interval=${interval}&limit=${limit}`;
+    
+    const response = await fetch(url, {
+      method: 'GET',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        'x-api-key': apiKey,
         'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ timeframe, count })
+      }
     });
+    
+    if (!response.ok) return [];
     const data = await response.json();
-    const rows = data.candles || data.results || (Array.isArray(data) ? data : []);
+    const rows = Array.isArray(data) ? data : (data.results || data.candles || data.bars || []);
     
     return rows.map(c => ({
-      t: Number(c.time || c.t || Date.now()),
-      o: Number(c.open || c.o || 0),
-      h: Number(c.high || c.h || 0),
-      l: Number(c.low || c.l || 0),
-      c: Number(c.close || c.c || 0)
+      t: Number(c.t || c.time || Date.now()),
+      o: Number(c.o || c.open || 0),
+      h: Number(c.h || c.high || 0),
+      l: Number(c.l || c.low || 0),
+      c: Number(c.c || c.close || 0)
     })).filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite)).sort((a, b) => a.t - b.t);
   } catch (err) {
-    console.error(`Gagal fetch XBTFX API untuk ${symbol} (${timeframe}):`, err);
+    console.error(`Gagal fetch TickerLayer OHLC untuk ${symbol} (${interval}):`, err);
     return [];
   }
 }
@@ -143,7 +162,6 @@ function structureDir(candles, emaFilter = {}, bbFilter = {}) {
   return baseDir;
 }
 
-// PEMINDAIAN TITIK SWING HIGH DAN SWING LOW RIIL DARI CANDLES
 function analyzeRealMarketStructure(candles, currentPrice) {
   if (!candles || candles.length < 10) {
     return { dir: 1, swingHigh: currentPrice * 1.02, swingLow: currentPrice * 0.98 };
@@ -213,7 +231,7 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, symbol, emaFilter, bbFilter, rrL
       sl: sl,
       tps: [tp1, tp2, tp3],
       zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
-      trigSrc: `Scalping Agresif (XBTFX + EMA + BB Filter) [${offsets.type}]`,
+      trigSrc: `Scalping Agresif (TickerLayer + EMA + BB Filter) [${offsets.type}]`,
       expireMs: 0,
       zoneNote: `Range Mode (${offsets.type})`
     }
@@ -230,7 +248,6 @@ function aggregateM15(m5) {
   return out.length ? out : m5;
 }
 
-// LOGIKA DAY TRADING, INTRADAY, SWING BERBASIS STRUKTUR RIIL & ZONA LIMIT ORDER LEBAR
 function generalTradePlan({ htfC, mtfC, m5C, price, symbol, styleKind, emaFilter, bbFilter, rrList }) {
   const sourceCandles = htfC.length >= 10 ? htfC : (mtfC.length >= 10 ? mtfC : aggregateM15(m5C));
   const struct = analyzeRealMarketStructure(sourceCandles, price);
@@ -244,15 +261,11 @@ function generalTradePlan({ htfC, mtfC, m5C, price, symbol, styleKind, emaFilter
   if (styleKind === 'intraday') depthMultiplier = 0.7;
   if (styleKind === 'swing') depthMultiplier = 1.2;
 
-  // Harga Entry Limit riil di dalam zona Demand / Supply berdasarkan struktur market
   const actualEntry = isBuy 
     ? price - Math.max(currentAtr * 1.5, marketSpan * depthMultiplier * 0.2) 
     : price + Math.max(currentAtr * 1.5, marketSpan * depthMultiplier * 0.2);
 
-  // Stop Loss di luar swing riil
   const sl = isBuy ? struct.swingLow - (currentAtr * 0.8) : struct.swingHigh + (currentAtr * 0.8);
-  
-  // Buffer dan lebar zona
   const bufferVal = currentAtr * 0.6;
   const bufferEnd = isBuy ? actualEntry - bufferVal : actualEntry + bufferVal;
 
@@ -272,13 +285,13 @@ function generalTradePlan({ htfC, mtfC, m5C, price, symbol, styleKind, emaFilter
     dir,
     plan: {
       kind: styleKind,
-      orderType: 'LIMIT', // Wajib Limit Order
-      status: 'WAITING',   // Status live menjadi WAITING (Pending Order)
+      orderType: 'LIMIT',
+      status: 'WAITING',
       entry: actualEntry,
       bufferEnd,
       sl,
       tps: [tp1, tp2, tp3],
-      zone: { min: zoneMin, max: zoneMax }, // Zona riil yang lebar dan valid
+      zone: { min: zoneMin, max: zoneMax },
       expireMs: 360 * 60 * 1000,
       trigSrc: `${trigName} [Swing High: ${struct.swingHigh.toFixed(2)} | Low: ${struct.swingLow.toFixed(2)}]`,
       zoneNote: `Structural Limit Zone (HTF Range)`,
@@ -293,7 +306,9 @@ export default async function handler(req, res) {
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
     const email = String(body.email || req.headers['x-user-email'] || '').trim().toLowerCase();
-    const xbtfxApiKey = String(body.apiKey || req.headers['x-xbtfx-key'] || process.env.XBTFX_API_KEY || '').trim();
+    
+    // Ambil TickerLayer API Key dari Environment Variables Vercel
+    const tickerLayerApiKey = String(process.env.TICKERLAYER_API_KEY || '').trim();
     
     const styleKey = body.tradingStyle || 'Scalping';
     const style = STYLES[styleKey] || STYLES['Scalping'];
@@ -304,14 +319,14 @@ export default async function handler(req, res) {
     const access = await checkAccess(email);
     if (!access.ok) return res.status(403).json({ error: access.msg });
 
-    // Jika frontend tidak mengirim candles, backend otomatis fetch langsung dari XBTFX REST API
     let htfC = cleanCandles(body.candles?.htf);
     let mtfC = cleanCandles(body.candles?.mtf ?? body.candles?.entry);
     let ltfC = cleanCandles(body.candles?.ltf);
 
+    // Jika frontend tidak mengirim candles, backend otomatis fetch dari TickerLayer OHLC API
     if (htfC.length === 0 || mtfC.length === 0) {
-      htfC = await fetchXBTFXCandles(symbol, 'H1', xbtfxApiKey, 50);
-      mtfC = await fetchXBTFXCandles(symbol, 'M15', xbtfxApiKey, 50);
+      htfC = await fetchTickerLayerOHLC(symbol, '1h', tickerLayerApiKey, 50);
+      mtfC = await fetchTickerLayerOHLC(symbol, '15m', tickerLayerApiKey, 50);
     }
 
     const price = Number(body.currentPrice) || (mtfC.length > 0 ? mtfC[mtfC.length - 1].c : 2000);
@@ -360,7 +375,7 @@ export default async function handler(req, res) {
 
     const techReason = [
       `Analisis Struktur Jauh SMC ${sideText} (${style.label}) pada pair ${symbol}.`,
-      `Mekanisme Eksekusi: Menggunakan Limit Order (Pending Order / WAITING) dengan memindai titik Swing High/Low dari data candle riil XBTFX REST API.`,
+      `Mekanisme Eksekusi: Menggunakan Limit Order (Pending Order / WAITING) dengan memindai titik Swing High/Low dari data bar OHLC TickerLayer.`,
       `Alasan: Diputuskan ${actionDesc}. Indikator EMA (${emaSummary}) serta Bollinger Bands (${bbSummary}) memfilter area jenuh.`,
       `Manajemen Risiko: Lebar zona dan Stop Loss ditarik dari struktur market asli dengan target RRR [TP1: 1:${rrList[0]}, TP2: 1:${rrList[1]}, TP3: 1:${rrList[2]}].`
     ].join('\n\n');
@@ -372,7 +387,7 @@ export default async function handler(req, res) {
         mode: actionType,
         orderType: plan.orderType,
         orderLabel: orderLabel(dir, plan.orderType),
-        status: plan.status, // WAITING untuk Day/Intra/Swing, RUNNING untuk Scalp
+        status: plan.status,
         entry: r(entry),
         bufferEnd: r(plan.bufferEnd || entry),
         sl: r(plan.sl),
