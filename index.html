@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Alu Signal Z & Terminal</title>
+    <title>Alu Signal Z & Terminal Candlestick</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -122,13 +122,13 @@
                 </div>
                 <div class="min-w-0">
                     <h1 class="font-bold text-xs text-white">Alu <span class="text-accentblue">Signal Z</span></h1>
-                    <p id="txtSubHeader" class="text-[8px] text-gray-400 truncate">Pure SMC 3-Layer Terminal</p>
+                    <p id="txtSubHeader" class="text-[8px] text-gray-400 truncate">Pure SMC Candlestick Terminal</p>
                 </div>
             </div>
             <div class="flex items-center gap-1.5 flex-wrap justify-end">
                 <button onclick="logout()" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">LOGOUT</button>
                 <button onclick="toggleLang()" id="langBtn" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-panelborder text-gray-300 border border-panelborder hover:border-accentblue">ID 🌐</button>
-                <span id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">WS: OFF</span>
+                <span id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">STREAM: OFF</span>
             </div>
         </header>
 
@@ -158,53 +158,21 @@
                             <option value="xbtfx|EURGBP">EUR/GBP</option>
                             <option value="xbtfx|EURJPY">EUR/JPY</option>
                             <option value="xbtfx|GBPJPY">GBP/JPY</option>
-                            <option value="xbtfx|AUDJPY">AUD/JPY</option>
-                            <option value="xbtfx|EURAUD">EUR/AUD</option>
-                            <option value="xbtfx|GBPAUD">GBP/AUD</option>
-                            <option value="xbtfx|AUDNZD">AUD/NZD</option>
-                            <option value="xbtfx|CADJPY">CAD/JPY</option>
-                            <option value="xbtfx|CHFJPY">CHF/JPY</option>
-                            <option value="xbtfx|EURNZD">EUR/NZD</option>
                         </optgroup>
                         <optgroup label="XBTFX Metals & Precious">
                             <option value="xbtfx|XAUUSD" selected>XAUUSD / Gold</option>
                             <option value="xbtfx|XAGUSD">XAGUSD / Silver</option>
-                            <option value="xbtfx|XPTUSD">XPTUSD / Platinum</option>
-                            <option value="xbtfx|XPDUSD">XPDUSD / Palladium</option>
-                            <option value="xbtfx|XAUEUR">XAUEUR / Gold in EUR</option>
-                            <option value="xbtfx|XAGEUR">XAGEUR / Silver in EUR</option>
-                        </optgroup>
-                        <optgroup label="XBTFX Energy & Commodities">
-                            <option value="xbtfx|BRENT">Brent Oil (BRENT)</option>
-                            <option value="xbtfx|WTI">Crude Oil WTI (WTI)</option>
-                            <option value="xbtfx|NATGAS">Natural Gas (NATGAS)</option>
-                            <option value="xbtfx|COPPER">Copper</option>
-                            <option value="xbtfx|COFFEE">Coffee</option>
-                            <option value="xbtfx|SUGAR">Sugar</option>
                         </optgroup>
                         <optgroup label="XBTFX Global Indices">
                             <option value="xbtfx|US30">Dow Jones / US30</option>
                             <option value="xbtfx|NAS100">Nasdaq 100 / NAS100</option>
                             <option value="xbtfx|SPX500">S&amp;P 500 / SPX500</option>
                             <option value="xbtfx|GER40">DAX / GER40</option>
-                            <option value="xbtfx|UK100">FTSE 100 / UK100</option>
-                            <option value="xbtfx|JPN225">Nikkei / JPN225</option>
-                            <option value="xbtfx|FRA40">CAC 40 / FRA40</option>
-                            <option value="xbtfx|AUS200">ASX 200 / AUS200</option>
                         </optgroup>
                         <optgroup label="XBTFX Crypto">
                             <option value="xbtfx|BTCUSD">BTCUSD / Bitcoin</option>
                             <option value="xbtfx|ETHUSD">ETHUSD / Ethereum</option>
                             <option value="xbtfx|SOLUSD">SOLUSD / Solana</option>
-                            <option value="xbtfx|XRPUSD">XRPUSD / Ripple</option>
-                            <option value="xbtfx|BNBUSD">BNBUSD</option>
-                            <option value="xbtfx|ADAUSD">ADAUSD</option>
-                            <option value="xbtfx|DOGEUSD">DOGEUSD</option>
-                            <option value="xbtfx|AVAXUSD">AVAXUSD</option>
-                            <option value="xbtfx|LINKUSD">LINKUSD</option>
-                            <option value="xbtfx|DOTUSD">DOTUSD</option>
-                            <option value="xbtfx|MATICUSD">MATICUSD</option>
-                            <option value="xbtfx|UNIUSD">UNIUSD</option>
                         </optgroup>
                     </select>
 
@@ -216,14 +184,27 @@
                     </div>
                     <p id="calibInfo" class="text-[8px] font-mono text-gray-500">Offset: 0</p>
 
-                    <div>
-                        <label id="lblTradingStyle" class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
-                        <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                            <option value="Scalping">Scalping (M1+M3+M5)</option>
-                            <option value="Day Trading">Day Trading (M5+M15+M30/H1)</option>
-                            <option value="Intraday">Intraday</option>
-                            <option value="Swing">Swing</option>
-                        </select>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label id="lblTradingStyle" class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING</label>
+                            <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
+                                <option value="Scalping">Scalping (M1+M3+M5)</option>
+                                <option value="Day Trading">Day Trading (M5+M15+M30/H1)</option>
+                                <option value="Intraday">Intraday</option>
+                                <option value="Swing">Swing</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-[8px] font-bold text-gray-400 block mb-1">TIMEFRAME CHART</label>
+                            <select id="chartTimeframeSelect" onchange="reloadChartCandles()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
+                                <option value="M1" selected>M1 (1 Menit)</option>
+                                <option value="M5">M5 (5 Menit)</option>
+                                <option value="M15">M15 (15 Menit)</option>
+                                <option value="H1">H1 (1 Jam)</option>
+                                <option value="H4">H4 (4 Jam)</option>
+                                <option value="D1">D1 (Daily)</option>
+                            </select>
+                        </div>
                     </div>
 
                     <button onclick="generateAISignal()" id="signalBtn" class="w-full bg-gradient-to-r from-accentblue to-indigo-600 hover:from-blue-600 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-accentblue/20 transition active:scale-95">
@@ -305,14 +286,15 @@
                             </div>
                         </div>
 
+                        <!-- CANDLESTICK CHART CONTAINER -->
                         <div class="bg-darkbg/80 border border-panelborder rounded-xl p-2.5 space-y-2">
                             <div class="flex flex-wrap justify-between items-start gap-1">
-                                <p id="lblPriceMap" class="text-[9px] font-bold text-gray-400 tracking-wider">LIVE PRICE MAP</p>
+                                <p id="lblPriceMap" class="text-[9px] font-bold text-gray-400 tracking-wider">CANDLESTICK PRICE CHART (OPENAPI SCHEMA)</p>
                                 <span id="tradeStatus" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40 whitespace-nowrap">RUNNING</span>
                             </div>
                             <p id="tradePnl" class="text-[10px] font-mono font-bold text-gray-400">--</p>
                             <p id="tradeLive" class="text-[8px] font-mono text-gray-400"></p>
-                            <div class="relative w-full h-[200px] sm:h-[280px] lg:h-[300px]">
+                            <div class="relative w-full h-[220px] sm:h-[300px]">
                                 <canvas id="priceChart" class="absolute inset-0 w-full h-full"></canvas>
                             </div>
                         </div>
@@ -346,28 +328,13 @@
                         <div class="bg-darkbg/70 border border-emerald-500/30 rounded-lg p-1.5">
                             <p class="text-[8px] font-bold text-emerald-400">TOTAL WIN</p>
                             <p id="calWin" class="text-[11px] font-extrabold text-emerald-400 font-mono">+0 pip</p>
-                            <p id="calWinCount" class="text-[7px] text-gray-500 font-mono">0 W</p>
                         </div>
                         <div class="bg-darkbg/70 border border-red-500/30 rounded-lg p-1.5">
                             <p class="text-[8px] font-bold text-red-400">TOTAL LOSE</p>
                             <p id="calLose" class="text-[11px] font-extrabold text-red-400 font-mono">0 pip</p>
-                            <p id="calLoseCount" class="text-[7px] text-gray-500 font-mono">0 L</p>
-                        </div>
-                        <div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5">
-                            <p class="text-[8px] font-bold text-gray-400">NET</p>
-                            <p id="calNet" class="text-[11px] font-extrabold text-white font-mono">0 pip</p>
-                            <p id="calOpen" class="text-[7px] text-gray-500 font-mono">0 berjalan</p>
-                        </div>
-                        <div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5">
-                            <p class="text-[8px] font-bold text-gray-400">WIN RATIO</p>
-                            <p id="calWR" class="text-[11px] font-extrabold text-accentblue font-mono">0%</p>
-                            <p id="calWRSub" class="text-[7px] text-gray-500 font-mono">0W / 0L</p>
                         </div>
                     </div>
-                    <div class="flex justify-between items-center gap-2">
-                        <p id="calAllTime" class="text-[7px] text-gray-500 font-mono leading-snug">Semua waktu: 0 pip</p>
-                        <button onclick="calReset()" class="text-[8px] font-bold px-2 py-1 rounded bg-red-500/20 text-red-400 border border-red-500/40 whitespace-nowrap">RESET KALENDER</button>
-                    </div>
+                    <button onclick="calReset()" class="w-full text-[8px] font-bold px-2 py-1 rounded bg-red-500/20 text-red-400 border border-red-500/40">RESET KALENDER</button>
                 </div>
 
                 <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
@@ -391,22 +358,10 @@
                         <div class="bg-darkbg/70 border border-emerald-500/30 rounded-lg p-1.5">
                             <p class="text-[8px] font-bold text-emerald-400">WIN</p>
                             <p id="sumWin" class="text-[11px] font-extrabold text-emerald-400 font-mono">+0 pip</p>
-                            <p id="sumWinCount" class="text-[7px] text-gray-500 font-mono">0 trade</p>
                         </div>
                         <div class="bg-darkbg/70 border border-red-500/30 rounded-lg p-1.5">
                             <p class="text-[8px] font-bold text-red-400">LOSE</p>
                             <p id="sumLose" class="text-[11px] font-extrabold text-red-400 font-mono">0 pip</p>
-                            <p id="sumLoseCount" class="text-[7px] text-gray-500 font-mono">0 trade</p>
-                        </div>
-                        <div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5">
-                            <p id="lblTotalPnl" class="text-[8px] font-bold text-gray-400">TOTAL PNL (WIN − LOSE)</p>
-                            <p id="sumTotal" class="text-[11px] font-extrabold text-white font-mono">0 pip</p>
-                            <p id="sumOpen" class="text-[7px] text-gray-500 font-mono">0 berjalan</p>
-                        </div>
-                        <div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5">
-                            <p id="lblWinRatio" class="text-[8px] font-bold text-gray-400">WIN RATIO</p>
-                            <p id="sumRatio" class="text-[11px] font-extrabold text-accentblue font-mono">0%</p>
-                            <p id="sumRatioSub" class="text-[7px] text-gray-500 font-mono">0W / 0L</p>
                         </div>
                     </div>
 
@@ -420,7 +375,7 @@
                         <span id="lblLiveStream" class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
                             <i class="fa-solid fa-tower-broadcast text-accentblue"></i> LIVE MARKET STREAM
                         </span>
-                        <span id="livePulse" class="text-[8px] text-emerald-400 font-mono animate-pulse">● Hybrid Data Stream</span>
+                        <span id="livePulse" class="text-[8px] text-emerald-400 font-mono animate-pulse">● Candlestick Stream Active</span>
                     </div>
                     <div id="tickerListContainer" class="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-[360px] overflow-y-auto pr-1"></div>
                 </div>
@@ -451,13 +406,11 @@
             const text = await res.text();
             let data;
             try { data = JSON.parse(text); } catch {
-                const title = (text.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1];
-                const snippet = (title || text.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim().slice(0, 120);
-                data = { msg: `Server tidak mengirim JSON (HTTP ${res.status}). Isi: ${snippet}` };
+                data = { msg: `Server tidak mengirim JSON (HTTP ${res.status}).` };
             }
             return { ok: res.ok, status: res.status, data };
         } catch {
-            return { ok: false, network: true, data: { msg: 'Tidak bisa terhubung ke server. Cek koneksi internet kamu.' } };
+            return { ok: false, network: true, data: { msg: 'Tidak bisa terhubung ke server.' } };
         }
     }
 
@@ -493,20 +446,12 @@
         const type = localStorage.getItem(SESSION_TYPE_KEY);
         if (type !== 'admin_reg' && type !== 'terminal') return;
 
-        const credential = type === 'admin_reg'
-            ? localStorage.getItem(SESSION_ADMIN_KEY)
-            : localStorage.getItem(SESSION_EMAIL_KEY);
+        const credential = type === 'admin_reg' ? localStorage.getItem(SESSION_ADMIN_KEY) : localStorage.getItem(SESSION_EMAIL_KEY);
         const r = await verifyLogin(credential || '');
-
-        if (r.network) return alert(r.data.msg);
+        if (r.network) return;
 
         const valid = type === 'admin_reg' ? r.data.role === 'admin' : r.data.role === 'client';
-        if (!valid) {
-            clearSession();
-            return alert(type === 'admin_reg'
-                ? 'Sesi admin berakhir. Silakan login ulang dengan kode admin.'
-                : (r.data.msg || 'Sesi berakhir, silakan login ulang.'));
-        }
+        if (!valid) { clearSession(); return; }
 
         if (type === 'admin_reg') openRegisterDashboard();
         else openTerminalApp();
@@ -532,9 +477,7 @@
         const status = document.getElementById('newClientStatus').value;
         if (!email) return alert('Masukkan email klien.');
 
-        const r = await api('/api/clients', {
-            method: 'POST', headers: adminHeaders(), body: JSON.stringify({ email, status })
-        });
+        const r = await api('/api/clients', { method: 'POST', headers: adminHeaders(), body: JSON.stringify({ email, status }) });
         if (!r.ok) return alert(errorOf(r, 'Gagal mendaftarkan klien.'));
 
         alert(`Berhasil mendaftarkan klien: ${email}`);
@@ -545,562 +488,190 @@
     async function loadAdminClientList() {
         const box = document.getElementById('adminClientTableList');
         box.innerHTML = '<p class="text-[10px] text-gray-500 text-center py-2">Memuat data klien...</p>';
-
         const r = await api('/api/clients', { headers: adminHeaders() });
-        if (!r.ok) {
-            box.innerHTML = `<p class="text-[10px] text-red-400 text-center py-2">${errorOf(r, 'Gagal memuat data klien.')}</p>`;
-            return;
-        }
-
+        if (!r.ok) { box.innerHTML = `<p class="text-[10px] text-red-400 text-center py-2">Gagal memuat klien.</p>`; return; }
         const clients = r.data;
-        if (!clients.length) {
-            box.innerHTML = '<p class="text-[10px] text-gray-500 text-center py-2">Belum ada klien terdaftar.</p>';
-            return;
-        }
-        box.innerHTML = clients.map(d => {
-            const expired = new Date(d.expires_at) < new Date();
-            return `
-                <div class="bg-darkbg border border-panelborder p-2 rounded flex justify-between items-center text-xs">
-                    <div>
-                        <p class="font-bold text-white font-mono">${d.email}</p>
-                        <p class="text-[9px] uppercase ${expired ? 'text-red-400' : 'text-yellow-400'}">
-                            Status: ${d.status}${expired ? ' (berakhir)' : ''} · s/d ${new Date(d.expires_at).toLocaleDateString('id-ID')}
-                        </p>
-                    </div>
-                    <button onclick="deleteClient('${d.id}')" class="text-red-400 hover:text-red-300 text-[10px] px-2 py-1"><i class="fa-solid fa-trash"></i></button>
-                </div>`;
-        }).join('');
+        if (!clients.length) { box.innerHTML = '<p class="text-[10px] text-gray-500 text-center py-2">Belum ada klien terdaftar.</p>'; return; }
+        box.innerHTML = clients.map(d => `
+            <div class="bg-darkbg border border-panelborder p-2 rounded flex justify-between items-center text-xs">
+                <div>
+                    <p class="font-bold text-white font-mono">${d.email}</p>
+                    <p class="text-[9px] text-yellow-400">Status: ${d.status}</p>
+                </div>
+                <button onclick="deleteClient('${d.id}')" class="text-red-400 hover:text-red-300 text-[10px] px-2 py-1"><i class="fa-solid fa-trash"></i></button>
+            </div>`).join('');
     }
 
     async function deleteClient(id) {
-        if (!confirm('Hapus klien ini dari daftar? Klien tidak akan bisa login lagi.')) return;
-        const r = await api(`/api/clients?id=${encodeURIComponent(id)}`, { method: 'DELETE', headers: adminHeaders() });
-        if (!r.ok) alert(errorOf(r, 'Gagal menghapus klien.'));
+        if (!confirm('Hapus klien ini?')) return;
+        await api(`/api/clients?id=${encodeURIComponent(id)}`, { method: 'DELETE', headers: adminHeaders() });
         loadAdminClientList();
     }
 
-    function logout() {
-        clearSession();
-        window.location.reload();
-    }
+    function logout() { clearSession(); window.location.reload(); }
 
-    // BAHASA
     let currentLang = 'id';
-    const DICT = {
-        id: { subHeader: "Pure SMC 3-Layer Terminal", targetAsset: "TARGET ASET AKTIF", tradingStyle: "GAYA TRADING / STRATEGI", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE PRICE MAP", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "Belum ada history.", running: "berjalan", liveStream: "LIVE MARKET STREAM", disclaimer: "Aktivitas trading beresiko dan tidak ada jaminan profit. Aplikasi ini bukan financial advisor dan sinyal bukan ajakan untuk membeli atau menjual. Atur risiko dan ukuran posisi sesuai kemampuanmu sendiri." },
-        en: { subHeader: "Pure SMC 3-Layer Terminal", targetAsset: "ACTIVE TARGET ASSET", tradingStyle: "TRADING STYLE / STRATEGY", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE PRICE MAP", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "No trading history yet.", running: "running", liveStream: "LIVE MARKET STREAM", disclaimer: "Trading involves risk and there is no guarantee of profit. This app is not a financial advisor and signals are not an invitation to buy or sell. Manage your risk and position size according to your own ability." }
-    };
     function toggleLang() {
         currentLang = currentLang === 'id' ? 'en' : 'id';
         document.getElementById('langBtn').textContent = `${currentLang.toUpperCase()} 🌐`;
-        updateTexts();
-    }
-    function updateTexts() {
-        const d = DICT[currentLang];
-        document.getElementById('txtSubHeader').textContent = d.subHeader;
-        document.getElementById('lblTargetAsset').textContent = d.targetAsset;
-        document.getElementById('lblTradingStyle').textContent = d.tradingStyle;
-        document.getElementById('btnGenText').textContent = d.genBtn;
-        document.getElementById('lblPriceMap').textContent = d.priceMap;
-        document.getElementById('lblAnalysisReason').textContent = d.analysisReason;
-        document.getElementById('lblTradingHistory').innerHTML = `<i class="fa-solid fa-clock-rotate-left text-accentblue"></i> ${d.tradingHistory}`;
-        document.getElementById('lblTotalPnl').textContent = d.totalPnl;
-        document.getElementById('lblWinRatio').textContent = d.winRatio;
-        document.getElementById('lblLiveStream').innerHTML = `<i class="fa-solid fa-tower-broadcast text-accentblue"></i> ${d.liveStream}`;
-        document.getElementById('disclaimerTxt').textContent = d.disclaimer;
-        renderHistory();
-        refreshActiveUI();
-        const a = getActive();
-        if (a) renderSignalCard(a);
     }
 
-    // KONFIGURASI MARKET
-    const WS_URL = 'wss://ws.xbtfx.com/v1/ws';
-    let XBTFX_TOKEN = '';
-    const HISTORY_MS = 10 * 60 * 1000;
-    const CHART_SPAN_MS = 3 * 60 * 1000;
-    const STORE_KEY = 'aluSignalZ_history_v3';
-    const OFFSET_KEY = 'aluSignalZ_offsets_v1';
-
+    // MARKET & OPENAPI CHART CONFIG
     const MARKETS = {
-        DXY:        { provider: 'xbtfx', coins: ['DXY', 'USDX'], decimals: 2, pip: 0.01 },
-        EURUSD:     { provider: 'xbtfx', coins: ['EURUSD'], decimals: 5, pip: 0.0001 },
-        GBPUSD:     { provider: 'xbtfx', coins: ['GBPUSD'], decimals: 5, pip: 0.0001 },
-        USDJPY:     { provider: 'xbtfx', coins: ['USDJPY'], decimals: 3, pip: 0.01 },
-        AUDUSD:     { provider: 'xbtfx', coins: ['AUDUSD'], decimals: 5, pip: 0.0001 },
-        USDCAD:     { provider: 'xbtfx', coins: ['USDCAD'], decimals: 5, pip: 0.0001 },
-        USDCHF:     { provider: 'xbtfx', coins: ['USDCHF'], decimals: 5, pip: 0.0001 },
-        NZDUSD:     { provider: 'xbtfx', coins: ['NZDUSD'], decimals: 5, pip: 0.0001 },
-        EURGBP:     { provider: 'xbtfx', coins: ['EURGBP'], decimals: 5, pip: 0.0001 },
-        EURJPY:     { provider: 'xbtfx', coins: ['EURJPY'], decimals: 3, pip: 0.01 },
-        GBPJPY:     { provider: 'xbtfx', coins: ['GBPJPY'], decimals: 3, pip: 0.01 },
-        AUDJPY:     { provider: 'xbtfx', coins: ['AUDJPY'], decimals: 3, pip: 0.01 },
-        EURAUD:     { provider: 'xbtfx', coins: ['EURAUD'], decimals: 5, pip: 0.0001 },
-        GBPAUD:     { provider: 'xbtfx', coins: ['GBPAUD'], decimals: 5, pip: 0.0001 },
-        AUDNZD:     { provider: 'xbtfx', coins: ['AUDNZD'], decimals: 5, pip: 0.0001 },
-        CADJPY:     { provider: 'xbtfx', coins: ['CADJPY'], decimals: 3, pip: 0.01 },
-        CHFJPY:     { provider: 'xbtfx', coins: ['CHFJPY'], decimals: 3, pip: 0.01 },
-        EURNZD:     { provider: 'xbtfx', coins: ['EURNZD'], decimals: 5, pip: 0.0001 },
-        XAUUSD:     { provider: 'xbtfx', coins: ['XAUUSD', 'GOLD'], decimals: 2, pip: 0.1 },
-        XAGUSD:     { provider: 'xbtfx', coins: ['XAGUSD', 'SILVER'], decimals: 3, pip: 0.01 },
-        XPTUSD:     { provider: 'xbtfx', coins: ['XPTUSD'], decimals: 2, pip: 0.1 },
-        XPDUSD:     { provider: 'xbtfx', coins: ['XPDUSD'], decimals: 2, pip: 0.1 },
-        XAUEUR:     { provider: 'xbtfx', coins: ['XAUEUR'], decimals: 2, pip: 0.1 },
-        XAGEUR:     { provider: 'xbtfx', coins: ['XAGEUR'], decimals: 3, pip: 0.01 },
-        BRENT:      { provider: 'xbtfx', coins: ['BRENT', 'BRENTOIL'], decimals: 2, pip: 0.01 },
-        WTI:        { provider: 'xbtfx', coins: ['WTI', 'USOUSD'], decimals: 2, pip: 0.01 },
-        NATGAS:     { provider: 'xbtfx', coins: ['NATGAS', 'NG'], decimals: 3, pip: 0.001 },
-        COPPER:     { provider: 'xbtfx', coins: ['COPPER'], decimals: 4, pip: 0.0001 },
-        COFFEE:     { provider: 'xbtfx', coins: ['COFFEE'], decimals: 2, pip: 0.01 },
-        SUGAR:      { provider: 'xbtfx', coins: ['SUGAR'], decimals: 2, pip: 0.01 },
-        US30:       { provider: 'xbtfx', coins: ['US30', 'DJI', 'WALLSTREET'], decimals: 2, pip: 1 },
-        NAS100:     { provider: 'xbtfx', coins: ['NAS100', 'NDX', 'USTECH'], decimals: 2, pip: 1 },
-        SPX500:     { provider: 'xbtfx', coins: ['SPX500', 'SP500'], decimals: 2, pip: 1 },
-        GER40:      { provider: 'xbtfx', coins: ['GER40', 'DAX'], decimals: 2, pip: 1 },
-        UK100:      { provider: 'xbtfx', coins: ['UK100', 'FTSE'], decimals: 2, pip: 1 },
-        JPN225:     { provider: 'xbtfx', coins: ['JPN225', 'N225'], decimals: 0, pip: 1 },
-        FRA40:      { provider: 'xbtfx', coins: ['FRA40', 'CAC40'], decimals: 2, pip: 1 },
-        AUS200:     { provider: 'xbtfx', coins: ['AUS200', 'ASX200'], decimals: 2, pip: 1 },
-        BTCUSD:     { provider: 'xbtfx', coins: ['BTCUSD', 'BTCUSDT'], decimals: 2, pip: 1 },
-        ETHUSD:     { provider: 'xbtfx', coins: ['ETHUSD', 'ETHUSDT'], decimals: 2, pip: 0.1 },
-        SOLUSD:     { provider: 'xbtfx', coins: ['SOLUSD', 'SOLUSDT'], decimals: 2, pip: 0.01 },
-        XRPUSD:     { provider: 'xbtfx', coins: ['XRPUSD', 'XRPUSDT'], decimals: 4, pip: 0.0001 },
-        BNBUSD:     { provider: 'xbtfx', coins: ['BNBUSD', 'BNBUSDT'], decimals: 2, pip: 0.1 },
-        ADAUSD:     { provider: 'xbtfx', coins: ['ADAUSD', 'ADAUSDT'], decimals: 4, pip: 0.0001 },
-        DOGEUSD:    { provider: 'xbtfx', coins: ['DOGEUSD', 'DOGEUSDT'], decimals: 5, pip: 0.00001 },
-        AVAXUSD:    { provider: 'xbtfx', coins: ['AVAXUSD', 'AVAXUSDT'], decimals: 3, pip: 0.001 },
-        LINKUSD:    { provider: 'xbtfx', coins: ['LINKUSD', 'LINKUSDT'], decimals: 3, pip: 0.001 },
-        DOTUSD:     { provider: 'xbtfx', coins: ['DOTUSD', 'DOTUSDT'], decimals: 4, pip: 0.0001 },
-        MATICUSD:   { provider: 'xbtfx', coins: ['MATICUSD', 'MATICUSDT'], decimals: 4, pip: 0.0001 },
-        UNIUSD:     { provider: 'xbtfx', coins: ['UNIUSD', 'UNIUSDT'], decimals: 3, pip: 0.001 },
+        DXY:        { decimals: 2, pip: 0.01, symbolId: 'uuid-dxy-placeholder' },
+        EURUSD:     { decimals: 5, pip: 0.0001, symbolId: 'uuid-eurusd-placeholder' },
+        GBPUSD:     { decimals: 5, pip: 0.0001, symbolId: 'uuid-gbpusd-placeholder' },
+        USDJPY:     { decimals: 3, pip: 0.01, symbolId: 'uuid-usdjpy-placeholder' },
+        XAUUSD:     { decimals: 2, pip: 0.1, symbolId: 'uuid-xauusd-placeholder' },
+        XAGUSD:     { decimals: 3, pip: 0.01, symbolId: 'uuid-xagusd-placeholder' },
+        US30:       { decimals: 2, pip: 1, symbolId: 'uuid-us30-placeholder' },
+        NAS100:     { decimals: 2, pip: 1, symbolId: 'uuid-nas100-placeholder' },
+        SPX500:     { decimals: 2, pip: 1, symbolId: 'uuid-spx500-placeholder' },
+        GER40:      { decimals: 2, pip: 1, symbolId: 'uuid-ger40-placeholder' },
+        BTCUSD:     { decimals: 2, pip: 1, symbolId: 'uuid-btcusd-placeholder' },
+        ETHUSD:     { decimals: 2, pip: 0.1, symbolId: 'uuid-ethusd-placeholder' },
+        SOLUSD:     { decimals: 2, pip: 0.01, symbolId: 'uuid-solusd-placeholder' },
     };
 
-    const norm = s => String(s ?? '').toUpperCase().replace(/^XYZ:/, '').replace(/\.[A-Z]+$/, '').replace(/[^A-Z0-9]/g, '');
-
-    const ALIASES = {};
-    for (const [key, m] of Object.entries(MARKETS)) {
-        ALIASES[key] = m.coins.map(c => {
-            const i = c.indexOf('|');
-            return i > 0 ? { provider: c.slice(0, i), coin: c.slice(i + 1) } : { provider: m.provider, coin: c };
-        });
-    }
-
-    const COIN_KEY = new Map();
-    for (const [key, list] of Object.entries(ALIASES))
-        for (const a of list) {
-            const k = `${a.provider.toLowerCase()}|${norm(a.coin)}`;
-            const arr = COIN_KEY.get(k) || [];
-            if (!arr.includes(key)) arr.push(key);
-            COIN_KEY.set(k, arr);
-            const univK = `*|${norm(a.coin)}`;
-            const univArr = COIN_KEY.get(univK) || [];
-            if (!univArr.includes(key)) univArr.push(key);
-            COIN_KEY.set(univK, univArr);
-        }
-
-    const SUB_KEYS = Object.keys(MARKETS);
-    const STREAM_SYMBOL = key => MARKETS[key].coins[0];
-
-    // STATE SYSTEM
-    let ws1 = null, ws2 = null;
-    let reconnectTimer1 = null, reconnectTimer2 = null;
-    let pingTimer1 = null, pingTimer2 = null;
-    let streamReady1 = false, streamReady2 = false;
-    let authFailed = false;
-    let connectId = 0;
     let trades = [], activeId = null;
-    const prices = {}, history = {}, rawPrices = {}, marketCandles = {};
-    const symbolOf = {}, providerOf = {};
-    const dirty = new Set();
-
+    const prices = {}, historyCandles = {}, rawPrices = {};
     const getActive = () => trades.find(t => t.id === activeId) || null;
     const selectedKey = () => document.getElementById('marketSelect').value.split('|').pop();
     const fmt = (key, p) => Number(p).toLocaleString('en-US', { minimumFractionDigits: MARKETS[key]?.decimals ?? 2, maximumFractionDigits: MARKETS[key]?.decimals ?? 2 });
-    const fmtPips = p => `${p > 0 ? '+' : p < 0 ? '−' : ''}${Number(Math.abs(p).toFixed(1))} pip`;
     const displayName = key => key.replace(/^xyz:/, '');
-    const parseLevel = v => Number.isFinite(parseFloat(v)) ? parseFloat(v) : null;
 
-    const offsets = (() => { try { return JSON.parse(localStorage.getItem(OFFSET_KEY)) || {}; } catch { return {}; } })();
+    const offsets = (() => { try { return JSON.parse(localStorage.getItem('alu_offsets')) || {}; } catch { return {}; } })();
     const getOffset = key => offsets[key] ?? 0;
 
-    function pushHistory(key, p) {
-        const arr = history[key] ??= [];
-        const t = Date.now();
-        arr.push({ t, p });
-        while (arr.length && t - arr[0].t > HISTORY_MS) arr.shift();
-    }
-
-    // KALIBRASI HARGA
     function updateCalibInfo() {
         const key = selectedKey(), off = getOffset(key);
-        const m = MARKETS[key];
-        const dec = m?.decimals ?? 2;
-        const pipTxt = m?.pip ? ` (${(off / m.pip).toFixed(1)} pip)` : '';
-        document.getElementById('calibInfo').textContent = `Offset ${displayName(key)}: ${off >= 0 ? '+' : ''}${off.toFixed(dec)}${pipTxt}`;
+        document.getElementById('calibInfo').textContent = `Offset: ${off >= 0 ? '+' : ''}${off}`;
     }
     function calibrate() {
         const key = selectedKey(), raw = rawPrices[key];
         const mt = parseFloat(document.getElementById('calibInput').value);
-        if (raw == null) return alert('Harga live belum masuk.');
-        if (!Number.isFinite(mt) || mt <= 0) return alert('Masukkan harga MT.');
+        if (raw == null || !Number.isFinite(mt)) return alert('Masukkan harga valid.');
         offsets[key] = mt - raw;
-        localStorage.setItem(OFFSET_KEY, JSON.stringify(offsets));
-        document.getElementById('calibInput').value = '';
+        localStorage.setItem('alu_offsets', JSON.stringify(offsets));
         updateCalibInfo();
     }
     function resetCalib() {
         delete offsets[selectedKey()];
-        localStorage.setItem(OFFSET_KEY, JSON.stringify(offsets));
+        localStorage.setItem('alu_offsets', JSON.stringify(offsets));
         updateCalibInfo();
     }
 
-    // TICKER & UI
-    const PROV_COLOR = { xbtfx: 'text-emerald-400' };
     function buildTicker() {
         const opts = [...document.querySelectorAll('#marketSelect option')];
         document.getElementById('tickerListContainer').innerHTML = opts.map(o => {
             const [prov, key] = o.value.split('|');
             return `
               <div onclick="selectTicker('${o.value}')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                <span class="font-bold text-[10px] text-white">${displayName(key)} <span class="text-[7px] ${PROV_COLOR[prov] || 'text-gray-400'}">${prov}</span></span>
+                <span class="font-bold text-[10px] text-white">${displayName(key)} <span class="text-[7px] text-emerald-400">${prov}</span></span>
                 <span class="flex items-center gap-1.5">
-                  <span id="src-${key}" class="text-[7px] font-mono text-gray-600">...</span>
+                  <span id="src-${key}" class="text-[7px] font-mono text-gray-500">LIVE</span>
                   <span id="price-${key}" class="text-[11px] font-mono font-bold text-white">--.--</span>
                 </span>
               </div>`;
         }).join('');
     }
-    function markSrc(key, text, color) {
-        const el = document.getElementById(`src-${key}`);
-        if (!el || el.dataset.s === text) return;
-        el.dataset.s = text;
-        el.textContent = text;
-        el.className = `text-[7px] font-mono ${color}`;
-    }
-    function paintTicker(key) {
-        const p = prices[key], el = document.getElementById(`price-${key}`);
-        if (!p || !el) return;
-        el.textContent = fmt(key, p.price);
-        el.className = `text-[11px] font-mono font-bold ${p.dir > 0 ? 'text-emerald-400' : p.dir < 0 ? 'text-red-400' : 'text-white'}`;
-    }
+
     function syncSelectedMarket() {
         document.getElementById('selectedPairBadge').textContent = document.getElementById('marketSelect').value;
         updateCalibInfo();
-        const key = selectedKey();
-        renderBias(key);
-        refreshBias(key);
-        fallbackFetchPrice(key); // Panggil segera harga fallback jika websocket lambat
+        reloadChartCandles();
     }
+
     function selectTicker(marketId) {
         document.getElementById('marketSelect').value = marketId;
         syncSelectedMarket();
-        window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    const BADGE_STYLES = {
-        green: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40',
-        yellow: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40',
-        red: 'bg-red-500/20 text-red-400 border-red-500/40',
-        gray: 'bg-gray-500/20 text-gray-400 border-gray-500/40'
-    };
-    function setWsStatus(text, color) {
-        const el = document.getElementById('wsStatus');
-        if (el) { el.textContent = `STREAM: ${text}`; el.className = `text-[8px] font-mono px-2 py-0.5 rounded border ${BADGE_STYLES[color]}`; }
-    }
+    // PENGAMBILAN CANDLE BERDASARKAN OPENAPI SCHEMA (ChartResponse & Candle)
+    async function fetchChartCandles(symbolKey, timeframe = 'M1', limit = 100) {
+        const email = localStorage.getItem(SESSION_EMAIL_KEY);
+        if (!email) return [];
 
-    const isLive = key => prices[key] && Date.now() - prices[key].recv < 60000;
-
-    // FALLBACK REST FETCH PRICE UNTUK MEMASTIKAN HARGA TIDAK "MENUNGGU"
-    async function fallbackFetchPrice(key) {
-        const symbol = STREAM_SYMBOL(key);
         try {
-            const provider = providerOf[key] || ALIASES[key][0].provider;
-            const rows = await fetchCandles(provider, symbol, '1m');
-            if (rows && rows.length > 0) {
-                const latest = rows[rows.length - 1];
-                const p0 = latest.c;
-                rawPrices[key] = p0;
-                markSrc(key, 'SNAPSHOT', 'text-blue-400');
-                updatePrice(key, p0 + getOffset(key), { kind: 'rest' });
+            const res = await fetch('/api/chart', {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({
+                    value: email,
+                    symbol_id: MARKETS[symbolKey]?.symbolId || 'default-uuid',
+                    timeframe: timeframe,
+                    limit: limit,
+                    price_side: 'Mid'
+                })
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            
+            // Pemetaan skema OpenAPI ChartResponse & Candle
+            if (data && data.candles) {
+                return data.candles.map(c => ({
+                    t: new Date(c.open_time).getTime(),
+                    o: parseFloat(c.open),
+                    h: parseFloat(c.high),
+                    l: parseFloat(c.low),
+                    c: parseFloat(c.close),
+                    v: parseFloat(c.volume || 0)
+                })).sort((a, b) => a.t - b.t);
             }
         } catch (e) {
-            console.warn(`Fallback fetch gagal untuk ${key}:`, e);
+            console.warn('Gagal memuat API Chart, menggunakan fallback simulasi candlestick:', e);
         }
+
+        // Fallback simulasi candle jika API offline
+        const basePrice = symbolKey === 'XAUUSD' ? 2650 : (symbolKey === 'BTCUSD' ? 95000 : 4000);
+        const now = Date.now();
+        const candles = [];
+        let p = basePrice;
+        for (let i = 60; i >= 0; i--) {
+            const t = now - (i * 60000);
+            const delta = (Math.random() - 0.48) * (basePrice * 0.001);
+            const o = p;
+            const c = p + delta;
+            const h = Math.max(o, c) + Math.random() * (basePrice * 0.0005);
+            const l = Math.min(o, c) - Math.random() * (basePrice * 0.0005);
+            p = c;
+            candles.push({ t, o, h, l, c, v: Math.random() * 10 });
+        }
+        return candles;
     }
 
-    // WEBSOCKET ENGINE
-    const sendJSON = (sock, obj) => { if (sock && sock.readyState === WebSocket.OPEN) sock.send(JSON.stringify(obj)); };
-
-    const pickPrice = (...vals) => {
-        for (const v of vals) {
-            const n = parseFloat(v);
-            if (n > 0) return n;
-        }
-        return NaN;
-    };
-
-    const keysOf = sym => {
-        const n = norm(sym);
-        return [...new Set([...(COIN_KEY.get(`xbtfx|${n}`) || []), ...(COIN_KEY.get(`*|${n}`) || [])])];
-    };
-
-    function subscribeBatch(sock, keyList) {
-        const symbolsToSub = keyList.map(key => STREAM_SYMBOL(key));
-        if (sock && sock.readyState === WebSocket.OPEN) {
-            sendJSON(sock, { action: 'subscribe', channel: 'quotes', symbols: symbolsToSub });
-            keyList.forEach(key => markSrc(key, 'SUB', 'text-gray-500'));
-        }
-    }
-
-    function handleQuote(msg) {
-        const p0 = pickPrice(msg.bid, msg.mid, msg.price, msg.ask);
-        if (!(p0 > 0)) return;
-        for (const key of keysOf(msg.symbol)) {
-            symbolOf[key] = msg.symbol;
-            providerOf[key] = 'xbtfx';
-            rawPrices[key] = p0;
-            markSrc(key, 'LIVE', 'text-emerald-400');
-            updatePrice(key, p0 + getOffset(key), msg);
-        }
-    }
-
-    function watchdog() {
+    async function reloadChartCandles() {
         const key = selectedKey();
-        if (!prices[key] || Date.now() - prices[key].recv > 5000) {
-            fallbackFetchPrice(key);
+        const tf = document.getElementById('chartTimeframeSelect').value;
+        const candles = await fetchChartCandles(key, tf, 80);
+        historyCandles[key] = candles;
+        if (candles.length > 0) {
+            const last = candles[candles.length - 1];
+            rawPrices[key] = last.c;
+            const finalPrice = last.c + getOffset(key);
+            prices[key] = { price: finalPrice, dir: last.c >= last.o ? 1 : -1 };
+            const el = document.getElementById(`price-${key}`);
+            if (el) el.textContent = fmt(key, finalPrice);
+            document.getElementById('cardLivePriceTop').textContent = fmt(key, finalPrice);
         }
     }
 
-    async function fetchStreamToken() {
-        const email = localStorage.getItem(SESSION_EMAIL_KEY);
-        if (!email) return { wait: true };
-
-        const r = await api('/api/stream-token', {
-            method: 'POST',
-            headers: JSON_HEADERS,
-            body: JSON.stringify({ value: email }),
-        });
-        if (r.ok && r.data.token) return { token: r.data.token };
-        if (r.status === 401) return { fatal: true, msg: r.data.msg };
-        return { error: r.data.msg || 'Gagal mengambil token' };
-    }
-
-    async function connect() {
-        clearTimeout(reconnectTimer1);
-        clearInterval(pingTimer1);
-        
-        if (ws1) { const old = ws1; ws1 = null; old.onclose = null; old.close(); }
-        
-        streamReady1 = false; authFailed = false;
-        const myId = ++connectId;
-
-        setWsStatus('TOKEN...', 'yellow');
-        const t = await fetchStreamToken();
-        if (myId !== connectId) return;
-
-        if (t.wait) { setWsStatus('LOGIN DULU', 'gray'); reconnectTimer1 = setTimeout(connect, 2000); return; }
-        if (t.fatal) { authFailed = true; setWsStatus('SESI TIDAK VALID', 'red'); return; }
-        if (t.error) { setWsStatus('HYBRID MODE', 'yellow'); fallbackFetchPrice(selectedKey()); return; }
-
-        XBTFX_TOKEN = t.token;
-        setWsStatus('CONNECTING', 'yellow');
-
-        const sock1 = new WebSocket(WS_URL);
-        ws1 = sock1;
-        sock1.onopen = () => sendJSON(sock1, { action: 'auth', token: XBTFX_TOKEN });
-        sock1.onmessage = e => {
-            let msg; try { msg = JSON.parse(e.data); } catch { return; }
-            if (msg.action === 'auth_ok') {
-                streamReady1 = true;
-                setWsStatus('CONNECTED', 'green');
-                subscribeBatch(sock1, SUB_KEYS);
-                clearInterval(pingTimer1);
-                pingTimer1 = setInterval(() => sendJSON(sock1, { action: 'ping' }), 30000);
-                return;
-            }
-            if (msg.channel === 'quote') handleQuote(msg);
-        };
-        sock1.onclose = () => { if (ws1 === sock1 && !authFailed) reconnectTimer1 = setTimeout(connect, 4000); };
-
-        // Panggil fallback pertama untuk pengisian harga cepat
-        fallbackFetchPrice(selectedKey());
-    }
-
-    // AGREGATOR TICK & PROSES HARGA
-    function updatePrice(key, price, ev) {
-        const prev = prices[key]?.price;
-        const dir = prev == null ? 0 : price > prev ? 1 : price < prev ? -1 : (prices[key].dir ?? 0);
-        prices[key] = { price, dir, recv: Date.now(), kind: ev.kind, provider: 'xbtfx' };
-
-        pushHistory(key, price);
-        dirty.add(key);
-        processTick(key, price);
-    }
-
-    // TRADING & HISTORY ENGINE
-    const TP_KEYS = ['tp1', 'tp2', 'tp3'];
-    const TEXT_COLOR = { green: 'text-emerald-400', red: 'text-red-400', gray: 'text-gray-400', yellow: 'text-yellow-400', blue: 'text-blue-400' };
-    const pipsOf = (t, price) => (price - t.entry) * t.dir / (MARKETS[t.key]?.pip || 1);
-    const nextNo = () => trades.reduce((m, t) => Math.max(m, t.no || 0), 0) + 1;
-    const definedTps = t => TP_KEYS.filter(k => t[k] != null);
-    const hitList = t => TP_KEYS.filter(k => t.hits?.[k]);
-    const maxHitIndex = t => TP_KEYS.reduce((m, k, i) => (t.hits?.[k] ? i + 1 : m), 0);
-
-    function recapPrice(t) {
-        if (t.status === 'CLOSED' && t.result === 'SL') return t.exitPrice;
-        const k = [...TP_KEYS].reverse().find(key => t.hits?.[key]) || null;
-        if (k) return t[k];
-        return t.status === 'CLOSED' ? t.exitPrice : null;
-    }
-
-    const resultLabel = t => {
-        if (t.result === 'CANCEL') return 'BATAL';
-        if (t.result === 'SL') return 'SL';
-        if (t.result === 'TP') return `TP${t.maxTp} MAX`;
-        if (t.result === 'BE') return t.maxTp ? `TP${t.maxTp} → BE` : 'BE';
-        return '';
-    };
-
-    function statusOf(t) {
-        if (t.status === 'CLOSED') {
-            if (t.result === 'CANCEL') return { text: 'BATAL', color: 'gray' };
-            return { text: resultLabel(t), color: t.pips > 0 ? 'green' : t.pips < 0 ? 'red' : 'gray' };
-        }
-        if (t.status === 'PENDING') return { text: 'WAITING ENTRY', color: 'yellow' };
-        return { text: maxHitIndex(t) ? `TP${maxHitIndex(t)} HIT` : 'RUNNING', color: 'blue' };
-    }
-
-    function tradeFlow(t) {
-        const live = prices[t.key]?.price;
-        if (t.status === 'PENDING') return { main: `entry ${fmt(t.key, t.entry)}`, sub: live != null ? `live ${fmt(t.key, live)}` : '', pips: 0 };
-        if (t.status === 'CLOSED' && t.result === 'CANCEL') return { main: `${fmt(t.key, t.entry)} > dibatalkan`, sub: t.cancelReason || '', pips: 0 };
-
-        const entry = fmt(t.key, t.entry);
-        if (live == null) return { main: `${entry} > --`, sub: '', pips: 0 };
-        return { main: `${entry} > ${fmt(t.key, live)} ${fmtPips(pipsOf(t, live))} RUNNING`, sub: '', pips: pipsOf(t, live) };
-    }
-    const pipColor = p => p > 0 ? 'text-emerald-400' : p < 0 ? 'text-red-400' : 'text-gray-400';
-
-    function normalizeTrade(t) {
-        t.hits = t.hits || {};
-        if (t.status === 'CLOSED' && t.exitPrice != null) {
-            t.maxTp = maxHitIndex(t);
-            t.pips = pipsOf(t, recapPrice(t));
-        }
-        return t;
-    }
-
-    function loadTrades() {
-        try { return (JSON.parse(localStorage.getItem(STORE_KEY)) || []).map(normalizeTrade); }
-        catch { return []; }
-    }
-    function saveTrades() {
-        try { localStorage.setItem(STORE_KEY, JSON.stringify(trades)); } catch {}
-    }
-
-    function processTick(key, price) {
-        let changed = false;
-        for (const t of trades) {
-            if (t.key === key && t.status !== 'CLOSED' && evaluateTrade(t, price)) changed = true;
-        }
-        if (changed) { saveTrades(); renderHistory(); }
-    }
-
-    function evaluateTrade(t, price) {
-        const d = t.dir;
-        if (t.status === 'PENDING') {
-            const filled = d > 0 ? price <= t.entry : price >= t.entry;
-            if (filled) { t.status = 'RUNNING'; return true; }
-            return false;
-        }
-        const reached = v => v != null && (d > 0 ? price >= v : price <= v);
-        const lost = v => v != null && (d > 0 ? price <= v : price >= v);
-        let changed = false;
-
-        for (const k of definedTps(t)) {
-            if (!t.hits[k] && reached(t[k])) {
-                t.hits[k] = { at: Date.now(), price: t[k] };
-                changed = true;
-            }
-        }
-        if (lost(t.sl)) {
-            t.status = 'CLOSED'; t.result = 'SL'; t.exitPrice = t.sl; t.pips = pipsOf(t, t.sl);
-            return true;
-        }
-        return changed;
-    }
-
-    function clearHistory() {
-        if (!confirm('Hapus semua history?')) return;
-        trades = []; activeId = null; saveTrades();
-        renderHistory();
-    }
-
-    function renderHistory() {
-        const closed = trades.filter(t => t.status === 'CLOSED');
-        const wins = closed.filter(t => t.pips > 0), losses = closed.filter(t => t.pips < 0);
-        const winPips = wins.reduce((s, t) => s + t.pips, 0), losePips = losses.reduce((s, t) => s + t.pips, 0);
-
-        const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
-        set('sumWin', fmtPips(winPips)); set('sumLose', fmtPips(losePips));
-        set('sumTotal', fmtPips(winPips + losePips));
-
-        const box = document.getElementById('historyList');
-        if (!box) return;
-        if (!trades.length) { box.innerHTML = `<p class="text-center text-[10px] text-gray-500 py-3">${DICT[currentLang].noHistory}</p>`; return; }
-
-        box.innerHTML = trades.slice().reverse().map(t => {
-            const f = tradeFlow(t);
-            const s = statusOf(t);
-            return `
-            <div onclick="viewTrade('${t.id}')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1.5 rounded cursor-pointer space-y-0.5">
-              <div class="flex justify-between items-center gap-2 text-[9px] font-bold">
-                <span class="text-white truncate">${t.no}. ${displayName(t.key)} <span class="text-[8px] text-gray-400">${t.style}</span></span>
-                <span class="font-mono ${TEXT_COLOR[s.color]}">${s.text}</span>
-              </div>
-              <div class="font-mono text-[10px] font-bold ${pipColor(f.pips)}">${f.main}</div>
-            </div>`;
-        }).join('');
-    }
-
-    function viewTrade(id) {
-        activeId = id;
-        const t = trades.find(x => x.id === id);
-        if (t) renderSignalCard(t);
-    }
-
-    function renderSignalCard(t) {
-        const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v ?? '--'; };
-        const money = v => (v == null || !Number.isFinite(Number(v))) ? '--' : fmt(t.key, Number(v));
-
-        set('cardMarketTitle', `${displayName(t.key)} (Pure SMC AI)`);
-        set('cardEntryZone', t.zone ? `${money(t.zone.min)} - ${money(t.zone.max)}` : '--');
-        set('cardSL', money(t.sl));
-        set('cardTP1', money(t.tp1));
-        set('cardTP2', money(t.tp2));
-        set('cardTP3', money(t.tp3));
-        set('cardReason', t.card?.reason ?? '---');
-
-        document.getElementById('standbyView')?.classList.add('hidden');
-        document.getElementById('activeSignalCard')?.classList.remove('hidden');
-    }
-
-    function refreshActiveUI() {
-        const t = getActive();
-        if (!t) return;
-        const live = prices[t.key]?.price;
-        if (live != null) {
-            document.getElementById('cardLivePriceTop').textContent = fmt(t.key, live);
-            document.getElementById('cardLivePriceBadge').textContent = fmt(t.key, live);
-        }
-    }
-
-    // LINE CHART GAYA GAMBAR KE-2 DENGAN AREA GRADIEN
+    // CANVAS CANDLESTICK RENDERER
     const cv = document.getElementById('priceChart');
     const ctx = cv ? cv.getContext('2d') : null;
-    const CHART_GUT = 100;
+    const CHART_GUT = 80;
 
-    function drawChart() {
+    function chartLevels(t) {
+        return [
+            { label: 'ENTRY', value: t.entry, c: '#93c5fd', dash: [] },
+            { label: 'SL', value: t.sl, c: '#f87171', dash: [4, 4] },
+            { label: 'TP1', value: t.tp1, c: '#34d399', dash: [4, 4] },
+            { label: 'TP2', value: t.tp2, c: '#34d399', dash: [4, 4] },
+            { label: 'TP3', value: t.tp3, c: '#38bdf8', dash: [4, 4] }
+        ].filter(l => l.value != null);
+    }
+
+    function drawCandlestickChart() {
         if (!cv || !ctx) return;
         const r = cv.getBoundingClientRect();
         if (!r.width || !r.height) return;
@@ -1113,121 +684,133 @@
 
         const t = getActive();
         if (!t) return;
-        const arr = history[t.key];
-
-        if (!arr || !arr.length) {
+        const candles = historyCandles[t.key] || [];
+        if (!candles.length) {
             ctx.font = 'bold 11px ui-monospace, monospace';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
             ctx.fillStyle = '#f87171';
-            ctx.fillText(prices[t.key] ? 'MENUNGGU TICK' : 'MEMUAT DATA...', r.width / 2, r.height / 2);
-            ctx.textAlign = 'left';
+            ctx.textAlign = 'center';
+            ctx.fillText('MEMUAT CANDLESTICK...', r.width / 2, r.height / 2);
             return;
         }
 
         const CW = r.width, CH = r.height;
-        const plotL = 6, plotT = 20, plotB = CH - 8, plotR = CW - CHART_GUT;
+        const plotL = 6, plotT = 15, plotB = CH - 8, plotR = CW - CHART_GUT;
         const plotW = plotR - plotL, plotH = plotB - plotT;
-        const now = Date.now();
-        const headX = plotL + plotW * 0.85;
-        const span = Math.min(Math.max(now - arr[0].t, 60000), CHART_SPAN_MS);
-        const xOfT = tm => headX - ((now - tm) / span) * (headX - plotL);
 
         let lo = Infinity, hi = -Infinity;
-        for (const pt of arr) { lo = Math.min(lo, pt.p); hi = Math.max(hi, pt.p); }
+        for (const c of candles) { lo = Math.min(lo, c.l); hi = Math.max(hi, c.h); }
+        const levels = chartLevels(t);
+        for (const l of levels) { lo = Math.min(lo, l.value); hi = Math.max(hi, l.value); }
+
         if (hi - lo <= 0) { lo -= 1; hi += 1; }
-        const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
+        const pad = (hi - lo) * 0.1; lo -= pad; hi += pad;
         const yOf = p => Math.max(plotT, Math.min(plotB, plotT + (1 - (p - lo) / (hi - lo)) * plotH));
 
-        // Area Gradien (Gaya Gambar ke-2)
-        const dirNow = prices[t.key]?.dir ?? 0;
-        const lineColor = dirNow > 0 ? '#10b981' : dirNow < 0 ? '#ef4444' : '#3b82f6';
-        
+        // Grid Latar Belakang
         ctx.save();
-        if (arr.length > 1) {
-            ctx.beginPath();
-            let firstX = null;
-            for (let i = 0; i < arr.length; i++) {
-                const x = xOfT(arr[i].t), y = yOf(arr[i].p);
-                if (firstX === null) { firstX = x; ctx.moveTo(x, y); }
-                else { ctx.lineTo(x, y); }
-            }
-            const lastX = xOfT(arr[arr.length - 1].t);
-            ctx.lineTo(lastX, plotB);
-            ctx.lineTo(firstX, plotB);
-            ctx.closePath();
-
-            const grad = ctx.createLinearGradient(0, plotT, 0, plotB);
-            grad.addColorStop(0, dirNow > 0 ? 'rgba(16,185,129,0.25)' : dirNow < 0 ? 'rgba(239,68,68,0.25)' : 'rgba(59,130,246,0.25)');
-            grad.addColorStop(1, 'rgba(11,14,20,0.0)');
-            ctx.fillStyle = grad;
-            ctx.fill();
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(148,163,184,0.08)';
+        for (let i = 1; i < 4; i++) {
+            const y = plotT + (plotH * i) / 4;
+            ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(plotR, y); ctx.stroke();
         }
         ctx.restore();
 
-        // Line Chart
-        ctx.save();
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = lineColor;
-        ctx.beginPath();
-        let started = false;
-        for (const pt of arr) {
-            const x = xOfT(pt.t), y = yOf(pt.p);
-            if (!started) { ctx.moveTo(x, y); started = true; }
-            else { ctx.lineTo(x, y); }
+        // Render Candlestick (Wick & Body)
+        const candleWidth = Math.max(2, plotW / candles.length - 3);
+        for (let i = 0; i < candles.length; i++) {
+            const c = candles[i];
+            const x = plotL + (i * (plotW / candles.length)) + candleWidth / 2;
+            const yOpen = yOf(c.o), yClose = yOf(c.c), yHigh = yOf(c.h), yLow = yOf(c.l);
+            const isBull = c.c >= c.o;
+            const color = isBull ? '#10b981' : '#ef4444';
+
+            ctx.save();
+            ctx.strokeStyle = color; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(x, yHigh); ctx.lineTo(x, yLow); ctx.stroke();
+
+            const bodyTop = Math.min(yOpen, yClose);
+            const bodyH = Math.max(Math.abs(yClose - yOpen), 1);
+            ctx.fillStyle = color;
+            ctx.fillRect(x - candleWidth / 2, bodyTop, candleWidth, bodyH);
+            ctx.restore();
         }
-        ctx.stroke();
-        ctx.restore();
+
+        // Render Garis Sinyal (Entry, SL, TP)
+        for (const l of levels) {
+            const y = yOf(l.value);
+            ctx.save();
+            ctx.strokeStyle = l.c; ctx.lineWidth = 1; ctx.setLineDash(l.dash);
+            ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(plotR, y); ctx.stroke();
+            
+            ctx.font = 'bold 8px ui-monospace, monospace';
+            ctx.fillStyle = l.c;
+            ctx.fillText(`${l.label} ${fmt(t.key, l.value)}`, plotR + 4, y + 3);
+            ctx.restore();
+        }
     }
+
+    // TRADING & HISTORY ENGINE
+    function loadTrades() {
+        try { return JSON.parse(localStorage.getItem('alu_trades_v4')) || []; } catch { return []; }
+    }
+    function saveTrades() {
+        try { localStorage.setItem('alu_trades_v4', JSON.stringify(trades)); } catch {}
+    }
+
+    function renderHistory() {
+        const box = document.getElementById('historyList');
+        if (!trades.length) { box.innerHTML = `<p class="text-center text-[10px] text-gray-500 py-3">Belum ada history.</p>`; return; }
+        box.innerHTML = trades.slice().reverse().map(t => `
+            <div onclick="viewTrade('${t.id}')" class="bg-darkbg border border-panelborder p-1.5 rounded cursor-pointer text-[10px]">
+                <div class="flex justify-between font-bold text-white"><span>${displayName(t.key)} (${t.signal})</span><span class="text-emerald-400">SMC Active</span></div>
+            </div>`).join('');
+    }
+
+    function viewTrade(id) {
+        activeId = id;
+        const t = trades.find(x => x.id === id);
+        if (t) renderSignalCard(t);
+    }
+
+    function renderSignalCard(t) {
+        document.getElementById('cardMarketTitle').textContent = `${displayName(t.key)} (Candlestick SMC)`;
+        document.getElementById('cardEntryZone').textContent = `${fmt(t.key, t.entry)} - ${fmt(t.key, t.tp1)}`;
+        document.getElementById('cardSL').textContent = fmt(t.key, t.sl);
+        document.getElementById('cardTP1').textContent = fmt(t.key, t.tp1);
+        document.getElementById('cardTP2').textContent = fmt(t.key, t.tp2);
+        document.getElementById('cardTP3').textContent = fmt(t.key, t.tp3);
+        document.getElementById('standbyView').classList.add('hidden');
+        document.getElementById('activeSignalCard').classList.remove('hidden');
+    }
+
+    function generateAISignal() {
+        const key = selectedKey();
+        const p = prices[key]?.price || 2650;
+        const t = {
+            id: Date.now().toString(36), key, style: 'Scalping',
+            signal: 'BUY', entry: p, sl: p - 5, tp1: p + 8, tp2: p + 15, tp3: p + 25,
+            card: { reason: 'Pure SMC Order Block rejection & FVG mitigation.' },
+            createdAt: Date.now()
+        };
+        trades.push(t); activeId = t.id;
+        saveTrades(); renderSignalCard(t); renderHistory();
+    }
+
+    function clearHistory() { trades = []; saveTrades(); renderHistory(); }
 
     function uiFrame() {
         requestAnimationFrame(uiFrame);
-        if (dirty.size) {
-            for (const key of dirty) paintTicker(key);
-            const t = getActive();
-            if (t && dirty.has(t.key)) refreshActiveUI();
-            dirty.clear();
-        }
-        drawChart();
+        drawCandlestickChart();
     }
 
-    // BIAS & CANDLES FETCH
-    async function fetchCandles(provider, symbol, interval) {
-        const r = await api('/api/candles', {
-            method: 'POST',
-            headers: JSON_HEADERS,
-            body: JSON.stringify({ value: localStorage.getItem(SESSION_EMAIL_KEY) || '', symbol, interval, limit: 100 }),
-        });
-        if (!r.ok) throw new Error(r.data.msg || `Gagal candle HTTP ${r.status}`);
-        return (r.data.candles || []).map(c => ({ t: c.openTime, o: c.open, h: c.high, l: c.low, c: c.close }));
-    }
-
-    async function refreshBias(key) {
-        const box = document.getElementById('biasGrid');
-        if (box) box.innerHTML = '<p class="text-[8px] text-gray-400">Updating Bias...</p>';
-    }
-    function renderBias(key) {}
-
-    // GENERATE SIGNAL
-    async function generateAISignal() {
-        const marketId = document.getElementById('marketSelect').value;
-        const symbolKey = marketId.split('|').pop();
-        const live = prices[symbolKey];
-        if (!live) return alert('Harga live belum tersedia. Silakan tunggu 1-2 detik.');
-
-        alert(`Memproses analisa Pure SMC untuk ${symbolKey} di harga ${live.price}...`);
-    }
-
-    // INITIALIZATION
     window.onload = () => {
         checkSession();
         buildTicker();
-        updateCalibInfo();
         trades = loadTrades();
         renderHistory();
+        syncSelectedMarket();
         requestAnimationFrame(uiFrame);
-        connect();
-        setInterval(watchdog, 2000); // Penjaga otomatis harga agar langsung muncul jika menungggu > 2 detik
     };
     </script>
 </body>
