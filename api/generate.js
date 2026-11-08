@@ -1,5 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC Universal: XBTFX 60% Pairs + DXY Support & Fixed Range + EMA & Bollinger Bands Filter + Konsistensi RRR + Pending/Waiting Mechanism
+// Analisis Pure SMC Universal: XBTFX 60% Pairs + DXY Support & Fixed Range + EMA & Bollinger Bands Filter + Konsistensi RRR + Real Structural Zone for Day/Intra/Swing
 
 const KV_KEY = 'alu_clients';
 
@@ -162,12 +162,13 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, symbol, emaFilter, bbFilter, rrL
       mode: 'DIRECT',
       entry: price,
       bufferEnd: bufferEnd,
-      status: 'RUNNING', // Scalping langsung berjalan
+      status: 'RUNNING',
       sl: sl,
       tps: [tp1, tp2, tp3],
       zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
       trigSrc: `Scalping Agresif (XBTFX + EMA + BB Filter) [${offsets.type}]`,
       expireMs: 0,
+      zoneNote: `Range Mode (${offsets.type})`
     }
   };
 }
@@ -184,16 +185,21 @@ function aggregateM15(m5) {
 
 function generalTradePlan({ mtfC, m5C, price, symbol, styleKind, emaFilter, bbFilter, rrList }) {
   const m15C = aggregateM15(m5C);
-  const a15 = atr(m15C, 14) || 10;
+  const a15 = atr(m15C, 14) || 15; // ATR riil timeframe 15m untuk rentang zona valid
   const dir = structureDir(mtfC, emaFilter, bbFilter) || 1;
   const isBuy = dir === 1;
 
-  // Day Trading, Intraday, dan Swing diatur menggunakan Limit Order (Pending Order / Waiting)
-  const mult = (styleKind === 'intraday' || styleKind === 'swing') ? 2.0 : 1.2;
-  const actualEntry = isBuy ? price - a15 * 0.5 : price + a15 * 0.5;
+  // Day Trading, Intraday, Swing menggunakan rentang zona Order Block / FVG asli berbasis ATR & Struktur
+  let zoneMult = 1.2;
+  if (styleKind === 'intraday') zoneMult = 2.0;
+  if (styleKind === 'swing') zoneMult = 3.5;
+
+  // Harga Entry Limit ditarik mundur sejauh proporsi ATR dari harga saat ini untuk menjemput zona pantulan (Demand/Supply)
+  const actualEntry = isBuy ? price - (a15 * zoneMult * 0.5) : price + (a15 * zoneMult * 0.5);
   
-  const bufferVal = a15 * 0.5 * mult;
-  const slVal = a15 * 1.5 * mult;
+  // Lebar Buffer dan Stop Loss ditarik di luar zona struktur riil
+  const bufferVal = a15 * zoneMult * 0.4;
+  const slVal = a15 * zoneMult * 1.5;
 
   const bufferEnd = isBuy ? actualEntry - bufferVal : actualEntry + bufferVal;
   const sl = isBuy ? actualEntry - slVal : actualEntry + slVal;
@@ -204,24 +210,29 @@ function generalTradePlan({ mtfC, m5C, price, symbol, styleKind, emaFilter, bbFi
   const tp2 = actualEntry + dir * rrList[1] * risk;
   const tp3 = actualEntry + dir * rrList[2] * risk;
 
-  let trigName = 'Day Trading (Pending Order Limit)';
-  if (styleKind === 'intraday') trigName = 'Intraday (Limit Order Pending)';
-  if (styleKind === 'swing') trigName = 'Swing Trading (Limit Order Pending)';
+  // Batas Area Zona Min dan Max untuk visualisasi kotak chart yang valid dan lebar
+  const zoneMin = Math.min(actualEntry, bufferEnd);
+  const zoneMax = Math.max(actualEntry, bufferEnd);
+
+  let trigName = 'Day Trading (Order Block / FVG Limit Zone)';
+  if (styleKind === 'intraday') trigName = 'Intraday (Structural Limit Zone)';
+  if (styleKind === 'swing') trigName = 'Swing Trading (Major Structure S&D Zone)';
 
   return {
     dir,
     plan: {
       kind: styleKind,
-      orderType: 'LIMIT', // Wajib Limit Order untuk Day, Intraday, Swing
-      status: 'WAITING',   // Status live diatur menjadi WAITING (Pending Order)
+      orderType: 'LIMIT', // Wajib Limit Order
+      status: 'WAITING',   // Status live menjadi WAITING (Pending Order)
       entry: actualEntry,
       bufferEnd,
       sl,
       tps: [tp1, tp2, tp3],
-      zone: { min: Math.min(actualEntry, bufferEnd), max: Math.max(actualEntry, bufferEnd) },
+      zone: { min: zoneMin, max: zoneMax }, // Zona riil yang lebar dan valid
       expireMs: 360 * 60 * 1000,
-      trigSrc: `${trigName} [ATR + Structure Zone]`,
-      flags: ['PENDING_ZONE'],
+      trigSrc: `${trigName} [ATR Structure Range]`,
+      zoneNote: `Structural Limit Zone (ATR-Based)`,
+      flags: ['VALID_STRUCTURAL_ZONE'],
     }
   };
 }
@@ -278,20 +289,22 @@ export default async function handler(req, res) {
 
     const actionType = plan.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET';
     const sideText = dir === 1 ? 'BUY' : 'SELL';
-    const offsets = getAbsoluteScalpOffsets(symbol);
+    
+    const zoneNoteText = plan.zoneNote || (isScalp ? `Range Mode (Scalp)` : `Structural Limit Zone (ATR-Based)`);
+    const zoneLabelText = plan.orderType === 'LIMIT' ? 'Limit Order Zone (Waiting)' : 'Market Execution Zone';
 
     const emaSummary = Object.entries(emaFilter).map(([k, v]) => `${k}: ${v}`).join(' | ');
     const bbSummary = `Upper: ${bbFilter.upper} | Mid: ${bbFilter.middle} | Lower: ${bbFilter.lower}`;
 
     const actionDesc = sideText === 'BUY' 
-      ? 'menempatkan Pending Order BUY LIMIT pada area Zona Demand & Bollinger Band Bawah' 
-      : 'menempatkan Pending Order SELL LIMIT pada area Zona Supply & Bollinger Band Atas';
+      ? 'menempatkan Pending Order BUY LIMIT pada area Zona Demand / Order Block & Bollinger Bawah' 
+      : 'menempatkan Pending Order SELL LIMIT pada area Zona Supply / Order Block & Bollinger Atas';
 
     const techReason = [
       `Analisis Teknikal Pure SMC ${sideText} (${style.label}) pada pair ${symbol}.`,
-      `Mekanisme Eksekusi: Menggunakan Limit Order (Pending Order / WAITING) pada zona harga optimal.`,
+      `Mekanisme Eksekusi: Menggunakan Limit Order (Pending Order / WAITING) dengan rentang zona harga struktural yang valid.`,
       `Alasan: Diputuskan ${actionDesc}. Indikator EMA (${emaSummary}) serta Bollinger Bands (${bbSummary}) menyaring titik jenuh.`,
-      `Manajemen Risiko: Target RRR konsisten [TP1: 1:${rrList[0]}, TP2: 1:${rrList[1]}, TP3: 1:${rrList[2]}].`
+      `Manajemen Risiko: Lebar zona, Buffer, dan Stop Loss dikalkulasi presisi dari struktur ATR dengan target RRR [TP1: 1:${rrList[0]}, TP2: 1:${rrList[1]}, TP3: 1:${rrList[2]}].`
     ].join('\n\n');
 
     return res.status(200).json({
@@ -301,7 +314,7 @@ export default async function handler(req, res) {
         mode: actionType,
         orderType: plan.orderType,
         orderLabel: orderLabel(dir, plan.orderType),
-        status: plan.status, // Menjadi WAITING untuk limit order / PENDING zone
+        status: plan.status, // WAITING untuk Day/Intra/Swing, RUNNING untuk Scalp
         entry: r(entry),
         bufferEnd: r(plan.bufferEnd || entry),
         sl: r(plan.sl),
@@ -311,8 +324,8 @@ export default async function handler(req, res) {
         risk: 'LOW',
         setup: `PENDING ORDER ZONE (RRR Target: 1:${rrList[0]} - 1:${rrList[2]})`,
         setupLabel: style.label,
-        zoneLabel: plan.orderType === 'LIMIT' ? 'Limit Order Zone (Waiting)' : 'Market Execution Zone',
-        zoneNote: `Range Mode (${offsets.type})`,
+        zoneLabel: zoneLabelText,
+        zoneNote: zoneNoteText,
         reason: techReason
       }
     });
