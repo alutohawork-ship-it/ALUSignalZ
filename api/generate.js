@@ -1,11 +1,14 @@
 // api/generate.js
-// v5 — Setup struktural Day Trading / Intraday / Swing (HTF bias → Sweep → CHoCH → FVG + EMA & BB).
-//      Riwayat candle dari TickerLayer (per potongan 2 hari, paralel), bar terakhir diisi harga live.
-//      1h dan 4h dicoba langsung (timespan "hour"), jika gagal dibentuk dari 15m.
-//      Jika tidak ada area valid, server TIDAK memaksa sinyal (signal: null).
+// v8
+//  - Acuan arah SELALU market structure. EMA hanya pendukung/continuation.
+//  - Candle dibaca dari cache KV (sama dengan api/candles.js) lebih dulu, baru TickerLayer.
+//  - Request ke TickerLayer dibatasi dan diulang sekali bila kena HTTP 429.
+//  - Scalping : arah 5m (cadangan 15m), SL swing 5m, jarak dalam ATR.
+//  - Day      : zona S/D HTF-MTF, bila tidak ada → continuation EMA MTF. SL 1,5× scalping, TP 1:2/1:3/1:4.
+//  - Intraday : Sweep > CHoCH > FVG, skor kekuatan, maks 1 sinyal kuat per hari (UTC) per user per pair.
+//  - Swing    : Sweep > CHoCH > FVG.
 
 const KV_KEY = 'alu_clients';
-const XBTFX_BASE_URL = 'https://interface.xbtfx.com';
 const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
 
 const DECIMALS = {
@@ -18,53 +21,58 @@ const DECIMALS = {
   BTCXAU: 2, ETHBTC: 5, SOLBTC: 5, US30BTC: 2, XAUUSDX: 2,
 };
 
-// Konsistensi RRR untuk setiap gaya trading
+const CRYPTO_LIST = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'BNBUSD', 'ADAUSD', 'DOGEUSD', 'AVAXUSD', 'LINKUSD', 'DOTUSD', 'MATICUSD', 'UNIUSD'];
+const INDEX_LIST = ['US30', 'NAS100', 'SPX500', 'GER40', 'UK100', 'JPN225', 'FRA40', 'AUS200'];
+
 const STYLES = {
-  'Scalping': { label: 'Scalping Agresif (Crypto 30-50 Pip & Currency Fix)', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0] },
-  'Day Trading': { label: 'Day Trading (Limit Order Zona & Bollinger Bands)', mode: 'LIMIT', kind: 'day', rr: [1.5, 2.5, 3.5] },
-  'Intraday': { label: 'Intraday (Limit Order + EMA + BB)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
-  'Swing': { label: 'Swing Trading (Limit Order + Multi EMA + BB)', mode: 'LIMIT', kind: 'swing', rr: [2.0, 4.5, 8.5] },
+  'Scalping': { label: 'Scalping Agresif (SL struktur MTF 5m)', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0] },
+  'Day Trading': { label: 'Day Trading (Reaksi S/D HTF-MTF · Continuation EMA · SL 1,5× scalping)', mode: 'LIMIT', kind: 'day', rr: [2.0, 3.0, 4.0] },
+  'Intraday': { label: 'Intraday (Sweep > CHoCH > FVG · 1 sinyal kuat/hari)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
+  'Swing': { label: 'Swing Trading (Sweep > CHoCH > FVG + Multi EMA + BB)', mode: 'LIMIT', kind: 'swing', rr: [2.0, 4.5, 8.5] },
 };
 
-// Konfigurasi setup struktural (khusus non-scalp)
-// ema       : [fast, slow] EMA di HTF untuk bias arah
-// pivot     : jumlah candle kiri/kanan untuk swing point
-// lookback  : jumlah candle MTF yang dipindai untuk sweep
-// riskAtr   : rentang lebar SL (kelipatan ATR MTF)
-// maxDist   : jarak maksimum harga ke entry (kelipatan ATR) agar area dianggap aktif
-// expireMin : umur pending order (menit) sebelum dibatalkan frontend
 const SETUP_CFG = {
-  day:      { ema: [20, 50], pivot: 3, lookback: 60, riskAtr: [0.8, 2.5], maxDist: 2.0, expireMin: 240 },
-  intraday: { ema: [20, 50], pivot: 3, lookback: 80, riskAtr: [0.8, 3.0], maxDist: 2.0, expireMin: 720 },
+  day:      { ema: [20, 50], pivot: 3, lookback: 80, maxDist: 2.0, expireMin: 240 },
+  intraday: { ema: [20, 50], pivot: 3, lookback: 80, riskAtr: [0.8, 3.0], maxDist: 2.0, expireMin: 720, minScore: 5 },
   swing:    { ema: [20, 50], pivot: 4, lookback: 80, riskAtr: [1.0, 3.5], maxDist: 1.5, expireMin: 2880 },
 };
 
-// Timeframe per gaya untuk fallback server: htf = bias, mtf = setup (samakan dengan STYLE_TF di frontend)
+const SCALP_PIVOT = 2;
+const SCALP_RISK_ATR = [0.8, 4.0];
+const DAY_SL_MULT = 1.5;
+const DAY_MAX_RISK_ATR = 4.0;
+
 const STYLE_TF_SERVER = {
   'Day Trading': { htf: '1h', mtf: '30m' },
   'Intraday':    { htf: '4h', mtf: '1h' },
   'Swing':       { htf: '1d', mtf: '4h' },
 };
 
-// Menit per timeframe
-const TF_MIN = { '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 };
+const TF_MIN = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 };
 
-// Interval yang dicoba langsung ke endpoint range TickerLayer
-// 1h dan 4h memakai timespan "hour" (menit 60/240 ditolak HTTP 400)
 const TL_SPAN = {
+  '1m':  { mult: 1,  span: 'minute', minutes: 1 },
+  '5m':  { mult: 5,  span: 'minute', minutes: 5 },
   '15m': { mult: 15, span: 'minute', minutes: 15 },
   '1h':  { mult: 1,  span: 'hour',   minutes: 60 },
   '4h':  { mult: 4,  span: 'hour',   minutes: 240 },
   '1d':  { mult: 1,  span: 'day',    minutes: 1440 },
 };
 
-// Interval yang dibentuk dari 15m bila pengambilan langsung gagal
 const BASE_OF = { '30m': '15m', '1h': '15m', '4h': '15m' };
 
-const CHUNK_MS = 2 * 86400000; // potongan 2 hari supaya tiap request di bawah limit 5.000 bar
+// Cache dibaca/ditulis dengan key yang sama seperti api/candles.js
+const CACHE_TTL = { '1m': 120, '5m': 600, '15m': 900, '30m': 900, '1h': 1800, '4h': 3600, '1d': 7200 };
+const CACHE_BARS = { '1m': 300, '5m': 300, '15m': 1600, '30m': 300, '1h': 300, '4h': 300, '1d': 300 };
+
+const CHUNK_MS = 2 * 86400000;
 const MAX_CHUNKS = 30;
+const MINUTE_CHUNK_THRESHOLD = 4500; // bar menit di atas ini dipecah per 2 hari
+const TIME_FMT = { timeZone: 'Asia/Jakarta', hour12: false, hour: '2-digit', minute: '2-digit' };
 
 const orderLabel = (dir, orderType) => `${dir === 1 ? 'BUY' : 'SELL'} ${orderType === 'LIMIT' ? 'LIMIT' : 'NOW'}`;
+const isoDate = d => d.toISOString().slice(0, 10);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function kv(command) {
   if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) return null;
@@ -76,6 +84,21 @@ async function kv(command) {
   const data = await r.json();
   if (!r.ok || data.error) throw new Error(data.error || `KV HTTP ${r.status}`);
   return data.result;
+}
+
+async function kvGetJSON(key) {
+  try {
+    const raw = await kv(['GET', key]);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function kvSetJSON(key, value, ttl) {
+  try {
+    await kv(['SET', key, JSON.stringify(value), 'EX', ttl]);
+  } catch (e) {}
 }
 
 async function checkAccess(email) {
@@ -91,23 +114,36 @@ async function checkAccess(email) {
   return { ok: true };
 }
 
-// Deteksi kategori asset & pemetaan format simbol untuk TickerLayer
 function mapSymbolToTickerLayer(symbol) {
   const s = symbol.toUpperCase().trim();
-  if (['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'BNBUSD', 'ADAUSD', 'DOGEUSD', 'AVAXUSD', 'LINKUSD'].includes(s)) {
-    return { asset: 'crypto', symbol: s };
-  }
+  if (CRYPTO_LIST.includes(s)) return { asset: 'crypto', symbol: s };
   if (s === 'US30' || s === 'SPX500') return { asset: 'stocks', symbol: `US:${s}` };
   if (s === 'NAS100') return { asset: 'stocks', symbol: 'US:NDX' };
   if (s.includes('XAU') || s.includes('XAG')) return { asset: 'forex', symbol: s };
   return { asset: 'forex', symbol: s };
 }
 
-const isoDate = d => d.toISOString().slice(0, 10);
+function padAtrFor(symbol) {
+  const s = String(symbol || '').toUpperCase();
+  if (CRYPTO_LIST.includes(s)) return 0.3;
+  if (s.includes('XAU') || s.includes('XAG')) return 0.25;
+  if (INDEX_LIST.includes(s)) return 0.25;
+  return 0.2;
+}
 
-// Ambil candle TERBARU dari endpoint range TickerLayer:
-// GET /{asset}/agg/{symbol}/{mult}/{span}/{from}/{to}?sort=asc&limit=5000
-// Rentang dipecah per 2 hari dan diminta paralel. Hasil dipotong sesuai kebutuhan (bar terbaru).
+// Satu request ke TickerLayer. Bila 429, tunggu lalu coba sekali lagi.
+async function tlFetch(url, apiKey) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const r = await fetch(url, {
+      method: 'GET',
+      headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
+    });
+    if (r.status === 429 && attempt === 0) { await sleep(1500); continue; }
+    return r;
+  }
+}
+
+// Ambil bar dari TickerLayer. Requests dijalankan BERURUTAN (bukan paralel) agar tidak kena 429.
 async function fetchTickerLayerOHLC(symbol, interval, apiKey, need) {
   const out = { rows: [], status: 'OK', reqs: 0 };
   const tf = TL_SPAN[interval];
@@ -119,53 +155,37 @@ async function fetchTickerLayerOHLC(symbol, interval, apiKey, need) {
   const startMs = now - Math.ceil(need * 1.2 * tf.minutes * 60000) - 86400000;
   const byT = new Map();
 
-  const request = async (fromMs, toMs) => {
+  const ranges = [];
+  const barsEst = (now - startMs) / (tf.minutes * 60000);
+  if (tf.span === 'minute' && barsEst > MINUTE_CHUNK_THRESHOLD) {
+    let to = now + 86400000;
+    while (to > startMs && ranges.length < MAX_CHUNKS) {
+      const from = Math.max(startMs, to - CHUNK_MS);
+      ranges.push([from, to]);
+      to = from;
+    }
+  } else {
+    ranges.push([startMs, now + 86400000]);
+  }
+
+  for (const [fromMs, toMs] of ranges) {
     const url = `${TICKERLAYER_BASE_URL}/${mapped.asset}/agg/${mapped.symbol}/${tf.mult}/${tf.span}/${isoDate(new Date(fromMs))}/${isoDate(new Date(toMs))}?sort=asc&limit=5000`;
     out.reqs++;
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
-    });
-    if (!response.ok) {
-      out.status = `HTTP ${response.status}`;
-      return;
-    }
-    const data = await response.json();
-    const rows = Array.isArray(data) ? data : (data.results || []);
-    for (const c of rows) {
-      const cand = {
-        t: Number(c.t || 0),
-        o: Number(c.o || 0),
-        h: Number(c.h || 0),
-        l: Number(c.l || 0),
-        c: Number(c.c || 0),
-      };
-      if (cand.t > 0 && [cand.o, cand.h, cand.l, cand.c].every(Number.isFinite)) byT.set(cand.t, cand);
-    }
-  };
-
-  const ranges = [];
-  if (tf.span === 'day') {
-    ranges.push([startMs, now + 86400000]);
-  } else {
-    let toMs = now + 86400000;
-    while (toMs > startMs && ranges.length < MAX_CHUNKS) {
-      const fromMs = Math.max(startMs, toMs - CHUNK_MS);
-      ranges.push([fromMs, toMs]);
-      toMs = fromMs;
+    try {
+      const response = await tlFetch(url, apiKey);
+      if (!response.ok) { out.status = `HTTP ${response.status}`; continue; }
+      const data = await response.json();
+      const rows = Array.isArray(data) ? data : (data.results || []);
+      for (const c of rows) {
+        const cand = { t: Number(c.t || 0), o: Number(c.o || 0), h: Number(c.h || 0), l: Number(c.l || 0), c: Number(c.c || 0) };
+        if (cand.t > 0 && [cand.o, cand.h, cand.l, cand.c].every(Number.isFinite)) byT.set(cand.t, cand);
+      }
+    } catch (err) {
+      out.status = `ERR ${err.message}`;
     }
   }
 
-  try {
-    await Promise.all(ranges.map(([f, t]) => request(f, t)));
-  } catch (err) {
-    out.status = `ERR ${err.message}`;
-    console.error(`Gagal fetch TickerLayer ${interval} ${symbol}:`, err);
-  }
-
-  out.rows = [...byT.values()]
-    .sort((a, b) => a.t - b.t)
-    .slice(-Math.max(1, Math.ceil(need)));
+  out.rows = [...byT.values()].sort((a, b) => a.t - b.t).slice(-Math.max(1, Math.ceil(need)));
   console.log(`TickerLayer ${interval} ${symbol}: ${out.rows.length} candle, ${out.reqs} req, ${out.status}`);
   return out;
 }
@@ -176,7 +196,6 @@ function cleanCandles(rows) {
     .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite)).sort((a, b) => a.t - b.t);
 }
 
-// Gabungkan candle kecil menjadi candle besar, mis. 15m → 30m, 1h → 4h
 function aggregateCandles(candles, tfMin) {
   const ms = tfMin * 60 * 1000;
   const buckets = new Map();
@@ -194,7 +213,6 @@ function aggregateCandles(candles, tfMin) {
   return [...buckets.values()].sort((a, b) => a.t - b.t);
 }
 
-// Hybrid: bar terakhir (yang sedang berjalan) diisi harga live dari frontend
 function mergeLiveBar(candles, price, tfMin) {
   if (!candles.length || !(price > 0)) return candles;
   const ms = tfMin * 60000;
@@ -211,8 +229,14 @@ function mergeLiveBar(candles, price, tfMin) {
   return candles;
 }
 
-// Ambil candle satu TF: langsung dari TickerLayer bila didukung, jika kurang dibentuk dari base
+// Cache dulu (key sama dengan api/candles.js), lalu TickerLayer, lalu bentuk dari base.
 async function getCandles(symbol, tf, need, apiKey) {
+  const cacheKey = `candles_${symbol}_${tf}`;
+  const cached = await kvGetJSON(cacheKey);
+  if (Array.isArray(cached) && cached.length >= need) {
+    return { candles: cached, note: `cache ${tf} ${cached.length}` };
+  }
+
   const notes = [];
   let best = [];
 
@@ -220,7 +244,10 @@ async function getCandles(symbol, tf, need, apiKey) {
     const nat = await fetchTickerLayerOHLC(symbol, tf, apiKey, Math.max(need, 150));
     notes.push(`native ${tf} ${nat.rows.length} (${nat.status})`);
     best = nat.rows;
-    if (nat.rows.length >= need) return { candles: nat.rows, note: notes.join(' · ') };
+    if (nat.rows.length >= need) {
+      await kvSetJSON(cacheKey, nat.rows.slice(-CACHE_BARS[tf]), CACHE_TTL[tf]);
+      return { candles: nat.rows, note: notes.join(' · ') };
+    }
   }
 
   const baseTf = BASE_OF[tf];
@@ -232,6 +259,7 @@ async function getCandles(symbol, tf, need, apiKey) {
     if (agg.length > best.length) best = agg;
   }
 
+  if (best.length) await kvSetJSON(cacheKey, best.slice(-CACHE_BARS[tf]), CACHE_TTL[tf]);
   return { candles: best, note: notes.join(' · ') || 'tidak ada sumber' };
 }
 
@@ -249,8 +277,7 @@ function atr(candles, period = 14) {
 function calculateBollingerBands(candles, period = 20, multiplier = 2) {
   try {
     if (!Array.isArray(candles) || candles.length < period) return { upper: 0, middle: 0, lower: 0 };
-    const slice = candles.slice(-period);
-    const closes = slice.map(c => Number(c.c)).filter(Number.isFinite);
+    const closes = candles.slice(-period).map(c => Number(c.c)).filter(Number.isFinite);
     if (closes.length < period) return { upper: 0, middle: 0, lower: 0 };
 
     const middle = closes.reduce((sum, val) => sum + val, 0) / period;
@@ -259,104 +286,13 @@ function calculateBollingerBands(candles, period = 20, multiplier = 2) {
 
     return {
       middle: Number(middle.toFixed(5)),
-      upper: Number((middle + (multiplier * stdDev)).toFixed(5)),
-      lower: Number((middle - (multiplier * stdDev)).toFixed(5))
+      upper: Number((middle + multiplier * stdDev).toFixed(5)),
+      lower: Number((middle - multiplier * stdDev).toFixed(5)),
     };
   } catch {
     return { upper: 0, middle: 0, lower: 0 };
   }
 }
-
-// ===== Scalping (tidak berubah) =====
-function structureDir(candles, emaFilter = {}, bbFilter = {}) {
-  if (!candles || candles.length < 5) return 1;
-  const last = candles[candles.length - 1], first = candles[0];
-  let baseDir = last.c >= first.c ? 1 : -1;
-
-  const emaKeys = Object.keys(emaFilter);
-  if (emaKeys.length > 0) {
-    const fastKey = emaKeys[0];
-    const slowKey = emaKeys[emaKeys.length - 1];
-    const fastVal = emaFilter[fastKey];
-    const slowVal = emaFilter[slowKey];
-
-    if (fastVal && slowVal && fastVal > 0 && slowVal > 0) {
-      if (fastVal > slowVal && baseDir === 1) return 1;
-      if (fastVal < slowVal && baseDir === -1) return -1;
-    }
-  }
-
-  const low = Number(bbFilter?.lower || 0);
-  const up = Number(bbFilter?.upper || 0);
-  if (low > 0 && up > 0) {
-    if (last.c <= low * 1.002) return 1;
-    if (last.c >= up * 0.998) return -1;
-  }
-
-  return baseDir;
-}
-
-function getAbsoluteScalpOffsets(symbol) {
-  const s = symbol.toUpperCase();
-  if (s.includes('XAU')) return { buffer: 1.0, sl: 2.8, type: 'XAU_20_30_PIP' };
-  if (s.includes('XAG')) return { buffer: 2.0, sl: 5.6, type: 'XAG_2X_XAU' };
-  if (s.includes('DXY')) return { buffer: 0.10, sl: 0.30, type: 'DXY_FIX' };
-  if (s.includes('BTC')) return { buffer: 12.0, sl: 35.0, type: 'BTC_30_50_PIP' };
-  if (s.includes('ETH')) return { buffer: 1.5, sl: 4.5, type: 'ETH_30_50_PIP' };
-  if (s.includes('SOL') || s.includes('BNB') || s.includes('XRP') || s.includes('LTC') || s.includes('AVAX') || s.includes('LINK')) {
-    return { buffer: 1.0, sl: 3.5, type: 'ALT_30_50_PIP' };
-  }
-  if (s.includes('USDJPY') || s.includes('GBPJPY') || s.includes('EURJPY') || s.includes('AUDJPY') || s.includes('CADJPY') || s.includes('CHFJPY')) {
-    return { buffer: 0.20, sl: 0.50, type: 'JPY_CROSS_50PIP' };
-  }
-  if (s.includes('GBPUSD')) return { buffer: 0.0020, sl: 0.0050, type: 'GBPUSD_50PIP' };
-  if (s.includes('AUDUSD')) return { buffer: 0.0012, sl: 0.0035, type: 'AUDUSD_30PIP' };
-  if (s.includes('USDCAD')) return { buffer: 0.0030, sl: 0.0080, type: 'USDCAD_80PIP' };
-  if (s.includes('USDCHF')) return { buffer: 0.0022, sl: 0.0060, type: 'USDCHF_60PIP' };
-  if (s.includes('EUR') || s.includes('NZD') || s.includes('CHF') || s.includes('CAD')) {
-    return { buffer: 0.0020, sl: 0.0055, type: 'CURRENCY_50_60_PIP' };
-  }
-  if (s.includes('US30') || s.includes('NAS100') || s.includes('SP500') || s.includes('GER40') || s.includes('UK100') || s.includes('JPN225')) {
-    return { buffer: 20.0, sl: 60.0, type: 'INDEX_FIX' };
-  }
-  return { buffer: 0.0020, sl: 0.0055, type: 'DEFAULT_FIX' };
-}
-
-function scalpHitRun(mtfC, ltfC, htfDir, price, symbol, emaFilter, bbFilter, rrList) {
-  let dir = structureDir(mtfC, emaFilter, bbFilter);
-  if (dir === 0) dir = htfDir !== 0 ? htfDir : 1;
-  const activeDir = htfDir !== 0 ? htfDir : dir;
-  const isBuy = activeDir === 1;
-
-  const offsets = getAbsoluteScalpOffsets(symbol);
-  const bufferEnd = isBuy ? price - offsets.buffer : price + offsets.buffer;
-  const sl = isBuy ? price - offsets.sl : price + offsets.sl;
-
-  const riskDistance = Math.abs(price - sl);
-  const tp1 = isBuy ? price + (rrList[0] * riskDistance) : price - (rrList[0] * riskDistance);
-  const tp2 = isBuy ? price + (rrList[1] * riskDistance) : price - (rrList[1] * riskDistance);
-  const tp3 = isBuy ? price + (rrList[2] * riskDistance) : price - (rrList[2] * riskDistance);
-
-  return {
-    dir: activeDir,
-    plan: {
-      kind: 'hitrun',
-      orderType: 'NOW',
-      mode: 'DIRECT',
-      entry: price,
-      bufferEnd: bufferEnd,
-      status: 'RUNNING',
-      sl: sl,
-      tps: [tp1, tp2, tp3],
-      zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
-      trigSrc: `Scalping Agresif (TickerLayer + EMA + BB Filter) [${offsets.type}]`,
-      expireMs: 0,
-      zoneNote: `Range Mode (${offsets.type})`
-    }
-  };
-}
-
-// ===== Setup struktural: Day Trading / Intraday / Swing =====
 
 function emaSeries(values, period) {
   const k = 2 / (period + 1);
@@ -364,8 +300,6 @@ function emaSeries(values, period) {
   return values.map(v => (e = v * k + e * (1 - k)));
 }
 
-// Swing point: candle i dianggap pivot jika high/low-nya paling tinggi/rendah
-// dibanding L candle kiri dan L candle kanan
 function findPivots(candles, L) {
   const highs = [], lows = [];
   for (let i = L; i < candles.length - L; i++) {
@@ -380,43 +314,76 @@ function findPivots(candles, L) {
   return { highs, lows };
 }
 
-// Bias HTF: struktur (HH/HL atau LH/LL) HARUS searah dengan EMA fast/slow
-function htfBias(htfC, cfg) {
-  const closes = htfC.map(c => c.c);
-  const fast = emaSeries(closes, cfg.ema[0]);
-  const slow = emaSeries(closes, cfg.ema[1]);
-  const fLast = fast[fast.length - 1];
-  const sLast = slow[slow.length - 1];
-  const last = closes[closes.length - 1];
-  const emaDir = (fLast > sLast && last > sLast) ? 1 : ((fLast < sLast && last < sLast) ? -1 : 0);
+// Market structure: BOS → HH/HL → LH/LL
+function structureBias(candles, pivot) {
+  if (!candles || candles.length < 10) return { dir: 0, src: 'data kurang' };
+  const { highs, lows } = findPivots(candles, pivot);
+  if (highs.length < 2 || lows.length < 2) return { dir: 0, src: 'swing belum cukup' };
 
-  const { highs, lows } = findPivots(htfC, cfg.pivot);
-  let structDir = 0;
-  if (highs.length >= 2 && lows.length >= 2) {
-    const [h1, h2] = highs.slice(-2);
-    const [l1, l2] = lows.slice(-2);
-    if (h2.p > h1.p && l2.p > l1.p) structDir = 1;
-    else if (h2.p < h1.p && l2.p < l1.p) structDir = -1;
-  }
+  const [h1, h2] = highs.slice(-2);
+  const [l1, l2] = lows.slice(-2);
+  const last = candles[candles.length - 1].c;
 
-  const dir = (structDir !== 0 && structDir === emaDir) ? structDir : 0;
-  return { dir, fast: fLast, slow: sLast };
+  if (last > h2.p) return { dir: 1, src: 'BOS naik' };
+  if (last < l2.p) return { dir: -1, src: 'BOS turun' };
+  if (h2.p > h1.p && l2.p > l1.p) return { dir: 1, src: 'HH/HL' };
+  if (h2.p < h1.p && l2.p < l1.p) return { dir: -1, src: 'LH/LL' };
+  return { dir: 0, src: 'range' };
 }
 
-// Mencari urutan: Sweep likuiditas → CHoCH → FVG segar (pending) di MTF
-function findStructuralSetup(mtfC, dir, cfg, price, bb) {
+function emaState(candles, cfg) {
+  const closes = candles.map(c => c.c);
+  const f = emaSeries(closes, cfg.ema[0]);
+  const s = emaSeries(closes, cfg.ema[1]);
+  const fl = f[f.length - 1], sl = s[s.length - 1];
+  return { fast: fl, slow: sl, dir: fl > sl ? 1 : fl < sl ? -1 : 0 };
+}
+
+function findSDZones(candles, dir, atrV, lookback) {
+  const zones = [];
+  const n = candles.length;
+  const from = Math.max(2, n - lookback);
+  for (let i = from; i < n; i++) {
+    const c = candles[i];
+    const body = Math.abs(c.c - c.o);
+    if (body < 1.2 * atrV) continue;
+    const bull = c.c > c.o;
+    if ((dir === 1 && !bull) || (dir === -1 && bull)) continue;
+
+    let bi = -1;
+    for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
+      const b = candles[j];
+      if (dir === 1 ? b.c < b.o : b.c > b.o) { bi = j; break; }
+    }
+    if (bi < 0) continue;
+
+    const b = candles[bi];
+    const zone = dir === 1
+      ? { min: b.l, max: b.o, idx: bi, impulse: i }
+      : { min: b.o, max: b.h, idx: bi, impulse: i };
+    if (zone.max - zone.min <= 0) continue;
+
+    let mitigated = false;
+    for (let y = i + 1; y < n; y++) {
+      if (dir === 1 ? candles[y].c < zone.min : candles[y].c > zone.max) { mitigated = true; break; }
+    }
+    if (!mitigated) zones.push(zone);
+  }
+  return zones;
+}
+
+function findStructuralSetup(mtfC, dir, cfg, price, bb, padAtr) {
   const n = mtfC.length;
   const atrV = atr(mtfC, 14);
   const { highs, lows } = findPivots(mtfC, cfg.pivot);
   const pivots = dir === 1 ? lows : highs;
   const from = Math.max(0, n - cfg.lookback);
-  let reason = 'Belum ada sweep likuiditas searah bias HTF.';
+  let reason = 'Belum ada sweep likuiditas searah market structure HTF.';
 
   for (let pi = pivots.length - 1; pi >= 0; pi--) {
     const piv = pivots[pi];
     if (piv.i < from) break;
 
-    // 1) Liquidity sweep: wick menembus swing point lalu close kembali
     let k = -1;
     for (let x = piv.i + cfg.pivot + 1; x < n; x++) {
       const c = mtfC[x];
@@ -425,7 +392,6 @@ function findStructuralSetup(mtfC, dir, cfg, price, bb) {
     }
     if (k < 0) continue;
 
-    // 2) CHoCH: close menembus ekstrem range antara swing dan sweep
     let rangeLvl = dir === 1 ? -Infinity : Infinity;
     for (let x = piv.i; x < k; x++) {
       rangeLvl = dir === 1 ? Math.max(rangeLvl, mtfC[x].h) : Math.min(rangeLvl, mtfC[x].l);
@@ -440,7 +406,6 @@ function findStructuralSetup(mtfC, dir, cfg, price, bb) {
       continue;
     }
 
-    // 3) FVG terbaru setelah sweep yang belum termitigasi
     let zone = null;
     for (let x = n - 1; x >= k + 2 && !zone; x--) {
       const a = mtfC[x - 2], b = mtfC[x];
@@ -459,11 +424,10 @@ function findStructuralSetup(mtfC, dir, cfg, price, bb) {
       continue;
     }
 
-    // 4) Area harus pending: harga belum menyentuh zona (limit menunggu retrace)
     const entry = (zone.min + zone.max) / 2;
     const pending = dir === 1 ? price > zone.max : price < zone.min;
     if (!pending) {
-      reason = 'Harga sudah berada di dalam atau melewati FVG; tidak ada area limit baru.';
+      reason = 'Harga sudah di dalam atau melewati FVG; tidak ada area limit baru.';
       continue;
     }
 
@@ -473,7 +437,6 @@ function findStructuralSetup(mtfC, dir, cfg, price, bb) {
       continue;
     }
 
-    // 5) Filter BB: BUY hanya di discount (<= BB middle), SELL hanya di premium (>= BB middle)
     if (bb && bb.middle > 0) {
       const okZone = dir === 1 ? entry <= bb.middle : entry >= bb.middle;
       if (!okZone) {
@@ -482,19 +445,18 @@ function findStructuralSetup(mtfC, dir, cfg, price, bb) {
       }
     }
 
-    // 6) SL di luar likuiditas yang disapu, lebar dibatasi oleh riskAtr
     const sw = mtfC[k];
     const extreme = dir === 1 ? Math.min(sw.l, zone.min) : Math.max(sw.h, zone.max);
-    const pad = 0.2 * atrV;
-    let sl = dir === 1 ? extreme - pad : extreme + pad;
+    const sl = dir === 1 ? extreme - padAtr * atrV : extreme + padAtr * atrV;
     let risk = Math.abs(entry - sl);
     if (risk > cfg.riskAtr[1] * atrV) {
-      reason = `SL terlalu lebar (${(risk / atrV).toFixed(1)} ATR, batas ${cfg.riskAtr[1]} ATR).`;
+      reason = `SL struktur terlalu lebar (${(risk / atrV).toFixed(1)} ATR, batas ${cfg.riskAtr[1]}).`;
       continue;
     }
+    let slFinal = sl;
     if (risk < cfg.riskAtr[0] * atrV) {
       risk = cfg.riskAtr[0] * atrV;
-      sl = dir === 1 ? entry - risk : entry + risk;
+      slFinal = dir === 1 ? entry - risk : entry + risk;
     }
 
     return {
@@ -502,13 +464,14 @@ function findStructuralSetup(mtfC, dir, cfg, price, bb) {
         dir,
         entry,
         zone,
-        sl,
+        sl: slFinal,
         risk,
         dist,
         atr: atrV,
         sweepLvl: piv.p,
         sweepWick: dir === 1 ? sw.l : sw.h,
         rangeLvl,
+        chochClose: mtfC[chochIdx].c,
       },
     };
   }
@@ -516,46 +479,307 @@ function findStructuralSetup(mtfC, dir, cfg, price, bb) {
   return { plan: null, reason };
 }
 
-function buildGeneralPlan({ htfC, mtfC, styleKind, price, rrList, bb, dec }) {
-  const cfg = SETUP_CFG[styleKind];
-  const minHtf = cfg.ema[1] + 5;
-  if (htfC.length < minHtf || mtfC.length < 30) {
-    return { plan: null, reason: `Data candle belum cukup (HTF min ${minHtf}, MTF min 30 candle).` };
+function scalpStructureSL(c5, price, dir, symbol) {
+  const a = atr(c5, 14);
+  const { highs, lows } = findPivots(c5, SCALP_PIVOT);
+  const list = dir === 1 ? lows : highs;
+  let level = null;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const p = list[i].p;
+    if (dir === 1 ? p < price : p > price) { level = p; break; }
   }
+  let risk = level == null
+    ? 1.5 * a
+    : Math.abs(price - level) + padAtrFor(symbol) * a;
+  risk = Math.min(Math.max(risk, SCALP_RISK_ATR[0] * a), SCALP_RISK_ATR[1] * a);
+  const sl = dir === 1 ? price - risk : price + risk;
+  return { sl, risk, atr: a, level };
+}
 
-  const bias = htfBias(htfC, cfg);
-  if (bias.dir === 0) {
-    return { plan: null, reason: `Bias HTF belum jelas: struktur (HH/HL atau LH/LL) dan EMA${cfg.ema[0]}/EMA${cfg.ema[1]} harus searah.` };
+function scoreStructure(p, htfZones, aM, emaAligned) {
+  let s = 1;
+  if (emaAligned) s++;
+  if (Math.abs(p.sweepLvl - p.sweepWick) / aM >= 0.3) s++;
+  if (Math.abs(p.chochClose - p.rangeLvl) / aM >= 0.2) s++;
+  if (htfZones.some(z => z.max >= p.zone.min && z.min <= p.zone.max)) s += 2;
+  if (p.dist <= 1) s++;
+  return s;
+}
+
+function buildScalpPlan({ htfC, mtfC, price, rrList, symbol, dec }) {
+  const s5 = structureBias(mtfC, SCALP_PIVOT);
+  const s15 = structureBias(htfC, SETUP_CFG.day.pivot);
+  const dir = s5.dir !== 0 ? s5.dir : s15.dir;
+  if (dir === 0) {
+    return { plan: null, reason: `Market structure 5m dan 15m belum jelas (5m: ${s5.src}, 15m: ${s15.src}).` };
   }
-
-  const found = findStructuralSetup(mtfC, bias.dir, cfg, price, bb);
-  if (!found.plan) return { plan: null, reason: found.reason };
-
-  const p = found.plan;
-  const dir = p.dir;
+  const srcTxt = s5.dir !== 0 ? `5m ${s5.src}` : `15m ${s15.src}`;
   const f = v => Number(v).toFixed(dec);
-  const tps = rrList.map(rr => p.entry + dir * rr * p.risk);
-  const riskAtr = p.risk / p.atr;
-  const riskLabel = riskAtr <= 1.5 ? 'LOW' : riskAtr <= 2.5 ? 'MEDIUM' : 'HIGH';
-  const confidence = (p.dist <= 1 && riskLabel === 'LOW') ? 'HIGH' : 'MEDIUM';
-  const biasTxt = dir === 1 ? 'BULLISH' : 'BEARISH';
 
-  const bbTxt = (bb && bb.middle > 0)
-    ? `BB filter: entry ${f(p.entry)} di ${dir === 1 ? 'discount' : 'premium'} (BB middle ${f(bb.middle)}).`
-    : 'BB filter: data BB belum tersedia.';
+  const sc = scalpStructureSL(mtfC, price, dir, symbol);
+  const bufferEnd = price - dir * 0.5 * sc.atr;
+  const riskAtr = sc.risk / sc.atr;
+  const riskLabel = riskAtr <= 1.5 ? 'LOW' : riskAtr <= 2.5 ? 'MEDIUM' : 'HIGH';
 
   const reason = [
-    `Bias HTF ${biasTxt}: struktur ${dir === 1 ? 'HH/HL' : 'LH/LL'} searah EMA${cfg.ema[0]} (${f(bias.fast)}) ${dir === 1 ? '>' : '<'} EMA${cfg.ema[1]} (${f(bias.slow)}).`,
-    `Liquidity sweep di ${dir === 1 ? 'swing low' : 'swing high'} ${f(p.sweepLvl)} (wick ${f(p.sweepWick)}), lalu close kembali ke dalam range.`,
-    `CHoCH: close menembus ${f(p.rangeLvl)} setelah sweep.`,
-    `FVG ${f(p.zone.min)} – ${f(p.zone.max)} belum termitigasi, entry di 50% (${f(p.entry)}).`,
-    bbTxt,
-    `Jarak harga ke entry ${p.dist.toFixed(1)} ATR, lebar SL ${riskAtr.toFixed(1)} ATR.`,
+    `Scalping ${dir === 1 ? 'BUY' : 'SELL'} MARKET pada ${symbol}, arah dari market structure ${srcTxt}.`,
+    sc.level != null
+      ? `SL struktur 5m: swing ${dir === 1 ? 'low' : 'high'} ${f(sc.level)} + pad ${padAtrFor(symbol)} ATR.`
+      : 'Tidak ada swing 5m tervalidasi, SL 1,5 ATR dari harga.',
+    `Jarak SL ${f(sc.risk)} (${riskAtr.toFixed(1)} ATR 5m, batas ${SCALP_RISK_ATR[0]}–${SCALP_RISK_ATR[1]}).`,
     `RRR: TP1 1:${rrList[0]}, TP2 1:${rrList[1]}, TP3 1:${rrList[2]}.`,
   ].join(' • ');
 
   return {
     dir,
+    plan: {
+      kind: 'scalp',
+      orderType: 'NOW',
+      status: 'RUNNING',
+      entry: price,
+      bufferEnd,
+      sl: sc.sl,
+      tps: rrList.map(rr => price + dir * rr * sc.risk),
+      zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
+      expireMs: 0,
+      zoneNote: 'Scalp · SL struktur 5m',
+    },
+    meta: {
+      confidence: riskLabel === 'LOW' ? 'HIGH' : 'MEDIUM',
+      riskLabel,
+      setup: 'CONTINUATION',
+      reason,
+    },
+  };
+}
+
+function buildContinuation({ mtfC, dir, price, c5, symbol, rrList, dec, cfg, aM }) {
+  const closes = mtfC.map(c => c.c);
+  const fArr = emaSeries(closes, cfg.ema[0]);
+  const sArr = emaSeries(closes, cfg.ema[1]);
+  const ef = fArr[fArr.length - 1];
+  const es = sArr[sArr.length - 1];
+  const f = v => Number(v).toFixed(dec);
+
+  if (dir === 1 ? !(ef > es) : !(ef < es)) {
+    return { plan: null, reason: `EMA${cfg.ema[0]} MTF belum searah dengan market structure.` };
+  }
+  if (dir === 1 ? !(price > es) : !(price < es)) {
+    return { plan: null, reason: `Harga di sisi lawan EMA${cfg.ema[1]} MTF.` };
+  }
+  const touched = mtfC.slice(-12).some(c => (dir === 1 ? c.l <= ef : c.h >= ef));
+  if (!touched) {
+    return { plan: null, reason: 'Belum ada pullback ke EMA dalam 12 candle MTF terakhir.' };
+  }
+  if (dir === 1 ? !(price > ef) : !(price < ef)) {
+    return { plan: null, reason: 'Harga sudah menembus EMA ke sisi lawan.' };
+  }
+
+  const entry = ef;
+  const dist = Math.abs(price - entry) / aM;
+  if (dist > cfg.maxDist) {
+    return { plan: null, reason: `Harga terlalu jauh dari EMA (${dist.toFixed(1)} ATR, batas ${cfg.maxDist}).` };
+  }
+
+  const sc = scalpStructureSL(c5, entry, dir, symbol);
+  const risk = DAY_SL_MULT * sc.risk;
+  const riskAtr = risk / aM;
+  if (riskAtr > DAY_MAX_RISK_ATR) {
+    return { plan: null, reason: `SL continuation terlalu lebar (${riskAtr.toFixed(1)} ATR MTF, maks ${DAY_MAX_RISK_ATR}).` };
+  }
+
+  const sl = dir === 1 ? entry - risk : entry + risk;
+  const band = 0.3 * aM;
+  const zone = dir === 1
+    ? { min: entry - band, max: entry }
+    : { min: entry, max: entry + band };
+  const bufferEnd = dir === 1 ? zone.min : zone.max;
+  const riskLabel = riskAtr <= 1.5 ? 'LOW' : riskAtr <= 2.5 ? 'MEDIUM' : 'HIGH';
+
+  const reason = [
+    `Market structure HTF ${dir === 1 ? 'BULLISH' : 'BEARISH'}; EMA${cfg.ema[0]} ${dir === 1 ? '>' : '<'} EMA${cfg.ema[1]} MTF sebagai pendukung.`,
+    `Tidak ada zona S/D yang valid, jadi dipakai continuation: pullback ke EMA${cfg.ema[0]} MTF, entry limit ${f(entry)}.`,
+    `SL 1,5× jarak scalping 5m: ${f(sc.risk)} → ${f(risk)}${sc.level != null ? ` (swing 5m ${f(sc.level)})` : ''}.`,
+    `RRR: TP1 1:${rrList[0]}, TP2 1:${rrList[1]}, TP3 1:${rrList[2]}.`,
+  ].join(' • ');
+
+  return {
+    dir,
+    plan: {
+      kind: 'day',
+      orderType: 'LIMIT',
+      status: 'PENDING',
+      entry,
+      bufferEnd,
+      sl,
+      tps: rrList.map(rr => entry + dir * rr * risk),
+      zone,
+      expireMs: cfg.expireMin * 60000,
+      zoneNote: `Continuation · EMA${cfg.ema[0]} MTF`,
+    },
+    meta: { confidence: 'MEDIUM', riskLabel, setup: 'CONTINUATION', reason },
+  };
+}
+
+function buildDayPlan({ htfC, mtfC, c5, symbol, price, rrList, dec }) {
+  const cfg = SETUP_CFG.day;
+  const aH = atr(htfC, 14);
+  const aM = atr(mtfC, 14);
+  const f = v => Number(v).toFixed(dec);
+
+  const st = structureBias(htfC, cfg.pivot);
+  if (st.dir === 0) {
+    return { plan: null, reason: `Market structure HTF belum jelas (${st.src}): belum ada HH/HL, LH/LL, atau BOS.` };
+  }
+  const dir = st.dir;
+
+  const zones = [
+    ...findSDZones(htfC, dir, aH, 60).map(z => ({ ...z, tf: 'HTF' })),
+    ...findSDZones(mtfC, dir, aM, cfg.lookback).map(z => ({ ...z, tf: 'MTF' })),
+  ];
+
+  let best = null;
+  for (const z of zones) {
+    let state, dist;
+    if (dir === 1) {
+      if (price < z.min) continue;
+      if (price <= z.max) { state = 'INSIDE'; dist = 0; }
+      else { state = 'ABOVE'; dist = (price - z.max) / aM; }
+    } else {
+      if (price > z.max) continue;
+      if (price >= z.min) { state = 'INSIDE'; dist = 0; }
+      else { state = 'BELOW'; dist = (z.min - price) / aM; }
+    }
+    if (dist > cfg.maxDist) continue;
+
+    if (state === 'INSIDE') {
+      const mid = (z.min + z.max) / 2;
+      const lastClose = mtfC[mtfC.length - 1].c;
+      if (dir === 1 ? lastClose < mid : lastClose > mid) continue;
+    }
+
+    const rank = dist - (z.tf === 'HTF' ? 0.5 : 0);
+    if (!best || rank < best.rank) best = { ...z, state, dist, rank };
+  }
+
+  if (!best) {
+    const cont = buildContinuation({ mtfC, dir, price, c5, symbol, rrList, dec, cfg, aM });
+    if (cont.plan) return cont;
+    return {
+      plan: null,
+      reason: `Tidak ada zona ${dir === 1 ? 'demand' : 'supply'} HTF/MTF yang belum termitigasi dan dekat harga. Continuation: ${cont.reason}`,
+    };
+  }
+
+  const entry = best.state === 'INSIDE' ? price : (dir === 1 ? best.max : best.min);
+  const orderType = best.state === 'INSIDE' ? 'NOW' : 'LIMIT';
+  const far = dir === 1 ? best.min : best.max;
+
+  const sc = scalpStructureSL(c5, price, dir, symbol);
+  const dayRisk = DAY_SL_MULT * sc.risk;
+  let sl = dir === 1 ? entry - dayRisk : entry + dayRisk;
+
+  const pad = padAtrFor(symbol) * aM;
+  const guard = dir === 1 ? far - pad : far + pad;
+  let widened = false;
+  if (dir === 1 ? sl > guard : sl < guard) { sl = guard; widened = true; }
+
+  const risk = Math.abs(entry - sl);
+  const riskAtr = risk / aM;
+  if (riskAtr > DAY_MAX_RISK_ATR) {
+    return { plan: null, reason: `SL day terlalu lebar (${riskAtr.toFixed(1)} ATR MTF, maks ${DAY_MAX_RISK_ATR}).` };
+  }
+
+  const riskLabel = riskAtr <= 1.5 ? 'LOW' : riskAtr <= 2.5 ? 'MEDIUM' : 'HIGH';
+  const stateTxt = best.state === 'INSIDE'
+    ? `harga di dalam zona dan close terakhir sudah berbalik, entry market ${f(entry)}`
+    : `harga ${best.state === 'ABOVE' ? 'di atas' : 'di bawah'} zona, entry limit di sisi terdekat ${f(entry)}`;
+
+  const reason = [
+    `Market structure HTF ${dir === 1 ? 'BULLISH' : 'BEARISH'} (${st.src}).`,
+    `Zona ${best.tf} ${dir === 1 ? 'demand' : 'supply'} ${f(best.min)} – ${f(best.max)}: ${stateTxt}.`,
+    `SL 1,5× jarak scalping 5m: ${f(sc.risk)} → ${f(dayRisk)}${sc.level != null ? ` (swing 5m ${f(sc.level)})` : ' (tanpa swing 5m, pakai 1,5 ATR)'}${widened ? ', diperlebar ke sisi jauh zona' : ''}.`,
+    `Jarak SL ${f(risk)} (${riskAtr.toFixed(1)} ATR MTF).`,
+    `RRR: TP1 1:${rrList[0]}, TP2 1:${rrList[1]}, TP3 1:${rrList[2]}.`,
+  ].join(' • ');
+
+  return {
+    dir,
+    plan: {
+      kind: 'day',
+      orderType,
+      status: orderType === 'LIMIT' ? 'PENDING' : 'RUNNING',
+      entry,
+      bufferEnd: far,
+      sl,
+      tps: rrList.map(rr => entry + dir * rr * risk),
+      zone: { min: best.min, max: best.max },
+      expireMs: orderType === 'LIMIT' ? cfg.expireMin * 60000 : 0,
+      zoneNote: `S/D ${best.tf} · ${best.state}`,
+    },
+    meta: {
+      confidence: best.tf === 'HTF' ? 'HIGH' : 'MEDIUM',
+      riskLabel,
+      setup: 'CONTINUATION',
+      reason,
+    },
+  };
+}
+
+function buildStructPlan({ htfC, mtfC, styleKind, price, rrList, bb, dec, symbol }) {
+  const cfg = SETUP_CFG[styleKind];
+  const minHtf = cfg.ema[1] + 5;
+  if (htfC.length < minHtf || mtfC.length < 30) {
+    return { plan: null, reason: `Data candle belum cukup (HTF min ${minHtf}, MTF min 30).` };
+  }
+
+  const st = structureBias(htfC, cfg.pivot);
+  if (st.dir === 0) {
+    return { plan: null, reason: `Market structure HTF belum jelas (${st.src}): belum ada HH/HL, LH/LL, atau BOS.` };
+  }
+  const emaH = emaState(htfC, cfg);
+  const emaAligned = emaH.dir === st.dir;
+
+  const padAtr = padAtrFor(symbol);
+  const found = findStructuralSetup(mtfC, st.dir, cfg, price, bb, padAtr);
+  if (!found.plan) return { plan: null, reason: found.reason };
+
+  const p = found.plan;
+  const dir = p.dir;
+  const aH = atr(htfC, 14);
+  const htfZones = findSDZones(htfC, dir, aH, 60);
+  const score = scoreStructure(p, htfZones, p.atr, emaAligned);
+
+  if (styleKind === 'intraday' && score < cfg.minScore) {
+    return {
+      plan: null,
+      reason: `Setup terbentuk, tapi kekuatannya ${score}/7 (minimal ${cfg.minScore}). Sinyal intraday tidak dikeluarkan.`,
+    };
+  }
+
+  const f = v => Number(v).toFixed(dec);
+  const riskAtr = p.risk / p.atr;
+  const riskLabel = riskAtr <= 1.5 ? 'LOW' : riskAtr <= 2.5 ? 'MEDIUM' : 'HIGH';
+  const confidence = score >= 6 ? 'HIGH' : 'MEDIUM';
+  const biasTxt = dir === 1 ? 'BULLISH' : 'BEARISH';
+  const bbTxt = (bb && bb.middle > 0)
+    ? `BB: entry ${f(p.entry)} di ${dir === 1 ? 'discount' : 'premium'} (BB middle ${f(bb.middle)}).`
+    : 'BB: data belum tersedia.';
+
+  const reason = [
+    `Market structure HTF ${biasTxt} (${st.src}).`,
+    `EMA${cfg.ema[0]}/EMA${cfg.ema[1]} HTF ${emaAligned ? 'sejalan (+1 skor)' : 'belum sejalan (tidak memblokir sinyal)'}.`,
+    `Sweep ${dir === 1 ? 'swing low' : 'swing high'} ${f(p.sweepLvl)} (wick ${f(p.sweepWick)}), CHoCH close ${f(p.chochClose)} menembus ${f(p.rangeLvl)}.`,
+    `FVG ${f(p.zone.min)} – ${f(p.zone.max)} belum termitigasi, entry 50% (${f(p.entry)}).`,
+    bbTxt,
+    `SL struktur ${f(p.sl)} (pad ${padAtr} ATR), jarak ${riskAtr.toFixed(1)} ATR MTF.`,
+    `Kekuatan ${score}/7${styleKind === 'intraday' ? ` (minimal ${cfg.minScore})` : ''}.`,
+    `RRR: TP1 1:${rrList[0]}, TP2 1:${rrList[1]}, TP3 1:${rrList[2]}.`,
+  ].join(' • ');
+
+  return {
+    dir,
+    score,
     plan: {
       kind: styleKind,
       orderType: 'LIMIT',
@@ -563,15 +787,12 @@ function buildGeneralPlan({ htfC, mtfC, styleKind, price, rrList, bb, dec }) {
       entry: p.entry,
       bufferEnd: dir === 1 ? p.zone.min : p.zone.max,
       sl: p.sl,
-      tps,
+      tps: rrList.map(rr => p.entry + dir * rr * p.risk),
       zone: { min: p.zone.min, max: p.zone.max },
-      expireMs: cfg.expireMin * 60 * 1000,
+      expireMs: cfg.expireMin * 60000,
       zoneNote: `Sweep > CHoCH > FVG · HTF ${biasTxt}`,
     },
-    confidence,
-    riskLabel,
-    setup: 'CONTINUATION',
-    reason,
+    meta: { confidence, riskLabel, setup: 'CONTINUATION', reason },
   };
 }
 
@@ -581,150 +802,127 @@ export default async function handler(req, res) {
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
     const email = String(body.email || req.headers['x-user-email'] || '').trim().toLowerCase();
-
-    // Ambil TickerLayer API Key dari Environment Variables Vercel
-    const tickerLayerApiKey = String(process.env.TICKERLAYER_API_KEY || '').trim();
+    const apiKey = String(process.env.TICKERLAYER_API_KEY || '').trim();
 
     const styleKey = body.tradingStyle || 'Scalping';
     const style = STYLES[styleKey] || STYLES['Scalping'];
-    const rrList = style.rr;
     const symbol = String(body.marketId || '').split('|').pop().toUpperCase();
     const dec = DECIMALS[symbol] ?? 2;
-    const emaFilter = body.emaFilter || {};
 
     const access = await checkAccess(email);
     if (!access.ok) return res.status(403).json({ error: access.msg });
 
+    const noSignal = reason => ({ ok: true, signal: null, reason });
+
+    const dayKey = `sig_intraday_${email}_${symbol}_${isoDate(new Date())}`;
+    if (style.kind === 'intraday') {
+      const used = await kvGetJSON(dayKey);
+      if (used) {
+        return res.status(200).json(noSignal(
+          `SINYAL INTRADAY ${symbol} HARI INI SUDAH ADA\n` +
+          `Batas 1 sinyal kuat per hari (UTC).\n` +
+          `${used.side} @ ${used.entry} · dikeluarkan ${used.time} WIB`
+        ));
+      }
+    }
+
     let htfC = cleanCandles(body.candles?.htf);
     let mtfC = cleanCandles(body.candles?.mtf ?? body.candles?.entry);
-    let ltfC = cleanCandles(body.candles?.ltf);
+    const price = Number(body.currentPrice) || (mtfC.length ? mtfC[mtfC.length - 1].c : 2000);
 
-    const price = Number(body.currentPrice) || (mtfC.length > 0 ? mtfC[mtfC.length - 1].c : 2000);
-
-    let dir = 0, plan = null, meta = null, bbFilter;
+    let result;
 
     if (style.kind === 'scalp') {
-      if (htfC.length === 0 || mtfC.length === 0) {
-        htfC = (await fetchTickerLayerOHLC(symbol, '1h', tickerLayerApiKey, 100)).rows;
-        mtfC = (await fetchTickerLayerOHLC(symbol, '15m', tickerLayerApiKey, 100)).rows;
+      if (mtfC.length < 30) mtfC = (await getCandles(symbol, '5m', 150, apiKey)).candles;
+      if (htfC.length < 20) htfC = (await getCandles(symbol, '15m', 100, apiKey)).candles;
+      mtfC = mergeLiveBar(mtfC, price, 5);
+      if (mtfC.length < 30) {
+        return res.status(200).json(noSignal(`Data candle 5m belum cukup (${mtfC.length}/30).`));
       }
-
-      const incomingBb = body.bbFilter;
-      bbFilter = (incomingBb && Number(incomingBb.middle) > 0)
-        ? {
-            upper: Number(incomingBb.upper || 0),
-            middle: Number(incomingBb.middle || 0),
-            lower: Number(incomingBb.lower || 0)
-          }
-        : calculateBollingerBands(mtfC.length > 0 ? mtfC : ltfC);
-
-      const htfDir = structureDir(htfC, emaFilter, bbFilter);
-      const hr = scalpHitRun(mtfC, ltfC, htfDir, price, symbol, emaFilter, bbFilter, rrList);
-      dir = hr.dir;
-      plan = hr.plan;
+      result = buildScalpPlan({ htfC, mtfC, price, rrList: style.rr, symbol, dec });
     } else {
       const tf = STYLE_TF_SERVER[styleKey];
       const htfNeed = SETUP_CFG[style.kind].ema[1] + 5;
       const mtfNeed = 30;
+      const note = { htf: `frontend ${htfC.length}`, mtf: `frontend ${mtfC.length}` };
 
-      let htfNote = `frontend ${htfC.length}`;
-      let mtfNote = `frontend ${mtfC.length}`;
-
-      // Kiriman frontend sering pendek, jadi ambil dari server bila kurang
       if (htfC.length < htfNeed) {
-        const h = await getCandles(symbol, tf.htf, htfNeed, tickerLayerApiKey);
-        htfNote = h.note;
+        const h = await getCandles(symbol, tf.htf, htfNeed, apiKey);
+        note.htf = h.note;
         if (h.candles.length > htfC.length) htfC = h.candles;
       }
       if (mtfC.length < mtfNeed) {
-        const m = await getCandles(symbol, tf.mtf, mtfNeed, tickerLayerApiKey);
-        mtfNote = m.note;
+        const m = await getCandles(symbol, tf.mtf, mtfNeed, apiKey);
+        note.mtf = m.note;
         if (m.candles.length > mtfC.length) mtfC = m.candles;
       }
-
       if (htfC.length < htfNeed || mtfC.length < mtfNeed) {
-        return res.status(200).json({
-          ok: true,
-          signal: null,
-          reason: `DATA CANDLE BELUM CUKUP · ${style.label}\n` +
-                  `HTF ${tf.htf}: ${htfC.length}/${htfNeed} · MTF ${tf.mtf}: ${mtfC.length}/${mtfNeed}\n` +
-                  `Detail HTF: ${htfNote}\n` +
-                  `Detail MTF: ${mtfNote}`,
-        });
+        return res.status(200).json(noSignal(
+          `DATA CANDLE BELUM CUKUP · ${style.label}\n` +
+          `HTF ${tf.htf}: ${htfC.length}/${htfNeed} · MTF ${tf.mtf}: ${mtfC.length}/${mtfNeed}\n` +
+          `Detail HTF: ${note.htf}\n` +
+          `Detail MTF: ${note.mtf}`
+        ));
       }
 
-      // Bar terakhir (yang sedang berjalan) diisi harga live
       htfC = mergeLiveBar(htfC, price, TF_MIN[tf.htf]);
       mtfC = mergeLiveBar(mtfC, price, TF_MIN[tf.mtf]);
 
-      bbFilter = calculateBollingerBands(mtfC);
-
-      const gp = buildGeneralPlan({
-        htfC, mtfC, styleKind: style.kind, price, rrList, bb: bbFilter, dec
-      });
-      if (!gp.plan) {
-        // Tidak ada area valid → tidak ada sinyal (bukan dipaksa)
-        return res.status(200).json({
-          ok: true,
-          signal: null,
-          reason: `TIDAK ADA AREA VALID · ${style.label}\n${gp.reason}`,
+      if (style.kind === 'day') {
+        let c5 = cleanCandles(body.candles?.ltf);
+        if (c5.length < 30) c5 = (await getCandles(symbol, '5m', 150, apiKey)).candles;
+        c5 = mergeLiveBar(c5, price, 5);
+        if (c5.length < 30) {
+          return res.status(200).json(noSignal(`Data 5m belum cukup untuk SL scalping (${c5.length}/30).`));
+        }
+        result = buildDayPlan({ htfC, mtfC, c5, symbol, price, rrList: style.rr, dec });
+      } else {
+        result = buildStructPlan({
+          htfC, mtfC, styleKind: style.kind, price, rrList: style.rr,
+          bb: calculateBollingerBands(mtfC), dec, symbol,
         });
       }
-      dir = gp.dir;
-      plan = gp.plan;
-      meta = gp;
     }
 
-    const entry = plan.entry;
+    if (!result.plan) {
+      return res.status(200).json(noSignal(`TIDAK ADA SINYAL · ${style.label}\n${result.reason}`));
+    }
+
+    const { dir, plan, meta } = result;
+
+    if (style.kind === 'intraday') {
+      await kvSetJSON(dayKey, {
+        side: dir === 1 ? 'BUY' : 'SELL',
+        entry: Number(plan.entry.toFixed(dec)),
+        time: new Date().toLocaleTimeString('id-ID', TIME_FMT),
+      }, 36 * 3600);
+    }
+
     const r = v => Number(v.toFixed(dec));
-    const tps = plan.tps || [entry + dir * 20, entry + dir * 40, entry + dir * 60];
-
-    const actionType = plan.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET';
-    const sideText = dir === 1 ? 'BUY' : 'SELL';
-
-    const zoneNoteText = plan.zoneNote || 'Range Mode (Scalp)';
-    const zoneLabelText = plan.orderType === 'LIMIT' ? 'Limit Order Zone (Waiting)' : 'Market Execution Zone';
-
-    let techReason;
-    if (meta) {
-      techReason = meta.reason;
-    } else {
-      const emaSummary = Object.entries(emaFilter).map(([k, v]) => `${k}: ${v}`).join(' | ');
-      const bbSummary = `Upper: ${bbFilter.upper} | Mid: ${bbFilter.middle} | Lower: ${bbFilter.lower}`;
-      const actionDesc = sideText === 'BUY'
-        ? 'menempatkan Pending Order BUY LIMIT pada area struktur Demand / Order Block riil'
-        : 'menempatkan Pending Order SELL LIMIT pada area struktur Supply / Order Block riil';
-
-      techReason = [
-        `Analisis Struktur Jauh SMC ${sideText} (${style.label}) pada pair ${symbol}.`,
-        `Mekanisme Eksekusi: Menggunakan Limit Order (Pending Order / WAITING) dengan memindai titik Swing High/Low dari data bar OHLC TickerLayer.`,
-        `Alasan: Diputuskan ${actionDesc}. Indikator EMA (${emaSummary}) serta Bollinger Bands (${bbSummary}) memfilter area jenuh.`,
-        `Manajemen Risiko: Lebar zona dan Stop Loss ditarik dari struktur market asli dengan target RRR [TP1: 1:${rrList[0]}, TP2: 1:${rrList[1]}, TP3: 1:${rrList[2]}].`
-      ].join('\n\n');
-    }
+    const tps = plan.tps;
 
     return res.status(200).json({
       ok: true,
       signal: {
-        signal: sideText,
-        mode: actionType,
+        signal: dir === 1 ? 'BUY' : 'SELL',
+        mode: plan.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET',
         orderType: plan.orderType,
         orderLabel: orderLabel(dir, plan.orderType),
         status: plan.status,
-        entry: r(entry),
-        bufferEnd: r(plan.bufferEnd || entry),
+        entry: r(plan.entry),
+        bufferEnd: r(plan.bufferEnd ?? plan.entry),
         sl: r(plan.sl),
         tp1: r(tps[0]), tp2: r(tps[1]), tp3: r(tps[2]),
         zone: plan.zone ? { min: r(plan.zone.min), max: r(plan.zone.max) } : null,
         expireMs: plan.expireMs || 0,
-        confidence: meta ? meta.confidence : 'HIGH',
-        risk: meta ? meta.riskLabel : 'LOW',
-        setup: meta ? meta.setup : `STRUCTURAL PENDING ZONE (RRR Target: 1:${rrList[0]} - 1:${rrList[2]})`,
+        confidence: meta.confidence,
+        risk: meta.riskLabel,
+        setup: meta.setup,
         setupLabel: style.label,
-        zoneLabel: zoneLabelText,
-        zoneNote: zoneNoteText,
-        reason: techReason
-      }
+        zoneLabel: plan.orderType === 'LIMIT' ? 'Limit Order Zone (Waiting)' : 'Market Execution Zone',
+        zoneNote: plan.zoneNote,
+        reason: meta.reason,
+      },
     });
   } catch (err) {
     console.error('generate error stack:', err);
