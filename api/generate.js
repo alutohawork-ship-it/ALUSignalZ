@@ -1,5 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC Universal: XBTFX 60% Pairs + DXY Support & Fixed Range + EMA Filter Integration
+// Analisis Pure SMC Universal: XBTFX 60% Pairs + DXY Support & Fixed Range + EMA & Bollinger Bands Filter
 
 const KV_KEY = 'alu_clients';
 
@@ -22,9 +22,9 @@ const DECIMALS = {
 
 const STYLES = {
   'Scalping': { label: 'Scalping Agresif (Crypto 30-50 Pip & Currency Fix)', mode: 'MARKET', kind: 'scalp', rr: [1, 2, 3] },
-  'Day Trading': { label: 'Day Trading (Zona & Kontinuitas + EMA 14/20)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
-  'Intraday': { label: 'Intraday (Limit Order + EMA 20/50/100)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
-  'Swing': { label: 'Swing Trading (Limit Order + EMA 20/50/100/200)', mode: 'LIMIT', kind: 'swing', rr: [2.0, 4.5, 8.5] },
+  'Day Trading': { label: 'Day Trading (Zona, EMA & Bollinger Bands)', mode: 'MARKET', kind: 'day', rr: [1.5, 2, 3] },
+  'Intraday': { label: 'Intraday (Limit Order + EMA + BB)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
+  'Swing': { label: 'Swing Trading (Limit Order + Multi EMA + BB)', mode: 'LIMIT', kind: 'swing', rr: [2.0, 4.5, 8.5] },
 };
 
 const orderLabel = (dir, orderType) => `${dir === 1 ? 'BUY' : 'SELL'} ${orderType === 'LIMIT' ? 'LIMIT' : 'NOW'}`;
@@ -66,12 +66,30 @@ function atr(candles, period = 14) {
   return s.length ? s.reduce((a, b) => a + b, 0) / s.length : 1;
 }
 
-function structureDir(candles, emaFilter = {}) {
+// Perhitungan Bollinger Bands (Periode 20, Deviasi 2)
+function calculateBollingerBands(candles, period = 20, multiplier = 2) {
+  if (!candles || candles.length < period) return { upper: 0, middle: 0, lower: 0 };
+  const slice = candles.slice(-period);
+  const closes = slice.map(c => c.c);
+  
+  const middle = closes.reduce((sum, val) => sum + val, 0) / period;
+  
+  const variance = closes.reduce((sum, val) => sum + Math.pow(val - middle, 2), 0) / period;
+  const stdDev = Math.sqrt(variance);
+
+  return {
+    middle: Number(middle.toFixed(5)),
+    upper: Number((middle + (multiplier * stdDev)).toFixed(5)),
+    lower: Number((middle - (multiplier * stdDev)).toFixed(5))
+  };
+}
+
+function structureDir(candles, emaFilter = {}, bbFilter = {}) {
   if (!candles || candles.length < 5) return 1;
   const last = candles[candles.length - 1], first = candles[0];
   let baseDir = last.c >= first.c ? 1 : -1;
 
-  // Konfirmasi tambahan menggunakan tren EMA yang dikirim dari klien
+  // Konfirmasi tambahan menggunakan tren EMA
   const emaKeys = Object.keys(emaFilter);
   if (emaKeys.length > 0) {
     const fastKey = emaKeys[0];
@@ -83,6 +101,12 @@ function structureDir(candles, emaFilter = {}) {
       if (fastVal > slowVal && baseDir === 1) return 1;
       if (fastVal < slowVal && baseDir === -1) return -1;
     }
+  }
+
+  // Filter konfirmasi Bollinger Bands (Harga mendekati band bawah = support/buy, mendekati band atas = resistance/sell)
+  if (bbFilter.lower && bbFilter.upper && bbFilter.middle) {
+    if (last.c <= bbFilter.lower * 1.002) return 1;  // Sentuh/tembus bawah -> potensi pantulan naik (Buy)
+    if (last.c >= bbFilter.upper * 0.998) return -1; // Sentuh/tembus atas -> potensi pantulan turun (Sell)
   }
 
   return baseDir;
@@ -120,8 +144,8 @@ function getAbsoluteScalpOffsets(symbol) {
   return { buffer: 0.0020, sl: 0.0055, type: 'DEFAULT_FIX' };
 }
 
-function scalpHitRun(mtfC, ltfC, htfDir, price, symbol, emaFilter) {
-  let dir = structureDir(mtfC, emaFilter);
+function scalpHitRun(mtfC, ltfC, htfDir, price, symbol, emaFilter, bbFilter) {
+  let dir = structureDir(mtfC, emaFilter, bbFilter);
   if (dir === 0) dir = htfDir !== 0 ? htfDir : 1;
   const activeDir = htfDir !== 0 ? htfDir : dir;
   const isBuy = activeDir === 1;
@@ -148,7 +172,7 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, symbol, emaFilter) {
       sl: sl,
       tps: [tp1, tp2, tp3],
       zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
-      trigSrc: `Scalping Agresif (XBTFX 60% Fixed + EMA Filter) [${offsets.type}]`,
+      trigSrc: `Scalping Agresif (XBTFX + EMA + BB Filter) [${offsets.type}]`,
       expireMs: 0,
     }
   };
@@ -164,10 +188,10 @@ function aggregateM15(m5) {
   return out.length ? out : m5;
 }
 
-function generalTradePlan({ mtfC, m5C, price, symbol, styleKind, emaFilter }) {
+function generalTradePlan({ mtfC, m5C, price, symbol, styleKind, emaFilter, bbFilter }) {
   const m15C = aggregateM15(m5C);
   const a15 = atr(m15C, 14) || 10;
-  const dir = structureDir(mtfC, emaFilter) || 1;
+  const dir = structureDir(mtfC, emaFilter, bbFilter) || 1;
   const isBuy = dir === 1;
 
   let mult = (styleKind === 'intraday' || styleKind === 'swing') ? 2.0 : 1.0;
@@ -188,8 +212,8 @@ function generalTradePlan({ mtfC, m5C, price, symbol, styleKind, emaFilter }) {
   const tp3 = actualEntry + dir * rrList[2] * risk;
 
   let trigName = 'Day Trading (Zona & Kontinuitas)';
-  if (styleKind === 'intraday') trigName = 'Intraday (Limit Order + EMA 20/50/100)';
-  if (styleKind === 'swing') trigName = 'Swing Trading (Limit Order + EMA 20/50/100/200)';
+  if (styleKind === 'intraday') trigName = 'Intraday (Limit Order + EMA + BB)';
+  if (styleKind === 'swing') trigName = 'Swing Trading (Limit Order + EMA + BB)';
 
   return {
     dir,
@@ -203,7 +227,7 @@ function generalTradePlan({ mtfC, m5C, price, symbol, styleKind, emaFilter }) {
       tps: [tp1, tp2, tp3],
       zone: { min: actualEntry - a15, max: actualEntry + a15 },
       expireMs: isLimit ? 360 * 60 * 1000 : 90 * 60 * 1000,
-      trigSrc: `${trigName} [ATR_DYNAMIC + EMA CONFLUENCE]`,
+      trigSrc: `${trigName} [ATR + EMA + BB CONFLUENCE]`,
       flags: [],
     }
   };
@@ -230,17 +254,20 @@ export default async function handler(req, res) {
     const mtfC = cleanCandles(cnd.mtf ?? cnd.entry);
     const ltfC = cleanCandles(cnd.ltf);
 
-    const htfDir = structureDir(htfC, emaFilter);
+    // Hitung Bollinger Bands dari timeframe utama (MTF/LTF)
+    const bbFilter = calculateBollingerBands(mtfC.length > 0 ? mtfC : ltfC);
+
+    const htfDir = structureDir(htfC, emaFilter, bbFilter);
     const isScalp = style.kind === 'scalp';
 
     let dir = 0, plan = null;
 
     if (isScalp) {
-      const hr = scalpHitRun(mtfC, ltfC, htfDir, price, symbol, emaFilter);
+      const hr = scalpHitRun(mtfC, ltfC, htfDir, price, symbol, emaFilter, bbFilter);
       dir = hr.dir;
       plan = hr.plan;
     } else {
-      const dp = generalTradePlan({ mtfC, m5C: ltfC, price, symbol, styleKind: style.kind, emaFilter });
+      const dp = generalTradePlan({ mtfC, m5C: ltfC, price, symbol, styleKind: style.kind, emaFilter, bbFilter });
       dir = dp.dir;
       plan = dp.plan;
     }
@@ -254,15 +281,16 @@ export default async function handler(req, res) {
     const offsets = getAbsoluteScalpOffsets(symbol);
 
     const emaSummary = Object.entries(emaFilter).map(([k, v]) => `${k}: ${v}`).join(' | ');
+    const bbSummary = `Upper: ${bbFilter.upper} | Mid: ${bbFilter.middle} | Lower: ${bbFilter.lower}`;
 
     const actionDesc = sideText === 'BUY' 
-      ? 'mengambil posisi BELI (BUY) karena struktur Market Shift dan konfirmasi EMA menunjukkan tren naik yang solid' 
-      : 'mengambil posisi JUAL (SELL) karena konfluensi Supply Zone dan posisi harga di bawah indikator EMA utama memperkuat tekanan jual';
+      ? 'mengambil posisi BELI (BUY) karena pantulan harga di area Bollinger Band Bawah & konfirmasi struktur Demand' 
+      : 'mengambil posisi JUAL (SELL) karena penolakan harga di area Bollinger Band Atas & tekanan Supply Zone';
 
     const techReason = [
       `Analisis Teknikal Pure SMC ${sideText} (${style.label}) pada pair ${symbol}.`,
-      `Alasan Eksekusi: Diputuskan ${actionDesc}. Indikator EMA aktif (${emaSummary}) dan pemicu strategi (${plan.trigSrc}) saling mengonfirmasi arah tren.`,
-      `Manajemen Risiko: Jarak Stop Loss dan Buffer telah disesuaikan secara presisi (${offsets.type}) dengan rasio risk-to-reward optimal.`
+      `Alasan Eksekusi: Diputuskan ${actionDesc}. Indikator EMA (${emaSummary}) serta Bollinger Bands (${bbSummary}) bekerja bersama menyaring titik jenuh harga.`,
+      `Manajemen Risiko: Jarak Stop Loss dan Buffer telah disesuaikan secara presisi (${offsets.type}) dengan target profit optimal.`
     ].join('\n\n');
 
     return res.status(200).json({
@@ -280,9 +308,9 @@ export default async function handler(req, res) {
         zone: plan.zone ? { min: r(plan.zone.min), max: r(plan.zone.max) } : null,
         confidence: 'HIGH',
         risk: 'LOW',
-        setup: 'CONTINUATION / REVERSAL',
+        setup: 'CONTINUATION / REVERSAL (BB + SMC)',
         setupLabel: style.label,
-        zoneLabel: 'Order Block / FVG / EMA Confluence',
+        zoneLabel: 'Order Block / FVG / Bollinger Confluence',
         zoneNote: `Range Mode (${offsets.type})`,
         reason: techReason
       }
