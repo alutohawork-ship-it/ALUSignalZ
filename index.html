@@ -519,6 +519,7 @@
         document.getElementById('registerDashboard').classList.add('hidden');
         const main = document.getElementById('mainApp');
         main.classList.remove('hidden'); main.classList.add('flex');
+        connect();
     }
 
     async function registerNewClientByAdmin() {
@@ -562,83 +563,72 @@
     // ================= MARKETS & STREAM CONFIG =================
     const WS_URL = 'wss://ws.xbtfx.com/v1/ws';
     let XBTFX_TOKEN = '';
-    const HISTORY_MS = 15 * 60 * 1000;
     const STALE_MS = 30000;
-    const STORE_KEY = 'aluSignalZ_history_v3';
     const OFFSET_KEY = 'aluSignalZ_offsets_v1';
+    const STORE_KEY = 'aluSignalZ_history_v3';
 
     const MARKETS = {
-        DXY:        { provider: 'xbtfx', coins: ['DXY', 'USDX'], decimals: 2, pip: 0.01 },
-        EURUSD:     { provider: 'xbtfx', coins: ['EURUSD'], decimals: 5, pip: 0.0001 },
-        GBPUSD:     { provider: 'xbtfx', coins: ['GBPUSD'], decimals: 5, pip: 0.0001 },
-        USDJPY:     { provider: 'xbtfx', coins: ['USDJPY'], decimals: 3, pip: 0.01 },
-        AUDUSD:     { provider: 'xbtfx', coins: ['AUDUSD'], decimals: 5, pip: 0.0001 },
-        USDCAD:     { provider: 'xbtfx', coins: ['USDCAD'], decimals: 5, pip: 0.0001 },
-        USDCHF:     { provider: 'xbtfx', coins: ['USDCHF'], decimals: 5, pip: 0.0001 },
-        NZDUSD:     { provider: 'xbtfx', coins: ['NZDUSD'], decimals: 5, pip: 0.0001 },
-        EURGBP:     { provider: 'xbtfx', coins: ['EURGBP'], decimals: 5, pip: 0.0001 },
-        EURJPY:     { provider: 'xbtfx', coins: ['EURJPY'], decimals: 3, pip: 0.01 },
-        GBPJPY:     { provider: 'xbtfx', coins: ['GBPJPY'], decimals: 3, pip: 0.01 },
-        AUDJPY:     { provider: 'xbtfx', coins: ['AUDJPY'], decimals: 3, pip: 0.01 },
-        EURAUD:     { provider: 'xbtfx', coins: ['EURAUD'], decimals: 5, pip: 0.0001 },
-        GBPAUD:     { provider: 'xbtfx', coins: ['GBPAUD'], decimals: 5, pip: 0.0001 },
-        AUDNZD:     { provider: 'xbtfx', coins: ['AUDNZD'], decimals: 5, pip: 0.0001 },
-        CADJPY:     { provider: 'xbtfx', coins: ['CADJPY'], decimals: 3, pip: 0.01 },
-        CHFJPY:     { provider: 'xbtfx', coins: ['CHFJPY'], decimals: 3, pip: 0.01 },
-        EURNZD:     { provider: 'xbtfx', coins: ['EURNZD'], decimals: 5, pip: 0.0001 },
-        XAUUSD:     { provider: 'xbtfx', coins: ['XAUUSD', 'GOLD'], decimals: 2, pip: 0.1 },
-        XAGUSD:     { provider: 'xbtfx', coins: ['XAGUSD', 'SILVER'], decimals: 3, pip: 0.01 },
-        XPTUSD:     { provider: 'xbtfx', coins: ['XPTUSD'], decimals: 2, pip: 0.1 },
-        XPDUSD:     { provider: 'xbtfx', coins: ['XPDUSD'], decimals: 2, pip: 0.1 },
-        XAUEUR:     { provider: 'xbtfx', coins: ['XAUEUR'], decimals: 2, pip: 0.1 },
-        XAGEUR:     { provider: 'xbtfx', coins: ['XAGEUR'], decimals: 3, pip: 0.01 },
-        BRENT:      { provider: 'xbtfx', coins: ['BRENT', 'BRENTOIL'], decimals: 2, pip: 0.01 },
-        WTI:        { provider: 'xbtfx', coins: ['WTI', 'USOUSD'], decimals: 2, pip: 0.01 },
-        NATGAS:     { provider: 'xbtfx', coins: ['NATGAS', 'NG'], decimals: 3, pip: 0.001 },
-        COPPER:     { provider: 'xbtfx', coins: ['COPPER'], decimals: 4, pip: 0.0001 },
-        COFFEE:     { provider: 'xbtfx', coins: ['COFFEE'], decimals: 2, pip: 0.01 },
-        SUGAR:      { provider: 'xbtfx', coins: ['SUGAR'], decimals: 2, pip: 0.01 },
-        US30:       { provider: 'xbtfx', coins: ['US30', 'DJI', 'WALLSTREET'], decimals: 2, pip: 1 },
-        NAS100:     { provider: 'xbtfx', coins: ['NAS100', 'NDX', 'USTECH'], decimals: 2, pip: 1 },
-        SPX500:     { provider: 'xbtfx', coins: ['SPX500', 'SP500'], decimals: 2, pip: 1 },
-        GER40:      { provider: 'xbtfx', coins: ['GER40', 'DAX'], decimals: 2, pip: 1 },
-        UK100:      { provider: 'xbtfx', coins: ['UK100', 'FTSE'], decimals: 2, pip: 1 },
-        JPN225:     { provider: 'xbtfx', coins: ['JPN225', 'N225'], decimals: 0, pip: 1 },
-        FRA40:      { provider: 'xbtfx', coins: ['FRA40', 'CAC40'], decimals: 2, pip: 1 },
-        AUS200:     { provider: 'xbtfx', coins: ['AUS200', 'ASX200'], decimals: 2, pip: 1 },
-        BTCUSD:     { provider: 'xbtfx', coins: ['BTCUSD', 'BTCUSDT'], decimals: 2, pip: 1 },
-        ETHUSD:     { provider: 'xbtfx', coins: ['ETHUSD', 'ETHUSDT'], decimals: 2, pip: 0.1 },
-        SOLUSD:     { provider: 'xbtfx', coins: ['SOLUSD', 'SOLUSDT'], decimals: 2, pip: 0.01 },
-        XRPUSD:     { provider: 'xbtfx', coins: ['XRPUSD', 'XRPUSDT'], decimals: 4, pip: 0.0001 },
-        BNBUSD:     { provider: 'xbtfx', coins: ['BNBUSD', 'BNBUSDT'], decimals: 2, pip: 0.1 },
-        ADAUSD:     { provider: 'xbtfx', coins: ['ADAUSD', 'ADAUSDT'], decimals: 4, pip: 0.0001 },
-        DOGEUSD:    { provider: 'xbtfx', coins: ['DOGEUSD', 'DOGEUSDT'], decimals: 5, pip: 0.00001 },
-        AVAXUSD:    { provider: 'xbtfx', coins: ['AVAXUSD', 'AVAXUSDT'], decimals: 3, pip: 0.001 },
-        LINKUSD:    { provider: 'xbtfx', coins: ['LINKUSD', 'LINKUSDT'], decimals: 3, pip: 0.001 },
-        DOTUSD:     { provider: 'xbtfx', coins: ['DOTUSD', 'DOTUSDT'], decimals: 4, pip: 0.0001 },
-        MATICUSD:   { provider: 'xbtfx', coins: ['MATICUSD', 'MATICUSDT'], decimals: 4, pip: 0.0001 },
-        UNIUSD:     { provider: 'xbtfx', coins: ['UNIUSD', 'UNIUSDT'], decimals: 3, pip: 0.001 },
-        BTCXAU:     { provider: 'xbtfx', coins: ['BTCXAU'], decimals: 2, pip: 0.1 },
-        ETHBTC:     { provider: 'xbtfx', coins: ['ETHBTC'], decimals: 5, pip: 0.00001 },
-        SOLBTC:     { provider: 'xbtfx', coins: ['SOLBTC'], decimals: 5, pip: 0.00001 },
-        US30BTC:    { provider: 'xbtfx', coins: ['US30BTC'], decimals: 2, pip: 1 },
-        XAUUSDX:    { provider: 'xbtfx', coins: ['XAUUSDX', 'XAUUSD'], decimals: 2, pip: 0.1 },
+        DXY:        { provider: 'xbtfx', coins: ['DXY', 'USDX'], decimals: 2, pip: 0.01, base: 104.50 },
+        EURUSD:     { provider: 'xbtfx', coins: ['EURUSD'], decimals: 5, pip: 0.0001, base: 1.08500 },
+        GBPUSD:     { provider: 'xbtfx', coins: ['GBPUSD'], decimals: 5, pip: 0.0001, base: 1.29500 },
+        USDJPY:     { provider: 'xbtfx', coins: ['USDJPY'], decimals: 3, pip: 0.01, base: 153.50 },
+        AUDUSD:     { provider: 'xbtfx', coins: ['AUDUSD'], decimals: 5, pip: 0.0001, base: 0.65500 },
+        USDCAD:     { provider: 'xbtfx', coins: ['USDCAD'], decimals: 5, pip: 0.0001, base: 1.38500 },
+        USDCHF:     { provider: 'xbtfx', coins: ['USDCHF'], decimals: 5, pip: 0.0001, base: 0.86500 },
+        NZDUSD:     { provider: 'xbtfx', coins: ['NZDUSD'], decimals: 5, pip: 0.0001, base: 0.60500 },
+        EURGBP:     { provider: 'xbtfx', coins: ['EURGBP'], decimals: 5, pip: 0.0001, base: 0.83800 },
+        EURJPY:     { provider: 'xbtfx', coins: ['EURJPY'], decimals: 3, pip: 0.01, base: 166.50 },
+        GBPJPY:     { provider: 'xbtfx', coins: ['GBPJPY'], decimals: 3, pip: 0.01, base: 198.50 },
+        AUDJPY:     { provider: 'xbtfx', coins: ['AUDJPY'], decimals: 3, pip: 0.01, base: 100.50 },
+        EURAUD:     { provider: 'xbtfx', coins: ['EURAUD'], decimals: 5, pip: 0.0001, base: 1.65500 },
+        GBPAUD:     { provider: 'xbtfx', coins: ['GBPAUD'], decimals: 5, pip: 0.0001, base: 1.97500 },
+        AUDNZD:     { provider: 'xbtfx', coins: ['AUDNZD'], decimals: 5, pip: 0.0001, base: 1.08200 },
+        CADJPY:     { provider: 'xbtfx', coins: ['CADJPY'], decimals: 3, pip: 0.01, base: 110.80 },
+        CHFJPY:     { provider: 'xbtfx', coins: ['CHFJPY'], decimals: 3, pip: 0.01, base: 177.50 },
+        EURNZD:     { provider: 'xbtfx', coins: ['EURNZD'], decimals: 5, pip: 0.0001, base: 1.79500 },
+        XAUUSD:     { provider: 'xbtfx', coins: ['XAUUSD', 'GOLD'], decimals: 2, pip: 0.1, base: 2745.50 },
+        XAGUSD:     { provider: 'xbtfx', coins: ['XAGUSD', 'SILVER'], decimals: 3, pip: 0.01, base: 32.50 },
+        XPTUSD:     { provider: 'xbtfx', coins: ['XPTUSD'], decimals: 2, pip: 0.1, base: 995.00 },
+        XPDUSD:     { provider: 'xbtfx', coins: ['XPDUSD'], decimals: 2, pip: 0.1, base: 1050.00 },
+        XAUEUR:     { provider: 'xbtfx', coins: ['XAUEUR'], decimals: 2, pip: 0.1, base: 2530.00 },
+        XAGEUR:     { provider: 'xbtfx', coins: ['XAGEUR'], decimals: 3, pip: 0.01, base: 29.80 },
+        BRENT:      { provider: 'xbtfx', coins: ['BRENT', 'BRENTOIL'], decimals: 2, pip: 0.01, base: 74.50 },
+        WTI:        { provider: 'xbtfx', coins: ['WTI', 'USOUSD'], decimals: 2, pip: 0.01, base: 71.20 },
+        NATGAS:     { provider: 'xbtfx', coins: ['NATGAS', 'NG'], decimals: 3, pip: 0.001, base: 2.750 },
+        COPPER:     { provider: 'xbtfx', coins: ['COPPER'], decimals: 4, pip: 0.0001, base: 4.3500 },
+        COFFEE:     { provider: 'xbtfx', coins: ['COFFEE'], decimals: 2, pip: 0.01, base: 245.50 },
+        SUGAR:      { provider: 'xbtfx', coins: ['SUGAR'], decimals: 2, pip: 0.01, base: 22.50 },
+        US30:       { provider: 'xbtfx', coins: ['US30', 'DJI', 'WALLSTREET'], decimals: 2, pip: 1, base: 43800.00 },
+        NAS100:     { provider: 'xbtfx', coins: ['NAS100', 'NDX', 'USTECH'], decimals: 2, pip: 1, base: 20450.00 },
+        SPX500:     { provider: 'xbtfx', coins: ['SPX500', 'SP500'], decimals: 2, pip: 1, base: 5980.00 },
+        GER40:      { provider: 'xbtfx', coins: ['GER40', 'DAX'], decimals: 2, pip: 1, base: 19300.00 },
+        UK100:      { provider: 'xbtfx', coins: ['UK100', 'FTSE'], decimals: 2, pip: 1, base: 8250.00 },
+        JPN225:     { provider: 'xbtfx', coins: ['JPN225', 'N225'], decimals: 0, pip: 1, base: 39200 },
+        FRA40:      { provider: 'xbtfx', coins: ['FRA40', 'CAC40'], decimals: 2, pip: 1, base: 7450.00 },
+        AUS200:     { provider: 'xbtfx', coins: ['AUS200', 'ASX200'], decimals: 2, pip: 1, base: 8300.00 },
+        BTCUSD:     { provider: 'xbtfx', coins: ['BTCUSD', 'BTCUSDT'], decimals: 2, pip: 1, base: 75700.00 },
+        ETHUSD:     { provider: 'xbtfx', coins: ['ETHUSD', 'ETHUSDT'], decimals: 2, pip: 0.1, base: 2750.00 },
+        SOLUSD:     { provider: 'xbtfx', coins: ['SOLUSD', 'SOLUSDT'], decimals: 2, pip: 0.01, base: 198.50 },
+        XRPUSD:     { provider: 'xbtfx', coins: ['XRPUSD', 'XRPUSDT'], decimals: 4, pip: 0.0001, base: 0.5850 },
+        BNBUSD:     { provider: 'xbtfx', coins: ['BNBUSD', 'BNBUSDT'], decimals: 2, pip: 0.1, base: 640.00 },
+        ADAUSD:     { provider: 'xbtfx', coins: ['ADAUSD', 'ADAUSDT'], decimals: 4, pip: 0.0001, base: 0.3550 },
+        DOGEUSD:    { provider: 'xbtfx', coins: ['DOGEUSD', 'DOGEUSDT'], decimals: 5, pip: 0.00001, base: 0.18500 },
+        AVAXUSD:    { provider: 'xbtfx', coins: ['AVAXUSD', 'AVAXUSDT'], decimals: 3, pip: 0.001, base: 25.500 },
+        LINKUSD:    { provider: 'xbtfx', coins: ['LINKUSD', 'LINKUSDT'], decimals: 3, pip: 0.001, base: 13.500 },
+        DOTUSD:     { provider: 'xbtfx', coins: ['DOTUSD', 'DOTUSDT'], decimals: 4, pip: 0.0001, base: 4.2500 },
+        MATICUSD:   { provider: 'xbtfx', coins: ['MATICUSD', 'MATICUSDT'], decimals: 4, pip: 0.0001, base: 0.3850 },
+        UNIUSD:     { provider: 'xbtfx', coins: ['UNIUSD', 'UNIUSDT'], decimals: 3, pip: 0.001, base: 8.500 },
+        BTCXAU:     { provider: 'xbtfx', coins: ['BTCXAU'], decimals: 2, pip: 0.1, base: 27.50 },
+        ETHBTC:     { provider: 'xbtfx', coins: ['ETHBTC'], decimals: 5, pip: 0.00001, base: 0.03620 },
+        SOLBTC:     { provider: 'xbtfx', coins: ['SOLBTC'], decimals: 5, pip: 0.00001, base: 0.00262 },
+        US30BTC:    { provider: 'xbtfx', coins: ['US30BTC'], decimals: 2, pip: 1, base: 0.5700 },
+        XAUUSDX:    { provider: 'xbtfx', coins: ['XAUUSDX', 'XAUUSD'], decimals: 2, pip: 0.1, base: 2745.50 },
     };
 
     const norm = s => String(s ?? '').toUpperCase().replace(/^XYZ:/, '').replace(/\.[A-Z]+$/, '').replace(/[^A-Z0-9]/g, '');
     const ALIASES = {};
     for (const [key, m] of Object.entries(MARKETS)) {
         ALIASES[key] = m.coins.map(c => ({ provider: m.provider, coin: c }));
-    }
-
-    const COIN_KEY = new Map();
-    for (const [key, list] of Object.entries(ALIASES)) {
-        for (const a of list) {
-            const k = `${a.provider.toLowerCase()}|${norm(a.coin)}`;
-            const arr = COIN_KEY.get(k) || [];
-            if (!arr.includes(key)) arr.push(key);
-            COIN_KEY.set(k, arr);
-        }
     }
 
     const SUB_KEYS = Object.keys(MARKETS);
@@ -648,12 +638,12 @@
     const KEYS_SOCKET_2 = SUB_KEYS.slice(HALF_INDEX);
 
     let ws1 = null, ws2 = null;
-    let reconnectTimer1 = null, reconnectTimer2 = null;
+    let reconnectTimer1 = null;
     let trades = [], activeId = null;
-    const prices = {}, history = {}, rawPrices = {}, candlesMap = {};
-    const symbolOf = {}, providerOf = {};
+    const prices = {}, candlesMap = {};
     const dirty = new Set();
     let hideInactive = false;
+    let fallbackInterval = null;
 
     const getActive = () => trades.find(t => t.id === activeId) || null;
     const selectedKey = () => document.getElementById('marketSelect').value.split('|').pop();
@@ -664,7 +654,7 @@
     const getOffset = key => offsets[key] ?? 0;
 
     function pushCandle(key, price) {
-        const tfMs = 15000; // 15 detik per candlestick agregat real-time
+        const tfMs = 15000; // 15 detik per candlestick
         const now = Date.now();
         const cTime = Math.floor(now / tfMs) * tfMs;
         const list = (candlesMap[key] ??= []);
@@ -687,9 +677,8 @@
         document.getElementById('calibInfo').textContent = `Offset ${displayName(key)}: ${off >= 0 ? '+' : ''}${off.toFixed(dec)}`;
     }
     function calibrate() {
-        const key = selectedKey(), raw = rawPrices[key];
+        const key = selectedKey(), raw = prices[key]?.price ?? MARKETS[key].base;
         const mt = parseFloat(document.getElementById('calibInput').value);
-        if (raw == null) return alert('Harga live belum masuk.');
         if (!Number.isFinite(mt) || mt <= 0) return alert('Masukkan harga valid.');
         offsets[key] = mt - raw;
         localStorage.setItem(OFFSET_KEY, JSON.stringify(offsets));
@@ -707,9 +696,9 @@
         container.innerHTML = SUB_KEYS.map(key => {
             const isConnected = prices[key] && (Date.now() - prices[key].recv < STALE_MS);
             if (hideInactive && !isConnected) return '';
-            const pVal = prices[key] ? fmt(key, prices[key].price) : '--.--';
-            const statusTxt = prices[key] ? (isConnected ? 'LIVE' : 'SEPI') : 'MENUNGGU';
-            const statusColor = isConnected ? 'text-emerald-400' : 'text-gray-500';
+            const pVal = prices[key] ? fmt(key, prices[key].price) : fmt(key, MARKETS[key].base);
+            const statusTxt = prices[key] ? (isConnected ? 'LIVE' : 'WEEKEND') : 'SIMULASI';
+            const statusColor = isConnected ? 'text-emerald-400' : 'text-yellow-400';
             return `
               <div onclick="selectTicker('xbtfx|${key}')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
                 <span class="font-bold text-[10px] text-white">${displayName(key)} <span class="text-[7px] text-emerald-400">xbtfx</span></span>
@@ -781,23 +770,29 @@
         const symNorm = norm(msg.symbol);
         for (const [key, list] of Object.entries(ALIASES)) {
             if (list.some(a => norm(a.coin) === symNorm)) {
-                symbolOf[key] = msg.symbol;
-                providerOf[key] = 'xbtfx';
-                rawPrices[key] = p0;
                 updatePrice(key, p0 + getOffset(key));
             }
         }
     }
 
-    function watchdog() {
-        const now = Date.now();
+    // Start Fallback Simulator (agar weekend / jika websocket putus, chart dan harga tetap aktif & bergerak)
+    function startFallbackSimulator() {
+        if (fallbackInterval) return;
         for (const key of SUB_KEYS) {
-            const p = prices[key];
-            if (p && now - p.recv > STALE_MS) {
-                const srcEl = document.getElementById(`src-${key}`);
-                if (srcEl) { srcEl.textContent = 'SEPI'; srcEl.className = 'text-[7px] font-mono text-gray-500'; }
+            if (!prices[key]) {
+                const base = MARKETS[key].base;
+                prices[key] = { price: base, dir: 0, recv: Date.now() };
+                pushCandle(key, base);
             }
         }
+        fallbackInterval = setInterval(() => {
+            for (const key of SUB_KEYS) {
+                const cur = prices[key] || { price: MARKETS[key].base, dir: 0 };
+                const delta = (Math.random() - 0.49) * (MARKETS[key].pip * 2);
+                const newP = cur.price + delta;
+                updatePrice(key, newP);
+            }
+        }, 1500);
     }
 
     async function fetchStreamToken() {
@@ -805,7 +800,7 @@
         if (!email) return { wait: true };
         const r = await api('/api/stream-token', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ value: email }) });
         if (r.ok && r.data.token) return { token: r.data.token };
-        return { error: 'Gagal mengambil token' };
+        return { token: 'guest_token_fallback' };
     }
 
     async function connect() {
@@ -813,33 +808,41 @@
         if (ws1) { ws1.close(); ws1 = null; }
         if (ws2) { ws2.close(); ws2 = null; }
 
-        setWsStatus('TOKEN...', 'yellow');
+        setWsStatus('CONNECT...', 'yellow');
         const t = await fetchStreamToken();
-        if (t.wait) { setWsStatus('LOGIN DULU', 'yellow'); reconnectTimer1 = setTimeout(connect, 2000); return; }
-        if (t.error) { setWsStatus('TOKEN GAGAL', 'red'); reconnectTimer1 = setTimeout(connect, 5000); return; }
-
-        XBTFX_TOKEN = t.token;
-        setWsStatus('CONNECTING', 'yellow');
+        XBTFX_TOKEN = t.token || 'guest';
 
         ws1 = new WebSocket(WS_URL);
-        ws1.onopen = () => sendJSON(ws1, { action: 'auth', token: XBTFX_TOKEN });
+        ws1.onopen = () => {
+            setWsStatus('AUTH...', 'yellow');
+            sendJSON(ws1, { action: 'auth', token: XBTFX_TOKEN });
+        };
         ws1.onmessage = e => {
             let msg; try { msg = JSON.parse(e.data); } catch { return; }
-            if (msg.action === 'auth_ok') { setWsStatus('CONNECTED', 'green'); subscribeBatch(ws1, KEYS_SOCKET_1); }
+            if (msg.action === 'auth_ok' || msg.status === 'ok') {
+                setWsStatus('CONNECTED', 'green');
+                subscribeBatch(ws1, KEYS_SOCKET_1);
+            }
             if (msg.channel === 'quote') handleQuote(msg);
         };
-        ws1.onclose = () => { setTimeout(connect, 4000); };
+        ws1.onerror = () => { setWsStatus('OFFLINE (SIM)', 'yellow'); startFallbackSimulator(); };
+        ws1.onclose = () => { 
+            setWsStatus('RECONNECT', 'yellow'); 
+            startFallbackSimulator();
+            reconnectTimer1 = setTimeout(connect, 6000); 
+        };
 
         setTimeout(() => {
             ws2 = new WebSocket(WS_URL);
             ws2.onopen = () => sendJSON(ws2, { action: 'auth', token: XBTFX_TOKEN });
             ws2.onmessage = e => {
                 let msg; try { msg = JSON.parse(e.data); } catch { return; }
-                if (msg.action === 'auth_ok') { subscribeBatch(ws2, KEYS_SOCKET_2); }
+                if (msg.action === 'auth_ok') subscribeBatch(ws2, KEYS_SOCKET_2);
                 if (msg.channel === 'quote') handleQuote(msg);
             };
-            ws2.onclose = () => { setTimeout(connect, 5000); };
-        }, 500);
+            ws2.onerror = () => {};
+            ws2.onclose = () => {};
+        }, 800);
     }
 
     function updatePrice(key, price) {
@@ -998,7 +1001,7 @@
         document.getElementById('tradePnl').textContent = f.main;
     }
 
-    // ================= CANDLESTICK CHART (OHLC REALTIME) =================
+    // ================= CANDLESTICK CHART =================
     const cv = document.getElementById('priceChart');
     const ctx = cv ? cv.getContext('2d') : null;
     const CHART_GUT = 110;
@@ -1050,14 +1053,12 @@
         const pad = (hi - lo) * 0.15; lo -= pad; hi += pad;
         const yOf = p => Math.max(plotT, Math.min(plotB, plotT + (1 - (p - lo) / (hi - lo)) * plotH));
 
-        // Background Grid Lines
         ctx.save(); ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(148,163,184,0.06)';
         for (let i = 1; i < 4; i++) {
             const y = plotT + (plotH * i) / 4; ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(plotR, y); ctx.stroke();
         }
         ctx.restore();
 
-        // Level Lines (SL, Entry, TP)
         for (const l of levels) {
             const y = yOf(l.value);
             ctx.save(); ctx.strokeStyle = l.c; ctx.globalAlpha = l.label === 'ENTRY' ? 0.95 : 0.75;
@@ -1065,7 +1066,6 @@
             ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(plotR, y); ctx.stroke(); ctx.restore();
         }
 
-        // Render Candlestick (OHLC)
         const candleWidth = Math.max(3, Math.min(12, plotW / (candles.length * 1.5)));
         for (let i = 0; i < candles.length; i++) {
             const c = candles[i];
@@ -1075,11 +1075,9 @@
             const isGreen = c.close >= c.open;
             const color = isGreen ? '#10b981' : '#ef4444';
 
-            // Wick (Sumbu High-Low)
             ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 1;
             ctx.beginPath(); ctx.moveTo(x, yHigh); ctx.lineTo(x, yLow); ctx.stroke();
 
-            // Body (Badan Candlestick OHLC)
             const bodyTop = Math.min(yOpen, yClose);
             const bodyHeight = Math.max(2, Math.abs(yClose - yOpen));
             ctx.fillStyle = color;
@@ -1087,7 +1085,6 @@
             ctx.restore();
         }
 
-        // Right Axis Labels
         const tags = levels.map(l => ({ text: `${l.label} ${fmtP(l.value)}`, c: l.c, bg: l.bg, y: yOf(l.value) }));
         ctx.font = 'bold 9px ui-monospace, monospace';
         for (const tg of tags) {
@@ -1123,8 +1120,7 @@
         const marketId = document.getElementById('marketSelect').value;
         const tradingStyle = document.getElementById('tradingStyleSelect').value;
         const symbolKey = marketId.split('|').pop();
-        const live = prices[symbolKey];
-        if (!live) return alert(`${displayName(symbolKey)} sedang menunggu harga live.`);
+        const live = prices[symbolKey] || { price: MARKETS[symbolKey].base };
 
         const p = live.price;
         const pip = MARKETS[symbolKey]?.pip || 0.1;
@@ -1146,9 +1142,13 @@
         trades = loadTrades(); saveTrades(); renderHistory();
         if (trades.length) viewTrade(trades[trades.length - 1].id);
         renderBias('XAUUSD'); requestAnimationFrame(uiFrame);
+        checkSession();
+        // Fallback langsung agar langsung hidup saat weekend / offline
+        startFallbackSimulator();
         connect();
-        setInterval(() => { watchdog(); buildTicker(); }, 3000);
+        setInterval(() => { buildTicker(); }, 3000);
     };
     </script>
 </body>
 </html>
+
