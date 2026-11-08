@@ -3,19 +3,51 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Pendeteksi error: script terpisah, tetap jalan walaupun script utama error -->
+    <script>
+      (function () {
+        var errs = [];
+        function show() {
+          var b = document.getElementById('jsErrBox');
+          if (!b) {
+            b = document.createElement('div');
+            b.id = 'jsErrBox';
+            b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#7f1d1d;color:#fff;font:11px monospace;padding:8px;white-space:pre-wrap;word-break:break-all;max-height:40vh;overflow:auto';
+            (document.body || document.documentElement).appendChild(b);
+          }
+          b.textContent = errs.join('\n');
+        }
+        function add(text) {
+          if (errs.length < 5) errs.push(text);
+          show();
+        }
+        window.onerror = function (msg, src, line) {
+          add('JS ERROR #' + (errs.length + 1) + ': ' + msg + ' (baris ' + line + ')');
+          return false;
+        };
+        window.addEventListener('unhandledrejection', function (e) {
+          var r = e.reason;
+          add('PROMISE ERROR: ' + (r && r.message ? r.message : r));
+        });
+      })();
+    </script>
+
     <title>Alu Signal Z & Terminal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        darkbg: '#0b0e14', cardbg: '#151924', panelborder: '#232936',
-                        accentblue: '#2962ff', accentgreen: '#00c076', accentred: '#ff3b69'
+        if (window.tailwind) {
+            tailwind.config = {
+                darkMode: 'class',
+                theme: {
+                    extend: {
+                        colors: {
+                            darkbg: '#0b0e14', cardbg: '#151924', panelborder: '#232936',
+                            accentblue: '#2962ff', accentgreen: '#00c076', accentred: '#ff3b69'
+                        }
                     }
                 }
-            }
+            };
         }
     </script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -42,7 +74,7 @@
                 <p class="text-[11px] text-gray-400">Silakan masukkan email terdaftar atau kode admin</p>
             </div>
 
-            <form id="authForm" onsubmit="handleUniversalLogin(event)" class="space-y-4 pt-2">
+            <form id="authForm" onsubmit="event.preventDefault(); handleUniversalLogin(event)" class="space-y-4 pt-2">
                 <div>
                     <label class="text-[10px] font-bold text-gray-400 block mb-1 tracking-wider">ACCESS LOGIN</label>
                     <input type="text" id="authInput" required class="w-full bg-darkbg border border-panelborder rounded-xl p-3 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="nama@email.com atau Kode Admin">
@@ -51,6 +83,7 @@
                     <i class="fa-solid fa-right-to-bracket"></i> MASUK SISTEM
                 </button>
             </form>
+            <p id="loginStatus" class="text-[10px] text-center font-mono min-h-[14px] text-gray-400"></p>
 
             <div class="pt-4 border-t border-panelborder/60 text-center space-y-1.5">
                 <p class="text-[10px] text-gray-400 font-medium">Bantuan & Informasi Admin:</p>
@@ -486,21 +519,35 @@
 
     async function handleUniversalLogin(e) {
         e.preventDefault();
-        const val = document.getElementById('authInput').value.trim();
-        if (!val) return;
+        const st = document.getElementById('loginStatus');
+        const say = (t, cls) => {
+            if (!st) return;
+            st.textContent = t;
+            st.className = `text-[10px] text-center font-mono min-h-[14px] ${cls}`;
+        };
+        try {
+            const val = document.getElementById('authInput').value.trim();
+            if (!val) return say('Isi email atau kode admin dulu.', 'text-yellow-400');
 
-        const r = await verifyLogin(val);
-        if (!r.data.ok) return alert(errorOf(r, `Login gagal (HTTP ${r.status}).`));
+            say('Mengecek...', 'text-gray-400');
+            const r = await verifyLogin(val);
 
-        if (r.data.role === 'admin') {
-            localStorage.setItem(SESSION_TYPE_KEY, 'admin_reg');
-            localStorage.setItem(SESSION_ADMIN_KEY, val);
-            return openRegisterDashboard();
+            if (!r.data || !r.data.ok) {
+                return say(`Login ditolak: ${errorOf(r, `HTTP ${r.status}`)}`, 'text-red-400');
+            }
+
+            if (r.data.role === 'admin') {
+                localStorage.setItem(SESSION_TYPE_KEY, 'admin_reg');
+                localStorage.setItem(SESSION_ADMIN_KEY, val);
+                return openRegisterDashboard();
+            }
+
+            localStorage.setItem(SESSION_TYPE_KEY, 'terminal');
+            localStorage.setItem(SESSION_EMAIL_KEY, r.data.email);
+            openTerminalApp();
+        } catch (err) {
+            say(`Error: ${err.message}`, 'text-red-400');
         }
-
-        localStorage.setItem(SESSION_TYPE_KEY, 'terminal');
-        localStorage.setItem(SESSION_EMAIL_KEY, r.data.email);
-        openTerminalApp();
     }
 
     async function checkSession() {
@@ -668,14 +715,14 @@
         COPPER:     { provider: 'xbtfx', coins: ['COPPER'], decimals: 4, pip: 0.0001 },
         COFFEE:     { provider: 'xbtfx', coins: ['COFFEE'], decimals: 2, pip: 0.01 },
         SUGAR:      { provider: 'xbtfx', coins: ['SUGAR'], decimals: 2, pip: 0.01 },
-        US30:       { provider: 'xbtfx', coins: ['US30', 'DJI', 'WALLSTREET'], decimals: 2, pip: 1 },
-        NAS100:     { provider: 'xbtfx', coins: ['NAS100', 'NDX', 'USTECH'], decimals: 2, pip: 1 },
-        SPX500:     { provider: 'xbtfx', coins: ['SPX500', 'SP500'], decimals: 2, pip: 1 },
-        GER40:      { provider: 'xbtfx', coins: ['GER40', 'DAX'], decimals: 2, pip: 1 },
+        US30:       { provider: 'xbtfx', coins: ['US30', 'DJ30', 'DJI', 'WALLSTREET'], decimals: 2, pip: 1 },
+        NAS100:     { provider: 'xbtfx', coins: ['NAS100', 'US100', 'NDX', 'USTEC', 'USTECH'], decimals: 2, pip: 1 },
+        SPX500:     { provider: 'xbtfx', coins: ['SPX500', 'US500', 'SP500'], decimals: 2, pip: 1 },
+        GER40:      { provider: 'xbtfx', coins: ['GER40', 'DE40', 'GER30', 'DAX'], decimals: 2, pip: 1 },
         UK100:      { provider: 'xbtfx', coins: ['UK100', 'FTSE'], decimals: 2, pip: 1 },
-        JPN225:     { provider: 'xbtfx', coins: ['JPN225', 'N225'], decimals: 0, pip: 1 },
-        FRA40:      { provider: 'xbtfx', coins: ['FRA40', 'CAC40'], decimals: 2, pip: 1 },
-        AUS200:     { provider: 'xbtfx', coins: ['AUS200', 'ASX200'], decimals: 2, pip: 1 },
+        JPN225:     { provider: 'xbtfx', coins: ['JPN225', 'JP225', 'N225'], decimals: 0, pip: 1 },
+        FRA40:      { provider: 'xbtfx', coins: ['FRA40', 'FR40', 'CAC40'], decimals: 2, pip: 1 },
+        AUS200:     { provider: 'xbtfx', coins: ['AUS200', 'AU200', 'ASX200'], decimals: 2, pip: 1 },
         BTCUSD:     { provider: 'xbtfx', coins: ['BTCUSD', 'BTCUSDT'], decimals: 2, pip: 1 },
         ETHUSD:     { provider: 'xbtfx', coins: ['ETHUSD', 'ETHUSDT'], decimals: 2, pip: 0.1 },
         SOLUSD:     { provider: 'xbtfx', coins: ['SOLUSD', 'SOLUSDT'], decimals: 2, pip: 0.01 },
@@ -860,18 +907,59 @@
         return [...new Set([...(COIN_KEY.get(`xbtfx|${n}`) || []), ...(COIN_KEY.get(`*|${n}`) || [])])];
     };
 
-    function subscribeBatch(sock, keyList) {
+    // Status diagnosa per socket dan per key
+    const sockState = { 1: 'idle', 2: 'idle' };
+    const sockOf = {};        // key -> socket yang dipakai untuk subscribe (1/2)
+    const subAt = {};         // key -> waktu subscribe terakhir
+    const aliasIdx = {};      // key -> indeks alias yang sedang dicoba
+    const workingSym = {};    // key -> simbol yang terbukti mengirim quote
+    const s2 = { fallback: false };
+    let s2Timer = null;
+
+    // Simbol untuk subscribe: yang sudah terbukti jalan, atau alias yang sedang dicoba
+    const aliasOf = key => {
+        if (workingSym[key]) return workingSym[key];
+        const list = MARKETS[key]?.coins || [];
+        return list[aliasIdx[key] || 0];
+    };
+
+    function refreshWsBadge() {
+        const s1ok = sockState[1] === 'ok';
+        const s2ok = sockState[2] === 'ok';
+        let txt;
+        if (s1ok && s2ok) txt = 'CONNECTED (DUAL)';
+        else if (s1ok && s2.fallback) txt = 'CONNECTED (S1 + FALLBACK)';
+        else if (s1ok) txt = 'CONNECTED (S1 ONLY)';
+        else txt = 'CONNECTING';
+        setWsStatus(txt, s1ok ? 'green' : 'yellow');
+    }
+
+    // Subscribe per batch 8 simbol
+    function subscribeKeys(sock, sockNo, keyList) {
         const batchSize = 8;
         for (let i = 0; i < keyList.length; i += batchSize) {
             const chunk = keyList.slice(i, i + batchSize);
-            const symbolsToSub = chunk.map(key => STREAM_SYMBOL(key));
-            
             setTimeout(() => {
                 if (!sock || sock.readyState !== WebSocket.OPEN) return;
-                sendJSON(sock, { action: 'subscribe', channel: 'quotes', symbols: symbolsToSub });
+                const syms = chunk.map(key => {
+                    sockOf[key] = sockNo;
+                    subAt[key] = Date.now();
+                    return aliasOf(key);
+                });
+                sendJSON(sock, { action: 'subscribe', channel: 'quotes', symbols: syms });
                 chunk.forEach(key => markSrc(key, 'SUB', 'text-gray-500'));
             }, (i / batchSize) * 200);
         }
+    }
+
+    // Subscribe satu key saja, dipakai saat mencoba alias berikutnya
+    function resubscribeKey(key) {
+        const preferred = sockOf[key] === 2 ? ws2 : ws1;
+        const sock = (preferred && preferred.readyState === WebSocket.OPEN) ? preferred : ws1;
+        if (!sock || sock.readyState !== WebSocket.OPEN) return;
+        subAt[key] = Date.now();
+        sendJSON(sock, { action: 'subscribe', channel: 'quotes', symbols: [aliasOf(key)] });
+        markSrc(key, `ALT${aliasIdx[key] || 0}`, 'text-yellow-400');
     }
 
     function handleQuote(msg) {
@@ -879,6 +967,7 @@
         if (!(p0 > 0)) return;
         for (const key of keysOf(msg.symbol)) {
             symbolOf[key] = msg.symbol;
+            workingSym[key] = msg.symbol;
             providerOf[key] = 'xbtfx';
             rawPrices[key] = p0;
             markSrc(key, 'LIVE', 'text-emerald-400');
@@ -886,8 +975,18 @@
         }
     }
 
+    function handleServerMsg(sockNo, msg) {
+        if (DEBUG) console.log(`ws${sockNo}`, JSON.stringify(msg).slice(0, 300));
+        if (msg.action === 'error' || msg.error) {
+            console.warn(`ws${sockNo} error`, msg);
+            const syms = Array.isArray(msg.symbols) ? msg.symbols : (msg.symbol ? [msg.symbol] : []);
+            for (const s of syms) for (const key of keysOf(s)) markSrc(key, 'ERR', 'text-red-400');
+        }
+    }
+
     function watchdog() {
         const now = Date.now();
+        const anyReady = streamReady1 || streamReady2;
         for (const key of SUB_KEYS) {
             if (!symbolOf[key]) {
                 const m = MARKETS[key];
@@ -895,7 +994,23 @@
             }
             const p = prices[key];
             if (!p) {
-                if (streamReady1 || streamReady2) markSrc(key, 'MENUNGGU', 'text-gray-500');
+                if (!anyReady) continue;
+                const started = subAt[key];
+                const total = MARKETS[key]?.coins.length || 1;
+                const idx = aliasIdx[key] || 0;
+                const waited = started ? now - started : 0;
+
+                if (started && waited > 15000 && !workingSym[key] && idx < total - 1) {
+                    aliasIdx[key] = idx + 1;
+                    if (DEBUG) console.log('coba alias', key, aliasOf(key));
+                    resubscribeKey(key);
+                } else if (started && waited > 15000) {
+                    markSrc(key, 'NOQ', 'text-red-400');
+                } else if (idx > 0) {
+                    markSrc(key, `ALT${idx}`, 'text-yellow-400');
+                } else {
+                    markSrc(key, started ? 'SUB' : 'MENUNGGU', 'text-gray-500');
+                }
                 continue;
             }
             if (now - p.recv > STALE_MS) markSrc(key, 'SEPI', 'text-gray-500');
@@ -917,13 +1032,15 @@
     }
 
     async function connect() {
-        clearTimeout(reconnectTimer1); clearTimeout(reconnectTimer2);
+        clearTimeout(reconnectTimer1); clearTimeout(reconnectTimer2); clearTimeout(s2Timer);
         clearInterval(pingTimer1); clearInterval(pingTimer2);
-        
+
         if (ws1) { const old = ws1; ws1 = null; old.onclose = null; old.close(); }
         if (ws2) { const old = ws2; ws2 = null; old.onclose = null; old.close(); }
-        
+
         streamReady1 = false; streamReady2 = false;
+        sockState[1] = 'idle'; sockState[2] = 'idle';
+        s2.fallback = false;
         authFailed = false;
         const myId = ++connectId;
 
@@ -945,15 +1062,21 @@
             let msg; try { msg = JSON.parse(e.data); } catch { return; }
             if (msg.action === 'auth_ok') {
                 streamReady1 = true;
-                setWsStatus('CONNECTED (DUAL)', 'green');
-                subscribeBatch(sock1, KEYS_SOCKET_1);
+                sockState[1] = 'ok';
+                refreshWsBadge();
+                subscribeKeys(sock1, 1, KEYS_SOCKET_1);
                 clearInterval(pingTimer1);
                 pingTimer1 = setInterval(() => sendJSON(sock1, { action: 'ping' }), 30000);
                 return;
             }
-            if (msg.channel === 'quote') handleQuote(msg);
+            if (msg.channel === 'quote') return handleQuote(msg);
+            handleServerMsg(1, msg);
         };
-        sock1.onclose = () => { if (ws1 === sock1 && !authFailed) reconnectTimer1 = setTimeout(connect, 4000); };
+        sock1.onclose = () => {
+            sockState[1] = 'closed';
+            refreshWsBadge();
+            if (ws1 === sock1 && !authFailed) reconnectTimer1 = setTimeout(connect, 4000);
+        };
 
         setTimeout(() => {
             if (myId !== connectId) return;
@@ -964,14 +1087,29 @@
                 let msg; try { msg = JSON.parse(e.data); } catch { return; }
                 if (msg.action === 'auth_ok') {
                     streamReady2 = true;
-                    subscribeBatch(sock2, KEYS_SOCKET_2);
+                    sockState[2] = 'ok';
+                    refreshWsBadge();
+                    subscribeKeys(sock2, 2, KEYS_SOCKET_2);
                     clearInterval(pingTimer2);
                     pingTimer2 = setInterval(() => sendJSON(sock2, { action: 'ping' }), 30000);
                     return;
                 }
-                if (msg.channel === 'quote') handleQuote(msg);
+                if (msg.channel === 'quote') return handleQuote(msg);
+                handleServerMsg(2, msg);
             };
-            sock2.onclose = () => { if (ws2 === sock2 && !authFailed) reconnectTimer2 = setTimeout(connect, 5000); };
+            sock2.onclose = () => {
+                sockState[2] = 'closed';
+                refreshWsBadge();
+                if (ws2 === sock2 && !authFailed) reconnectTimer2 = setTimeout(connect, 5000);
+            };
+
+            // Socket 2 belum auth dalam 10 detik: pindahkan key-nya ke socket 1
+            s2Timer = setTimeout(() => {
+                if (myId !== connectId || sockState[2] === 'ok') return;
+                s2.fallback = true;
+                if (ws1 && ws1.readyState === WebSocket.OPEN) subscribeKeys(ws1, 1, KEYS_SOCKET_2);
+                refreshWsBadge();
+            }, 10000);
         }, 500);
     }
 
@@ -1006,7 +1144,7 @@
         processTickToCandle(key, price, 60);
         processTickToCandle(key, price, 240);
         processTickToCandle(key, price, 1440);
-        
+
         pushHistory(key, price);
         dirty.add(key);
 
@@ -1701,7 +1839,7 @@
     }
 
     function calcBias(candles) {
-        if (!candles || candles.length < 5) return { bias: 'NETRAL', score: 0 };
+        if (!candles || candles.length < 5) return { bias: 'N/A', score: 0 };
         const closes = candles.map(c => c.c);
         const period = Math.min(20, Math.floor(closes.length / 2));
         const e20 = emaSeries(closes, Math.max(2, period));
@@ -1780,7 +1918,7 @@
                     const candles = await fetchCandles(provider, symbol, tf.interval);
                     rows[tf.label] = calcBias(candles);
                 } catch (e) {
-                    rows[tf.label] = { bias: 'NETRAL', score: 0 };
+                    rows[tf.label] = { bias: 'N/A', score: 0 };
                 }
             }
             biasCache[key] = { at: Date.now(), rows };
@@ -1800,10 +1938,10 @@
 
         box.innerHTML = BIAS_TF.map(tf => {
             const b = rows?.[tf.label];
-            const name = b ? b.bias : 'NETRAL';
-            const cls = BIAS_STYLE[name] || BIAS_STYLE['NETRAL'];
-            const text = BIAS_LABEL[name] || 'Netral';
-            const score = b?.score != null ? `skor ${b.score > 0 ? '+' : ''}${b.score}` : '';
+            const name = b ? b.bias : 'N/A';
+            const cls = BIAS_STYLE[name] || BIAS_STYLE['N/A'];
+            const text = BIAS_LABEL[name] || 'N/A';
+            const score = (b && b.bias !== 'N/A' && b.score != null) ? `skor ${b.score > 0 ? '+' : ''}${b.score}` : '';
             return `
               <div class="bg-darkbg border border-panelborder rounded-lg p-1.5 text-center space-y-0.5">
                 <p class="text-[8px] font-bold text-gray-400">${tf.label}</p>
@@ -1812,11 +1950,9 @@
               </div>`;
         }).join('');
 
-        const vals = Object.values(rows || {}).map(r => r.bias || 'NETRAL');
-        const bull = vals.filter(v => v === 'BULLISH').length || 3;
-        const bear = vals.filter(v => v === 'BEARISH').length || 2;
-        const neu = vals.filter(v => v === 'NETRAL').length || 1;
-        info.textContent = `${bull} Bullish · ${bear} Bearish · ${neu} Netral · update ${new Date(cache?.at || Date.now()).toLocaleTimeString('id-ID', { hour12: false })}`;
+        const vals = Object.values(rows || {}).map(r => r.bias || 'N/A');
+        const cnt = k => vals.filter(v => v === k).length;
+        info.textContent = `${cnt('BULLISH')} Bullish · ${cnt('BEARISH')} Bearish · ${cnt('NETRAL')} Netral · ${cnt('N/A')} N/A · update ${new Date(cache?.at || Date.now()).toLocaleTimeString('id-ID', { hour12: false })}`;
     }
 
     // ================= AI SIGNAL, EMA & BOLLINGER BANDS FILTER LOGIC =================
@@ -1833,7 +1969,7 @@
         const k = 2 / (period + 1);
         let emaArray = [];
         let prevEMA = candles[0].c;
-        
+
         for (let i = 0; i < candles.length; i++) {
             const close = candles[i].c;
             if (i === 0) {
@@ -1852,5 +1988,211 @@
         if (!candles || candles.length < period) return { upper: 0, middle: 0, lower: 0 };
         const slice = candles.slice(-period);
         const closes = slice.map(c => c.c);
-        
-        const middle = closes.re
+
+        const middle = closes.reduce((sum, val) => sum + val, 0) / period;
+        const variance = closes.reduce((sum, val) => sum + Math.pow(val - middle, 2), 0) / period;
+        const stdDev = Math.sqrt(variance);
+
+        return {
+            middle: Number(middle.toFixed(5)),
+            upper: Number((middle + (multiplier * stdDev)).toFixed(5)),
+            lower: Number((middle - (multiplier * stdDev)).toFixed(5))
+        };
+    }
+
+    // Menentukan periode EMA filter berdasarkan Gaya Trading
+    function getEmaPeriodsForStyle(style) {
+        switch (style) {
+            case 'Scalping': return [5, 9];          // Agresif / Eksekusi Langsung
+            case 'Day Trading': return [14, 20];     // Harian
+            case 'Intraday': return [20, 50, 100];   // Menengah
+            case 'Swing': return [20, 200];          // Panjang
+            default: return [5, 9];
+        }
+    }
+
+    const CANDLE_CACHE = {};
+
+    async function loadCandles(key, interval) {
+        const ck = `${key}|${interval}`;
+        const hit = CANDLE_CACHE[ck];
+        if (hit && Date.now() - hit.at < 180000) return hit.rows;
+
+        let rows = [];
+        try {
+            const provider = providerOf[key] || 'xbtfx';
+            const symbol = symbolOf[key] || MARKETS[key].coins[0];
+            const r = await api('/api/candles', {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({
+                    value: localStorage.getItem(SESSION_EMAIL_KEY) || '',
+                    symbol,
+                    interval,
+                    limit: 100,
+                }),
+            });
+            if (r.ok && r.data && Array.isArray(r.data.candles) && r.data.candles.length > 0) {
+                rows = r.data.candles.map(c => ({
+                    t: Number(c.openTime || c.t),
+                    o: Number(c.open || c.o),
+                    h: Number(c.high || c.h),
+                    l: Number(c.low || c.l),
+                    c: Number(c.close || c.c)
+                }));
+            }
+        } catch (err) {
+            console.warn('Gagal ambil candles dari API server, beralih ke local aggregator:', err);
+        }
+
+        if (rows.length < 5) {
+            const tfMinutes = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 }[interval] || 1;
+            const tfKey = `${tfMinutes}m`;
+            rows = (marketCandles[key]?.[tfKey] || []).map(c => ({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close }));
+
+            if (rows.length < 5) {
+                const rawTicks = history[key] || [];
+                if (rawTicks.length > 0) {
+                    const intervalMs = tfMinutes * 60 * 1000;
+                    const grouped = {};
+                    for (const tick of rawTicks) {
+                        const bucketTime = Math.floor(tick.t / intervalMs) * intervalMs;
+                        if (!grouped[bucketTime]) {
+                            grouped[bucketTime] = { t: bucketTime, o: tick.p, h: tick.p, l: tick.p, c: tick.p };
+                        } else {
+                            grouped[bucketTime].h = Math.max(grouped[bucketTime].h, tick.p);
+                            grouped[bucketTime].l = Math.min(grouped[bucketTime].l, tick.p);
+                            grouped[bucketTime].c = tick.p;
+                        }
+                    }
+                    rows = Object.values(grouped).sort((a, b) => a.t - b.t);
+                }
+            }
+        }
+
+        if (rows.length > 0) {
+            CANDLE_CACHE[ck] = { at: Date.now(), rows };
+        }
+        return rows;
+    }
+
+    const shiftCandles = (rows, off) => rows.map(c => ({ t: c.t, o: c.o + off, h: c.h + off, l: c.l + off, c: c.c + off }));
+
+    async function generateAISignal() {
+        const marketId = document.getElementById('marketSelect').value;
+        const tradingStyle = document.getElementById('tradingStyleSelect').value;
+        const symbolKey = marketId.split('|').pop();
+        const live = prices[symbolKey];
+        if (!live || !isLive(symbolKey)) {
+            return alert(`${displayName(symbolKey)} TIDAK TERSAMBUNG ke stream. Pilih pair lain atau tunggu harga masuk.`);
+        }
+
+        const email = localStorage.getItem(SESSION_EMAIL_KEY);
+        if (!email) return alert('Sesi tidak ditemukan. Silakan login ulang.');
+
+        const btn = document.getElementById('signalBtn');
+        btn.disabled = true;
+        btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> Menganalisis SMC + EMA + Bollinger Bands...`;
+
+        try {
+            const tf = STYLE_TF[tradingStyle];
+            if (!tf) throw new Error('gaya trading tidak dikenal');
+
+            const off = getOffset(symbolKey);
+            const [htfRows, mtfRows, ltfRows] = await Promise.all([
+                loadCandles(symbolKey, tf.htf),
+                loadCandles(symbolKey, tf.mtf),
+                tf.ltf ? loadCandles(symbolKey, tf.ltf).catch(() => []) : Promise.resolve([]),
+            ]);
+
+            const shiftedLtf = shiftCandles(ltfRows, off);
+            const shiftedMtf = shiftCandles(mtfRows, off);
+
+            // Hitung EMA Filter
+            const periods = getEmaPeriodsForStyle(tradingStyle);
+            const emaMetrics = {};
+            periods.forEach(p => {
+                const resEma = calculateEMA(shiftedLtf, p);
+                emaMetrics[`EMA_${p}`] = resEma.length ? Number(resEma[resEma.length - 1].toFixed(5)) : 0;
+            });
+
+            // Hitung Bollinger Bands Filter
+            const bbMetrics = calculateBollingerBands(shiftedMtf.length > 0 ? shiftedMtf : shiftedLtf);
+
+            const res = await fetch('/api/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email,
+                    marketId,
+                    tradingStyle,
+                    currentPrice: live.price,
+                    lang: currentLang,
+                    emaFilter: emaMetrics,
+                    bbFilter: bbMetrics, // Menyertakan data Bollinger Bands ke backend
+                    candles: {
+                        htf: shiftCandles(htfRows, off).slice(-200),
+                        mtf: shiftedMtf.slice(-200),
+                        ltf: shiftedLtf.slice(-200),
+                    },
+                }),
+            });
+
+            const txt = await res.text();
+            let data = {};
+            try {
+                data = JSON.parse(txt);
+            } catch {
+                const snippet = txt.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+                data = { error: `Server tidak mengirim JSON (HTTP ${res.status}). ${snippet}` };
+            }
+            if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+            if (!data.signal) return alert('Belum ada setup valid.\n\n' + (data.reason || ''));
+
+            const s = data.signal;
+            const t = {
+                id: Date.now().toString(36), key: symbolKey, style: tradingStyle,
+                signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
+                mode: s.mode, status: s.status, fill: s.fill || null,
+                entry: s.entry, bufferEnd: s.bufferEnd, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
+                zone: s.zone,
+                expiresAt: s.expireMs ? Date.now() + s.expireMs : null,
+                confidence: s.confidence, risk: s.risk, setup: s.setup,
+                setupLabel: s.setupLabel, zoneLabel: s.zoneLabel, zoneNote: s.zoneNote,
+                createdAt: Date.now(), hits: {},
+                card: { reason: s.reason }, no: nextNo(),
+            };
+
+            trades.push(t);
+            activeId = t.id;
+            saveTrades();
+            renderSignalCard(t);
+            renderHistory();
+            refreshActiveUI();
+        } catch (e) {
+            alert('Gagal generate sinyal: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnGenText">${DICT[currentLang].genBtn}</span>`;
+        }
+    }
+
+    // ================= BOOT =================
+    window.onload = () => {
+        checkSession();
+        buildTicker();
+        updateCalibInfo();
+        trades = loadTrades();
+        saveTrades();
+        renderHistory();
+        if (trades.length) viewTrade(trades[trades.length - 1].id);
+        renderBias(selectedKey());
+        requestAnimationFrame(uiFrame);
+        connect();
+        setInterval(() => { watchdog(); expirePending(); }, 1000);
+        setInterval(() => refreshBias(selectedKey()), 60000);
+    };
+    </script>
+</body>
+</html>
