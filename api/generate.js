@@ -254,8 +254,10 @@ export default async function handler(req, res) {
     const mtfC = cleanCandles(cnd.mtf ?? cnd.entry);
     const ltfC = cleanCandles(cnd.ltf);
 
-    // Hitung Bollinger Bands dari timeframe utama (MTF/LTF)
-    const bbFilter = calculateBollingerBands(mtfC.length > 0 ? mtfC : ltfC);
+    // Prioritaskan bbFilter dari body request frontend jika valid, jika tidak hitung secara lokal
+    const bbFilter = (body.bbFilter && body.bbFilter.middle > 0) 
+      ? body.bbFilter 
+      : calculateBollingerBands(mtfC.length > 0 ? mtfC : ltfC);
 
     const htfDir = structureDir(htfC, emaFilter, bbFilter);
     const isScalp = style.kind === 'scalp';
@@ -277,46 +279,4 @@ export default async function handler(req, res) {
     const tps = plan.tps || [entry + dir * 20, entry + dir * 40, entry + dir * 60];
 
     const actionType = plan.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET';
-    const sideText = dir === 1 ? 'BUY' : 'SELL';
-    const offsets = getAbsoluteScalpOffsets(symbol);
-
-    const emaSummary = Object.entries(emaFilter).map(([k, v]) => `${k}: ${v}`).join(' | ');
-    const bbSummary = `Upper: ${bbFilter.upper} | Mid: ${bbFilter.middle} | Lower: ${bbFilter.lower}`;
-
-    const actionDesc = sideText === 'BUY' 
-      ? 'mengambil posisi BELI (BUY) karena pantulan harga di area Bollinger Band Bawah & konfirmasi struktur Demand' 
-      : 'mengambil posisi JUAL (SELL) karena penolakan harga di area Bollinger Band Atas & tekanan Supply Zone';
-
-    const techReason = [
-      `Analisis Teknikal Pure SMC ${sideText} (${style.label}) pada pair ${symbol}.`,
-      `Alasan Eksekusi: Diputuskan ${actionDesc}. Indikator EMA (${emaSummary}) serta Bollinger Bands (${bbSummary}) bekerja bersama menyaring titik jenuh harga.`,
-      `Manajemen Risiko: Jarak Stop Loss dan Buffer telah disesuaikan secara presisi (${offsets.type}) dengan target profit optimal.`
-    ].join('\n\n');
-
-    return res.status(200).json({
-      ok: true,
-      signal: {
-        signal: sideText,
-        mode: actionType,
-        orderType: plan.orderType,
-        orderLabel: orderLabel(dir, plan.orderType),
-        status: plan.status,
-        entry: r(entry),
-        bufferEnd: r(plan.bufferEnd || entry),
-        sl: r(plan.sl),
-        tp1: r(tps[0]), tp2: r(tps[1]), tp3: r(tps[2]),
-        zone: plan.zone ? { min: r(plan.zone.min), max: r(plan.zone.max) } : null,
-        confidence: 'HIGH',
-        risk: 'LOW',
-        setup: 'CONTINUATION / REVERSAL (BB + SMC)',
-        setupLabel: style.label,
-        zoneLabel: 'Order Block / FVG / Bollinger Confluence',
-        zoneNote: `Range Mode (${offsets.type})`,
-        reason: techReason
-      }
-    });
-  } catch (err) {
-    console.error('generate error:', err);
-    return res.status(200).json({ ok: false, error: 'Server error: ' + err.message });
-  }
-}
+    const sideText = dir === 1 ?
