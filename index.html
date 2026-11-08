@@ -1564,11 +1564,15 @@
             ctx.restore();
         }
 
-        // Render Candlestick (OHLC)
-        const candleWidth = Math.max(3, Math.min(12, plotW / (candles.length * 1.5)));
-        for (let i = 0; i < candles.length; i++) {
-            const c = candles[i];
-            const x = plotL + 15 + i * (plotW / Math.max(1, candles.length));
+        // --- PENGATURAN PROPORSI CANDLESTICK AGAR TIDAK GEPENG/RENGGANG ---
+        const maxVisible = 25; // Batasi jumlah maksimal candle yang tampil agar jarak antar candle pas
+        const visibleCandles = candles.slice(-maxVisible);
+        const candleStep = plotW / Math.max(1, visibleCandles.length);
+        const candleWidth = Math.max(5, Math.min(10, candleStep * 0.65)); // Lebar badan candle diatur proporsional
+
+        for (let i = 0; i < visibleCandles.length; i++) {
+            const c = visibleCandles[i];
+            const x = plotL + 12 + i * candleStep;
             const yOpen = yOf(c.open), yClose = yOf(c.close);
             const yHigh = yOf(c.high), yLow = yOf(c.low);
             const isGreen = c.close >= c.open;
@@ -1577,12 +1581,12 @@
             // Wick (Sumbu High-Low)
             ctx.save();
             ctx.strokeStyle = color;
-            ctx.lineWidth = 1;
+            ctx.lineWidth = 1.2;
             ctx.beginPath(); ctx.moveTo(x, yHigh); ctx.lineTo(x, yLow); ctx.stroke();
 
             // Body (Badan Candlestick OHLC)
             const bodyTop = Math.min(yOpen, yClose);
-            const bodyHeight = Math.max(2, Math.abs(yClose - yOpen));
+            const bodyHeight = Math.max(3, Math.abs(yClose - yOpen));
             ctx.fillStyle = color;
             ctx.fillRect(x - candleWidth / 2, bodyTop, candleWidth, bodyHeight);
             ctx.restore();
