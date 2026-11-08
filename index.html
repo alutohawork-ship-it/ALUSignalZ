@@ -227,10 +227,10 @@
                     <div>
                         <label id="lblTradingStyle" class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
                         <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                            <option value="Scalping">Scalping (M1)</option>
-                            <option value="Day Trading">Day Trading (M1)</option>
-                            <option value="Intraday">Intraday (M5)</option>
-                            <option value="Swing">Swing (M15)</option>
+                            <option value="Scalping">Scalping (M1+M3+M5)</option>
+                            <option value="Day Trading">Day Trading (M5+M15+M30/H1)</option>
+                            <option value="Intraday">Intraday</option>
+                            <option value="Swing">Swing</option>
                         </select>
                     </div>
 
@@ -315,12 +315,12 @@
 
                         <div class="bg-darkbg/80 border border-panelborder rounded-xl p-2.5 space-y-2">
                             <div class="flex flex-wrap justify-between items-start gap-1">
-                                <p id="lblPriceMap" class="text-[9px] font-bold text-gray-400 tracking-wider">LIVE PRICE MAP (ENTRY, SL, TP)</p>
+                                <p id="lblPriceMap" class="text-[9px] font-bold text-gray-400 tracking-wider">LIVE MAP CHART</p>
                                 <span id="tradeStatus" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40 whitespace-nowrap">RUNNING</span>
                             </div>
                             <p id="tradePnl" class="text-[10px] font-mono font-bold text-gray-400">--</p>
                             <p id="tradeLive" class="text-[8px] font-mono text-gray-400"></p>
-                            <div class="relative w-full h-[220px] sm:h-[300px] lg:h-[320px]">
+                            <div class="relative w-full h-[200px] sm:h-[280px] lg:h-[300px]">
                                 <canvas id="priceChart" class="absolute inset-0 w-full h-full"></canvas>
                             </div>
                         </div>
@@ -601,8 +601,8 @@
     // ================= BAHASA =================
     let currentLang = 'id';
     const DICT = {
-        id: { subHeader: "Pure SMC 3-Layer Terminal", targetAsset: "TARGET ASET AKTIF", tradingStyle: "GAYA TRADING / STRATEGI", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE PRICE MAP (ENTRY, SL, TP)", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "Belum ada history.", running: "berjalan", liveStream: "LIVE MARKET STREAM", disclaimer: "Aktivitas trading beresiko dan tidak ada jaminan profit. Aplikasi ini bukan financial advisor dan sinyal bukan ajakan untuk membeli atau menjual. Atur risiko dan ukuran posisi sesuai kemampuanmu sendiri." },
-        en: { subHeader: "Pure SMC 3-Layer Terminal", targetAsset: "ACTIVE TARGET ASSET", tradingStyle: "TRADING STYLE / STRATEGY", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE PRICE MAP (ENTRY, SL, TP)", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "No trading history yet.", running: "running", liveStream: "LIVE MARKET STREAM", disclaimer: "Trading involves risk and there is no guarantee of profit. This app is not a financial advisor and signals are not an invitation to buy or sell. Manage your risk and position size according to your own ability." }
+        id: { subHeader: "Pure SMC 3-Layer Terminal", targetAsset: "TARGET ASET AKTIF", tradingStyle: "GAYA TRADING / STRATEGI", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE MAP CHART", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "Belum ada history.", running: "berjalan", liveStream: "LIVE MARKET STREAM", disclaimer: "Aktivitas trading beresiko dan tidak ada jaminan profit. Aplikasi ini bukan financial advisor dan sinyal bukan ajakan untuk membeli atau menjual. Atur risiko dan ukuran posisi sesuai kemampuanmu sendiri." },
+        en: { subHeader: "Pure SMC 3-Layer Terminal", targetAsset: "ACTIVE TARGET ASSET", tradingStyle: "TRADING STYLE / STRATEGY", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE MAP CHART", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "No trading history yet.", running: "running", liveStream: "LIVE MARKET STREAM", disclaimer: "Trading involves risk and there is no guarantee of profit. This app is not a financial advisor and signals are not an invitation to buy or sell. Manage your risk and position size according to your own ability." }
     };
     function toggleLang() {
         currentLang = currentLang === 'id' ? 'en' : 'id';
@@ -635,6 +635,7 @@
     const STALE_MS = 30000;
     const STORE_KEY = 'aluSignalZ_history_v3';
     const OFFSET_KEY = 'aluSignalZ_offsets_v1';
+    const DEBUG = localStorage.getItem('alu_debug') === '1';
 
     const MARKETS = {
         DXY:        { provider: 'xbtfx', coins: ['DXY', 'USDX'], decimals: 2, pip: 0.01 },
@@ -742,6 +743,8 @@
     const fmt = (key, p) => Number(p).toLocaleString('en-US', { minimumFractionDigits: MARKETS[key]?.decimals ?? 2, maximumFractionDigits: MARKETS[key]?.decimals ?? 2 });
     const fmtPips = p => `${p > 0 ? '+' : p < 0 ? '−' : ''}${Number(Math.abs(p).toFixed(1))} pip`;
     const displayName = key => key.replace(/^xyz:/, '');
+    const parseLevel = v => Number.isFinite(parseFloat(v)) ? parseFloat(v) : null;
+
     const DEFAULT_OFFSETS = {};
 
     const offsets = (() => { try { return JSON.parse(localStorage.getItem(OFFSET_KEY)) || {}; } catch { return {}; } })();
@@ -779,7 +782,7 @@
     }
 
     // ================= TICKER & UI =================
-    const PROV_COLOR = { xbtfx: 'text-emerald-400' };
+    const PROV_COLOR = { hyperliquid: 'text-yellow-400', veranta: 'text-blue-400', ostium: 'text-orange-400', binance: 'text-emerald-400', xbtfx: 'text-emerald-400' };
     function buildTicker() {
         const opts = [...document.querySelectorAll('#marketSelect option')];
         document.getElementById('tickerListContainer').innerHTML = opts.map(o => {
@@ -1462,7 +1465,7 @@
         renderCalendar();
     }
 
-    // ================= CANDLESTICK CHART (OHLC REALTIME) =================
+    // ================= LIVE MAP CHART (SMOOTH LINE CHART) =================
     const cv = document.getElementById('priceChart');
     const ctx = cv ? cv.getContext('2d') : null;
     const CHART_GUT = 110;
@@ -1502,20 +1505,14 @@
 
         const t = getActive();
         if (!t) return;
-        
-        let tfKey = '1m';
-        if (t.style === 'Intraday') tfKey = '5m';
-        else if (t.style === 'Swing') tfKey = '15m';
+        const ticks = history[t.key] || [];
 
-        const bucket = marketCandles[t.key] || {};
-        const candles = bucket[tfKey] || [];
-
-        if (!candles.length) {
+        if (!ticks.length) {
             ctx.font = 'bold 11px ui-monospace, monospace';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillStyle = '#94a3b8';
-            ctx.fillText('Menunggu data candlestick...', r.width / 2, r.height / 2);
+            ctx.fillText('Menunggu data live tick...', r.width / 2, r.height / 2);
             ctx.textAlign = 'left';
             return;
         }
@@ -1524,14 +1521,14 @@
         const fmtP = v => Number(v).toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
 
         const CW = r.width, CH = r.height;
-        const plotL = 6, plotT = 10, plotB = CH - 8, plotR = CW - CHART_GUT;
+        const plotL = 6, plotT = 20, plotB = CH - 8, plotR = CW - CHART_GUT;
         const plotW = plotR - plotL, plotH = plotB - plotT;
 
         const levels = chartLevels(t);
         let lo = Infinity, hi = -Infinity;
-        for (const c of candles) {
-            lo = Math.min(lo, c.low);
-            hi = Math.max(hi, c.high);
+        for (const tk of ticks) {
+            lo = Math.min(lo, tk.p);
+            hi = Math.max(hi, tk.p);
         }
         for (const l of levels) {
             lo = Math.min(lo, l.value);
@@ -1566,31 +1563,31 @@
             ctx.restore();
         }
 
-        // Proporsi Candlestick
-        const maxVisible = 25;
-        const visibleCandles = candles.slice(-maxVisible);
-        const candleStep = plotW / Math.max(1, visibleCandles.length);
-        const candleWidth = Math.max(5, Math.min(10, candleStep * 0.65));
-
-        for (let i = 0; i < visibleCandles.length; i++) {
-            const c = visibleCandles[i];
-            const x = plotL + 12 + i * candleStep;
-            const yOpen = yOf(c.open), yClose = yOf(c.close);
-            const yHigh = yOf(c.high), yLow = yOf(c.low);
-            const isGreen = c.close >= c.open;
-            const color = isGreen ? '#10b981' : '#ef4444';
-
-            ctx.save();
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 1.2;
-            ctx.beginPath(); ctx.moveTo(x, yHigh); ctx.lineTo(x, yLow); ctx.stroke();
-
-            const bodyTop = Math.min(yOpen, yClose);
-            const bodyHeight = Math.max(3, Math.abs(yClose - yOpen));
-            ctx.fillStyle = color;
-            ctx.fillRect(x - candleWidth / 2, bodyTop, candleWidth, bodyHeight);
-            ctx.restore();
+        // --- SMOOTH LIVE LINE CHART ---
+        const step = plotW / Math.max(1, ticks.length - 1);
+        ctx.save();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#2962ff';
+        ctx.beginPath();
+        for (let i = 0; i < ticks.length; i++) {
+            const x = plotL + i * step;
+            const y = yOf(ticks[i].p);
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
         }
+        ctx.stroke();
+
+        // Gradient Fill di Bawah Line Chart
+        const lastX = plotL + (ticks.length - 1) * step;
+        ctx.lineTo(lastX, plotB);
+        ctx.lineTo(plotL, plotB);
+        ctx.closePath();
+        const grad = ctx.createLinearGradient(0, plotT, 0, plotB);
+        grad.addColorStop(0, 'rgba(41, 98, 255, 0.35)');
+        grad.addColorStop(1, 'rgba(41, 98, 255, 0.0)');
+        ctx.fillStyle = grad;
+        ctx.fill();
+        ctx.restore();
 
         // Right Axis Labels
         const tags = levels.map(l => ({
@@ -1752,7 +1749,7 @@
         info.textContent = `${bull} Bullish · ${bear} Bearish · ${neu} Netral${na ? ` · ${na} N/A` : ''} · update ${new Date(cache.at).toLocaleTimeString('id-ID', { hour12: false })}`;
     }
 
-    // ================= AI SIGNAL =================
+    // ================= AI SIGNAL (TickerLayer Backend + Fallback) =================
     const STYLE_TF = {
         'Scalping':    { htf: '15m', mtf: '5m',  ltf: '1m' },
         'Day Trading': { htf: '1h',  mtf: '30m', ltf: '5m' },
@@ -1764,6 +1761,7 @@
     async function loadCandles(key, interval) {
         const ck = `${key}|${interval}`;
         const hit = CANDLE_CACHE[ck];
+        
         if (hit && Date.now() - hit.at < 180000) return hit.rows;
 
         try {
@@ -1773,7 +1771,9 @@
                 CANDLE_CACHE[ck] = { at: Date.now(), rows };
                 return rows;
             }
-        } catch {}
+        } catch (err) {
+            console.warn('Gagal ambil data candle via backend/TickerLayer, beralih ke tick lokal:', err);
+        }
 
         const tfMinutes = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 }[interval] || 1;
         const tfKey = `${tfMinutes}m`;
