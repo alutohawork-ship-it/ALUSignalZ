@@ -1,7 +1,8 @@
 // api/generate.js
 // Analisis Pure SMC Universal: TickerLayer OHLC Bars + XBTFX Live Stream Support
-// v2 — Day Trading / Intraday / Swing memakai setup struktural (HTF bias → Sweep → CHoCH → FVG)
+// v3 — Day Trading / Intraday / Swing memakai setup struktural (HTF bias → Sweep → CHoCH → FVG)
 //      + filter EMA (HTF) & Bollinger Bands (premium/discount di MTF).
+//      Candle diambil dari TickerLayer (endpoint range) bila kiriman frontend kurang.
 //      Jika tidak ada area valid, server TIDAK memaksa sinyal (signal: null).
 
 const KV_KEY = 'alu_clients';
@@ -37,6 +38,27 @@ const SETUP_CFG = {
   day:      { ema: [20, 50], pivot: 3, lookback: 60, riskAtr: [0.8, 2.5], maxDist: 2.0, expireMin: 240 },
   intraday: { ema: [20, 50], pivot: 3, lookback: 80, riskAtr: [0.8, 3.0], maxDist: 2.0, expireMin: 720 },
   swing:    { ema: [20, 50], pivot: 4, lookback: 80, riskAtr: [1.0, 3.5], maxDist: 1.5, expireMin: 2880 },
+};
+
+// Timeframe per gaya untuk fallback server: htf = bias, mtf = setup
+// (samakan dengan STYLE_TF di frontend)
+const STYLE_TF_SERVER = {
+  'Day Trading': { htf: '1h', mtf: '30m' },
+  'Intraday':    { htf: '4h', mtf: '1h' },
+  'Swing':       { htf: '1d', mtf: '4h' },
+};
+
+// Menit per timeframe
+const TF_MIN = { '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 };
+
+// Interval yang didukung endpoint range TickerLayer (multiplier + timespan)
+// 30m tidak ada di daftar → otomatis diagregasi dari 15m oleh getCandles
+const TL_SPAN = {
+  '5m':  { mult: 5,   span: 'minute', minutes: 5 },
+  '15m': { mult: 15,  span: 'minute', minutes: 15 },
+  '1h':  { mult: 60,  span: 'minute', minutes: 60 },
+  '4h':  { mult: 240, span: 'minute', minutes: 240 },
+  '1d':  { mult: 1,   span: 'day',    minutes: 1440 },
 };
 
 const orderLabel = (dir, orderType) => `${dir === 1 ? 'BUY' : 'SELL'} ${orderType === 'LIMIT' ? 'LIMIT' : 'NOW'}`;
@@ -78,34 +100,51 @@ function mapSymbolToTickerLayer(symbol) {
   return { asset: 'forex', symbol: s };
 }
 
-// Fungsi pengambil data bar OHLC dari TickerLayer REST API
-async function fetchTickerLayerOHLC(symbol, interval = '1h', apiKey, limit = 50) {
-  if (!apiKey) return [];
+const isoDate = d => d.toISOString().slice(0, 10);
+
+// Ambil N candle terakhir lewat endpoint range TickerLayer:
+// GET /{asset}/agg/{symbol}/{multiplier}/{timespan}/{from}/{to}?sort=asc&limit=5000
+async function fetchTickerLayerOHLC(symbol, interval = '1h', apiKey, limit = 100) {
+  if (!apiKey) {
+    console.error('TICKERLAYER_API_KEY kosong di environment Vercel');
+    return [];
+  }
+  const tf = TL_SPAN[interval];
+  if (!tf) return [];
   try {
     const mapped = mapSymbolToTickerLayer(symbol);
-    const url = `${TICKERLAYER_BASE_URL}/${mapped.asset}/agg/${mapped.symbol}/prev?interval=${interval}&limit=${limit}`;
+    const now = Date.now();
+    const days = Math.ceil((limit * tf.minutes * 60000) / 86400000) + 3;
+    const from = isoDate(new Date(now - days * 86400000));
+    const to = isoDate(new Date(now + 86400000));
+    const url = `${TICKERLAYER_BASE_URL}/${mapped.asset}/agg/${mapped.symbol}/${tf.mult}/${tf.span}/${from}/${to}?sort=asc&limit=5000`;
 
     const response = await fetch(url, {
       method: 'GET',
-      headers: {
-        'x-api-key': apiKey,
-        'Content-Type': 'application/json'
-      }
+      headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
     });
+    if (!response.ok) {
+      console.error(`TickerLayer ${interval} ${symbol} HTTP ${response.status}`);
+      return [];
+    }
 
-    if (!response.ok) return [];
     const data = await response.json();
-    const rows = Array.isArray(data) ? data : (data.results || data.candles || data.bars || []);
+    const rows = Array.isArray(data) ? data : (data.results || []);
 
-    return rows.map(c => ({
-      t: Number(c.t || c.time || Date.now()),
-      o: Number(c.o || c.open || 0),
-      h: Number(c.h || c.high || 0),
-      l: Number(c.l || c.low || 0),
-      c: Number(c.c || c.close || 0)
-    })).filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite)).sort((a, b) => a.t - b.t);
+    const out = rows.map(c => ({
+      t: Number(c.t || 0),
+      o: Number(c.o || 0),
+      h: Number(c.h || 0),
+      l: Number(c.l || 0),
+      c: Number(c.c || 0),
+    })).filter(c => c.t > 0 && [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite))
+      .sort((a, b) => a.t - b.t);
+
+    const result = out.slice(-limit);
+    console.log(`TickerLayer ${interval} ${symbol}: ${result.length} candle`);
+    return result;
   } catch (err) {
-    console.error(`Gagal fetch TickerLayer OHLC untuk ${symbol} (${interval}):`, err);
+    console.error(`Gagal fetch TickerLayer ${interval} ${symbol}:`, err);
     return [];
   }
 }
@@ -114,6 +153,39 @@ function cleanCandles(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return [];
   return rows.map(c => ({ t: Number(c?.t), o: Number(c?.o), h: Number(c?.h), l: Number(c?.l), c: Number(c?.c) }))
     .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite)).sort((a, b) => a.t - b.t);
+}
+
+// Gabungkan candle kecil menjadi candle besar, mis. 1h → 4h
+function aggregateCandles(candles, tfMin) {
+  const ms = tfMin * 60 * 1000;
+  const buckets = new Map();
+  for (const c of candles) {
+    const b = Math.floor(c.t / ms) * ms;
+    const g = buckets.get(b);
+    if (!g) {
+      buckets.set(b, { t: b, o: c.o, h: c.h, l: c.l, c: c.c });
+    } else {
+      g.h = Math.max(g.h, c.h);
+      g.l = Math.min(g.l, c.l);
+      g.c = c.c;
+    }
+  }
+  return [...buckets.values()].sort((a, b) => a.t - b.t);
+}
+
+// Ambil candle satu TF: coba TF asli dulu, kalau kurang pakai agregasi dari TF dasar
+async function getCandles(symbol, tf, need, apiKey) {
+  const native = await fetchTickerLayerOHLC(symbol, tf, apiKey, Math.max(need, 150));
+  if (native.length >= need) return native;
+
+  const targetMin = TF_MIN[tf];
+  const baseTf = targetMin >= 240 ? '1h' : '15m';
+  const factor = targetMin / TF_MIN[baseTf];
+  const baseLimit = Math.min(5000, need * factor + factor * 5);
+  const base = await fetchTickerLayerOHLC(symbol, baseTf, apiKey, baseLimit);
+  const agg = aggregateCandles(base, targetMin);
+  console.log(`Agregasi ${tf} dari ${baseTf}: ${agg.length} candle`);
+  return agg.length > native.length ? agg : native;
 }
 
 function atr(candles, period = 14) {
@@ -480,31 +552,54 @@ export default async function handler(req, res) {
     let mtfC = cleanCandles(body.candles?.mtf ?? body.candles?.entry);
     let ltfC = cleanCandles(body.candles?.ltf);
 
-    // Jika frontend tidak mengirim candles, backend fetch sendiri dari TickerLayer
-    if (htfC.length === 0 || mtfC.length === 0) {
-      htfC = await fetchTickerLayerOHLC(symbol, '1h', tickerLayerApiKey, 50);
-      mtfC = await fetchTickerLayerOHLC(symbol, '15m', tickerLayerApiKey, 50);
-    }
-
     const price = Number(body.currentPrice) || (mtfC.length > 0 ? mtfC[mtfC.length - 1].c : 2000);
 
-    const incomingBb = body.bbFilter;
-    const bbFilter = (incomingBb && Number(incomingBb.middle) > 0)
-      ? {
-          upper: Number(incomingBb.upper || 0),
-          middle: Number(incomingBb.middle || 0),
-          lower: Number(incomingBb.lower || 0)
-        }
-      : calculateBollingerBands(mtfC.length > 0 ? mtfC : ltfC);
-
-    let dir = 0, plan = null, meta = null;
+    let dir = 0, plan = null, meta = null, bbFilter;
 
     if (style.kind === 'scalp') {
+      if (htfC.length === 0 || mtfC.length === 0) {
+        htfC = await fetchTickerLayerOHLC(symbol, '1h', tickerLayerApiKey, 100);
+        mtfC = await fetchTickerLayerOHLC(symbol, '15m', tickerLayerApiKey, 100);
+      }
+
+      const incomingBb = body.bbFilter;
+      bbFilter = (incomingBb && Number(incomingBb.middle) > 0)
+        ? {
+            upper: Number(incomingBb.upper || 0),
+            middle: Number(incomingBb.middle || 0),
+            lower: Number(incomingBb.lower || 0)
+          }
+        : calculateBollingerBands(mtfC.length > 0 ? mtfC : ltfC);
+
       const htfDir = structureDir(htfC, emaFilter, bbFilter);
       const hr = scalpHitRun(mtfC, ltfC, htfDir, price, symbol, emaFilter, bbFilter, rrList);
       dir = hr.dir;
       plan = hr.plan;
     } else {
+      const tf = STYLE_TF_SERVER[styleKey];
+      const htfNeed = SETUP_CFG[style.kind].ema[1] + 5;
+      const mtfNeed = 30;
+
+      // Kiriman frontend sering pendek (candle dirakit dari tick live), jadi ambil dari server bila kurang
+      if (htfC.length < htfNeed) {
+        const h = await getCandles(symbol, tf.htf, htfNeed, tickerLayerApiKey);
+        if (h.length > htfC.length) htfC = h;
+      }
+      if (mtfC.length < mtfNeed) {
+        const m = await getCandles(symbol, tf.mtf, mtfNeed, tickerLayerApiKey);
+        if (m.length > mtfC.length) mtfC = m;
+      }
+
+      if (htfC.length < htfNeed || mtfC.length < mtfNeed) {
+        return res.status(200).json({
+          ok: true,
+          signal: null,
+          reason: `DATA CANDLE BELUM CUKUP · ${style.label}\nHTF ${tf.htf}: ${htfC.length}/${htfNeed} candle · MTF ${tf.mtf}: ${mtfC.length}/${mtfNeed} candle.\nCek log Vercel untuk status TickerLayer.`,
+        });
+      }
+
+      bbFilter = calculateBollingerBands(mtfC);
+
       const gp = buildGeneralPlan({
         htfC, mtfC, styleKind: style.kind, price, rrList, bb: bbFilter, dec
       });
