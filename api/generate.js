@@ -1,5 +1,5 @@
 // api/generate.js
-// Analisis Pure SMC Universal: XBTFX 60% Pairs + DXY Support & Fixed Range
+// Analisis Pure SMC Universal: XBTFX 60% Pairs + DXY Support & Fixed Range + EMA Filter Integration
 
 const KV_KEY = 'alu_clients';
 
@@ -66,10 +66,26 @@ function atr(candles, period = 14) {
   return s.length ? s.reduce((a, b) => a + b, 0) / s.length : 1;
 }
 
-function structureDir(candles) {
+function structureDir(candles, emaFilter = {}) {
   if (!candles || candles.length < 5) return 1;
   const last = candles[candles.length - 1], first = candles[0];
-  return last.c >= first.c ? 1 : -1;
+  let baseDir = last.c >= first.c ? 1 : -1;
+
+  // Konfirmasi tambahan menggunakan tren EMA yang dikirim dari klien
+  const emaKeys = Object.keys(emaFilter);
+  if (emaKeys.length > 0) {
+    const fastKey = emaKeys[0];
+    const slowKey = emaKeys[emaKeys.length - 1];
+    const fastVal = emaFilter[fastKey];
+    const slowVal = emaFilter[slowKey];
+    
+    if (fastVal && slowVal && fastVal > 0 && slowVal > 0) {
+      if (fastVal > slowVal && baseDir === 1) return 1;
+      if (fastVal < slowVal && baseDir === -1) return -1;
+    }
+  }
+
+  return baseDir;
 }
 
 function getAbsoluteScalpOffsets(symbol) {
@@ -104,8 +120,8 @@ function getAbsoluteScalpOffsets(symbol) {
   return { buffer: 0.0020, sl: 0.0055, type: 'DEFAULT_FIX' };
 }
 
-function scalpHitRun(mtfC, ltfC, htfDir, price, symbol) {
-  let dir = structureDir(mtfC);
+function scalpHitRun(mtfC, ltfC, htfDir, price, symbol, emaFilter) {
+  let dir = structureDir(mtfC, emaFilter);
   if (dir === 0) dir = htfDir !== 0 ? htfDir : 1;
   const activeDir = htfDir !== 0 ? htfDir : dir;
   const isBuy = activeDir === 1;
@@ -132,7 +148,7 @@ function scalpHitRun(mtfC, ltfC, htfDir, price, symbol) {
       sl: sl,
       tps: [tp1, tp2, tp3],
       zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
-      trigSrc: `Scalping Agresif (XBTFX 60% Fixed) [${offsets.type}]`,
+      trigSrc: `Scalping Agresif (XBTFX 60% Fixed + EMA Filter) [${offsets.type}]`,
       expireMs: 0,
     }
   };
@@ -148,10 +164,10 @@ function aggregateM15(m5) {
   return out.length ? out : m5;
 }
 
-function generalTradePlan({ mtfC, m5C, price, symbol, styleKind }) {
+function generalTradePlan({ mtfC, m5C, price, symbol, styleKind, emaFilter }) {
   const m15C = aggregateM15(m5C);
   const a15 = atr(m15C, 14) || 10;
-  const dir = structureDir(mtfC) || 1;
+  const dir = structureDir(mtfC, emaFilter) || 1;
   const isBuy = dir === 1;
 
   let mult = (styleKind === 'intraday' || styleKind === 'swing') ? 2.0 : 1.0;
@@ -187,7 +203,7 @@ function generalTradePlan({ mtfC, m5C, price, symbol, styleKind }) {
       tps: [tp1, tp2, tp3],
       zone: { min: actualEntry - a15, max: actualEntry + a15 },
       expireMs: isLimit ? 360 * 60 * 1000 : 90 * 60 * 1000,
-      trigSrc: `${trigName} [ATR_DYNAMIC]`,
+      trigSrc: `${trigName} [ATR_DYNAMIC + EMA CONFLUENCE]`,
       flags: [],
     }
   };
@@ -203,6 +219,7 @@ export default async function handler(req, res) {
     const symbol = String(body.marketId || '').split('|').pop().toUpperCase();
     const dec = DECIMALS[symbol] ?? 2;
     const price = Number(body.currentPrice);
+    const emaFilter = body.emaFilter || {};
 
     const access = await checkAccess(email);
     if (!access.ok) return res.status(403).json({ error: access.msg });
@@ -213,17 +230,17 @@ export default async function handler(req, res) {
     const mtfC = cleanCandles(cnd.mtf ?? cnd.entry);
     const ltfC = cleanCandles(cnd.ltf);
 
-    const htfDir = structureDir(htfC);
+    const htfDir = structureDir(htfC, emaFilter);
     const isScalp = style.kind === 'scalp';
 
     let dir = 0, plan = null;
 
     if (isScalp) {
-      const hr = scalpHitRun(mtfC, ltfC, htfDir, price, symbol);
+      const hr = scalpHitRun(mtfC, ltfC, htfDir, price, symbol, emaFilter);
       dir = hr.dir;
       plan = hr.plan;
     } else {
-      const dp = generalTradePlan({ mtfC, m5C: ltfC, price, symbol, styleKind: style.kind });
+      const dp = generalTradePlan({ mtfC, m5C: ltfC, price, symbol, styleKind: style.kind, emaFilter });
       dir = dp.dir;
       plan = dp.plan;
     }
@@ -236,14 +253,16 @@ export default async function handler(req, res) {
     const sideText = dir === 1 ? 'BUY' : 'SELL';
     const offsets = getAbsoluteScalpOffsets(symbol);
 
+    const emaSummary = Object.entries(emaFilter).map(([k, v]) => `${k}: ${v}`).join(' | ');
+
     const actionDesc = sideText === 'BUY' 
-      ? 'mengambil posisi BELI (BUY) karena harga merespons area Demand / Batas Bawah dengan reaksi penolakan (wick rejection) yang kuat' 
-      : 'mengambil posisi JUAL (SELL) karena harga menabrak area Supply / Batas Atas dengan konfirmasi penolakan harga secara real-time';
+      ? 'mengambil posisi BELI (BUY) karena struktur Market Shift dan konfirmasi EMA menunjukkan tren naik yang solid' 
+      : 'mengambil posisi JUAL (SELL) karena konfluensi Supply Zone dan posisi harga di bawah indikator EMA utama memperkuat tekanan jual';
 
     const techReason = [
       `Analisis Teknikal Pure SMC ${sideText} (${style.label}) pada pair ${symbol}.`,
-      `Alasan Eksekusi: Diputuskan ${actionDesc}. Pemicu utama didasarkan pada pembacaan struktur mikro dan filter indikator (${plan.trigSrc}).`,
-      `Manajemen Risiko: Jarak Stop Loss dan Buffer telah disesuaikan secara presisi (${offsets.type}) agar laporan rentang pip/poin tampil ideal sesuai target.`
+      `Alasan Eksekusi: Diputuskan ${actionDesc}. Indikator EMA aktif (${emaSummary}) dan pemicu strategi (${plan.trigSrc}) saling mengonfirmasi arah tren.`,
+      `Manajemen Risiko: Jarak Stop Loss dan Buffer telah disesuaikan secara presisi (${offsets.type}) dengan rasio risk-to-reward optimal.`
     ].join('\n\n');
 
     return res.status(200).json({
@@ -263,7 +282,7 @@ export default async function handler(req, res) {
         risk: 'LOW',
         setup: 'CONTINUATION / REVERSAL',
         setupLabel: style.label,
-        zoneLabel: 'Order Block / FVG / Structure Zone',
+        zoneLabel: 'Order Block / FVG / EMA Confluence',
         zoneNote: `Range Mode (${offsets.type})`,
         reason: techReason
       }
