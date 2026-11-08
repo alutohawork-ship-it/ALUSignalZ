@@ -144,74 +144,16 @@
                     </div>
 
                     <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                        <optgroup label="XBTFX Dollar Index & Majors">
-                            <option value="xbtfx|DXY">DXY / US Dollar Index</option>
+                        <optgroup label="XBTFX Active & Connected Pairs">
                             <option value="xbtfx|EURUSD">EUR/USD</option>
                             <option value="xbtfx|GBPUSD">GBP/USD</option>
                             <option value="xbtfx|USDJPY">USD/JPY</option>
-                            <option value="xbtfx|AUDUSD">AUD/USD</option>
-                            <option value="xbtfx|USDCAD">USD/CAD</option>
-                            <option value="xbtfx|USDCHF">USD/CHF</option>
-                            <option value="xbtfx|NZDUSD">NZD/USD</option>
-                        </optgroup>
-                        <optgroup label="XBTFX Cross Forex">
-                            <option value="xbtfx|EURGBP">EUR/GBP</option>
-                            <option value="xbtfx|EURJPY">EUR/JPY</option>
-                            <option value="xbtfx|GBPJPY">GBP/JPY</option>
-                            <option value="xbtfx|AUDJPY">AUD/JPY</option>
-                            <option value="xbtfx|EURAUD">EUR/AUD</option>
-                            <option value="xbtfx|GBPAUD">GBP/AUD</option>
-                            <option value="xbtfx|AUDNZD">AUD/NZD</option>
-                            <option value="xbtfx|CADJPY">CAD/JPY</option>
-                            <option value="xbtfx|CHFJPY">CHF/JPY</option>
-                            <option value="xbtfx|EURNZD">EUR/NZD</option>
-                        </optgroup>
-                        <optgroup label="XBTFX Metals & Precious">
-                            <option value="xbtfx|XAUUSD">XAUUSD / Gold</option>
+                            <option value="xbtfx|XAUUSD" selected>XAUUSD / Gold</option>
                             <option value="xbtfx|XAGUSD">XAGUSD / Silver</option>
-                            <option value="xbtfx|XPTUSD">XPTUSD / Platinum</option>
-                            <option value="xbtfx|XPDUSD">XPDUSD / Palladium</option>
-                            <option value="xbtfx|XAUEUR">XAUEUR / Gold in EUR</option>
-                            <option value="xbtfx|XAGEUR">XAGEUR / Silver in EUR</option>
-                        </optgroup>
-                        <optgroup label="XBTFX Energy & Commodities">
-                            <option value="xbtfx|BRENT">Brent Oil (BRENT)</option>
-                            <option value="xbtfx|WTI">Crude Oil WTI (WTI)</option>
-                            <option value="xbtfx|NATGAS">Natural Gas (NATGAS)</option>
-                            <option value="xbtfx|COPPER">Copper</option>
-                            <option value="xbtfx|COFFEE">Coffee</option>
-                            <option value="xbtfx|SUGAR">Sugar</option>
-                        </optgroup>
-                        <optgroup label="XBTFX Global Indices">
-                            <option value="xbtfx|US30">Dow Jones / US30</option>
-                            <option value="xbtfx|NAS100">Nasdaq 100 / NAS100</option>
-                            <option value="xbtfx|SPX500">S&amp;P 500 / SPX500</option>
-                            <option value="xbtfx|GER40">DAX / GER40</option>
-                            <option value="xbtfx|UK100">FTSE 100 / UK100</option>
-                            <option value="xbtfx|JPN225">Nikkei / JPN225</option>
-                            <option value="xbtfx|FRA40">CAC 40 / FRA40</option>
-                            <option value="xbtfx|AUS200">ASX 200 / AUS200</option>
-                        </optgroup>
-                        <optgroup label="XBTFX Crypto">
                             <option value="xbtfx|BTCUSD">BTCUSD / Bitcoin</option>
                             <option value="xbtfx|ETHUSD">ETHUSD / Ethereum</option>
-                            <option value="xbtfx|SOLUSD">SOLUSD / Solana</option>
-                            <option value="xbtfx|XRPUSD">XRPUSD / Ripple</option>
-                            <option value="xbtfx|BNBUSD">BNBUSD</option>
-                            <option value="xbtfx|ADAUSD">ADAUSD</option>
-                            <option value="xbtfx|DOGEUSD">DOGEUSD</option>
-                            <option value="xbtfx|AVAXUSD">AVAXUSD</option>
-                            <option value="xbtfx|LINKUSD">LINKUSD</option>
-                            <option value="xbtfx|DOTUSD">DOTUSD</option>
-                            <option value="xbtfx|MATICUSD">MATICUSD</option>
-                            <option value="xbtfx|UNIUSD">UNIUSD</option>
-                        </optgroup>
-                        <optgroup label="XBTFX Synthetic / Custom Pairs">
-                            <option value="xbtfx|BTCXAU">BTC/XAU (Crypto-Gold Synthetic)</option>
-                            <option value="xbtfx|ETHBTC">ETH/BTC (Cross Crypto Synthetic)</option>
-                            <option value="xbtfx|SOLBTC">SOL/BTC (Cross Crypto Synthetic)</option>
-                            <option value="xbtfx|US30BTC">US30/BTC (Index-Crypto Synthetic)</option>
-                            <option value="xbtfx|XAUUSDX">XAUUSD.X (Synthetic Gold Index)</option>
+                            <option value="xbtfx|US30">US30 / Dow Jones</option>
+                            <option value="xbtfx|NAS100">NAS100 / Nasdaq</option>
                         </optgroup>
                     </select>
 
@@ -222,7 +164,7 @@
                         <button onclick="resetCalib()" class="text-[9px] font-bold px-2 py-1.5 rounded-lg bg-panelborder text-gray-300 border border-panelborder">RESET</button>
                     </div>
                     <p id="calibInfo" class="text-[8px] font-mono text-gray-500">Offset: 0</p>
-                    <p class="text-[8px] text-gray-500 leading-snug">Jika harga di MT4/MT5 dan di web berbeda, isi harga Bid dari MT lalu tekan KALIBRASI. Selisihnya disimpan sebagai offset untuk pair ini. Perbedaan kecil wajar karena sumber dan waktu pengambilan harga berbeda.</p>
+                    <p class="text-[8px] text-gray-500 leading-snug">Jika harga di MT4/MT5 dan di web berbeda, isi harga Bid dari MT lalu tekan KALIBRASI.</p>
 
                     <div>
                         <label id="lblTradingStyle" class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
@@ -405,7 +347,7 @@
                         </div>
                         <div class="bg-darkbg/70 border border-red-500/30 rounded-lg p-1.5">
                             <p class="text-[8px] font-bold text-red-400">LOSE</p>
-                            <p id="sumLose" class="text-[11px] font-extrabold text-red-400 font-mono">0 pip</p>
+                            <p id="sumLose" class="text-[11px] font-extrabold text-red-400 font-mono">-0 pip</p>
                             <p id="sumLoseCount" class="text-[7px] text-gray-500 font-mono">0 trade</p>
                         </div>
                         <div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5">
@@ -449,7 +391,6 @@
 
     <!-- ================= SCRIPT ================= -->
     <script>
-    // ================= LOGIN & ADMIN (server-side via /api) =================
     const SESSION_TYPE_KEY = 'alu_session_type';
     const SESSION_EMAIL_KEY = 'alu_user_email';
     const SESSION_ADMIN_KEY = 'alu_admin_code';
@@ -602,7 +543,7 @@
     let currentLang = 'id';
     const DICT = {
         id: { subHeader: "Pure SMC 3-Layer Terminal", targetAsset: "TARGET ASET AKTIF", tradingStyle: "GAYA TRADING / STRATEGI", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE PRICE MAP", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "Belum ada history.", running: "berjalan", liveStream: "LIVE MARKET STREAM", disclaimer: "Aktivitas trading beresiko dan tidak ada jaminan profit. Aplikasi ini bukan financial advisor dan sinyal bukan ajakan untuk membeli atau menjual. Atur risiko dan ukuran posisi sesuai kemampuanmu sendiri." },
-        en: { subHeader: "Pure SMC 3-Layer Terminal", targetAsset: "ACTIVE TARGET ASSET", tradingStyle: "TRADING STYLE / STRATEGY", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE PRICE MAP", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "No trading history yet.", running: "running", liveStream: "LIVE MARKET STREAM", disclaimer: "Trading involves risk and there is no guarantee of profit. This app is not a financial advisor and signals are not an invitation to buy or sell. Manage your risk and position size according to your own ability." }
+        en: { subHeader: "Pure SMC 3-Layer Terminal", targetAsset: "ACTIVE TARGET ASSET", tradingStyle: "TRADING STYLE / STRATEGI", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE PRICE MAP", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "No trading history yet.", running: "running", liveStream: "LIVE MARKET STREAM", disclaimer: "Trading involves risk and there is no guarantee of profit. This app is not a financial advisor and signals are not an invitation to buy or sell. Manage your risk and position size according to your own ability." }
     };
     function toggleLang() {
         currentLang = currentLang === 'id' ? 'en' : 'id';
@@ -628,7 +569,7 @@
         if (a) renderSignalCard(a);
     }
 
-    // ================= KONFIG MARKET =================
+    // ================= KONFIG MARKET (Delist Pair Ngaco, Hanya Pair Terhubung) =================
     const WS_URL = 'wss://ws.xbtfx.com/v1/ws';
     let XBTFX_TOKEN = '';
     const HISTORY_MS = 10 * 60 * 1000;
@@ -636,64 +577,17 @@
     const STALE_MS = 30000;
     const STORE_KEY = 'aluSignalZ_history_v3';
     const OFFSET_KEY = 'aluSignalZ_offsets_v1';
-    const DEBUG = localStorage.getItem('alu_debug') === '1';
 
     const MARKETS = {
-        DXY:        { provider: 'xbtfx', coins: ['DXY', 'USDX'], decimals: 2, pip: 0.01 },
         EURUSD:     { provider: 'xbtfx', coins: ['EURUSD'], decimals: 5, pip: 0.0001 },
         GBPUSD:     { provider: 'xbtfx', coins: ['GBPUSD'], decimals: 5, pip: 0.0001 },
         USDJPY:     { provider: 'xbtfx', coins: ['USDJPY'], decimals: 3, pip: 0.01 },
-        AUDUSD:     { provider: 'xbtfx', coins: ['AUDUSD'], decimals: 5, pip: 0.0001 },
-        USDCAD:     { provider: 'xbtfx', coins: ['USDCAD'], decimals: 5, pip: 0.0001 },
-        USDCHF:     { provider: 'xbtfx', coins: ['USDCHF'], decimals: 5, pip: 0.0001 },
-        NZDUSD:     { provider: 'xbtfx', coins: ['NZDUSD'], decimals: 5, pip: 0.0001 },
-        EURGBP:     { provider: 'xbtfx', coins: ['EURGBP'], decimals: 5, pip: 0.0001 },
-        EURJPY:     { provider: 'xbtfx', coins: ['EURJPY'], decimals: 3, pip: 0.01 },
-        GBPJPY:     { provider: 'xbtfx', coins: ['GBPJPY'], decimals: 3, pip: 0.01 },
-        AUDJPY:     { provider: 'xbtfx', coins: ['AUDJPY'], decimals: 3, pip: 0.01 },
-        EURAUD:     { provider: 'xbtfx', coins: ['EURAUD'], decimals: 5, pip: 0.0001 },
-        GBPAUD:     { provider: 'xbtfx', coins: ['GBPAUD'], decimals: 5, pip: 0.0001 },
-        AUDNZD:     { provider: 'xbtfx', coins: ['AUDNZD'], decimals: 5, pip: 0.0001 },
-        CADJPY:     { provider: 'xbtfx', coins: ['CADJPY'], decimals: 3, pip: 0.01 },
-        CHFJPY:     { provider: 'xbtfx', coins: ['CHFJPY'], decimals: 3, pip: 0.01 },
-        EURNZD:     { provider: 'xbtfx', coins: ['EURNZD'], decimals: 5, pip: 0.0001 },
         XAUUSD:     { provider: 'xbtfx', coins: ['XAUUSD', 'GOLD'], decimals: 2, pip: 0.1 },
         XAGUSD:     { provider: 'xbtfx', coins: ['XAGUSD', 'SILVER'], decimals: 3, pip: 0.01 },
-        XPTUSD:     { provider: 'xbtfx', coins: ['XPTUSD'], decimals: 2, pip: 0.1 },
-        XPDUSD:     { provider: 'xbtfx', coins: ['XPDUSD'], decimals: 2, pip: 0.1 },
-        XAUEUR:     { provider: 'xbtfx', coins: ['XAUEUR'], decimals: 2, pip: 0.1 },
-        XAGEUR:     { provider: 'xbtfx', coins: ['XAGEUR'], decimals: 3, pip: 0.01 },
-        BRENT:      { provider: 'xbtfx', coins: ['BRENT', 'BRENTOIL'], decimals: 2, pip: 0.01 },
-        WTI:        { provider: 'xbtfx', coins: ['WTI', 'USOUSD'], decimals: 2, pip: 0.01 },
-        NATGAS:     { provider: 'xbtfx', coins: ['NATGAS', 'NG'], decimals: 3, pip: 0.001 },
-        COPPER:     { provider: 'xbtfx', coins: ['COPPER'], decimals: 4, pip: 0.0001 },
-        COFFEE:     { provider: 'xbtfx', coins: ['COFFEE'], decimals: 2, pip: 0.01 },
-        SUGAR:      { provider: 'xbtfx', coins: ['SUGAR'], decimals: 2, pip: 0.01 },
         US30:       { provider: 'xbtfx', coins: ['US30', 'DJI', 'WALLSTREET'], decimals: 2, pip: 1 },
         NAS100:     { provider: 'xbtfx', coins: ['NAS100', 'NDX', 'USTECH'], decimals: 2, pip: 1 },
-        SPX500:     { provider: 'xbtfx', coins: ['SPX500', 'SP500'], decimals: 2, pip: 1 },
-        GER40:      { provider: 'xbtfx', coins: ['GER40', 'DAX'], decimals: 2, pip: 1 },
-        UK100:      { provider: 'xbtfx', coins: ['UK100', 'FTSE'], decimals: 2, pip: 1 },
-        JPN225:     { provider: 'xbtfx', coins: ['JPN225', 'N225'], decimals: 0, pip: 1 },
-        FRA40:      { provider: 'xbtfx', coins: ['FRA40', 'CAC40'], decimals: 2, pip: 1 },
-        AUS200:     { provider: 'xbtfx', coins: ['AUS200', 'ASX200'], decimals: 2, pip: 1 },
         BTCUSD:     { provider: 'xbtfx', coins: ['BTCUSD', 'BTCUSDT'], decimals: 2, pip: 1 },
         ETHUSD:     { provider: 'xbtfx', coins: ['ETHUSD', 'ETHUSDT'], decimals: 2, pip: 0.1 },
-        SOLUSD:     { provider: 'xbtfx', coins: ['SOLUSD', 'SOLUSDT'], decimals: 2, pip: 0.01 },
-        XRPUSD:     { provider: 'xbtfx', coins: ['XRPUSD', 'XRPUSDT'], decimals: 4, pip: 0.0001 },
-        BNBUSD:     { provider: 'xbtfx', coins: ['BNBUSD', 'BNBUSDT'], decimals: 2, pip: 0.1 },
-        ADAUSD:     { provider: 'xbtfx', coins: ['ADAUSD', 'ADAUSDT'], decimals: 4, pip: 0.0001 },
-        DOGEUSD:    { provider: 'xbtfx', coins: ['DOGEUSD', 'DOGEUSDT'], decimals: 5, pip: 0.00001 },
-        AVAXUSD:    { provider: 'xbtfx', coins: ['AVAXUSD', 'AVAXUSDT'], decimals: 3, pip: 0.001 },
-        LINKUSD:    { provider: 'xbtfx', coins: ['LINKUSD', 'LINKUSDT'], decimals: 3, pip: 0.001 },
-        DOTUSD:     { provider: 'xbtfx', coins: ['DOTUSD', 'DOTUSDT'], decimals: 4, pip: 0.0001 },
-        MATICUSD:   { provider: 'xbtfx', coins: ['MATICUSD', 'MATICUSDT'], decimals: 4, pip: 0.0001 },
-        UNIUSD:     { provider: 'xbtfx', coins: ['UNIUSD', 'UNIUSDT'], decimals: 3, pip: 0.001 },
-        BTCXAU:     { provider: 'xbtfx', coins: ['BTCXAU'], decimals: 2, pip: 0.1 },
-        ETHBTC:     { provider: 'xbtfx', coins: ['ETHBTC'], decimals: 5, pip: 0.00001 },
-        SOLBTC:     { provider: 'xbtfx', coins: ['SOLBTC'], decimals: 5, pip: 0.00001 },
-        US30BTC:    { provider: 'xbtfx', coins: ['US30BTC'], decimals: 2, pip: 1 },
-        XAUUSDX:    { provider: 'xbtfx', coins: ['XAUUSDX', 'XAUUSD'], decimals: 2, pip: 0.1 },
     };
 
     const norm = s => String(s ?? '').toUpperCase().replace(/^XYZ:/, '').replace(/\.[A-Z]+$/, '').replace(/[^A-Z0-9]/g, '');
@@ -719,7 +613,7 @@
             COIN_KEY.set(univK, univArr);
         }
 
-    const SUB_KEYS = Object.keys(MARKETS).filter(k => !MARKETS[k].base);
+    const SUB_KEYS = Object.keys(MARKETS);
     const STREAM_SYMBOL = key => MARKETS[key].coins[0];
     const PENDING_SL_CANCEL = true;
 
@@ -746,10 +640,8 @@
     const displayName = key => key.replace(/^xyz:/, '');
     const parseLevel = v => Number.isFinite(parseFloat(v)) ? parseFloat(v) : null;
 
-    const DEFAULT_OFFSETS = {};
-
     const offsets = (() => { try { return JSON.parse(localStorage.getItem(OFFSET_KEY)) || {}; } catch { return {}; } })();
-    const getOffset = key => offsets[key] ?? DEFAULT_OFFSETS[key] ?? 0;
+    const getOffset = key => offsets[key] ?? 0;
 
     function pushHistory(key, p) {
         const arr = history[key] ??= [];
@@ -783,7 +675,7 @@
     }
 
     // ================= TICKER & UI =================
-    const PROV_COLOR = { hyperliquid: 'text-yellow-400', veranta: 'text-blue-400', ostium: 'text-orange-400', binance: 'text-emerald-400', xbtfx: 'text-emerald-400' };
+    const PROV_COLOR = { xbtfx: 'text-emerald-400' };
     function buildTicker() {
         const opts = [...document.querySelectorAll('#marketSelect option')];
         document.getElementById('tickerListContainer').innerHTML = opts.map(o => {
@@ -838,14 +730,11 @@
 
     const isLive = key => prices[key] && Date.now() - prices[key].recv < 30000;
 
-    // ================= DOUBLE WEBSOCKET ENGINE =================
+    // ================= WEBSOCKET =================
     const sendJSON = (sock, obj) => { if (sock && sock.readyState === WebSocket.OPEN) sock.send(JSON.stringify(obj)); };
 
     const pickPrice = (...vals) => {
-        for (const v of vals) {
-            const n = parseFloat(v);
-            if (n > 0) return n;
-        }
+        for (const v of vals) { const n = parseFloat(v); if (n > 0) return n; }
         return NaN;
     };
 
@@ -859,7 +748,6 @@
         for (let i = 0; i < keyList.length; i += batchSize) {
             const chunk = keyList.slice(i, i + batchSize);
             const symbolsToSub = chunk.map(key => STREAM_SYMBOL(key));
-            
             setTimeout(() => {
                 if (!sock || sock.readyState !== WebSocket.OPEN) return;
                 sendJSON(sock, { action: 'subscribe', channel: 'quotes', symbols: symbolsToSub });
@@ -884,10 +772,7 @@
         const now = Date.now();
         for (const key of SUB_KEYS) {
             const p = prices[key];
-            if (!p) {
-                if (streamReady1 || streamReady2) markSrc(key, 'MENUNGGU', 'text-gray-500');
-                continue;
-            }
+            if (!p) { if (streamReady1 || streamReady2) markSrc(key, 'MENUNGGU', 'text-gray-500'); continue; }
             if (now - p.recv > STALE_MS) markSrc(key, 'SEPI', 'text-gray-500');
         }
     }
@@ -895,11 +780,8 @@
     async function fetchStreamToken() {
         const email = localStorage.getItem(SESSION_EMAIL_KEY);
         if (!email) return { wait: true };
-
         const r = await api('/api/stream-token', {
-            method: 'POST',
-            headers: JSON_HEADERS,
-            body: JSON.stringify({ value: email }),
+            method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ value: email }),
         });
         if (r.ok && r.data.token) return { token: r.data.token };
         if (r.status === 401) return { fatal: true, msg: r.data.msg };
@@ -909,10 +791,8 @@
     async function connect() {
         clearTimeout(reconnectTimer1); clearTimeout(reconnectTimer2);
         clearInterval(pingTimer1); clearInterval(pingTimer2);
-        
         if (ws1) { const old = ws1; ws1 = null; old.onclose = null; old.close(); }
         if (ws2) { const old = ws2; ws2 = null; old.onclose = null; old.close(); }
-        
         streamReady1 = false; streamReady2 = false;
         authFailed = false;
         const myId = ++connectId;
@@ -994,7 +874,6 @@
         processTickToCandle(key, price, 15);
         pushHistory(key, price);
         dirty.add(key);
-
         processTick(key, price);
     }
 
@@ -1033,16 +912,13 @@
     }
 
     function lockOf(t) {
-        if (t.status === 'CLOSED') {
-            return { price: recapPrice(t), label: resultLabel(t), closed: true };
-        }
+        if (t.status === 'CLOSED') return { price: recapPrice(t), label: resultLabel(t), closed: true };
         const k = lastHitKey(t);
         return k ? { price: t[k], label: k.toUpperCase(), closed: false } : null;
     }
 
     function tradeFlow(t) {
         const live = prices[t.key]?.price;
-
         if (t.status === 'PENDING') {
             const z = t.zone ? `${fmt(t.key, t.zone.min)} – ${fmt(t.key, t.zone.max)}` : '--';
             return { main: `ZONA ${z} · entry ${fmt(t.key, t.entry)}`, sub: live != null ? `live ${fmt(t.key, live)}` : '', pips: 0 };
@@ -1066,9 +942,7 @@
 
     function normalizeTrade(t) {
         t.hits = t.hits || {};
-        for (const k of TP_KEYS) {
-            if (typeof t.hits[k] === 'number') t.hits[k] = { at: t.hits[k], price: t[k] };
-        }
+        for (const k of TP_KEYS) { if (typeof t.hits[k] === 'number') t.hits[k] = { at: t.hits[k], price: t[k] }; }
         if (t.status === 'CLOSED' && t.exitPrice != null) {
             t.maxTp = maxHitIndex(t);
             t.pips = pipsOf(t, recapPrice(t));
@@ -1077,8 +951,7 @@
     }
 
     function loadTrades() {
-        try { return (JSON.parse(localStorage.getItem(STORE_KEY)) || []).map(normalizeTrade); }
-        catch { return []; }
+        try { return (JSON.parse(localStorage.getItem(STORE_KEY)) || []).map(normalizeTrade); } catch { return []; }
     }
     function saveTrades() {
         try { localStorage.setItem(STORE_KEY, JSON.stringify(trades)); } catch {}
@@ -1087,31 +960,19 @@
 
     function processTick(key, price) {
         let changed = false;
-        for (const t of trades) {
-            if (t.key === key && t.status !== 'CLOSED' && evaluateTrade(t, price)) changed = true;
-        }
+        for (const t of trades) { if (t.key === key && t.status !== 'CLOSED' && evaluateTrade(t, price)) changed = true; }
         if (changed) { saveTrades(); renderHistory(); }
     }
 
     function evaluateTrade(t, price) {
         const d = t.dir;
-
         if (t.status === 'PENDING') {
             const stopFill = t.fill === 'STOP';
-            const filled = stopFill
-                ? (d > 0 ? price >= t.entry : price <= t.entry)
-                : (d > 0 ? price <= t.entry : price >= t.entry);
-            if (filled) {
-                t.status = 'RUNNING';
-                t.filledAt = Date.now();
-                return true;
-            }
+            const filled = stopFill ? (d > 0 ? price >= t.entry : price <= t.entry) : (d > 0 ? price <= t.entry : price >= t.entry);
+            if (filled) { t.status = 'RUNNING'; t.filledAt = Date.now(); return true; }
             if (PENDING_SL_CANCEL) {
                 const slHit = d > 0 ? price <= t.sl : price >= t.sl;
-                if (slHit) {
-                    cancelTrade(t, 'SL tersentuh sebelum entry');
-                    return true;
-                }
+                if (slHit) { cancelTrade(t, 'SL tersentuh sebelum entry'); return true; }
             }
             return false;
         }
@@ -1121,25 +982,16 @@
         let changed = false;
 
         for (const k of definedTps(t)) {
-            if (!t.hits[k] && reached(t[k])) {
-                t.hits[k] = { at: Date.now(), price: t[k] };
-                changed = true;
-            }
+            if (!t.hits[k] && reached(t[k])) { t.hits[k] = { at: Date.now(), price: t[k] }; changed = true; }
         }
         const beOn = hitList(t).length > 0;
         if (beOn && t.status !== 'BE') { t.status = 'BE'; changed = true; }
 
         const keys = definedTps(t);
-        if (keys.length && keys.every(k => t.hits[k])) {
-            closeTrade(t, 'TP', t[keys[keys.length - 1]]);
-            return true;
-        }
+        if (keys.length && keys.every(k => t.hits[k])) { closeTrade(t, 'TP', t[keys[keys.length - 1]]); return true; }
 
         const stop = beOn ? t.entry : t.sl;
-        if (lost(stop)) {
-            closeTrade(t, beOn ? 'BE' : 'SL', stop);
-            return true;
-        }
+        if (lost(stop)) { closeTrade(t, beOn ? 'BE' : 'SL', stop); return true; }
         return changed;
     }
 
@@ -1147,27 +999,19 @@
         Object.assign(t, { status: 'CLOSED', result, exitPrice, closedAt: Date.now(), maxTp: maxHitIndex(t) });
         t.pips = pipsOf(t, recapPrice(t));
     }
-
     function cancelTrade(t, reason) {
         Object.assign(t, { status: 'CLOSED', result: 'CANCEL', closedAt: Date.now(), pips: 0, maxTp: 0, cancelReason: reason });
     }
-
     function expirePending() {
         let changed = false;
         for (const t of trades) {
-            if (t.status === 'PENDING' && t.expiresAt && Date.now() > t.expiresAt) {
-                cancelTrade(t, 'Zona tidak tersentuh sampai batas waktu');
-                changed = true;
-            }
+            if (t.status === 'PENDING' && t.expiresAt && Date.now() > t.expiresAt) { cancelTrade(t, 'Zona tidak tersentuh sampai batas waktu'); changed = true; }
         }
         if (changed) { saveTrades(); renderHistory(); refreshActiveUI(); }
     }
-
     function clearHistory() {
         if (!confirm('Hapus semua history? Kalender PNL tidak ikut terhapus.')) return;
-        trades = [];
-        activeId = null;
-        saveTrades();
+        trades = []; activeId = null; saveTrades();
         document.getElementById('standbyView')?.classList.remove('hidden');
         document.getElementById('activeSignalCard')?.classList.add('hidden');
         renderHistory();
@@ -1194,8 +1038,7 @@
         if (!trades.length) { box.innerHTML = `<p class="text-center text-[10px] text-gray-500 py-3">${DICT[currentLang].noHistory}</p>`; return; }
 
         box.innerHTML = trades.slice().reverse().map(t => {
-            const f = tradeFlow(t);
-            const s = statusOf(t);
+            const f = tradeFlow(t), s = statusOf(t);
             const hits = hitList(t).map(k => `✓${k.toUpperCase()}`).join(' ');
             const active = t.id === activeId ? 'ring-1 ring-accentblue' : '';
             return `
@@ -1215,22 +1058,12 @@
         activeId = id;
         const t = trades.find(x => x.id === id);
         if (!t) return;
-        renderSignalCard(t);
-        renderHistory();
-        refreshActiveUI();
+        renderSignalCard(t); renderHistory(); refreshActiveUI();
     }
 
     const SETUP_SHORT = { CONTINUATION: 'Continuation', REVERSAL: 'Reversal', NEUTRAL: 'Netral' };
-    const CONF_STYLE = {
-        HIGH: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40',
-        MEDIUM: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40',
-        LOW: 'bg-red-500/20 text-red-400 border-red-500/40',
-    };
-    const RISK_STYLE = {
-        LOW: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40',
-        MEDIUM: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40',
-        HIGH: 'bg-red-500/20 text-red-400 border-red-500/40',
-    };
+    const CONF_STYLE = { HIGH: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40', MEDIUM: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40', LOW: 'bg-red-500/20 text-red-400 border-red-500/40' };
+    const RISK_STYLE = { LOW: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40', MEDIUM: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40', HIGH: 'bg-red-500/20 text-red-400 border-red-500/40' };
 
     function renderSignalCard(t) {
         const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v ?? '--'; };
@@ -1238,39 +1071,23 @@
         const badgeBase = 'text-[8px] font-mono font-bold px-2 py-0.5 rounded border ';
 
         set('cardMarketTitle', `${displayName(t.key)} (Pure SMC AI)`);
-        set('cardEntryZone', t.zone
-            ? `${money(t.zone.min)} - ${money(t.zone.max)}`
-            : (t.card?.entry_min ? `${t.card.entry_min} - ${t.card.entry_max}` : '--'));
+        set('cardEntryZone', t.zone ? `${money(t.zone.min)} - ${money(t.zone.max)}` : '--');
         set('cardZoneNote', t.zoneNote || '');
 
         const lz = document.getElementById('lblEntryZone');
         if (lz) {
             const setupTxt = SETUP_SHORT[t.setup] || '';
-            lz.textContent = t.zoneLabel
-                ? `ENTRY ZONE · ${t.zoneLabel}${setupTxt ? ' · ' + setupTxt : ''}`
-                : DICT[currentLang].entryZone;
+            lz.textContent = t.zoneLabel ? `ENTRY ZONE · ${t.zoneLabel}${setupTxt ? ' · ' + setupTxt : ''}` : DICT[currentLang].entryZone;
         }
 
         const bs = document.getElementById('badgeSetup');
-        if (bs) {
-            bs.textContent = SETUP_SHORT[t.setup] ? SETUP_SHORT[t.setup].toUpperCase() : '--';
-            bs.className = badgeBase + 'bg-darkbg text-gray-300 border-panelborder';
-        }
+        if (bs) { bs.textContent = SETUP_SHORT[t.setup] ? SETUP_SHORT[t.setup].toUpperCase() : '--'; bs.className = badgeBase + 'bg-darkbg text-gray-300 border-panelborder'; }
         const bc = document.getElementById('badgeConf');
-        if (bc) {
-            bc.textContent = `CONFIDENCE ${t.confidence || '--'}`;
-            bc.className = badgeBase + (CONF_STYLE[t.confidence] || 'bg-darkbg text-gray-300 border-panelborder');
-        }
+        if (bc) { bc.textContent = `CONFIDENCE ${t.confidence || '--'}`; bc.className = badgeBase + (CONF_STYLE[t.confidence] || ''); }
         const br = document.getElementById('badgeRisk');
-        if (br) {
-            br.textContent = `RISK ${t.risk || '--'}`;
-            br.className = badgeBase + (RISK_STYLE[t.risk] || 'bg-darkbg text-gray-300 border-panelborder');
-        }
+        if (br) { br.textContent = `RISK ${t.risk || '--'}`; br.className = badgeBase + (RISK_STYLE[t.risk] || ''); }
 
-        set('cardSL', money(t.sl));
-        set('cardTP1', money(t.tp1));
-        set('cardTP2', money(t.tp2));
-        set('cardTP3', money(t.tp3));
+        set('cardSL', money(t.sl)); set('cardTP1', money(t.tp1)); set('cardTP2', money(t.tp2)); set('cardTP3', money(t.tp3));
         set('cardReason', t.card?.reason ?? '---');
 
         const sig = t.signal || '';
@@ -1279,8 +1096,7 @@
             badge.className = `${sig === 'BUY' ? 'bg-sky-500' : 'bg-red-500'} text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg flex items-center gap-1`;
             badge.innerHTML = `<i class="fa-solid ${sig === 'BUY' ? 'fa-caret-up' : 'fa-caret-down'}"></i> ${sig}`;
         }
-        const modeTxt = t.mode === 'LIMIT' ? 'Entry zona' : 'Entry market';
-        set('cardStyleSub', `${t.style} · ${modeTxt} / ${new Date(t.createdAt).toLocaleTimeString('id-ID', { hour12: false })}`);
+        set('cardStyleSub', `${t.style} · Entry market / ${new Date(t.createdAt).toLocaleTimeString('id-ID', { hour12: false })}`);
         document.getElementById('standbyView')?.classList.add('hidden');
         document.getElementById('activeSignalCard')?.classList.remove('hidden');
 
@@ -1292,34 +1108,23 @@
         const t = getActive();
         if (!t) return;
         const hits = t.hits || {};
-
         [['SL', 'sl'], ['TP1', 'tp1'], ['TP2', 'tp2'], ['TP3', 'tp3']].forEach(([name, k]) => {
             const box = document.getElementById(`box${name}`), chk = document.getElementById(`chk${name}`);
             if (!box || !chk) return;
-            box.classList.remove('tp-hit', 'sl-hit');
-            chk.classList.remove('show');
+            box.classList.remove('tp-hit', 'sl-hit'); chk.classList.remove('show');
             const hit = k === 'sl' ? t.result === 'SL' : !!hits[k];
-            if (hit) {
-                box.classList.add(k === 'sl' ? 'sl-hit' : 'tp-hit');
-                chk.classList.add('show');
-                const at = k === 'sl' ? t.closedAt : hits[k]?.at;
-                chk.title = at ? new Date(at).toLocaleString('id-ID', { hour12: false }) : '';
-            }
+            if (hit) { box.classList.add(k === 'sl' ? 'sl-hit' : 'tp-hit'); chk.classList.add('show'); }
         });
 
         const live = prices[t.key]?.price;
-        const topEl = document.getElementById('cardLivePriceTop');
-        const badgeEl = document.getElementById('cardLivePriceBadge');
         if (live != null) {
-            if (topEl) topEl.textContent = fmt(t.key, live);
-            if (badgeEl) badgeEl.textContent = fmt(t.key, live);
+            document.getElementById('cardLivePriceTop').textContent = fmt(t.key, live);
+            document.getElementById('cardLivePriceBadge').textContent = fmt(t.key, live);
         }
 
-        const f = tradeFlow(t);
-        const st = document.getElementById('tradeStatus');
+        const f = tradeFlow(t), st = document.getElementById('tradeStatus');
         if (st) {
-            const s = statusOf(t);
-            st.textContent = s.text;
+            const s = statusOf(t); st.textContent = s.text;
             st.className = `text-[8px] font-mono font-bold px-2 py-0.5 rounded border whitespace-nowrap ${BADGE_STYLES[s.color]}`;
         }
         const pnlEl = document.getElementById('tradePnl');
@@ -1343,28 +1148,18 @@
     function calEntryOf(t) {
         let res = 'OPEN', pips = 0;
         if (t.status === 'CLOSED') {
-            if (t.result === 'CANCEL') {
-                res = 'CANCEL';
-            } else {
-                pips = Math.round((Number(t.pips) || 0) * 10) / 10;
-                res = pips > 0 ? 'W' : pips < 0 ? 'L' : 'BE';
-            }
+            if (t.result === 'CANCEL') res = 'CANCEL';
+            else { pips = Math.round((Number(t.pips) || 0) * 10) / 10; res = pips > 0 ? 'W' : pips < 0 ? 'L' : 'BE'; }
         }
         return { id: t.id, date: ymd(new Date(t.createdAt || Date.now())), key: t.key, style: t.style, signal: t.signal, res, pips };
     }
 
     function calSyncAll() {
-        const since = calSince();
-        const cal = calLoad();
-        let changed = false;
+        const since = calSince(), cal = calLoad(); let changed = false;
         for (const t of trades) {
             if ((t.createdAt || 0) < since) continue;
-            const e = calEntryOf(t);
-            const old = cal[t.id];
-            if (!old || old.res !== e.res || old.pips !== e.pips || old.date !== e.date) {
-                cal[t.id] = e;
-                changed = true;
-            }
+            const e = calEntryOf(t), old = cal[t.id];
+            if (!old || old.res !== e.res || old.pips !== e.pips || old.date !== e.date) { cal[t.id] = e; changed = true; }
         }
         if (changed) calSave(cal);
         renderCalendar();
@@ -1380,15 +1175,12 @@
     }
 
     function renderCalendar() {
-        const grid = document.getElementById('calGrid');
-        if (!grid) return;
-
-        const all = Object.values(calLoad());
-        const { y, m } = calView;
+        const grid = document.getElementById('calGrid'); if (!grid) return;
+        const all = Object.values(calLoad()), { y, m } = calView;
         const ym = `${y}-${String(m + 1).padStart(2, '0')}`;
         const monthEntries = all.filter(e => e.date && e.date.startsWith(ym));
-
         const byDay = {};
+
         for (const e of monthEntries) {
             const d = byDay[e.date] ??= { pips: 0, w: 0, l: 0, open: 0 };
             if (e.res === 'W') { d.w++; d.pips += e.pips; }
@@ -1400,16 +1192,12 @@
         document.getElementById('calTitle').textContent = new Date(y, m, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
         document.getElementById('calWeekdays').innerHTML = WEEKDAYS.map(d => `<div class="text-[7px] text-gray-500 font-bold">${d}</div>`).join('');
 
-        const offset = (new Date(y, m, 1).getDay() + 6) % 7;
-        const days = new Date(y, m + 1, 0).getDate();
-        const todayKey = ymd(new Date());
-        let html = '';
+        const offset = (new Date(y, m, 1).getDay() + 6) % 7, days = new Date(y, m + 1, 0).getDate();
+        const todayKey = ymd(new Date()); let html = '';
         for (let i = 0; i < offset; i++) html += '<div></div>';
         for (let d = 1; d <= days; d++) {
-            const key = `${ym}-${String(d).padStart(2, '0')}`;
-            const v = byDay[key];
-            let cls = 'border-panelborder bg-darkbg';
-            let body = '';
+            const key = `${ym}-${String(d).padStart(2, '0')}`, v = byDay[key];
+            let cls = 'border-panelborder bg-darkbg', body = '';
             if (v && (v.w || v.l)) {
                 const p = Math.round(v.pips * 10) / 10;
                 cls = p > 0 ? 'border-emerald-500/40 bg-emerald-500/10' : p < 0 ? 'border-red-500/40 bg-red-500/10' : 'border-panelborder bg-darkbg';
@@ -1417,56 +1205,40 @@
             } else if (v && v.open) {
                 body = `<p class="font-mono text-[7px] text-blue-400">${v.open} run</p>`;
             }
-            const ring = key === todayKey ? ' ring-1 ring-accentblue' : '';
-            html += `<div class="rounded border ${cls}${ring} min-h-[44px] p-0.5 text-center"><p class="text-[8px] text-gray-400 font-bold">${d}</p>${body}</div>`;
+            html += `<div class="rounded border ${cls}${key === todayKey ? ' ring-1 ring-accentblue' : ''} min-h-[44px] p-0.5 text-center"><p class="text-[8px] text-gray-400 font-bold">${d}</p>${body}</div>`;
         }
         grid.innerHTML = html;
 
-        const m1 = calStats(monthEntries);
-        const allStats = calStats(all);
-        const openMonth = monthEntries.filter(e => e.res === 'OPEN').length;
-        const openAll = all.filter(e => e.res === 'OPEN').length;
-
+        const m1 = calStats(monthEntries), allStats = calStats(all);
         const monthEl = document.getElementById('calMonthPnl');
-        monthEl.textContent = fmtPips(m1.net);
-        monthEl.className = `text-[11px] font-extrabold font-mono ${pipColor(m1.net)}`;
+        monthEl.textContent = fmtPips(m1.net); monthEl.className = `text-[11px] font-extrabold font-mono ${pipColor(m1.net)}`;
 
         const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
-        set('calWin', fmtPips(m1.win));
-        set('calWinCount', `${m1.wc} W`);
-        set('calLose', fmtPips(m1.lose));
-        set('calLoseCount', `${m1.lc} L`);
-        set('calNet', fmtPips(m1.net));
-        set('calOpen', `${openMonth} berjalan`);
-        set('calWR', `${m1.wr.toFixed(1)}%`);
-        set('calWRSub', `${m1.wc}W / ${m1.lc}L`);
-        set('calAllTime', `Semua waktu: ${fmtPips(allStats.net)} · ${allStats.wc} W · ${allStats.lc} L · ${openAll} berjalan`);
+        set('calWin', fmtPips(m1.win)); set('calWinCount', `${m1.wc} W`);
+        set('calLose', fmtPips(m1.lose)); set('calLoseCount', `${m1.lc} L`);
+        set('calNet', fmtPips(m1.net)); set('calOpen', `${monthEntries.filter(e => e.res === 'OPEN').length} berjalan`);
+        set('calWR', `${m1.wr.toFixed(1)}%`); set('calWRSub', `${m1.wc}W / ${m1.lc}L`);
+        set('calAllTime', `Semua waktu: ${fmtPips(allStats.net)} · ${allStats.wc} W · ${allStats.lc} L`);
     }
 
     function calShift(n) {
         let m = calView.m + n, y = calView.y;
         while (m < 0) { m += 12; y--; }
         while (m > 11) { m -= 12; y++; }
-        calView = { y, m };
-        renderCalendar();
+        calView = { y, m }; renderCalendar();
     }
-
     function calToggle() {
-        const card = document.getElementById('calCard');
-        const btn = document.getElementById('calToggle');
+        const card = document.getElementById('calCard'), btn = document.getElementById('calToggle');
         const hiddenNow = card.classList.toggle('hidden');
         btn.classList.toggle('bg-accentblue/40', !hiddenNow);
         if (!hiddenNow) renderCalendar();
     }
-
     function calReset() {
-        if (!confirm('Reset kalender PNL? Data kalender akan dikosongkan. Riwayat trading di history tidak ikut terhapus.')) return;
-        calSave({});
-        localStorage.setItem(CAL_SINCE_KEY, String(Date.now()));
-        renderCalendar();
+        if (!confirm('Reset kalender PNL?')) return;
+        calSave({}); localStorage.setItem(CAL_SINCE_KEY, String(Date.now())); renderCalendar();
     }
 
-    // ================= CHART (LINE CHART DENGAN AREA GRADIEN) =================
+    // ================= CHART (VISUAL LINE CHART DENGAN AREA GRADIEN) =================
     const cv = document.getElementById('priceChart');
     const ctx = cv ? cv.getContext('2d') : null;
     const CHART_GUT = 100;
@@ -1484,19 +1256,14 @@
     }
 
     function rrPath(x, y, w, h, r) {
-        ctx.beginPath();
-        ctx.moveTo(x + r, y);
-        ctx.arcTo(x + w, y, x + w, y + h, r);
-        ctx.arcTo(x + w, y + h, x, y + h, r);
-        ctx.arcTo(x, y + h, x, y, r);
-        ctx.arcTo(x, y, x + w, y, r);
-        ctx.closePath();
+        ctx.beginPath(); ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
     }
 
     function drawChart() {
         if (!cv || !ctx) return;
-        const r = cv.getBoundingClientRect();
-        if (!r.width || !r.height) return;
+        const r = cv.getBoundingClientRect(); if (!r.width || !r.height) return;
 
         const dpr = window.devicePixelRatio || 1;
         const W = Math.round(r.width * dpr), H = Math.round(r.height * dpr);
@@ -1504,173 +1271,115 @@
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, r.width, r.height);
 
-        const t = getActive();
-        if (!t) return;
+        const t = getActive(); if (!t) return;
         const arr = history[t.key];
-
         if (!arr || !arr.length) {
-            ctx.font = 'bold 11px ui-monospace, monospace';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillStyle = '#f87171';
-            ctx.fillText(prices[t.key] ? 'MENUNGGU TICK' : 'TIDAK TERSAMBUNG', r.width / 2, r.height / 2);
-            ctx.textAlign = 'left';
+            ctx.font = 'bold 11px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillStyle = '#f87171'; ctx.fillText(prices[t.key] ? 'MENUNGGU TICK' : 'TIDAK TERSAMBUNG', r.width / 2, r.height / 2);
             return;
         }
 
-        const MIN_SPAN_MS = 60000;
         const dec = MARKETS[t.key]?.decimals ?? 2;
         const fmtP = v => Number(v).toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
-
         const CW = r.width, CH = r.height;
         const plotL = 6, plotT = 20, plotB = CH - 8, plotR = CW - CHART_GUT;
-        const plotW = plotR - plotL, plotH = plotB - plotT;
-        const now = Date.now();
+        const plotW = plotR - plotL, plotH = plotB - plotT, now = Date.now();
 
         const headX = plotL + plotW * 0.85;
-        const span = Math.min(Math.max(now - arr[0].t, MIN_SPAN_MS), CHART_SPAN_MS);
+        const span = Math.min(Math.max(now - arr[0].t, 60000), CHART_SPAN_MS);
         const xOfT = tm => headX - ((now - tm) / span) * (headX - plotL);
 
         const levels = chartLevels(t);
-        const zMin = parseLevel(t.zone?.min ?? t.card?.entry_min);
-        const zMax = parseLevel(t.zone?.max ?? t.card?.entry_max);
-        const hasZone = zMin != null && zMax != null;
+        const zMin = parseLevel(t.zone?.min), zMax = parseLevel(t.zone?.max), hasZone = zMin != null && zMax != null;
 
         let lo = Infinity, hi = -Infinity;
         for (const pt of arr) { lo = Math.min(lo, pt.p); hi = Math.max(hi, pt.p); }
         for (const l of levels) { lo = Math.min(lo, l.value); hi = Math.max(hi, l.value); }
         if (hasZone) { lo = Math.min(lo, zMin, zMax); hi = Math.max(hi, zMin, zMax); }
-        if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
         if (hi - lo <= 0) { const d = Math.abs(hi) * 0.001 || 1; lo -= d; hi += d; }
         const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
         const yOf = p => Math.max(plotT, Math.min(plotB, plotT + (1 - (p - lo) / (hi - lo)) * plotH));
 
-        // Render Grid Latar Belakang
-        ctx.save();
-        ctx.lineWidth = 1;
-        ctx.strokeStyle = 'rgba(148,163,184,0.07)';
+        // Grid Background
+        ctx.save(); ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(148,163,184,0.07)';
         for (let i = 1; i < 4; i++) {
-            const y = plotT + (plotH * i) / 4;
-            ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(plotR, y); ctx.stroke();
+            const y = plotT + (plotH * i) / 4; ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(plotR, y); ctx.stroke();
         }
-        ctx.strokeStyle = 'rgba(148,163,184,0.18)';
-        ctx.beginPath(); ctx.moveTo(plotR + 0.5, plotT); ctx.lineTo(plotR + 0.5, plotB); ctx.stroke();
+        ctx.strokeStyle = 'rgba(148,163,184,0.18)'; ctx.beginPath(); ctx.moveTo(plotR + 0.5, plotT); ctx.lineTo(plotR + 0.5, plotB); ctx.stroke();
         ctx.restore();
 
-        // Render Zona Order Block / FVG jika ada
+        // Zone Box (Order Block / FVG)
         if (hasZone) {
-            const top = yOf(Math.max(zMin, zMax)), bot = yOf(Math.min(zMin, zMax));
-            const hgt = Math.max(bot - top, 2);
+            const top = yOf(Math.max(zMin, zMax)), bot = yOf(Math.min(zMin, zMax)), hgt = Math.max(bot - top, 2);
             const zg = ctx.createLinearGradient(0, top, 0, top + hgt);
-            zg.addColorStop(0, 'rgba(59,130,246,0.26)');
-            zg.addColorStop(1, 'rgba(59,130,246,0.06)');
-            ctx.fillStyle = zg;
-            ctx.fillRect(plotL, top, plotR - plotL, hgt);
-            ctx.strokeStyle = 'rgba(96,165,250,0.35)';
-            ctx.lineWidth = 1;
-            ctx.strokeRect(plotL + 0.5, top + 0.5, plotR - plotL - 1, hgt - 1);
-            ctx.font = 'bold 8px ui-monospace, monospace';
-            ctx.fillStyle = 'rgba(147,197,253,0.95)';
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'top';
+            zg.addColorStop(0, 'rgba(59,130,246,0.26)'); zg.addColorStop(1, 'rgba(59,130,246,0.06)');
+            ctx.fillStyle = zg; ctx.fillRect(plotL, top, plotR - plotL, hgt);
+            ctx.strokeStyle = 'rgba(96,165,250,0.35)'; ctx.strokeRect(plotL + 0.5, top + 0.5, plotR - plotL - 1, hgt - 1);
+            ctx.font = 'bold 8px ui-monospace, monospace'; ctx.fillStyle = 'rgba(147,197,253,0.95)';
             ctx.fillText((t.zoneLabel || 'ZONE').toUpperCase(), plotL + 5, top + 3);
         }
 
-        // Render Garis Level (Entry, SL, TP)
+        // Level Lines
         for (const l of levels) {
             const y = yOf(l.value);
-            ctx.save();
-            ctx.strokeStyle = l.c;
-            ctx.globalAlpha = l.label === 'ENTRY' ? 0.95 : 0.7;
-            ctx.lineWidth = l.label === 'ENTRY' ? 1.4 : 1;
-            ctx.setLineDash(l.dash);
-            ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(plotR, y); ctx.stroke();
-            ctx.restore();
+            ctx.save(); ctx.strokeStyle = l.c; ctx.globalAlpha = l.label === 'ENTRY' ? 0.95 : 0.7;
+            ctx.lineWidth = l.label === 'ENTRY' ? 1.4 : 1; ctx.setLineDash(l.dash);
+            ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(plotR, y); ctx.stroke(); ctx.restore();
         }
 
-        // Render Area Gradien di Bawah Line Chart
-        ctx.save();
+        // Gradient Area & Line Chart
         const dirNow = prices[t.key]?.dir ?? 0;
         const lineColor = dirNow > 0 ? '#10b981' : dirNow < 0 ? '#ef4444' : '#3b82f6';
         
+        ctx.save();
         if (arr.length > 1) {
-            ctx.beginPath();
-            let firstX = null;
+            ctx.beginPath(); let firstX = null;
             for (let i = 0; i < arr.length; i++) {
                 const x = xOfT(arr[i].t), y = yOf(arr[i].p);
                 if (x < plotL - 20 || x > plotR + 20) continue;
-                if (firstX === null) { firstX = x; ctx.moveTo(x, y); }
-                else { ctx.lineTo(x, y); }
+                if (firstX === null) { firstX = x; ctx.moveTo(x, y); } else { ctx.lineTo(x, y); }
             }
             const lastX = xOfT(arr[arr.length - 1].t);
-            ctx.lineTo(lastX, plotB);
-            ctx.lineTo(firstX, plotB);
-            ctx.closePath();
+            ctx.lineTo(lastX, plotB); ctx.lineTo(firstX, plotB); ctx.closePath();
 
             const grad = ctx.createLinearGradient(0, plotT, 0, plotB);
             grad.addColorStop(0, dirNow > 0 ? 'rgba(16,185,129,0.25)' : dirNow < 0 ? 'rgba(239,68,68,0.25)' : 'rgba(59,130,246,0.25)');
             grad.addColorStop(1, 'rgba(11,14,20,0.0)');
-            ctx.fillStyle = grad;
-            ctx.fill();
+            ctx.fillStyle = grad; ctx.fill();
         }
         ctx.restore();
 
-        // Render Garis Line Chart Utama
-        ctx.save();
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = lineColor;
-        ctx.beginPath();
+        // Main Price Line
+        ctx.save(); ctx.lineWidth = 2; ctx.strokeStyle = lineColor; ctx.beginPath();
         let started = false;
         for (const pt of arr) {
             const x = xOfT(pt.t), y = yOf(pt.p);
             if (x < plotL - 20 || x > plotR + 20) continue;
-            if (!started) { ctx.moveTo(x, y); started = true; }
-            else { ctx.lineTo(x, y); }
+            if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); }
         }
-        ctx.stroke();
-        ctx.restore();
+        ctx.stroke(); ctx.restore();
 
-        const last = arr[arr.length - 1];
-        const hx = headX, hy = yOf(last.p);
-        const pillTxt = fmtP(last.p);
-
-        ctx.font = 'bold 10px ui-monospace, monospace';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'middle';
+        const last = arr[arr.length - 1], hx = headX, hy = yOf(last.p), pillTxt = fmtP(last.p);
+        ctx.font = 'bold 10px ui-monospace, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
         const pw = ctx.measureText(pillTxt).width + 12, ph = 16;
         const px = Math.max(plotL, Math.min(hx - pw / 2, plotR - pw));
-        let py = hy - ph - 9;
-        if (py < plotT - 4) py = hy + 9;
+        let py = hy - ph - 9; if (py < plotT - 4) py = hy + 9;
 
-        rrPath(px, py, pw, ph, 4);
-        ctx.fillStyle = lineColor; ctx.fill();
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText(pillTxt, px + 6, py + ph / 2 + 0.5);
+        rrPath(px, py, pw, ph, 4); ctx.fillStyle = lineColor; ctx.fill();
+        ctx.fillStyle = '#ffffff'; ctx.fillText(pillTxt, px + 6, py + ph / 2 + 0.5);
 
-        // Render Label Harga Samping Kanan (Y-Axis)
-        const tags = levels.map(l => ({
-            text: `${l.hit ? '✓ ' : ''}${l.label} ${fmtP(l.value)}`,
-            c: l.c, bg: l.bg, y: yOf(l.value),
-        }));
+        // Right Y-Axis Level Labels
+        const tags = levels.map(l => ({ text: `${l.hit ? '✓ ' : ''}${l.label} ${fmtP(l.value)}`, c: l.c, bg: l.bg, y: yOf(l.value) }));
         tags.sort((a, b) => a.y - b.y);
-        const GAP = 16;
-        for (let i = 1; i < tags.length; i++) {
-            if (tags[i].y < tags[i - 1].y + GAP) tags[i].y = tags[i - 1].y + GAP;
-        }
-        for (let i = tags.length - 1; i >= 0; i--) {
-            const cap = i === tags.length - 1 ? plotB - 8 : tags[i + 1].y - GAP;
-            if (tags[i].y > cap) tags[i].y = cap;
-        }
+        for (let i = 1; i < tags.length; i++) { if (tags[i].y < tags[i - 1].y + 16) tags[i].y = tags[i - 1].y + 16; }
+        for (let i = tags.length - 1; i >= 0; i--) { const cap = i === tags.length - 1 ? plotB - 8 : tags[i + 1].y - 16; if (tags[i].y > cap) tags[i].y = cap; }
+
         ctx.font = 'bold 9px ui-monospace, monospace';
-        ctx.textBaseline = 'middle';
-        ctx.textAlign = 'left';
         for (const tg of tags) {
             const bx = plotR + 7, bw = CHART_GUT - 12, bh = 15, by = tg.y - bh / 2;
-            rrPath(bx, by, bw, bh, 3);
-            ctx.fillStyle = tg.bg; ctx.fill();
+            rrPath(bx, by, bw, bh, 3); ctx.fillStyle = tg.bg; ctx.fill();
             ctx.strokeStyle = tg.c; ctx.lineWidth = 0.8; ctx.stroke();
-            ctx.fillStyle = tg.c;
-            ctx.fillText(tg.text, bx + 5, tg.y + 0.5);
+            ctx.fillStyle = tg.c; ctx.fillText(tg.text, bx + 5, tg.y + 0.5);
         }
     }
 
@@ -1679,265 +1388,128 @@
         requestAnimationFrame(uiFrame);
         if (dirty.size) {
             for (const key of dirty) paintTicker(key);
-            const t = getActive();
-            if (t && dirty.has(t.key)) refreshActiveUI();
+            const t = getActive(); if (t && dirty.has(t.key)) refreshActiveUI();
             dirty.clear();
         }
-        const nowMs = performance.now();
-        if (nowMs - lastHistPaint > 500 && trades.some(t => t.status !== 'CLOSED')) {
-            lastHistPaint = nowMs;
-            renderHistory();
+        if (performance.now() - lastHistPaint > 500 && trades.some(t => t.status !== 'CLOSED')) {
+            lastHistPaint = performance.now(); renderHistory();
         }
         drawChart();
     }
 
     // ================= BIAS MULTI-TIMEFRAME =================
-    const BIAS_TF = [
-        { label: 'M5', interval: '5m' },
-        { label: 'M15', interval: '15m' },
-        { label: 'M30', interval: '30m' },
-        { label: 'H1', interval: '1h' },
-        { label: 'H4', interval: '4h' },
-        { label: 'Daily', interval: '1d' },
-    ];
-    const BIAS_STYLE = {
-        BULLISH: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40',
-        BEARISH: 'bg-red-500/20 text-red-400 border-red-500/40',
-        NETRAL:  'bg-yellow-500/20 text-yellow-400 border-yellow-500/40',
-        'N/A':   'bg-gray-500/20 text-gray-400 border-gray-500/40',
-    };
+    const BIAS_TF = [{ label: 'M5', interval: '5m' }, { label: 'M15', interval: '15m' }, { label: 'M30', interval: '30m' }, { label: 'H1', interval: '1h' }, { label: 'H4', interval: '4h' }, { label: 'Daily', interval: '1d' }];
+    const BIAS_STYLE = { BULLISH: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40', BEARISH: 'bg-red-500/20 text-red-400 border-red-500/40', NETRAL: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40', 'N/A': 'bg-gray-500/20 text-gray-400 border-gray-500/40' };
     const BIAS_LABEL = { BULLISH: 'Bullish', BEARISH: 'Bearish', NETRAL: 'Netral', 'N/A': 'N/A' };
-    const biasCache = {};
-    let biasBusy = false;
+    const biasCache = {}; let biasBusy = false;
 
     function emaSeries(values, period) {
-        const k = 2 / (period + 1);
-        let e = values[0];
+        const k = 2 / (period + 1); let e = values[0];
         return values.map(v => (e = v * k + e * (1 - k)));
     }
-
     function calcBias(candles) {
         if (!candles || candles.length < 60) return { bias: 'N/A', score: null };
-        const closes = candles.map(c => c.c);
-        const e20 = emaSeries(closes, 20), e50 = emaSeries(closes, 50);
-        const i = closes.length - 1;
-        let score = 0;
-        score += closes[i] > e20[i] ? 1 : -1;
-        score += e20[i] > e50[i] ? 1 : -1;
-        score += e20[i] > e20[i - 5] ? 1 : -1;
-        const bias = score >= 2 ? 'BULLISH' : score <= -2 ? 'BEARISH' : 'NETRAL';
-        return { bias, score };
+        const closes = candles.map(c => c.c), e20 = emaSeries(closes, 20), e50 = emaSeries(closes, 50), i = closes.length - 1;
+        let score = 0; score += closes[i] > e20[i] ? 1 : -1; score += e20[i] > e50[i] ? 1 : -1; score += e20[i] > e20[i - 5] ? 1 : -1;
+        return { bias: score >= 2 ? 'BULLISH' : score <= -2 ? 'BEARISH' : 'NETRAL', score };
     }
 
     async function fetchCandles(provider, symbol, interval) {
         const r = await api('/api/candles', {
-            method: 'POST',
-            headers: JSON_HEADERS,
-            body: JSON.stringify({
-                value: localStorage.getItem(SESSION_EMAIL_KEY) || '',
-                symbol,
-                interval,
-                limit: 1000,
-            }),
+            method: 'POST', headers: JSON_HEADERS,
+            body: JSON.stringify({ value: localStorage.getItem(SESSION_EMAIL_KEY) || '', symbol, interval, limit: 1000 }),
         });
-        if (!r.ok) throw new Error(r.data.msg || `Gagal mengambil candle (HTTP ${r.status})`);
-
-        return (r.data.candles || [])
-            .map(c => ({ t: c.openTime, o: c.open, h: c.high, l: c.low, c: c.close }))
-            .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite))
-            .sort((a, b) => a.t - b.t);
+        if (!r.ok) throw new Error(r.data.msg || `Gagal mengambil candle`);
+        return (r.data.candles || []).map(c => ({ t: c.openTime, o: c.open, h: c.high, l: c.low, c: c.close })).filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite)).sort((a, b) => a.t - b.t);
     }
 
     async function refreshBias(key, force = false) {
-        const m = MARKETS[key];
-        if (!m) return;
-        const cached = biasCache[key];
-        if (!force && cached && Date.now() - cached.at < 60000) return renderBias(key);
-        if (biasBusy) return;
-        if (!symbolOf[key]) return renderBias(key);
-
-        biasBusy = true;
-        const symbol = symbolOf[key];
-        const provider = providerOf[key] || ALIASES[key][0].provider;
-        const rows = {};
+        const m = MARKETS[key]; if (!m) return;
+        const cached = biasCache[key]; if (!force && cached && Date.now() - cached.at < 60000) return renderBias(key);
+        if (biasBusy || !symbolOf[key]) return;
+        biasBusy = true; const symbol = symbolOf[key], provider = providerOf[key] || 'xbtfx'; const rows = {};
         try {
             for (const tf of BIAS_TF) {
                 try {
                     const candles = await fetchCandles(provider, symbol, tf.interval);
                     rows[tf.label] = calcBias(candles);
-                } catch (e) {
-                    rows[tf.label] = { bias: 'N/A', score: null, err: e.message };
-                }
+                } catch { rows[tf.label] = { bias: 'N/A', score: null }; }
             }
             biasCache[key] = { at: Date.now(), rows };
-        } finally {
-            biasBusy = false;
-        }
+        } finally { biasBusy = false; }
         renderBias(key);
     }
 
     function renderBias(key) {
         if (key !== selectedKey()) return;
-        const box = document.getElementById('biasGrid');
-        const info = document.getElementById('biasInfo');
-        if (!box) return;
-        const cache = biasCache[key];
-        const rows = cache?.rows;
-
+        const box = document.getElementById('biasGrid'), info = document.getElementById('biasInfo'); if (!box) return;
+        const rows = biasCache[key]?.rows;
         box.innerHTML = BIAS_TF.map(tf => {
-            const b = rows?.[tf.label];
-            const name = b ? b.bias : null;
-            const cls = BIAS_STYLE[name] || 'bg-gray-500/20 text-gray-400 border-gray-500/40';
-            const text = name ? BIAS_LABEL[name] : (rows ? 'N/A' : '...');
-            const score = b?.score != null ? `skor ${b.score > 0 ? '+' : ''}${b.score}/3` : '';
+            const b = rows?.[tf.label], name = b ? b.bias : null;
             return `
               <div class="bg-darkbg border border-panelborder rounded-lg p-1.5 text-center space-y-0.5">
                 <p class="text-[8px] font-bold text-gray-400">${tf.label}</p>
-                <span class="inline-block text-[9px] font-black px-2 py-0.5 rounded border ${cls}">${text}</span>
-                <p class="text-[7px] text-gray-500 font-mono">${score}</p>
+                <span class="inline-block text-[9px] font-black px-2 py-0.5 rounded border ${BIAS_STYLE[name] || 'bg-gray-500/20 text-gray-400 border-gray-500/40'}">${name ? BIAS_LABEL[name] : (rows ? 'N/A' : '...')}</span>
+                <p class="text-[7px] text-gray-500 font-mono">${b?.score != null ? `skor ${b.score > 0 ? '+' : ''}${b.score}/3` : ''}</p>
               </div>`;
         }).join('');
-
         if (!rows) { info.textContent = symbolOf[key] ? 'memuat bias...' : 'TIDAK TERSAMBUNG / menunggu harga live...'; return; }
         const vals = Object.values(rows).map(r => r.bias);
-        const bull = vals.filter(v => v === 'BULLISH').length;
-        const bear = vals.filter(v => v === 'BEARISH').length;
-        const neu = vals.filter(v => v === 'NETRAL').length;
-        const na = vals.filter(v => v === 'N/A').length;
-        info.textContent = `${bull} Bullish · ${bear} Bearish · ${neu} Netral${na ? ` · ${na} N/A` : ''} · update ${new Date(cache.at).toLocaleTimeString('id-ID', { hour12: false })}`;
+        info.textContent = `${vals.filter(v => v === 'BULLISH').length} Bullish · ${vals.filter(v => v === 'BEARISH').length} Bearish · ${vals.filter(v => v === 'NETRAL').length} Netral`;
     }
 
-    // ================= AI SIGNAL (TickerLayer Backend + Fallback) =================
-    const STYLE_TF = {
-        'Scalping':    { htf: '15m', mtf: '5m',  ltf: '1m' },
-        'Day Trading': { htf: '1h',  mtf: '30m', ltf: '5m' },
-        'Intraday':    { htf: '4h',  mtf: '1h',  ltf: '15m' },
-        'Swing':       { htf: '1d',  mtf: '4h',  ltf: '1h' },
-    };
+    // ================= AI SIGNAL =================
+    const STYLE_TF = { 'Scalping': { htf: '15m', mtf: '5m', ltf: '1m' }, 'Day Trading': { htf: '1h', mtf: '30m', ltf: '5m' }, 'Intraday': { htf: '4h', mtf: '1h', ltf: '15m' }, 'Swing': { htf: '1d', mtf: '4h', ltf: '1h' } };
     const CANDLE_CACHE = {};
 
     async function loadCandles(key, interval) {
-        const ck = `${key}|${interval}`;
-        const hit = CANDLE_CACHE[ck];
-        
+        const ck = `${key}|${interval}`, hit = CANDLE_CACHE[ck];
         if (hit && Date.now() - hit.at < 180000) return hit.rows;
-
         try {
-            const provider = providerOf[key] || ALIASES[key][0].provider;
+            const provider = providerOf[key] || 'xbtfx';
             const rows = await fetchCandles(provider, symbolOf[key], interval);
-            if (rows.length > 0) {
-                CANDLE_CACHE[ck] = { at: Date.now(), rows };
-                return rows;
-            }
-        } catch (err) {
-            console.warn('Gagal ambil data candle via backend/TickerLayer, beralih ke tick lokal:', err);
-        }
-
-        const tfMinutes = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 }[interval] || 1;
-        const tfKey = `${tfMinutes}m`;
-        let candles = (marketCandles[key]?.[tfKey] || []).map(c => ({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close }));
-
-        if (candles.length < 10) {
-            const rawTicks = history[key] || [];
-            if (rawTicks.length > 5) {
-                const intervalMs = tfMinutes * 60 * 1000;
-                const grouped = {};
-                for (const tick of rawTicks) {
-                    const bucketTime = Math.floor(tick.t / intervalMs) * intervalMs;
-                    if (!grouped[bucketTime]) {
-                        grouped[bucketTime] = { t: bucketTime, o: tick.p, h: tick.p, l: tick.p, c: tick.p };
-                    } else {
-                        grouped[bucketTime].h = Math.max(grouped[bucketTime].h, tick.p);
-                        grouped[bucketTime].l = Math.min(grouped[bucketTime].l, tick.p);
-                        grouped[bucketTime].c = tick.p;
-                    }
-                }
-                candles = Object.values(grouped).sort((a, b) => a.t - b.t);
-            }
-        }
-
-        CANDLE_CACHE[ck] = { at: Date.now(), rows: candles };
-        return candles;
+            if (rows.length > 0) { CANDLE_CACHE[ck] = { at: Date.now(), rows }; return rows; }
+        } catch {}
+        return (marketCandles[key]?.[`${interval === '1m' ? 1 : 5}m`] || []).map(c => ({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close }));
     }
 
     const shiftCandles = (rows, off) => rows.map(c => ({ t: c.t, o: c.o + off, h: c.h + off, l: c.l + off, c: c.c + off }));
 
     async function generateAISignal() {
-        const marketId = document.getElementById('marketSelect').value;
-        const tradingStyle = document.getElementById('tradingStyleSelect').value;
-        const symbolKey = marketId.split('|').pop();
-        const live = prices[symbolKey];
-        if (!live || !isLive(symbolKey)) {
-            return alert(`${displayName(symbolKey)} TIDAK TERSAMBUNG ke stream. Pilih pair lain atau tunggu harga masuk.`);
-        }
+        const marketId = document.getElementById('marketSelect').value, tradingStyle = document.getElementById('tradingStyleSelect').value;
+        const symbolKey = marketId.split('|').pop(), live = prices[symbolKey];
+        if (!live || !isLive(symbolKey)) return alert(`${displayName(symbolKey)} TIDAK TERSAMBUNG ke stream.`);
+        const email = localStorage.getItem(SESSION_EMAIL_KEY); if (!email) return alert('Sesi tidak ditemukan.');
 
-        const email = localStorage.getItem(SESSION_EMAIL_KEY);
-        if (!email) return alert('Sesi tidak ditemukan. Silakan login ulang.');
-
-        const btn = document.getElementById('signalBtn');
-        btn.disabled = true;
+        const btn = document.getElementById('signalBtn'); btn.disabled = true;
         btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> Menganalisis Struktur SMC...`;
 
         try {
-            const tf = STYLE_TF[tradingStyle];
-            if (!tf) throw new Error('gaya trading tidak dikenal');
-
-            const off = getOffset(symbolKey);
+            const tf = STYLE_TF[tradingStyle], off = getOffset(symbolKey);
             const [htfRows, mtfRows, ltfRows] = await Promise.all([
-                loadCandles(symbolKey, tf.htf),
-                loadCandles(symbolKey, tf.mtf),
-                tf.ltf ? loadCandles(symbolKey, tf.ltf).catch(() => []) : Promise.resolve([]),
+                loadCandles(symbolKey, tf.htf), loadCandles(symbolKey, tf.mtf), loadCandles(symbolKey, tf.ltf).catch(() => [])
             ]);
 
             const res = await fetch('/api/generate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    email,
-                    marketId,
-                    tradingStyle,
-                    currentPrice: live.price,
-                    lang: currentLang,
-                    candles: {
-                        htf: shiftCandles(htfRows, off).slice(-200),
-                        mtf: shiftCandles(mtfRows, off).slice(-200),
-                        ltf: shiftCandles(ltfRows, off).slice(-200),
-                    },
-                }),
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, marketId, tradingStyle, currentPrice: live.price, lang: currentLang, candles: { htf: shiftCandles(htfRows, off).slice(-200), mtf: shiftCandles(mtfRows, off).slice(-200), ltf: shiftCandles(ltfRows, off).slice(-200) } }),
             });
-
-            const txt = await res.text();
-            let data = {};
-            try {
-                data = JSON.parse(txt);
-            } catch {
-                const snippet = txt.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
-                data = { error: `Server tidak mengirim JSON (HTTP ${res.status}). ${snippet}` };
-            }
+            const data = await res.json();
             if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-
             if (!data.signal) return alert('Belum ada setup valid.\n\n' + (data.reason || ''));
 
             const s = data.signal;
             const t = {
                 id: Date.now().toString(36), key: symbolKey, style: tradingStyle,
-                signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
-                mode: s.mode, status: s.status, fill: s.fill || null,
-                entry: s.entry, bufferEnd: s.bufferEnd, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
-                zone: s.zone,
-                expiresAt: s.expireMs ? Date.now() + s.expireMs : null,
-                confidence: s.confidence, risk: s.risk, setup: s.setup,
-                setupLabel: s.setupLabel, zoneLabel: s.zoneLabel, zoneNote: s.zoneNote,
-                createdAt: Date.now(), hits: {},
+                signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1, mode: s.mode, status: s.status, fill: s.fill || null,
+                entry: s.entry, bufferEnd: s.bufferEnd, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, zone: s.zone,
+                expiresAt: s.expireMs ? Date.now() + s.expireMs : null, confidence: s.confidence, risk: s.risk, setup: s.setup,
+                setupLabel: s.setupLabel, zoneLabel: s.zoneLabel, zoneNote: s.zoneNote, createdAt: Date.now(), hits: {},
                 card: { reason: s.reason }, no: nextNo(),
             };
 
-            trades.push(t);
-            activeId = t.id;
-            saveTrades();
-            renderSignalCard(t);
-            renderHistory();
-            refreshActiveUI();
+            trades.push(t); activeId = t.id; saveTrades();
+            renderSignalCard(t); renderHistory(); refreshActiveUI();
         } catch (e) {
             alert('Gagal generate sinyal: ' + e.message);
         } finally {
@@ -1948,15 +1520,10 @@
 
     // ================= BOOT =================
     window.onload = () => {
-        checkSession();
-        buildTicker();
-        updateCalibInfo();
-        trades = loadTrades();
-        saveTrades();
-        renderHistory();
+        checkSession(); buildTicker(); updateCalibInfo();
+        trades = loadTrades(); saveTrades(); renderHistory();
         if (trades.length) viewTrade(trades[trades.length - 1].id);
-        renderBias(selectedKey());
-        requestAnimationFrame(uiFrame);
+        renderBias(selectedKey()); requestAnimationFrame(uiFrame);
         connect();
         setInterval(() => { watchdog(); expirePending(); }, 1000);
         setInterval(() => refreshBias(selectedKey()), 60000);
