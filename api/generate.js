@@ -49,19 +49,20 @@ async function checkAccess(email) {
 }
 
 function cleanCandles(rows) {
-  if (!Array.isArray(rows)) return [];
+  if (!Array.isArray(rows) || rows.length === 0) return [];
   return rows.map(c => ({ t: Number(c?.t), o: Number(c?.o), h: Number(c?.h), l: Number(c?.l), c: Number(c?.c) }))
-    .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite)).sort((a, b) => a.t - b.t).slice(-200);
+    .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite)).sort((a, b) => a.t - b.t);
 }
 
 function atr(candles, period = 14) {
+  if (!candles || candles.length < 2) return 15;
   const trs = [];
   for (let i = 1; i < candles.length; i++) {
     const c = candles[i], p = candles[i - 1];
     trs.push(Math.max(c.h - c.l, Math.abs(c.h - p.c), Math.abs(c.l - p.c)));
   }
   const s = trs.slice(-period);
-  return s.length ? s.reduce((a, b) => a + b, 0) / s.length : 1;
+  return s.length ? s.reduce((a, b) => a + b, 0) / s.length : 15;
 }
 
 function calculateBollingerBands(candles, period = 20, multiplier = 2) {
@@ -111,6 +112,23 @@ function structureDir(candles, emaFilter = {}, bbFilter = {}) {
   }
 
   return baseDir;
+}
+
+// PEMINDAIAN TITIK SWING HIGH DAN SWING LOW RIIL DARI CANDLES
+function analyzeRealMarketStructure(candles, currentPrice) {
+  if (!candles || candles.length < 10) {
+    return { dir: 1, swingHigh: currentPrice * 1.02, swingLow: currentPrice * 0.98 };
+  }
+  const highs = candles.map(c => c.h);
+  const lows = candles.map(c => c.l);
+  const swingHigh = Math.max(...highs);
+  const swingLow = Math.min(...lows);
+  
+  const firstClose = candles[0].c;
+  const lastClose = candles[candles.length - 1].c;
+  const dir = lastClose >= firstClose ? 1 : -1;
+
+  return { dir, swingHigh, swingLow };
 }
 
 function getAbsoluteScalpOffsets(symbol) {
@@ -183,38 +201,41 @@ function aggregateM15(m5) {
   return out.length ? out : m5;
 }
 
-function generalTradePlan({ mtfC, m5C, price, symbol, styleKind, emaFilter, bbFilter, rrList }) {
-  const m15C = aggregateM15(m5C);
-  const a15 = atr(m15C, 14) || 15; // ATR riil timeframe 15m untuk rentang zona valid
-  const dir = structureDir(mtfC, emaFilter, bbFilter) || 1;
+// LOGIKA DAY TRADING, INTRADAY, SWING BERBASIS STRUKTUR RIIL & ZONA LIMIT ORDER LEBAR
+function generalTradePlan({ htfC, mtfC, m5C, price, symbol, styleKind, emaFilter, bbFilter, rrList }) {
+  const sourceCandles = htfC.length >= 10 ? htfC : (mtfC.length >= 10 ? mtfC : aggregateM15(m5C));
+  const struct = analyzeRealMarketStructure(sourceCandles, price);
+  const dir = struct.dir;
   const isBuy = dir === 1;
 
-  // Day Trading, Intraday, Swing menggunakan rentang zona Order Block / FVG asli berbasis ATR & Struktur
-  let zoneMult = 1.2;
-  if (styleKind === 'intraday') zoneMult = 2.0;
-  if (styleKind === 'swing') zoneMult = 3.5;
+  const marketSpan = struct.swingHigh - struct.swingLow;
+  const currentAtr = atr(sourceCandles, 14) || (marketSpan > 0 ? marketSpan * 0.05 : 15);
 
-  // Harga Entry Limit ditarik mundur sejauh proporsi ATR dari harga saat ini untuk menjemput zona pantulan (Demand/Supply)
-  const actualEntry = isBuy ? price - (a15 * zoneMult * 0.5) : price + (a15 * zoneMult * 0.5);
+  let depthMultiplier = 0.4;
+  if (styleKind === 'intraday') depthMultiplier = 0.7;
+  if (styleKind === 'swing') depthMultiplier = 1.2;
+
+  // Harga Entry Limit riil di dalam zona Demand / Supply berdasarkan struktur market
+  const actualEntry = isBuy 
+    ? price - Math.max(currentAtr * 1.5, marketSpan * depthMultiplier * 0.2) 
+    : price + Math.max(currentAtr * 1.5, marketSpan * depthMultiplier * 0.2);
+
+  // Stop Loss di luar swing riil
+  const sl = isBuy ? struct.swingLow - (currentAtr * 0.8) : struct.swingHigh + (currentAtr * 0.8);
   
-  // Lebar Buffer dan Stop Loss ditarik di luar zona struktur riil
-  const bufferVal = a15 * zoneMult * 0.4;
-  const slVal = a15 * zoneMult * 1.5;
-
+  // Buffer dan lebar zona
+  const bufferVal = currentAtr * 0.6;
   const bufferEnd = isBuy ? actualEntry - bufferVal : actualEntry + bufferVal;
-  const sl = isBuy ? actualEntry - slVal : actualEntry + slVal;
 
   const risk = Math.abs(actualEntry - sl);
-  
   const tp1 = actualEntry + dir * rrList[0] * risk;
   const tp2 = actualEntry + dir * rrList[1] * risk;
   const tp3 = actualEntry + dir * rrList[2] * risk;
 
-  // Batas Area Zona Min dan Max untuk visualisasi kotak chart yang valid dan lebar
   const zoneMin = Math.min(actualEntry, bufferEnd);
   const zoneMax = Math.max(actualEntry, bufferEnd);
 
-  let trigName = 'Day Trading (Order Block / FVG Limit Zone)';
+  let trigName = 'Day Trading (Real Structure OB Zone)';
   if (styleKind === 'intraday') trigName = 'Intraday (Structural Limit Zone)';
   if (styleKind === 'swing') trigName = 'Swing Trading (Major Structure S&D Zone)';
 
@@ -230,8 +251,8 @@ function generalTradePlan({ mtfC, m5C, price, symbol, styleKind, emaFilter, bbFi
       tps: [tp1, tp2, tp3],
       zone: { min: zoneMin, max: zoneMax }, // Zona riil yang lebar dan valid
       expireMs: 360 * 60 * 1000,
-      trigSrc: `${trigName} [ATR Structure Range]`,
-      zoneNote: `Structural Limit Zone (ATR-Based)`,
+      trigSrc: `${trigName} [Swing High: ${struct.swingHigh.toFixed(2)} | Low: ${struct.swingLow.toFixed(2)}]`,
+      zoneNote: `Structural Limit Zone (HTF Range)`,
       flags: ['VALID_STRUCTURAL_ZONE'],
     }
   };
@@ -278,7 +299,7 @@ export default async function handler(req, res) {
       dir = hr.dir;
       plan = hr.plan;
     } else {
-      const dp = generalTradePlan({ mtfC, m5C: ltfC, price, symbol, styleKind: style.kind, emaFilter, bbFilter, rrList });
+      const dp = generalTradePlan({ htfC, mtfC, m5C: ltfC, price, symbol, styleKind: style.kind, emaFilter, bbFilter, rrList });
       dir = dp.dir;
       plan = dp.plan;
     }
@@ -290,21 +311,21 @@ export default async function handler(req, res) {
     const actionType = plan.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET';
     const sideText = dir === 1 ? 'BUY' : 'SELL';
     
-    const zoneNoteText = plan.zoneNote || (isScalp ? `Range Mode (Scalp)` : `Structural Limit Zone (ATR-Based)`);
+    const zoneNoteText = plan.zoneNote || (isScalp ? `Range Mode (Scalp)` : `Structural Limit Zone`);
     const zoneLabelText = plan.orderType === 'LIMIT' ? 'Limit Order Zone (Waiting)' : 'Market Execution Zone';
 
     const emaSummary = Object.entries(emaFilter).map(([k, v]) => `${k}: ${v}`).join(' | ');
     const bbSummary = `Upper: ${bbFilter.upper} | Mid: ${bbFilter.middle} | Lower: ${bbFilter.lower}`;
 
     const actionDesc = sideText === 'BUY' 
-      ? 'menempatkan Pending Order BUY LIMIT pada area Zona Demand / Order Block & Bollinger Bawah' 
-      : 'menempatkan Pending Order SELL LIMIT pada area Zona Supply / Order Block & Bollinger Atas';
+      ? 'menempatkan Pending Order BUY LIMIT pada area struktur Demand / Order Block riil' 
+      : 'menempatkan Pending Order SELL LIMIT pada area struktur Supply / Order Block riil';
 
     const techReason = [
-      `Analisis Teknikal Pure SMC ${sideText} (${style.label}) pada pair ${symbol}.`,
-      `Mekanisme Eksekusi: Menggunakan Limit Order (Pending Order / WAITING) dengan rentang zona harga struktural yang valid.`,
-      `Alasan: Diputuskan ${actionDesc}. Indikator EMA (${emaSummary}) serta Bollinger Bands (${bbSummary}) menyaring titik jenuh.`,
-      `Manajemen Risiko: Lebar zona, Buffer, dan Stop Loss dikalkulasi presisi dari struktur ATR dengan target RRR [TP1: 1:${rrList[0]}, TP2: 1:${rrList[1]}, TP3: 1:${rrList[2]}].`
+      `Analisis Struktur Jauh SMC ${sideText} (${style.label}) pada pair ${symbol}.`,
+      `Mekanisme Eksekusi: Menggunakan Limit Order (Pending Order / WAITING) dengan memindai titik Swing High/Low dari data candle riil.`,
+      `Alasan: Diputuskan ${actionDesc}. Indikator EMA (${emaSummary}) serta Bollinger Bands (${bbSummary}) memfilter area jenuh.`,
+      `Manajemen Risiko: Lebar zona dan Stop Loss ditarik dari struktur market asli dengan target RRR [TP1: 1:${rrList[0]}, TP2: 1:${rrList[1]}, TP3: 1:${rrList[2]}].`
     ].join('\n\n');
 
     return res.status(200).json({
@@ -322,7 +343,7 @@ export default async function handler(req, res) {
         zone: plan.zone ? { min: r(plan.zone.min), max: r(plan.zone.max) } : null,
         confidence: 'HIGH',
         risk: 'LOW',
-        setup: `PENDING ORDER ZONE (RRR Target: 1:${rrList[0]} - 1:${rrList[2]})`,
+        setup: `STRUCTURAL PENDING ZONE (RRR Target: 1:${rrList[0]} - 1:${rrList[2]})`,
         setupLabel: style.label,
         zoneLabel: zoneLabelText,
         zoneNote: zoneNoteText,
