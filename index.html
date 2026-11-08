@@ -753,8 +753,11 @@
     function pushHistory(key, p) {
         const arr = history[key] ??= [];
         const t = Date.now();
-        arr.push({ t, p });
-        while (arr.length && t - arr[0].t > HISTORY_MS) arr.shift();
+        // Hanya masukkan jika harga berubah atau sudah lewat 1 detik agar tidak menumpuk tapi tetap dinamis mengalir
+        if (!arr.length || arr[arr.length - 1].p !== p || t - arr[arr.length - 1].t > 1000) {
+            arr.push({ t, p });
+            while (arr.length && t - arr[0].t > HISTORY_MS) arr.shift();
+        }
     }
 
     // ================= KALIBRASI =================
@@ -1520,8 +1523,13 @@
         const t = getActive();
         if (!t) return;
         let ticks = history[t.key] || [];
-        if (!ticks.length && prices[t.key]) {
-            ticks = [{ t: Date.now(), p: prices[t.key].price }];
+        const livePrice = prices[t.key]?.price;
+
+        if (!ticks.length && livePrice != null) {
+            ticks = [{ t: Date.now(), p: livePrice }];
+        } else if (ticks.length && livePrice != null && ticks[ticks.length - 1].p !== livePrice) {
+            // Tambahkan harga live terbaru agar garis mengalir realtime
+            ticks.push({ t: Date.now(), p: livePrice });
         }
 
         if (!ticks.length) {
@@ -1580,7 +1588,7 @@
             ctx.restore();
         }
 
-        // --- SMOOTH LIVE LINE CHART ---
+        // --- SMOOTH REALTIME LINE CHART ---
         const step = plotW / Math.max(1, ticks.length - 1);
         ctx.save();
         ctx.lineWidth = 2;
@@ -1712,7 +1720,6 @@
             }
         } catch (e) {}
 
-        // Fallback ke candle lokal dari tick
         const tfMinutes = { '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 }[interval] || 5;
         const key = selectedKey();
         const tfKey = `${tfMinutes}m`;
