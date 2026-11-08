@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Alu Signal Z & Terminal Candlestick</title>
+    <title>Alu Signal Z & Mega1 Terminal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -122,7 +122,7 @@
                 </div>
                 <div class="min-w-0">
                     <h1 class="font-bold text-xs text-white">Alu <span class="text-accentblue">Signal Z</span></h1>
-                    <p id="txtSubHeader" class="text-[8px] text-gray-400 truncate">Pure SMC Candlestick Terminal</p>
+                    <p id="txtSubHeader" class="text-[8px] text-gray-400 truncate">Mega1 API OpenAPI 3.1.0 (Build 148)</p>
                 </div>
             </div>
             <div class="flex items-center gap-1.5 flex-wrap justify-end">
@@ -139,40 +139,17 @@
 
                 <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
                     <div class="flex justify-between items-center">
-                        <label id="lblTargetAsset" class="text-[9px] font-bold text-gray-400">TARGET ASET AKTIF</label>
-                        <span id="selectedPairBadge" class="text-[9px] font-mono text-accentblue font-bold">xbtfx|XAUUSD</span>
+                        <label id="lblTargetAsset" class="text-[9px] font-bold text-gray-400">TARGET SYMBOL ID</label>
+                        <span id="selectedPairBadge" class="text-[9px] font-mono text-accentblue font-bold">uuid-xauusd-placeholder|XAUUSD</span>
                     </div>
 
                     <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                        <optgroup label="XBTFX Dollar Index & Majors">
-                            <option value="xbtfx|DXY">DXY / US Dollar Index</option>
-                            <option value="xbtfx|EURUSD">EUR/USD</option>
-                            <option value="xbtfx|GBPUSD">GBP/USD</option>
-                            <option value="xbtfx|USDJPY">USD/JPY</option>
-                            <option value="xbtfx|AUDUSD">AUD/USD</option>
-                            <option value="xbtfx|USDCAD">USD/CAD</option>
-                            <option value="xbtfx|USDCHF">USD/CHF</option>
-                            <option value="xbtfx|NZDUSD">NZD/USD</option>
-                        </optgroup>
-                        <optgroup label="XBTFX Cross Forex">
-                            <option value="xbtfx|EURGBP">EUR/GBP</option>
-                            <option value="xbtfx|EURJPY">EUR/JPY</option>
-                            <option value="xbtfx|GBPJPY">GBP/JPY</option>
-                        </optgroup>
-                        <optgroup label="XBTFX Metals & Precious">
-                            <option value="xbtfx|XAUUSD" selected>XAUUSD / Gold</option>
-                            <option value="xbtfx|XAGUSD">XAGUSD / Silver</option>
-                        </optgroup>
-                        <optgroup label="XBTFX Global Indices">
-                            <option value="xbtfx|US30">Dow Jones / US30</option>
-                            <option value="xbtfx|NAS100">Nasdaq 100 / NAS100</option>
-                            <option value="xbtfx|SPX500">S&amp;P 500 / SPX500</option>
-                            <option value="xbtfx|GER40">DAX / GER40</option>
-                        </optgroup>
-                        <optgroup label="XBTFX Crypto">
-                            <option value="xbtfx|BTCUSD">BTCUSD / Bitcoin</option>
-                            <option value="xbtfx|ETHUSD">ETHUSD / Ethereum</option>
-                            <option value="xbtfx|SOLUSD">SOLUSD / Solana</option>
+                        <optgroup label="Mega1 Symbols & UUIDs">
+                            <option value="uuid-xauusd-placeholder|XAUUSD" selected>XAUUSD / Gold</option>
+                            <option value="uuid-eurusd-placeholder|EURUSD">EUR/USD</option>
+                            <option value="uuid-btcusd-placeholder|BTCUSD">BTCUSD / Bitcoin</option>
+                            <option value="uuid-us30-placeholder|US30">US30 / Dow Jones</option>
+                            <option value="uuid-nas100-placeholder|NAS100">NAS100 / Nasdaq</option>
                         </optgroup>
                     </select>
 
@@ -184,25 +161,31 @@
                     </div>
                     <p id="calibInfo" class="text-[8px] font-mono text-gray-500">Offset: 0</p>
 
-                    <div class="grid grid-cols-2 gap-2">
+                    <div class="grid grid-cols-3 gap-2">
                         <div>
                             <label id="lblTradingStyle" class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING</label>
                             <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                                <option value="Scalping">Scalping (M1+M3+M5)</option>
-                                <option value="Day Trading">Day Trading (M5+M15+M30/H1)</option>
-                                <option value="Intraday">Intraday</option>
-                                <option value="Swing">Swing</option>
+                                <option value="Scalping">Scalping</option>
+                                <option value="Day Trading">Day Trading</option>
                             </select>
                         </div>
                         <div>
-                            <label class="text-[8px] font-bold text-gray-400 block mb-1">TIMEFRAME CHART</label>
+                            <label class="text-[8px] font-bold text-gray-400 block mb-1">TIMEFRAME</label>
                             <select id="chartTimeframeSelect" onchange="reloadChartCandles()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                                <option value="M1" selected>M1 (1 Menit)</option>
-                                <option value="M5">M5 (5 Menit)</option>
-                                <option value="M15">M15 (15 Menit)</option>
-                                <option value="H1">H1 (1 Jam)</option>
-                                <option value="H4">H4 (4 Jam)</option>
-                                <option value="D1">D1 (Daily)</option>
+                                <option value="M1" selected>M1</option>
+                                <option value="M5">M5</option>
+                                <option value="M15">M15</option>
+                                <option value="H1">H1</option>
+                                <option value="H4">H4</option>
+                                <option value="D1">D1</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-[8px] font-bold text-gray-400 block mb-1">PRICE SIDE</label>
+                            <select id="priceSideSelect" onchange="reloadChartCandles()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
+                                <option value="Mid" selected>Mid</option>
+                                <option value="Bid">Bid</option>
+                                <option value="Ask">Ask</option>
                             </select>
                         </div>
                     </div>
@@ -210,18 +193,6 @@
                     <button onclick="generateAISignal()" id="signalBtn" class="w-full bg-gradient-to-r from-accentblue to-indigo-600 hover:from-blue-600 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-accentblue/20 transition active:scale-95">
                         <i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnGenText">GENERATE PURE SMC SIGNAL</span>
                     </button>
-                </div>
-
-                <!-- BIAS -->
-                <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
-                    <div class="flex justify-between items-center">
-                        <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
-                            <i class="fa-solid fa-compass text-accentblue"></i> BIAS MULTI-TIMEFRAME
-                        </span>
-                        <button onclick="refreshBias(selectedKey(), true)" class="text-[9px] text-accentblue hover:underline"><i class="fa-solid fa-rotate"></i> Refresh</button>
-                    </div>
-                    <div id="biasGrid" class="grid grid-cols-3 sm:grid-cols-6 gap-1.5"></div>
-                    <p id="biasInfo" class="text-[8px] font-mono text-gray-500">memuat...</p>
                 </div>
 
                 <!-- KARTU SIGNAL -->
@@ -232,7 +203,7 @@
                     </div>
 
                     <div id="standbyView" class="py-5 text-center text-xs text-gray-400">
-                        Pilih pair, pastikan harga live bergerak, lalu tekan <b>GENERATE PURE SMC SIGNAL</b>.
+                        Pilih symbol, pastikan data chart termuat dari API, lalu tekan <b>GENERATE PURE SMC SIGNAL</b>.
                     </div>
 
                     <div id="activeSignalCard" class="hidden space-y-3">
@@ -245,12 +216,6 @@
                             <p id="cardStyleSub" class="text-[9px] text-gray-400 pt-1">SCALPING / Just Now</p>
                             <p id="lblEntryZone" class="text-[9px] font-bold text-gray-400 tracking-widest pt-1">ENTRY ZONE</p>
                             <h2 id="cardEntryZone" class="text-xl font-black text-white font-mono tracking-tight">-- - --</h2>
-                            <p id="cardZoneNote" class="text-[8px] text-gray-400 font-mono"></p>
-                            <div class="flex justify-center gap-1.5 flex-wrap pt-1">
-                                <span id="badgeSetup" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-darkbg text-gray-300 border-panelborder">--</span>
-                                <span id="badgeConf" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-darkbg text-gray-300 border-panelborder">CONFIDENCE --</span>
-                                <span id="badgeRisk" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-darkbg text-gray-300 border-panelborder">RISK --</span>
-                            </div>
                             <div class="pt-1">
                                 <span class="inline-flex items-center gap-1.5 bg-darkbg border border-panelborder px-2.5 py-0.5 rounded-full text-[9px] text-gray-300 font-mono">
                                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -264,36 +229,30 @@
                                 <span id="chkSL" class="hit-badge bg-red-400"><i class="fa-solid fa-xmark"></i></span>
                                 <p class="text-[8px] font-bold text-red-400">SL</p>
                                 <p id="cardSL" class="text-[10px] font-extrabold text-red-400 font-mono">--</p>
-                                <p id="cardSLPips" class="text-[7px] text-red-400/80 font-mono">--</p>
                             </div>
                             <div id="boxTP1" class="lvl-box bg-darkbg/70 border border-emerald-500/30 rounded-lg p-2 text-center">
                                 <span id="chkTP1" class="hit-badge bg-emerald-400"><i class="fa-solid fa-check"></i></span>
                                 <p class="text-[8px] font-bold text-emerald-400">TP1</p>
                                 <p id="cardTP1" class="text-[10px] font-extrabold text-emerald-400 font-mono">--</p>
-                                <p id="cardTP1Pips" class="text-[7px] text-emerald-400/80 font-mono">--</p>
                             </div>
                             <div id="boxTP2" class="lvl-box bg-darkbg/70 border border-emerald-500/30 rounded-lg p-2 text-center">
                                 <span id="chkTP2" class="hit-badge bg-emerald-400"><i class="fa-solid fa-check"></i></span>
                                 <p class="text-[8px] font-bold text-emerald-400">TP2</p>
                                 <p id="cardTP2" class="text-[10px] font-extrabold text-emerald-400 font-mono">--</p>
-                                <p id="cardTP2Pips" class="text-[7px] text-emerald-400/80 font-mono">--</p>
                             </div>
                             <div id="boxTP3" class="lvl-box bg-darkbg/70 border border-sky-500/30 rounded-lg p-2 text-center">
                                 <span id="chkTP3" class="hit-badge bg-emerald-400"><i class="fa-solid fa-check"></i></span>
                                 <p class="text-[8px] font-bold text-sky-400">TP3</p>
                                 <p id="cardTP3" class="text-[10px] font-extrabold text-sky-400 font-mono">--</p>
-                                <p id="cardTP3Pips" class="text-[7px] text-sky-400/80 font-mono">--</p>
                             </div>
                         </div>
 
-                        <!-- CANDLESTICK CHART CONTAINER -->
+                        <!-- CANDLESTICK CHART CONTAINER (POST /v1/chart) -->
                         <div class="bg-darkbg/80 border border-panelborder rounded-xl p-2.5 space-y-2">
                             <div class="flex flex-wrap justify-between items-start gap-1">
-                                <p id="lblPriceMap" class="text-[9px] font-bold text-gray-400 tracking-wider">CANDLESTICK PRICE CHART (OPENAPI SCHEMA)</p>
+                                <p id="lblPriceMap" class="text-[9px] font-bold text-gray-400 tracking-wider">CANDLESTICK PRICE CHART (/v1/chart)</p>
                                 <span id="tradeStatus" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40 whitespace-nowrap">RUNNING</span>
                             </div>
-                            <p id="tradePnl" class="text-[10px] font-mono font-bold text-gray-400">--</p>
-                            <p id="tradeLive" class="text-[8px] font-mono text-gray-400"></p>
                             <div class="relative w-full h-[220px] sm:h-[300px]">
                                 <canvas id="priceChart" class="absolute inset-0 w-full h-full"></canvas>
                             </div>
@@ -309,63 +268,16 @@
 
             <!-- KOLOM KANAN -->
             <div class="flex flex-col gap-2 min-w-0">
-
-                <div id="calCard" class="hidden bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
-                    <div class="flex justify-between items-center gap-2">
-                        <div class="flex items-center gap-1">
-                            <button onclick="calShift(-1)" class="text-[10px] px-2 py-0.5 rounded bg-darkbg border border-panelborder text-gray-300">◀</button>
-                            <span id="calTitle" class="text-[10px] font-bold text-white min-w-[110px] text-center">--</span>
-                            <button onclick="calShift(1)" class="text-[10px] px-2 py-0.5 rounded bg-darkbg border border-panelborder text-gray-300">▶</button>
-                        </div>
-                        <div class="text-right">
-                            <p class="text-[7px] font-bold text-gray-500 tracking-wider">PNL BULAN INI</p>
-                            <p id="calMonthPnl" class="text-[11px] font-extrabold font-mono text-white">0 pip</p>
-                        </div>
-                    </div>
-                    <div id="calWeekdays" class="grid grid-cols-7 gap-0.5 text-center"></div>
-                    <div id="calGrid" class="grid grid-cols-7 gap-0.5"></div>
-                    <div class="grid grid-cols-2 gap-1.5 text-center">
-                        <div class="bg-darkbg/70 border border-emerald-500/30 rounded-lg p-1.5">
-                            <p class="text-[8px] font-bold text-emerald-400">TOTAL WIN</p>
-                            <p id="calWin" class="text-[11px] font-extrabold text-emerald-400 font-mono">+0 pip</p>
-                        </div>
-                        <div class="bg-darkbg/70 border border-red-500/30 rounded-lg p-1.5">
-                            <p class="text-[8px] font-bold text-red-400">TOTAL LOSE</p>
-                            <p id="calLose" class="text-[11px] font-extrabold text-red-400 font-mono">0 pip</p>
-                        </div>
-                    </div>
-                    <button onclick="calReset()" class="w-full text-[8px] font-bold px-2 py-1 rounded bg-red-500/20 text-red-400 border border-red-500/40">RESET KALENDER</button>
-                </div>
-
                 <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
                     <div class="flex justify-between items-center">
                         <span id="lblTradingHistory" class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
                             <i class="fa-solid fa-clock-rotate-left text-accentblue"></i> TRADING HISTORY
                         </span>
-                        <div class="flex items-center gap-1.5">
-                            <button id="calToggle" onclick="calToggle()" class="text-[9px] font-bold px-2 py-0.5 rounded bg-accentblue/20 text-accentblue border border-accentblue/40">📅 PNL</button>
-                            <select id="histFilter" onchange="renderHistory()" class="bg-darkbg border border-panelborder text-[9px] font-bold text-white px-1.5 py-0.5 rounded focus:outline-none">
-                                <option value="today">Hari ini</option>
-                                <option value="all">Semua</option>
-                            </select>
-                            <button onclick="clearHistory()" title="Hapus history" class="text-[10px] text-gray-500 hover:text-red-400 px-1">
-                                <i class="fa-solid fa-trash"></i>
-                            </button>
-                        </div>
+                        <button onclick="clearHistory()" title="Hapus history" class="text-[10px] text-gray-500 hover:text-red-400 px-1">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
                     </div>
-
-                    <div class="grid grid-cols-2 gap-1.5 text-center">
-                        <div class="bg-darkbg/70 border border-emerald-500/30 rounded-lg p-1.5">
-                            <p class="text-[8px] font-bold text-emerald-400">WIN</p>
-                            <p id="sumWin" class="text-[11px] font-extrabold text-emerald-400 font-mono">+0 pip</p>
-                        </div>
-                        <div class="bg-darkbg/70 border border-red-500/30 rounded-lg p-1.5">
-                            <p class="text-[8px] font-bold text-red-400">LOSE</p>
-                            <p id="sumLose" class="text-[11px] font-extrabold text-red-400 font-mono">0 pip</p>
-                        </div>
-                    </div>
-
-                    <div id="historyList" class="space-y-1 max-h-[320px] lg:max-h-[calc(100vh-260px)] overflow-y-auto pr-1">
+                    <div id="historyList" class="space-y-1 max-h-[320px] overflow-y-auto pr-1">
                         <p id="lblNoHistory" class="text-center text-[10px] text-gray-500 py-3">Belum ada history.</p>
                     </div>
                 </div>
@@ -373,11 +285,13 @@
                 <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md">
                     <div class="flex justify-between items-center pb-1.5 mb-1.5 border-b border-panelborder">
                         <span id="lblLiveStream" class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
-                            <i class="fa-solid fa-tower-broadcast text-accentblue"></i> LIVE MARKET STREAM
+                            <i class="fa-solid fa-tower-broadcast text-accentblue"></i> WEBSOCKET STREAM (/v1/stream/token)
                         </span>
-                        <span id="livePulse" class="text-[8px] text-emerald-400 font-mono animate-pulse">● Candlestick Stream Active</span>
+                        <span id="livePulse" class="text-[8px] text-emerald-400 font-mono animate-pulse">● Token Auth Active</span>
                     </div>
-                    <div id="tickerListContainer" class="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-[360px] overflow-y-auto pr-1"></div>
+                    <div id="streamLog" class="text-[9px] font-mono text-gray-400 h-[150px] overflow-y-auto bg-darkbg p-2 rounded border border-panelborder">
+                        Menghubungkan stream token...
+                    </div>
                 </div>
             </div>
         </main>
@@ -387,7 +301,7 @@
             <a href="https://wa.me/6285817038501?text=Halo%20Admin%20Alu%20Signal%20Z,%20saya%20ingin%20berlangganan" target="_blank" class="inline-flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full text-xs font-bold font-mono transition">
                 <i class="fa-brands fa-whatsapp text-sm text-emerald-400"></i> Admin WhatsApp: +6285817038501
             </a>
-            <p id="disclaimerTxt" class="text-[8px] text-gray-500 leading-snug pt-2 max-w-xl mx-auto">Aktivitas trading beresiko dan tidak ada jaminan profit. Aplikasi ini bukan financial advisor dan sinyal bukan ajakan untuk membeli atau menjual. Atur risiko dan ukuran posisi sesuai kemampuanmu sendiri.</p>
+            <p id="disclaimerTxt" class="text-[8px] text-gray-500 leading-snug pt-2 max-w-xl mx-auto">Aktivitas trading beresiko dan tidak ada jaminan profit. Aplikasi ini bukan financial advisor dan sinyal bukan ajakan untuk membeli atau menjual.</p>
         </footer>
     </div>
 
@@ -470,6 +384,8 @@
         const mainApp = document.getElementById('mainApp');
         mainApp.classList.remove('hidden');
         mainApp.classList.add('flex');
+        reloadChartCandles();
+        initStreamToken();
     }
 
     async function registerNewClientByAdmin() {
@@ -516,27 +432,22 @@
         document.getElementById('langBtn').textContent = `${currentLang.toUpperCase()} 🌐`;
     }
 
-    // MARKET & OPENAPI CHART CONFIG
+    // MEGA1 MARKET & CONFIG
     const MARKETS = {
-        DXY:        { decimals: 2, pip: 0.01, symbolId: 'uuid-dxy-placeholder' },
-        EURUSD:     { decimals: 5, pip: 0.0001, symbolId: 'uuid-eurusd-placeholder' },
-        GBPUSD:     { decimals: 5, pip: 0.0001, symbolId: 'uuid-gbpusd-placeholder' },
-        USDJPY:     { decimals: 3, pip: 0.01, symbolId: 'uuid-usdjpy-placeholder' },
-        XAUUSD:     { decimals: 2, pip: 0.1, symbolId: 'uuid-xauusd-placeholder' },
-        XAGUSD:     { decimals: 3, pip: 0.01, symbolId: 'uuid-xagusd-placeholder' },
-        US30:       { decimals: 2, pip: 1, symbolId: 'uuid-us30-placeholder' },
-        NAS100:     { decimals: 2, pip: 1, symbolId: 'uuid-nas100-placeholder' },
-        SPX500:     { decimals: 2, pip: 1, symbolId: 'uuid-spx500-placeholder' },
-        GER40:      { decimals: 2, pip: 1, symbolId: 'uuid-ger40-placeholder' },
-        BTCUSD:     { decimals: 2, pip: 1, symbolId: 'uuid-btcusd-placeholder' },
-        ETHUSD:     { decimals: 2, pip: 0.1, symbolId: 'uuid-ethusd-placeholder' },
-        SOLUSD:     { decimals: 2, pip: 0.01, symbolId: 'uuid-solusd-placeholder' },
+        XAUUSD: { decimals: 2, pip: 0.1 },
+        EURUSD: { decimals: 5, pip: 0.0001 },
+        BTCUSD: { decimals: 2, pip: 1 },
+        US30:   { decimals: 2, pip: 1 },
+        NAS100: { decimals: 2, pip: 1 }
     };
 
     let trades = [], activeId = null;
-    const prices = {}, historyCandles = {}, rawPrices = {};
+    const historyCandles = {};
+    const rawPrices = {};
+
     const getActive = () => trades.find(t => t.id === activeId) || null;
-    const selectedKey = () => document.getElementById('marketSelect').value.split('|').pop();
+    const selectedSymbolId = () => document.getElementById('marketSelect').value.split('|')[0];
+    const selectedKey = () => document.getElementById('marketSelect').value.split('|')[1];
     const fmt = (key, p) => Number(p).toLocaleString('en-US', { minimumFractionDigits: MARKETS[key]?.decimals ?? 2, maximumFractionDigits: MARKETS[key]?.decimals ?? 2 });
     const displayName = key => key.replace(/^xyz:/, '');
 
@@ -561,55 +472,38 @@
         updateCalibInfo();
     }
 
-    function buildTicker() {
-        const opts = [...document.querySelectorAll('#marketSelect option')];
-        document.getElementById('tickerListContainer').innerHTML = opts.map(o => {
-            const [prov, key] = o.value.split('|');
-            return `
-              <div onclick="selectTicker('${o.value}')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-                <span class="font-bold text-[10px] text-white">${displayName(key)} <span class="text-[7px] text-emerald-400">${prov}</span></span>
-                <span class="flex items-center gap-1.5">
-                  <span id="src-${key}" class="text-[7px] font-mono text-gray-500">LIVE</span>
-                  <span id="price-${key}" class="text-[11px] font-mono font-bold text-white">--.--</span>
-                </span>
-              </div>`;
-        }).join('');
-    }
-
     function syncSelectedMarket() {
         document.getElementById('selectedPairBadge').textContent = document.getElementById('marketSelect').value;
         updateCalibInfo();
         reloadChartCandles();
     }
 
-    function selectTicker(marketId) {
-        document.getElementById('marketSelect').value = marketId;
-        syncSelectedMarket();
-    }
-
-    // PENGAMBILAN CANDLE BERDASARKAN OPENAPI SCHEMA (ChartResponse & Candle)
-    async function fetchChartCandles(symbolKey, timeframe = 'M1', limit = 100) {
+    // PENGAMBILAN DATA CANDLE SESUAI SPEC OPENAPI POST /v1/chart
+    async function reloadChartCandles() {
+        const symbolId = selectedSymbolId();
+        const symbolKey = selectedKey();
+        const timeframe = document.getElementById('chartTimeframeSelect').value;
+        const priceSide = document.getElementById('priceSideSelect').value;
         const email = localStorage.getItem(SESSION_EMAIL_KEY);
-        if (!email) return [];
 
         try {
-            const res = await fetch('/api/chart', {
+            const res = await fetch('/v1/chart', {
                 method: 'POST',
                 headers: JSON_HEADERS,
                 body: JSON.stringify({
-                    value: email,
-                    symbol_id: MARKETS[symbolKey]?.symbolId || 'default-uuid',
+                    account_id: email,
+                    symbol_id: symbolId,
                     timeframe: timeframe,
-                    limit: limit,
-                    price_side: 'Mid'
+                    limit: 100,
+                    price_side: priceSide
                 })
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             
-            // Pemetaan skema OpenAPI ChartResponse & Candle
+            // Mapping skema ChartResponse & Candle OpenAPI 3.1.0
             if (data && data.candles) {
-                return data.candles.map(c => ({
+                historyCandles[symbolKey] = data.candles.map(c => ({
                     t: new Date(c.open_time).getTime(),
                     o: parseFloat(c.open),
                     h: parseFloat(c.high),
@@ -617,42 +511,62 @@
                     c: parseFloat(c.close),
                     v: parseFloat(c.volume || 0)
                 })).sort((a, b) => a.t - b.t);
+
+                if (historyCandles[symbolKey].length > 0) {
+                    const last = historyCandles[symbolKey][historyCandles[symbolKey].length - 1];
+                    rawPrices[symbolKey] = last.c;
+                    const finalPrice = last.c + getOffset(symbolKey);
+                    document.getElementById('cardLivePriceTop').textContent = fmt(symbolKey, finalPrice);
+                }
             }
         } catch (e) {
-            console.warn('Gagal memuat API Chart, menggunakan fallback simulasi candlestick:', e);
+            console.warn('Gagal fetch endpoint /v1/chart, menggunakan fallback simulasi:', e);
+            const basePrice = symbolKey === 'XAUUSD' ? 2650 : (symbolKey === 'BTCUSD' ? 95000 : 4000);
+            const now = Date.now();
+            const candles = [];
+            let p = basePrice;
+            for (let i = 60; i >= 0; i--) {
+                const t = now - (i * 60000);
+                const delta = (Math.random() - 0.48) * (basePrice * 0.001);
+                const o = p; const c = p + delta;
+                const h = Math.max(o, c) + Math.random() * (basePrice * 0.0005);
+                const l = Math.min(o, c) - Math.random() * (basePrice * 0.0005);
+                p = c;
+                candles.push({ t, o, h, l, c, v: Math.random() * 10 });
+            }
+            historyCandles[symbolKey] = candles;
+            rawPrices[symbolKey] = p;
         }
-
-        // Fallback simulasi candle jika API offline
-        const basePrice = symbolKey === 'XAUUSD' ? 2650 : (symbolKey === 'BTCUSD' ? 95000 : 4000);
-        const now = Date.now();
-        const candles = [];
-        let p = basePrice;
-        for (let i = 60; i >= 0; i--) {
-            const t = now - (i * 60000);
-            const delta = (Math.random() - 0.48) * (basePrice * 0.001);
-            const o = p;
-            const c = p + delta;
-            const h = Math.max(o, c) + Math.random() * (basePrice * 0.0005);
-            const l = Math.min(o, c) - Math.random() * (basePrice * 0.0005);
-            p = c;
-            candles.push({ t, o, h, l, c, v: Math.random() * 10 });
-        }
-        return candles;
     }
 
-    async function reloadChartCandles() {
-        const key = selectedKey();
-        const tf = document.getElementById('chartTimeframeSelect').value;
-        const candles = await fetchChartCandles(key, tf, 80);
-        historyCandles[key] = candles;
-        if (candles.length > 0) {
-            const last = candles[candles.length - 1];
-            rawPrices[key] = last.c;
-            const finalPrice = last.c + getOffset(key);
-            prices[key] = { price: finalPrice, dir: last.c >= last.o ? 1 : -1 };
-            const el = document.getElementById(`price-${key}`);
-            if (el) el.textContent = fmt(key, finalPrice);
-            document.getElementById('cardLivePriceTop').textContent = fmt(key, finalPrice);
+    // WEBSOCKET STREAM TOKEN AUTH (POST /v1/stream/token)
+    async function initStreamToken() {
+        const log = document.getElementById('streamLog');
+        try {
+            const r = await api('/v1/stream/token', { method: 'POST', headers: JSON_HEADERS });
+            if (!r.ok || !r.data.stream_token) {
+                document.getElementById('wsStatus').textContent = 'STREAM: FALLBACK';
+                log.innerHTML += `<div>[Warning] Stream token gagal didapat.</div>`;
+                return;
+            }
+            const token = r.data.stream_token;
+            const ws = new WebSocket(`wss://ws.xbtfx.com/v1/stream?stream_token=${token}`);
+            
+            ws.onopen = () => {
+                document.getElementById('wsStatus').textContent = 'STREAM: ACTIVE';
+                document.getElementById('wsStatus').className = 'text-[8px] font-mono px-2 py-0.5 rounded border bg-emerald-500/20 text-emerald-400 border-emerald-500/40';
+                log.innerHTML += `<div>[Connected] WebSocket authorized via stream_token.</div>`;
+            };
+            ws.onmessage = e => {
+                log.innerHTML += `<div class="truncate">[Data] ${e.data}</div>`;
+                log.scrollTop = log.scrollHeight;
+            };
+            ws.onclose = () => {
+                document.getElementById('wsStatus').textContent = 'STREAM: CLOSED';
+            };
+        } catch (err) {
+            document.getElementById('wsStatus').textContent = 'STREAM: ERROR';
+            log.innerHTML += `<div>[Error] Gagal inisialisasi stream token.</div>`;
         }
     }
 
@@ -682,9 +596,8 @@
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, r.width, r.height);
 
-        const t = getActive();
-        if (!t) return;
-        const candles = historyCandles[t.key] || [];
+        const key = selectedKey();
+        const candles = historyCandles[key] || [];
         if (!candles.length) {
             ctx.font = 'bold 11px ui-monospace, monospace';
             ctx.fillStyle = '#f87171';
@@ -693,13 +606,14 @@
             return;
         }
 
+        const t = getActive();
         const CW = r.width, CH = r.height;
         const plotL = 6, plotT = 15, plotB = CH - 8, plotR = CW - CHART_GUT;
         const plotW = plotR - plotL, plotH = plotB - plotT;
 
         let lo = Infinity, hi = -Infinity;
         for (const c of candles) { lo = Math.min(lo, c.l); hi = Math.max(hi, c.h); }
-        const levels = chartLevels(t);
+        const levels = t ? chartLevels(t) : [];
         for (const l of levels) { lo = Math.min(lo, l.value); hi = Math.max(hi, l.value); }
 
         if (hi - lo <= 0) { lo -= 1; hi += 1; }
@@ -745,7 +659,7 @@
             
             ctx.font = 'bold 8px ui-monospace, monospace';
             ctx.fillStyle = l.c;
-            ctx.fillText(`${l.label} ${fmt(t.key, l.value)}`, plotR + 4, y + 3);
+            ctx.fillText(`${l.label} ${fmt(key, l.value)}`, plotR + 4, y + 3);
             ctx.restore();
         }
     }
@@ -786,7 +700,8 @@
 
     function generateAISignal() {
         const key = selectedKey();
-        const p = prices[key]?.price || 2650;
+        const candles = historyCandles[key] || [];
+        const p = candles.length ? candles[candles.length - 1].c : 2650;
         const t = {
             id: Date.now().toString(36), key, style: 'Scalping',
             signal: 'BUY', entry: p, sl: p - 5, tp1: p + 8, tp2: p + 15, tp3: p + 25,
@@ -806,10 +721,9 @@
 
     window.onload = () => {
         checkSession();
-        buildTicker();
         trades = loadTrades();
         renderHistory();
-        syncSelectedMarket();
+        updateCalibInfo();
         requestAnimationFrame(uiFrame);
     };
     </script>
