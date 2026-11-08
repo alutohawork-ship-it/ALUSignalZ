@@ -3,6 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Pendeteksi error: script terpisah, tetap jalan walaupun script utama error -->
+    <script>
+      (function () {
+        function showErr(text) {
+          var b = document.getElementById('jsErrBox');
+          if (!b) {
+            b = document.createElement('div');
+            b.id = 'jsErrBox';
+            b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#7f1d1d;color:#fff;font:11px monospace;padding:8px;white-space:pre-wrap;word-break:break-all';
+            (document.body || document.documentElement).appendChild(b);
+          }
+          b.textContent = text;
+        }
+        window.onerror = function (msg, src, line) {
+          showErr('JS ERROR: ' + msg + ' (baris ' + line + ')');
+          return false;
+        };
+        window.addEventListener('unhandledrejection', function (e) {
+          var r = e.reason;
+          showErr('PROMISE ERROR: ' + (r && r.message ? r.message : r));
+        });
+      })();
+    </script>
+
     <title>Alu Signal Z & Terminal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -42,7 +67,7 @@
                 <p class="text-[11px] text-gray-400">Silakan masukkan email terdaftar atau kode admin</p>
             </div>
 
-            <form id="authForm" onsubmit="handleUniversalLogin(event)" class="space-y-4 pt-2">
+            <form id="authForm" onsubmit="event.preventDefault(); handleUniversalLogin(event)" class="space-y-4 pt-2">
                 <div>
                     <label class="text-[10px] font-bold text-gray-400 block mb-1 tracking-wider">ACCESS LOGIN</label>
                     <input type="text" id="authInput" required class="w-full bg-darkbg border border-panelborder rounded-xl p-3 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="nama@email.com atau Kode Admin">
@@ -450,20 +475,6 @@
 
     <!-- ================= SCRIPT ================= -->
     <script>
-    // Diagnosa sementara: tampilkan error JS di area status login (boleh dihapus nanti)
-    window.addEventListener('error', e => {
-        const st = document.getElementById('loginStatus');
-        if (!st) return;
-        st.textContent = `JS error: ${e.message} (baris ${e.lineno})`;
-        st.className = 'text-[10px] text-center font-mono min-h-[14px] text-red-400';
-    });
-    window.addEventListener('unhandledrejection', e => {
-        const st = document.getElementById('loginStatus');
-        if (!st) return;
-        st.textContent = `Error: ${e.reason && e.reason.message ? e.reason.message : e.reason}`;
-        st.className = 'text-[10px] text-center font-mono min-h-[14px] text-red-400';
-    });
-
     // ================= LOGIN & ADMIN (server-side via /api) =================
     const SESSION_TYPE_KEY = 'alu_session_type';
     const SESSION_EMAIL_KEY = 'alu_user_email';
@@ -1843,12 +1854,4 @@
                 method: 'POST',
                 headers: JSON_HEADERS,
                 body: JSON.stringify({
-                    value: localStorage.getItem(SESSION_EMAIL_KEY) || '',
-                    symbol,
-                    interval,
-                    limit: 100,
-                }),
-            });
-            if (r.ok && r.data && r.data.candles && r.data.candles.length > 0) {
-                return r.data.candles
-                    .map(c => ({ t: c.op
+                    value: localStorage.getItem(SESSION_EMAIL_KEY)
