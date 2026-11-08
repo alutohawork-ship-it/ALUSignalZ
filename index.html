@@ -227,10 +227,10 @@
                     <div>
                         <label id="lblTradingStyle" class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
                         <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                            <option value="Scalping">Scalping (M1+M3+M5)</option>
-                            <option value="Day Trading">Day Trading (M5+M15+M30/H1)</option>
-                            <option value="Intraday">Intraday</option>
-                            <option value="Swing">Swing</option>
+                            <option value="Scalping">Scalping (M1)</option>
+                            <option value="Day Trading">Day Trading (M1)</option>
+                            <option value="Intraday">Intraday (M5)</option>
+                            <option value="Swing">Swing (M15)</option>
                         </select>
                     </div>
 
@@ -315,12 +315,12 @@
 
                         <div class="bg-darkbg/80 border border-panelborder rounded-xl p-2.5 space-y-2">
                             <div class="flex flex-wrap justify-between items-start gap-1">
-                                <p id="lblPriceMap" class="text-[9px] font-bold text-gray-400 tracking-wider">CANDLESTICK PRICE CHART (/v1/chart)</p>
+                                <p id="lblPriceMap" class="text-[9px] font-bold text-gray-400 tracking-wider">LIVE PRICE MAP (ENTRY, SL, TP)</p>
                                 <span id="tradeStatus" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40 whitespace-nowrap">RUNNING</span>
                             </div>
                             <p id="tradePnl" class="text-[10px] font-mono font-bold text-gray-400">--</p>
                             <p id="tradeLive" class="text-[8px] font-mono text-gray-400"></p>
-                            <div class="relative w-full h-[200px] sm:h-[280px] lg:h-[300px]">
+                            <div class="relative w-full h-[220px] sm:h-[300px] lg:h-[320px]">
                                 <canvas id="priceChart" class="absolute inset-0 w-full h-full"></canvas>
                             </div>
                         </div>
@@ -601,8 +601,8 @@
     // ================= BAHASA =================
     let currentLang = 'id';
     const DICT = {
-        id: { subHeader: "Pure SMC 3-Layer Terminal", targetAsset: "TARGET ASET AKTIF", tradingStyle: "GAYA TRADING / STRATEGI", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "CANDLESTICK PRICE CHART (/v1/chart)", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "Belum ada history.", running: "berjalan", liveStream: "LIVE MARKET STREAM", disclaimer: "Aktivitas trading beresiko dan tidak ada jaminan profit. Aplikasi ini bukan financial advisor dan sinyal bukan ajakan untuk membeli atau menjual. Atur risiko dan ukuran posisi sesuai kemampuanmu sendiri." },
-        en: { subHeader: "Pure SMC 3-Layer Terminal", targetAsset: "ACTIVE TARGET ASSET", tradingStyle: "TRADING STYLE / STRATEGY", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "CANDLESTICK PRICE CHART (/v1/chart)", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "No trading history yet.", running: "running", liveStream: "LIVE MARKET STREAM", disclaimer: "Trading involves risk and there is no guarantee of profit. This app is not a financial advisor and signals are not an invitation to buy or sell. Manage your risk and position size according to your own ability." }
+        id: { subHeader: "Pure SMC 3-Layer Terminal", targetAsset: "TARGET ASET AKTIF", tradingStyle: "GAYA TRADING / STRATEGI", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE PRICE MAP (ENTRY, SL, TP)", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "Belum ada history.", running: "berjalan", liveStream: "LIVE MARKET STREAM", disclaimer: "Aktivitas trading beresiko dan tidak ada jaminan profit. Aplikasi ini bukan financial advisor dan sinyal bukan ajakan untuk membeli atau menjual. Atur risiko dan ukuran posisi sesuai kemampuanmu sendiri." },
+        en: { subHeader: "Pure SMC 3-Layer Terminal", targetAsset: "ACTIVE TARGET ASSET", tradingStyle: "TRADING STYLE / STRATEGY", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE PRICE MAP (ENTRY, SL, TP)", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "No trading history yet.", running: "running", liveStream: "LIVE MARKET STREAM", disclaimer: "Trading involves risk and there is no guarantee of profit. This app is not a financial advisor and signals are not an invitation to buy or sell. Manage your risk and position size according to your own ability." }
     };
     function toggleLang() {
         currentLang = currentLang === 'id' ? 'en' : 'id';
@@ -635,7 +635,6 @@
     const STALE_MS = 30000;
     const STORE_KEY = 'aluSignalZ_history_v3';
     const OFFSET_KEY = 'aluSignalZ_offsets_v1';
-    const DEBUG = localStorage.getItem('alu_debug') === '1';
 
     const MARKETS = {
         DXY:        { provider: 'xbtfx', coins: ['DXY', 'USDX'], decimals: 2, pip: 0.01 },
@@ -743,8 +742,6 @@
     const fmt = (key, p) => Number(p).toLocaleString('en-US', { minimumFractionDigits: MARKETS[key]?.decimals ?? 2, maximumFractionDigits: MARKETS[key]?.decimals ?? 2 });
     const fmtPips = p => `${p > 0 ? '+' : p < 0 ? '−' : ''}${Number(Math.abs(p).toFixed(1))} pip`;
     const displayName = key => key.replace(/^xyz:/, '');
-    const parseLevel = v => Number.isFinite(parseFloat(v)) ? parseFloat(v) : null;
-
     const DEFAULT_OFFSETS = {};
 
     const offsets = (() => { try { return JSON.parse(localStorage.getItem(OFFSET_KEY)) || {}; } catch { return {}; } })();
@@ -782,7 +779,7 @@
     }
 
     // ================= TICKER & UI =================
-    const PROV_COLOR = { hyperliquid: 'text-yellow-400', veranta: 'text-blue-400', ostium: 'text-orange-400', binance: 'text-emerald-400', xbtfx: 'text-emerald-400' };
+    const PROV_COLOR = { xbtfx: 'text-emerald-400' };
     function buildTicker() {
         const opts = [...document.querySelectorAll('#marketSelect option')];
         document.getElementById('tickerListContainer').innerHTML = opts.map(o => {
@@ -1505,8 +1502,13 @@
 
         const t = getActive();
         if (!t) return;
+        
+        let tfKey = '1m';
+        if (t.style === 'Intraday') tfKey = '5m';
+        else if (t.style === 'Swing') tfKey = '15m';
+
         const bucket = marketCandles[t.key] || {};
-        const candles = bucket['1m'] || [];
+        const candles = bucket[tfKey] || [];
 
         if (!candles.length) {
             ctx.font = 'bold 11px ui-monospace, monospace';
@@ -1522,7 +1524,7 @@
         const fmtP = v => Number(v).toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
 
         const CW = r.width, CH = r.height;
-        const plotL = 6, plotT = 20, plotB = CH - 8, plotR = CW - CHART_GUT;
+        const plotL = 6, plotT = 10, plotB = CH - 8, plotR = CW - CHART_GUT;
         const plotW = plotR - plotL, plotH = plotB - plotT;
 
         const levels = chartLevels(t);
@@ -1564,11 +1566,11 @@
             ctx.restore();
         }
 
-        // --- PENGATURAN PROPORSI CANDLESTICK AGAR TIDAK GEPENG/RENGGANG ---
-        const maxVisible = 25; // Batasi jumlah maksimal candle yang tampil agar jarak antar candle pas
+        // Proporsi Candlestick
+        const maxVisible = 25;
         const visibleCandles = candles.slice(-maxVisible);
         const candleStep = plotW / Math.max(1, visibleCandles.length);
-        const candleWidth = Math.max(5, Math.min(10, candleStep * 0.65)); // Lebar badan candle diatur proporsional
+        const candleWidth = Math.max(5, Math.min(10, candleStep * 0.65));
 
         for (let i = 0; i < visibleCandles.length; i++) {
             const c = visibleCandles[i];
@@ -1578,13 +1580,11 @@
             const isGreen = c.close >= c.open;
             const color = isGreen ? '#10b981' : '#ef4444';
 
-            // Wick (Sumbu High-Low)
             ctx.save();
             ctx.strokeStyle = color;
             ctx.lineWidth = 1.2;
             ctx.beginPath(); ctx.moveTo(x, yHigh); ctx.lineTo(x, yLow); ctx.stroke();
 
-            // Body (Badan Candlestick OHLC)
             const bodyTop = Math.min(yOpen, yClose);
             const bodyHeight = Math.max(3, Math.abs(yClose - yOpen));
             ctx.fillStyle = color;
@@ -1752,7 +1752,7 @@
         info.textContent = `${bull} Bullish · ${bear} Bearish · ${neu} Netral${na ? ` · ${na} N/A` : ''} · update ${new Date(cache.at).toLocaleTimeString('id-ID', { hour12: false })}`;
     }
 
-    // ================= AI SIGNAL (TickerLayer Backend + Fallback) =================
+    // ================= AI SIGNAL =================
     const STYLE_TF = {
         'Scalping':    { htf: '15m', mtf: '5m',  ltf: '1m' },
         'Day Trading': { htf: '1h',  mtf: '30m', ltf: '5m' },
@@ -1764,7 +1764,6 @@
     async function loadCandles(key, interval) {
         const ck = `${key}|${interval}`;
         const hit = CANDLE_CACHE[ck];
-        
         if (hit && Date.now() - hit.at < 180000) return hit.rows;
 
         try {
@@ -1774,9 +1773,7 @@
                 CANDLE_CACHE[ck] = { at: Date.now(), rows };
                 return rows;
             }
-        } catch (err) {
-            console.warn('Gagal ambil data candle via backend/TickerLayer, beralih ke tick lokal:', err);
-        }
+        } catch {}
 
         const tfMinutes = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 }[interval] || 1;
         const tfKey = `${tfMinutes}m`;
