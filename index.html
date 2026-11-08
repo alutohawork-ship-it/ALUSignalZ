@@ -2,63 +2,50 @@
 <html lang="id" class="dark">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Alu Signal Z &amp; Terminal</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <!-- 1. Pendeteksi error: jalan lebih dulu, menampilkan error JS di layar HP -->
+    <!-- Pendeteksi error: script terpisah, tetap jalan walaupun script utama error -->
     <script>
-        (function () {
-            function showErr(text) {
-                var b = document.getElementById('jsErrBox');
-                if (!b) {
-                    b = document.createElement('div');
-                    b.id = 'jsErrBox';
-                    b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#7f1d1d;color:#fff;font:11px monospace;padding:8px;white-space:pre-wrap;word-break:break-all';
-                    (document.body || document.documentElement).appendChild(b);
-                }
-                b.textContent = text;
-            }
-            window.onerror = function (msg, src, line) {
-                showErr('JS ERROR: ' + msg + ' (baris ' + line + ')');
-                return false;
-            };
-            window.addEventListener('unhandledrejection', function (e) {
-                var r = e.reason;
-                showErr('PROMISE ERROR: ' + (r && r.message ? r.message : r));
-            });
-        })();
+      (function () {
+        function showErr(text) {
+          var b = document.getElementById('jsErrBox');
+          if (!b) {
+            b = document.createElement('div');
+            b.id = 'jsErrBox';
+            b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#7f1d1d;color:#fff;font:11px monospace;padding:8px;white-space:pre-wrap;word-break:break-all';
+            (document.body || document.documentElement).appendChild(b);
+          }
+          b.textContent = text;
+        }
+        window.onerror = function (msg, src, line) {
+          showErr('JS ERROR: ' + msg + ' (baris ' + line + ')');
+          return false;
+        };
+        window.addEventListener('unhandledrejection', function (e) {
+          var r = e.reason;
+          showErr('PROMISE ERROR: ' + (r && r.message ? r.message : r));
+        });
+      })();
     </script>
 
-    <!-- 2. Tailwind: CDN dimuat dulu, konfigurasi diterapkan hanya jika CDN berhasil -->
+    <title>Alu Signal Z & Terminal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-        window.addEventListener('load', function () {
-            if (!window.tailwind) {
-                console.warn('Tailwind CDN gagal dimuat. Tampilan akan polos, tetapi login tetap jalan.');
-                return;
-            }
+        if (window.tailwind) {
             tailwind.config = {
                 darkMode: 'class',
                 theme: {
                     extend: {
                         colors: {
-                            darkbg: '#0b0e14',
-                            cardbg: '#151924',
-                            panelborder: '#232936',
-                            accentblue: '#2962ff',
-                            accentgreen: '#00c076',
-                            accentred: '#ff3b69'
+                            darkbg: '#0b0e14', cardbg: '#151924', panelborder: '#232936',
+                            accentblue: '#2962ff', accentgreen: '#00c076', accentred: '#ff3b69'
                         }
                     }
                 }
             };
-        });
+        }
     </script>
-
-    <!-- 3. Icon -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-
-    <!-- 4. Style khusus aplikasi -->
     <style>
         .lvl-box { position: relative; transition: all .25s ease; }
         .tp-hit { background: rgba(16,185,129,.18) !important; border-color: #34d399 !important; box-shadow: 0 0 0 1px #34d399, 0 0 14px rgba(52,211,153,.35); }
@@ -66,14 +53,12 @@
         .hit-badge { position: absolute; top: -6px; right: -6px; width: 16px; height: 16px; border-radius: 9999px; display: none; align-items: center; justify-content: center; font-size: 9px; color: #0b0e14; z-index: 5; }
         .hit-badge.show { display: flex; animation: pop .45s ease-out; }
         @keyframes pop { 0% { transform: scale(0); } 60% { transform: scale(1.4); } 100% { transform: scale(1); } }
-        input[type=number]::-webkit-inner-spin-button,
-        input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
     </style>
 </head>
-
 <body class="bg-darkbg text-gray-200 font-sans min-h-screen flex flex-col justify-between p-2 sm:p-4">
 
-    <!-- ================= LOGIN ================= -->
+    <!-- ================= HALAMAN LOGIN ================= -->
     <div id="authScreen" class="fixed inset-0 z-50 bg-darkbg/95 backdrop-blur-md flex flex-col items-center justify-center p-4">
         <div class="bg-cardbg border border-panelborder rounded-2xl p-6 max-w-sm w-full space-y-5 shadow-2xl">
             <div class="text-center space-y-1">
@@ -84,12 +69,10 @@
                 <p class="text-[11px] text-gray-400">Silakan masukkan email terdaftar atau kode admin</p>
             </div>
 
-            <form id="authForm" class="space-y-4 pt-2">
+            <form id="authForm" onsubmit="event.preventDefault(); handleUniversalLogin(event)" class="space-y-4 pt-2">
                 <div>
-                    <label for="authInput" class="text-[10px] font-bold text-gray-400 block mb-1 tracking-wider">ACCESS LOGIN</label>
-                    <input type="text" id="authInput" required autocomplete="username"
-                           class="w-full bg-darkbg border border-panelborder rounded-xl p-3 text-xs font-mono text-white focus:outline-none focus:border-accentblue"
-                           placeholder="nama@email.com atau Kode Admin">
+                    <label class="text-[10px] font-bold text-gray-400 block mb-1 tracking-wider">ACCESS LOGIN</label>
+                    <input type="text" id="authInput" required class="w-full bg-darkbg border border-panelborder rounded-xl p-3 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="nama@email.com atau Kode Admin">
                 </div>
                 <button type="submit" class="w-full bg-accentblue hover:bg-blue-600 text-white font-bold py-3 rounded-xl text-xs transition shadow-lg shadow-accentblue/20 flex items-center justify-center gap-2">
                     <i class="fa-solid fa-right-to-bracket"></i> MASUK SISTEM
@@ -98,10 +81,9 @@
             <p id="loginStatus" class="text-[10px] text-center font-mono min-h-[14px] text-gray-400"></p>
 
             <div class="pt-4 border-t border-panelborder/60 text-center space-y-1.5">
-                <p class="text-[10px] text-gray-400 font-medium">Bantuan &amp; Informasi Admin:</p>
-                <a href="https://wa.me/6285817038501?text=Halo%20Admin%20Alu%20Signal%20Z,%20saya%20ingin%20bertanya" target="_blank" rel="noopener"
-                   class="inline-flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-full text-xs font-bold font-mono transition">
-                    <i class="fa-brands fa-whatsapp text-sm"></i> +6285817038501
+                <p class="text-[10px] text-gray-400 font-medium">Bantuan & Informasi Admin:</p>
+                <a href="https://wa.me/6285817038501?text=Halo%20Admin%20Alu%20Signal%20Z,%20saya%20ingin%20bertanya" target="_blank" class="inline-flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-full text-xs font-bold font-mono transition">
+                    <i class="fa-brands fa-whatsapp text-sm text-emerald-400"></i> +6285817038501
                 </a>
             </div>
         </div>
@@ -129,12 +111,11 @@
                 </h3>
                 <div class="space-y-2">
                     <div>
-                        <label for="newClientEmail" class="text-[9px] font-bold text-gray-400 block mb-1">EMAIL KLIEN</label>
-                        <input type="email" id="newClientEmail" placeholder="klien@email.com"
-                               class="w-full bg-darkbg border border-panelborder rounded-lg p-2.5 text-xs font-mono text-white focus:outline-none focus:border-accentblue">
+                        <label class="text-[9px] font-bold text-gray-400 block mb-1">EMAIL KLIEN</label>
+                        <input type="email" id="newClientEmail" class="w-full bg-darkbg border border-panelborder rounded-lg p-2.5 text-xs font-mono text-white focus:outline-none focus:border-accentblue" placeholder="klien@email.com">
                     </div>
                     <div>
-                        <label for="newClientStatus" class="text-[9px] font-bold text-gray-400 block mb-1">PAKET / STATUS</label>
+                        <label class="text-[9px] font-bold text-gray-400 block mb-1">PAKET / STATUS</label>
                         <select id="newClientStatus" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2.5 rounded-lg focus:outline-none">
                             <option value="trial">Trial 3 Hari</option>
                             <option value="monthly">Langganan Bulanan (Monthly)</option>
@@ -142,7 +123,7 @@
                         </select>
                     </div>
                     <button onclick="registerNewClientByAdmin()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg text-xs transition shadow-md">
-                        + SIMPAN &amp; DAFTARKAN KLIEN
+                        + SIMPAN & DAFTARKAN KLIEN
                     </button>
                 </div>
             </div>
@@ -175,13 +156,13 @@
             <div class="flex items-center gap-1.5 flex-wrap justify-end">
                 <button onclick="logout()" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">LOGOUT</button>
                 <button onclick="toggleLang()" id="langBtn" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-panelborder text-gray-300 border border-panelborder hover:border-accentblue">ID 🌐</button>
-                <span id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded border bg-red-500/20 text-red-400 border-red-500/40">WS: OFF</span>
+                <span id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">WS: OFF</span>
             </div>
         </header>
 
         <main class="max-w-md md:max-w-6xl mx-auto w-full flex-1 grid grid-cols-1 lg:grid-cols-2 gap-2 pt-2 items-start">
 
-            <!-- KOLOM KIRI: kontrol, bias, kartu signal -->
+            <!-- ============ KOLOM KIRI: CONTROL, BIAS, SIGNAL ============ -->
             <div class="flex flex-col gap-2 min-w-0">
 
                 <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
@@ -191,7 +172,7 @@
                     </div>
 
                     <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                        <optgroup label="XBTFX Dollar Index &amp; Majors">
+                        <optgroup label="XBTFX Dollar Index & Majors">
                             <option value="xbtfx|DXY">DXY / US Dollar Index</option>
                             <option value="xbtfx|EURUSD">EUR/USD</option>
                             <option value="xbtfx|GBPUSD">GBP/USD</option>
@@ -213,7 +194,7 @@
                             <option value="xbtfx|CHFJPY">CHF/JPY</option>
                             <option value="xbtfx|EURNZD">EUR/NZD</option>
                         </optgroup>
-                        <optgroup label="XBTFX Metals &amp; Precious">
+                        <optgroup label="XBTFX Metals & Precious">
                             <option value="xbtfx|XAUUSD">XAUUSD / Gold</option>
                             <option value="xbtfx|XAGUSD">XAGUSD / Silver</option>
                             <option value="xbtfx|XPTUSD">XPTUSD / Platinum</option>
@@ -221,7 +202,7 @@
                             <option value="xbtfx|XAUEUR">XAUEUR / Gold in EUR</option>
                             <option value="xbtfx|XAGEUR">XAGEUR / Silver in EUR</option>
                         </optgroup>
-                        <optgroup label="XBTFX Energy &amp; Commodities">
+                        <optgroup label="XBTFX Energy & Commodities">
                             <option value="xbtfx|BRENT">Brent Oil (BRENT)</option>
                             <option value="xbtfx|WTI">Crude Oil WTI (WTI)</option>
                             <option value="xbtfx|NATGAS">Natural Gas (NATGAS)</option>
@@ -286,7 +267,7 @@
                     </button>
                 </div>
 
-                <!-- BIAS MULTI-TIMEFRAME -->
+                <!-- BIAS -->
                 <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
                     <div class="flex justify-between items-center">
                         <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
@@ -380,7 +361,7 @@
                 </div>
             </div>
 
-            <!-- KOLOM KANAN: kalender, history, stream -->
+            <!-- ============ KOLOM KANAN: KALENDER, HISTORY & STREAM ============ -->
             <div class="flex flex-col gap-2 min-w-0">
 
                 <!-- KALENDER PNL -->
@@ -487,9 +468,8 @@
 
         <footer class="max-w-md md:max-w-6xl mx-auto w-full pt-4 pb-2 border-t border-panelborder/60 text-center space-y-1">
             <p class="text-[10px] text-gray-400">Punya pertanyaan atau ingin perpanjang langganan?</p>
-            <a href="https://wa.me/6285817038501?text=Halo%20Admin%20Alu%20Signal%20Z,%20saya%20ingin%20berlangganan" target="_blank" rel="noopener"
-               class="inline-flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full text-xs font-bold font-mono transition">
-                <i class="fa-brands fa-whatsapp text-sm"></i> Admin WhatsApp: +6285817038501
+            <a href="https://wa.me/6285817038501?text=Halo%20Admin%20Alu%20Signal%20Z,%20saya%20ingin%20berlangganan" target="_blank" class="inline-flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full text-xs font-bold font-mono transition">
+                <i class="fa-brands fa-whatsapp text-sm text-emerald-400"></i> Admin WhatsApp: +6285817038501
             </a>
             <p id="disclaimerTxt" class="text-[8px] text-gray-500 leading-snug pt-2 max-w-xl mx-auto">Aktivitas trading beresiko dan tidak ada jaminan profit. Aplikasi ini bukan financial advisor dan sinyal bukan ajakan untuk membeli atau menjual. Atur risiko dan ukuran posisi sesuai kemampuanmu sendiri.</p>
         </footer>
@@ -497,7 +477,7 @@
 
     <!-- ================= SCRIPT ================= -->
     <script>
-    // ================= LOGIN & ADMIN =================
+    // ================= LOGIN & ADMIN (server-side via /api) =================
     const SESSION_TYPE_KEY = 'alu_session_type';
     const SESSION_EMAIL_KEY = 'alu_user_email';
     const SESSION_ADMIN_KEY = 'alu_admin_code';
@@ -536,6 +516,7 @@
         e.preventDefault();
         const st = document.getElementById('loginStatus');
         const say = (t, cls) => {
+            if (!st) return;
             st.textContent = t;
             st.className = `text-[10px] text-center font-mono min-h-[14px] ${cls}`;
         };
@@ -600,7 +581,6 @@
         const mainApp = document.getElementById('mainApp');
         mainApp.classList.remove('hidden');
         mainApp.classList.add('flex');
-        connect(); // mulai stream harga setelah login terminal
     }
 
     async function registerNewClientByAdmin() {
@@ -781,6 +761,7 @@
         }
 
     const SUB_KEYS = Object.keys(MARKETS).filter(k => !MARKETS[k].base);
+    const STREAM_SYMBOL = key => MARKETS[key].coins[0];
     const PENDING_SL_CANCEL = true;
 
     const HALF_INDEX = Math.ceil(SUB_KEYS.length / 2);
@@ -921,14 +902,16 @@
         return [...new Set([...(COIN_KEY.get(`xbtfx|${n}`) || []), ...(COIN_KEY.get(`*|${n}`) || [])])];
     };
 
+    // Status diagnosa per socket dan per key
     const sockState = { 1: 'idle', 2: 'idle' };
-    const sockOf = {};
-    const subAt = {};
-    const aliasIdx = {};
-    const workingSym = {};
+    const sockOf = {};        // key -> socket yang dipakai untuk subscribe (1/2)
+    const subAt = {};         // key -> waktu subscribe terakhir
+    const aliasIdx = {};      // key -> indeks alias yang sedang dicoba
+    const workingSym = {};    // key -> simbol yang terbukti mengirim quote
     const s2 = { fallback: false };
     let s2Timer = null;
 
+    // Simbol untuk subscribe: yang sudah terbukti jalan, atau alias yang sedang dicoba
     const aliasOf = key => {
         if (workingSym[key]) return workingSym[key];
         const list = MARKETS[key]?.coins || [];
@@ -946,6 +929,7 @@
         setWsStatus(txt, s1ok ? 'green' : 'yellow');
     }
 
+    // Subscribe per batch 8 simbol
     function subscribeKeys(sock, sockNo, keyList) {
         const batchSize = 8;
         for (let i = 0; i < keyList.length; i += batchSize) {
@@ -963,6 +947,7 @@
         }
     }
 
+    // Subscribe satu key saja, dipakai saat mencoba alias berikutnya
     function resubscribeKey(key) {
         const preferred = sockOf[key] === 2 ? ws2 : ws1;
         const sock = (preferred && preferred.readyState === WebSocket.OPEN) ? preferred : ws1;
@@ -1147,7 +1132,13 @@
         const dir = prev == null ? 0 : price > prev ? 1 : price < prev ? -1 : (prices[key].dir ?? 0);
         prices[key] = { price, dir, recv: Date.now(), kind: ev.kind, provider: 'xbtfx' };
 
-        for (const tf of [1, 5, 15, 30, 60, 240, 1440]) processTickToCandle(key, price, tf);
+        processTickToCandle(key, price, 1);
+        processTickToCandle(key, price, 5);
+        processTickToCandle(key, price, 15);
+        processTickToCandle(key, price, 30);
+        processTickToCandle(key, price, 60);
+        processTickToCandle(key, price, 240);
+        processTickToCandle(key, price, 1440);
 
         pushHistory(key, price);
         dirty.add(key);
@@ -1623,7 +1614,7 @@
         renderCalendar();
     }
 
-    // ================= LIVE MAP CHART =================
+    // ================= LIVE MAP CHART (SMOOTH LINE CHART) =================
     const cv = document.getElementById('priceChart');
     const ctx = cv ? cv.getContext('2d') : null;
     const CHART_GUT = 110;
@@ -1704,7 +1695,7 @@
         const pad = (hi - lo) * 0.15; lo -= pad; hi += pad;
         const yOf = p => Math.max(plotT, Math.min(plotB, plotT + (1 - (p - lo) / (hi - lo)) * plotH));
 
-        // Grid
+        // Background Grid Lines
         ctx.save();
         ctx.lineWidth = 1;
         ctx.strokeStyle = 'rgba(148,163,184,0.06)';
@@ -1716,7 +1707,7 @@
         ctx.beginPath(); ctx.moveTo((CW - CHART_GUT) + 0.5, plotT); ctx.lineTo((CW - CHART_GUT) + 0.5, plotB); ctx.stroke();
         ctx.restore();
 
-        // Garis level (SL, Entry, TP)
+        // Level Lines (SL, Entry, TP)
         for (const l of levels) {
             const y = yOf(l.value);
             ctx.save();
@@ -1728,7 +1719,7 @@
             ctx.restore();
         }
 
-        // Line harga realtime
+        // --- SMOOTH REALTIME LINE CHART ---
         const step = plotW / Math.max(1, ticks.length - 1);
         ctx.save();
         ctx.lineWidth = 2;
@@ -1753,26 +1744,26 @@
         ctx.fill();
         ctx.restore();
 
-        // Titik terakhir (pulse)
-        const headX = plotL + (ticks.length - 1) * step;
-        const headY = yOf(ticks[ticks.length - 1].p);
-        const pulseR = 3 + Math.sin(Date.now() / 150) * 1.5;
+        if (ticks.length > 0) {
+            const headX = plotL + (ticks.length - 1) * step;
+            const headY = yOf(ticks[ticks.length - 1].p);
+            const pulseR = 3 + Math.sin(Date.now() / 150) * 1.5;
 
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(headX, headY, pulseR + 3, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(41, 98, 255, 0.4)';
-        ctx.fill();
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(headX, headY, pulseR + 3, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(41, 98, 255, 0.4)';
+            ctx.fill();
 
-        ctx.beginPath();
-        ctx.arc(headX, headY, 3.5, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffffff';
-        ctx.shadowColor = '#2962ff';
-        ctx.shadowBlur = 8;
-        ctx.fill();
-        ctx.restore();
+            ctx.beginPath();
+            ctx.arc(headX, headY, 3.5, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.shadowColor = '#2962ff';
+            ctx.shadowBlur = 8;
+            ctx.fill();
+            ctx.restore();
+        }
 
-        // Label level di sisi kanan
         const tags = levels.map(l => ({
             text: `${l.hit ? '✓ ' : ''}${l.label} ${fmtP(l.value)}`,
             c: l.c, bg: l.bg, y: yOf(l.value),
@@ -1855,12 +1846,13 @@
         return { bias, score };
     }
 
-    // TODO: bagian ini terpotong di file asli. Sesuaikan body dan bentuk respons dengan backend /api/candles.
-    // Asumsi: respons { candles: [{ c: number, ... }] }
     async function fetchCandles(provider, symbol, interval) {
         if (!symbol) {
             const key = selectedKey();
             symbol = symbolOf[key] || MARKETS[key]?.coins[0];
         }
         try {
-            const r = await api('/api
+            const r = await api('/api/candles', {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                bod
