@@ -753,7 +753,6 @@
     function pushHistory(key, p) {
         const arr = history[key] ??= [];
         const t = Date.now();
-        // Hanya masukkan jika harga berubah atau sudah lewat 1 detik agar tidak menumpuk tapi tetap dinamis mengalir
         if (!arr.length || arr[arr.length - 1].p !== p || t - arr[arr.length - 1].t > 1000) {
             arr.push({ t, p });
             while (arr.length && t - arr[0].t > HISTORY_MS) arr.shift();
@@ -1528,7 +1527,6 @@
         if (!ticks.length && livePrice != null) {
             ticks = [{ t: Date.now(), p: livePrice }];
         } else if (ticks.length && livePrice != null && ticks[ticks.length - 1].p !== livePrice) {
-            // Tambahkan harga live terbaru agar garis mengalir realtime
             ticks.push({ t: Date.now(), p: livePrice });
         }
 
@@ -1546,7 +1544,8 @@
         const fmtP = v => Number(v).toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
 
         const CW = r.width, CH = r.height;
-        const plotL = 6, plotT = 20, plotB = CH - 8, plotR = CW - CHART_GUT;
+        // Lebar plot dibatasi sampai 55% dari lebar canvas agar kepala tick berhenti di tengah/sebelum label
+        const plotL = 6, plotT = 20, plotB = CH - 8, plotR = Math.min(CW - CHART_GUT, Math.round(CW * 0.55));
         const plotW = plotR - plotL, plotH = plotB - plotT;
 
         const levels = chartLevels(t);
@@ -1570,10 +1569,10 @@
         ctx.strokeStyle = 'rgba(148,163,184,0.06)';
         for (let i = 1; i < 4; i++) {
             const y = plotT + (plotH * i) / 4;
-            ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(plotR, y); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(CW - CHART_GUT, y); ctx.stroke();
         }
         ctx.strokeStyle = 'rgba(148,163,184,0.18)';
-        ctx.beginPath(); ctx.moveTo(plotR + 0.5, plotT); ctx.lineTo(plotR + 0.5, plotB); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo((CW - CHART_GUT) + 0.5, plotT); ctx.lineTo((CW - CHART_GUT) + 0.5, plotB); ctx.stroke();
         ctx.restore();
 
         // Level Lines (SL, Entry, TP)
@@ -1584,11 +1583,11 @@
             ctx.globalAlpha = l.label === 'ENTRY' ? 0.95 : 0.75;
             ctx.lineWidth = l.label === 'ENTRY' ? 1.4 : 1;
             ctx.setLineDash(l.dash);
-            ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(plotR, y); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(CW - CHART_GUT, y); ctx.stroke();
             ctx.restore();
         }
 
-        // --- SMOOTH REALTIME LINE CHART ---
+        // --- SMOOTH REALTIME LINE CHART (BATAS 55% & KEPALA TICK MENYALA) ---
         const step = plotW / Math.max(1, ticks.length - 1);
         ctx.save();
         ctx.lineWidth = 2;
@@ -1614,6 +1613,29 @@
         ctx.fill();
         ctx.restore();
 
+        // --- KEPALA TICK / TITIK PULSE BERGERAK DI UJUNG LINE ---
+        if (ticks.length > 0) {
+            const headX = plotL + (ticks.length - 1) * step;
+            const headY = yOf(ticks[ticks.length - 1].p);
+            const pulseR = 3 + Math.sin(Date.now() / 150) * 1.5; // Efek denyut animasi bergerak
+
+            ctx.save();
+            // Lingkaran Luar (Glow/Pulse)
+            ctx.beginPath();
+            ctx.arc(headX, headY, pulseR + 3, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(41, 98, 255, 0.4)';
+            ctx.fill();
+
+            // Lingkaran Inti Kepala Tick
+            ctx.beginPath();
+            ctx.arc(headX, headY, 3.5, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.shadowColor = '#2962ff';
+            ctx.shadowBlur = 8;
+            ctx.fill();
+            ctx.restore();
+        }
+
         // Right Axis Labels
         const tags = levels.map(l => ({
             text: `${l.hit ? '✓ ' : ''}${l.label} ${fmtP(l.value)}`,
@@ -1628,16 +1650,17 @@
             const cap = i === tags.length - 1 ? plotB - 8 : tags[i + 1].y - GAP;
             if (tags[i].y > cap) tags[i].y = cap;
         }
+        const rightAnchor = CW - CHART_GUT + 6;
         ctx.font = 'bold 9px ui-monospace, monospace';
         ctx.textBaseline = 'middle';
         ctx.textAlign = 'left';
         for (const tg of tags) {
-            const bx = plotR + 6, bw = CHART_GUT - 10, bh = 15, by = tg.y - bh / 2;
-            rrPath(bx, by, bw, bh, 3);
+            const bw = CHART_GUT - 10, bh = 15, by = tg.y - bh / 2;
+            rrPath(rightAnchor, by, bw, bh, 3);
             ctx.fillStyle = tg.bg; ctx.fill();
             ctx.strokeStyle = tg.c; ctx.lineWidth = 0.8; ctx.stroke();
             ctx.fillStyle = tg.c;
-            ctx.fillText(tg.text, bx + 5, tg.y + 0.5);
+            ctx.fillText(tg.text, rightAnchor + 5, tg.y + 0.5);
         }
     }
 
