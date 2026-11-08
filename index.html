@@ -71,12 +71,12 @@
                 </div>
                 <div class="min-w-0">
                     <h1 class="font-bold text-xs text-white">Alu <span class="text-accentblue">Signal Z</span></h1>
-                    <p id="txtSubHeader" class="text-[8px] text-gray-400 truncate">Pure SMC Structure Price Map</p>
+                    <p id="txtSubHeader" class="text-[8px] text-gray-400 truncate">Mega1 API OpenAPI 3.1.0 (Build 148)</p>
                 </div>
             </div>
             <div class="flex items-center gap-1.5 flex-wrap justify-end">
                 <button onclick="logout()" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">LOGOUT</button>
-                <span id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">STREAM: ACTIVE</span>
+                <span id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-400 border border-yellow-500/40">STREAM: OFF</span>
             </div>
         </header>
 
@@ -185,10 +185,10 @@
                             </div>
                         </div>
 
-                        <!-- CANDLESTICK STRUCTURE PRICE MAP -->
+                        <!-- STRUCTURE PRICE MAP (CANDLESTICK) -->
                         <div class="bg-darkbg/80 border border-panelborder rounded-xl p-2.5 space-y-2">
                             <div class="flex flex-wrap justify-between items-start gap-1">
-                                <p id="lblPriceMap" class="text-[9px] font-bold text-gray-400 tracking-wider">STRUCTURE PRICE MAP (CANDLESTICK)</p>
+                                <p id="lblPriceMap" class="text-[9px] font-bold text-gray-400 tracking-wider">CANDLESTICK PRICE CHART (/v1/chart)</p>
                                 <span id="tradeStatus" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40 whitespace-nowrap">RUNNING</span>
                             </div>
                             <div class="relative w-full h-[220px] sm:h-[300px]">
@@ -215,7 +215,7 @@
                             <i class="fa-solid fa-trash"></i>
                         </button>
                     </div>
-                    <div id="historyList" class="space-y-1 max-h-[220px] overflow-y-auto pr-1">
+                    <div id="historyList" class="space-y-1 max-h-[180px] overflow-y-auto pr-1">
                         <p id="lblNoHistory" class="text-center text-[10px] text-gray-500 py-3">Belum ada history.</p>
                     </div>
                 </div>
@@ -228,7 +228,19 @@
                         </span>
                         <span class="text-[8px] text-emerald-400 font-mono animate-pulse">● Live Active</span>
                     </div>
-                    <div id="tickerListContainer" class="grid grid-cols-1 gap-1 max-h-[220px] overflow-y-auto pr-1"></div>
+                    <div id="tickerListContainer" class="grid grid-cols-1 gap-1 max-h-[160px] overflow-y-auto pr-1"></div>
+                </div>
+
+                <!-- WEBSOCKET STREAM LOG (/v1/stream/token) -->
+                <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
+                    <div class="flex justify-between items-center pb-1 border-b border-panelborder">
+                        <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
+                            <i class="fa-solid fa-signal text-accentblue"></i> WEBSOCKET STREAM (/v1/stream/token)
+                        </span>
+                    </div>
+                    <div id="streamLog" class="text-[9px] font-mono text-gray-400 h-[100px] overflow-y-auto bg-darkbg p-2 rounded border border-panelborder">
+                        Menghubungkan stream token...
+                    </div>
                 </div>
             </div>
         </main>
@@ -248,6 +260,18 @@
     const SESSION_EMAIL_KEY = 'alu_user_email';
 
     const JSON_HEADERS = { 'Content-Type': 'application/json' };
+
+    async function api(path, opts = {}) {
+        try {
+            const res = await fetch(path, opts);
+            const text = await res.text();
+            let data;
+            try { data = JSON.parse(text); } catch { data = { msg: 'error' }; }
+            return { ok: res.ok, status: res.status, data };
+        } catch {
+            return { ok: false, network: true, data: { msg: 'network error' } };
+        }
+    }
 
     function checkSession() {
         const email = localStorage.getItem(SESSION_EMAIL_KEY);
@@ -272,6 +296,7 @@
         mainApp.classList.add('flex');
         buildTicker();
         syncSelectedMarket();
+        initStreamToken();
     }
 
     function logout() {
@@ -349,7 +374,9 @@
         reloadChartCandles();
     }
 
+    // PENGAMBILAN DATA SKEMA OHLC BERDASARKAN ENDPOINT POST /v1/chart
     async function reloadChartCandles() {
+        const symbolId = document.getElementById('marketSelect').value.split('|')[0];
         const symbolKey = selectedKey();
         const timeframe = document.getElementById('chartTimeframeSelect').value;
         const email = localStorage.getItem(SESSION_EMAIL_KEY) || 'user@terminal.com';
@@ -359,7 +386,7 @@
             const res = await fetch('/v1/chart', {
                 method: 'POST',
                 headers: JSON_HEADERS,
-                body: JSON.stringify({ account_id: email, symbol_id: document.getElementById('marketSelect').value.split('|')[0], timeframe, limit: 80 })
+                body: JSON.stringify({ account_id: email, symbol_id: symbolId, timeframe, limit: 100, price_side: 'Mid' })
             });
             if (res.ok) {
                 const data = await res.json();
@@ -397,6 +424,37 @@
             document.getElementById('cardLivePriceTop').textContent = fmt(symbolKey, finalPrice);
             const tEl = document.getElementById(`price-${symbolKey}`);
             if (tEl) tEl.textContent = fmt(symbolKey, finalPrice);
+        }
+    }
+
+    // WEBSOCKET STREAM TOKEN AUTH (POST /v1/stream/token)
+    async function initStreamToken() {
+        const log = document.getElementById('streamLog');
+        try {
+            const r = await api('/v1/stream/token', { method: 'POST', headers: JSON_HEADERS });
+            if (!r.ok || !r.data.stream_token) {
+                document.getElementById('wsStatus').textContent = 'STREAM: FALLBACK';
+                log.innerHTML += `<div>[Warning] Stream token gagal didapat.</div>`;
+                return;
+            }
+            const token = r.data.stream_token;
+            const ws = new WebSocket(`wss://ws.xbtfx.com/v1/stream?stream_token=${token}`);
+            
+            ws.onopen = () => {
+                document.getElementById('wsStatus').textContent = 'STREAM: ACTIVE';
+                document.getElementById('wsStatus').className = 'text-[8px] font-mono px-2 py-0.5 rounded border bg-emerald-500/20 text-emerald-400 border-emerald-500/40';
+                log.innerHTML += `<div>[Connected] WebSocket authorized via stream_token.</div>`;
+            };
+            ws.onmessage = e => {
+                log.innerHTML += `<div class="truncate">[Data] ${e.data}</div>`;
+                log.scrollTop = log.scrollHeight;
+            };
+            ws.onclose = () => {
+                document.getElementById('wsStatus').textContent = 'STREAM: CLOSED';
+            };
+        } catch (err) {
+            document.getElementById('wsStatus').textContent = 'STREAM: ERROR';
+            log.innerHTML += `<div>[Error] Gagal inisialisasi stream token.</div>`;
         }
     }
 
@@ -474,7 +532,7 @@
             ctx.restore();
         }
 
-        // Render Entry, SL, TP levels
+        // Render Entry, SL, TP levels dengan garis putus-putus
         for (const l of levels) {
             const y = yOf(l.value);
             ctx.save();
@@ -531,7 +589,7 @@
 
     function clearHistory() { trades = []; try { localStorage.removeItem('alu_trades_v4'); } catch {} renderHistory(); }
 
-    // Simulasi live ticker berjalan halus
+    // Live tick simulator & updater
     setInterval(() => {
         for (const k in MARKETS) {
             if (!rawPrices[k]) continue;
