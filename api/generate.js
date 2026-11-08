@@ -1,7 +1,8 @@
 // api/generate.js
-// Analisis Pure SMC Universal: XBTFX 60% Pairs + DXY Support & Fixed Range + EMA & Bollinger Bands Filter + Konsistensi RRR + Real Structural Zone for Day/Intra/Swing
+// Analisis Pure SMC Universal: XBTFX 60% Pairs + DXY Support & Fixed Range + EMA & Bollinger Bands Filter + Konsistensi RRR + XBTFX REST API Auto-Fetch
 
 const KV_KEY = 'alu_clients';
+const XBTFX_BASE_URL = 'https://interface.xbtfx.com';
 
 const DECIMALS = {
   DXY: 2, EURUSD: 5, GBPUSD: 5, USDJPY: 3, AUDUSD: 5, USDCAD: 5, USDCHF: 5, NZDUSD: 5,
@@ -46,6 +47,34 @@ async function checkAccess(email) {
     if (new Date(c.expires_at) <= new Date()) return { ok: false, msg: 'Masa aktif habis.' };
   } catch (e) {}
   return { ok: true };
+}
+
+// Fungsi pengambil data candle otomatis langsung dari XBTFX REST API jika frontend tidak mengirimkan candle
+async function fetchXBTFXCandles(symbol, timeframe, apiKey, count = 50) {
+  if (!apiKey) return [];
+  try {
+    const response = await fetch(`${XBTFX_BASE_URL}/v1/chart/${symbol}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ timeframe, count })
+    });
+    const data = await response.json();
+    const rows = data.candles || data.results || (Array.isArray(data) ? data : []);
+    
+    return rows.map(c => ({
+      t: Number(c.time || c.t || Date.now()),
+      o: Number(c.open || c.o || 0),
+      h: Number(c.high || c.h || 0),
+      l: Number(c.low || c.l || 0),
+      c: Number(c.close || c.c || 0)
+    })).filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite)).sort((a, b) => a.t - b.t);
+  } catch (err) {
+    console.error(`Gagal fetch XBTFX API untuk ${symbol} (${timeframe}):`, err);
+    return [];
+  }
 }
 
 function cleanCandles(rows) {
@@ -264,20 +293,28 @@ export default async function handler(req, res) {
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
     const email = String(body.email || req.headers['x-user-email'] || '').trim().toLowerCase();
+    const xbtfxApiKey = String(body.apiKey || req.headers['x-xbtfx-key'] || process.env.XBTFX_API_KEY || '').trim();
+    
     const styleKey = body.tradingStyle || 'Scalping';
     const style = STYLES[styleKey] || STYLES['Scalping'];
     const symbol = String(body.marketId || '').split('|').pop().toUpperCase();
     const dec = DECIMALS[symbol] ?? 2;
-    const price = Number(body.currentPrice);
     const emaFilter = body.emaFilter || {};
 
     const access = await checkAccess(email);
     if (!access.ok) return res.status(403).json({ error: access.msg });
 
-    const cnd = body.candles || {};
-    const htfC = cleanCandles(cnd.htf);
-    const mtfC = cleanCandles(cnd.mtf ?? cnd.entry);
-    const ltfC = cleanCandles(cnd.ltf);
+    // Jika frontend tidak mengirim candles, backend otomatis fetch langsung dari XBTFX REST API
+    let htfC = cleanCandles(body.candles?.htf);
+    let mtfC = cleanCandles(body.candles?.mtf ?? body.candles?.entry);
+    let ltfC = cleanCandles(body.candles?.ltf);
+
+    if (htfC.length === 0 || mtfC.length === 0) {
+      htfC = await fetchXBTFXCandles(symbol, 'H1', xbtfxApiKey, 50);
+      mtfC = await fetchXBTFXCandles(symbol, 'M15', xbtfxApiKey, 50);
+    }
+
+    const price = Number(body.currentPrice) || (mtfC.length > 0 ? mtfC[mtfC.length - 1].c : 2000);
 
     const incomingBb = body.bbFilter;
     const bbFilter = (incomingBb && Number(incomingBb.middle) > 0)
@@ -323,7 +360,7 @@ export default async function handler(req, res) {
 
     const techReason = [
       `Analisis Struktur Jauh SMC ${sideText} (${style.label}) pada pair ${symbol}.`,
-      `Mekanisme Eksekusi: Menggunakan Limit Order (Pending Order / WAITING) dengan memindai titik Swing High/Low dari data candle riil.`,
+      `Mekanisme Eksekusi: Menggunakan Limit Order (Pending Order / WAITING) dengan memindai titik Swing High/Low dari data candle riil XBTFX REST API.`,
       `Alasan: Diputuskan ${actionDesc}. Indikator EMA (${emaSummary}) serta Bollinger Bands (${bbSummary}) memfilter area jenuh.`,
       `Manajemen Risiko: Lebar zona dan Stop Loss ditarik dari struktur market asli dengan target RRR [TP1: 1:${rrList[0]}, TP2: 1:${rrList[1]}, TP3: 1:${rrList[2]}].`
     ].join('\n\n');
