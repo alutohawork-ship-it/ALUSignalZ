@@ -1,6 +1,4 @@
 // api/candles.js
-// Endpoint untuk menyimpan dan melayani history candle OHLC terpusat
-
 async function kv(command) {
   const r = await fetch(process.env.KV_REST_API_URL, {
     method: 'POST',
@@ -13,30 +11,33 @@ async function kv(command) {
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
-    const { symbol, interval, limit = 100 } = body;
+    const { action = 'get', symbol, interval, candles, limit = 100 } = body;
 
     if (!symbol || !interval) {
-      return res.status(400).json({ error: 'Symbol dan interval wajib diisi.' });
+      return res.status(400).json({ ok: false, error: 'Symbol dan interval wajib diisi.' });
     }
 
     const kvKey = `candles_${symbol.toUpperCase()}_${interval}`;
-    
-    // Ambil data candle yang tersimpan di server
-    const raw = await kv(['GET', kvKey]);
-    let candles = raw ? JSON.parse(raw) : [];
 
-    // Jika server belum punya data, kembalikan array kosong agar frontend memicu fallback
+    // Jika ingin menyimpan/update array candle dari server/worker
+    if (req.method === 'POST' && action === 'save' && Array.isArray(candles)) {
+      await kv(['SET', kvKey, JSON.stringify(candles)]);
+      return res.status(200).json({ ok: true, saved: candles.length });
+    }
+
+    // Default: Ambil data candle untuk klien
+    const raw = await kv(['GET', kvKey]);
+    let storedCandles = raw ? JSON.parse(raw) : [];
+
     return res.status(200).json({
       ok: true,
-      candles: candles.slice(-limit)
+      candles: storedCandles.slice(-limit)
     });
 
   } catch (err) {
     console.error('candles api error:', err);
-    return res.status(200).json({ ok: false, candles: [], error: err.message });
+    return res.status(500).json({ ok: false, candles: [], error: err.message });
   }
 }
