@@ -1,5 +1,5 @@
 // api/generate.js
-// v11
+// v12
 //  - Acuan arah SELALU market structure (BOS / HH-HL / LH-LL). EMA hanya pendukung.
 //  - Day Trading:
 //      1) Zona S/D berbasis BOS (HTF lalu MTF). Harga di dalam zona + reaksi → NOW, di luar zona → LIMIT di tepi terdekat.
@@ -7,10 +7,8 @@
 //           BOS MTF → NOW | harga sejalan EMA20 MTF → LIMIT di EMA | lainnya → LIMIT di swing MTF terdekat.
 //      SL = 1,5 × jarak SL scalping 5m. TP 1:2 / 1:3 / 1:4. ATR hanya untuk padding, tanpa batas min/max.
 //  - Scalping : arah dari structure 5m (cadangan 15m).
-//      XAUUSD → SL = swing M1 TERDEKAT di sisi SL + padding ATR M1 (maks 3 ATR M1).
+//      XAUUSD → SL mode 'clamp': swing M1 terdekat, dibatasi 30–35 pip (1 pip = 0.10).
 //      Pair lain → SL = swing 5m + padding. Tanpa batas ATR.
-//  - Gold Hit n Run (XAUUSD saja): arah BOS 5m dikonfirmasi 15m. SL = swing M1 terdekat + padding.
-//      Filter sesi likuid, anti-spike, anti kejar harga. TP cepat 1R / 1.5R / 2R.
 //  - Intraday : Sweep > CHoCH > FVG, skor kekuatan, maks 1 sinyal kuat per hari (UTC) per user per pair.
 //  - Swing    : Sweep > CHoCH > FVG.
 //  - Candle: cache KV (candles_SIMBOL_TF) dulu, lalu TickerLayer berurutan (retry 429 sekali).
@@ -33,8 +31,7 @@ const INDEX_LIST = ['US30', 'NAS100', 'SPX500', 'GER40', 'UK100', 'JPN225', 'FRA
 const GOLD_SYMBOLS = ['XAUUSD', 'XAUUSDX'];
 
 const STYLES = {
-  'Scalping': { label: 'Scalping Agresif (SL struktur 5m · XAUUSD: swing M1)', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0] },
-  'Gold Hit n Run': { label: 'Gold Hit n Run (BOS 5m · SL swing M1 · TP cepat)', mode: 'MARKET', kind: 'goldscalp', rr: [1.0, 1.5, 2.0] },
+  'Scalping': { label: 'Scalping Agresif (SL struktur 5m · XAUUSD: swing M1 30–35 pip)', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0] },
   'Day Trading': { label: 'Day Trading (Zona BOS HTF-MTF · Continuation EMA · SL 1,5× scalping)', mode: 'LIMIT', kind: 'day', rr: [2.0, 3.0, 4.0] },
   'Intraday': { label: 'Intraday (Sweep > CHoCH > FVG · 1 sinyal kuat/hari)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
   'Swing': { label: 'Swing Trading (Sweep > CHoCH > FVG + Multi EMA + BB)', mode: 'LIMIT', kind: 'swing', rr: [2.0, 4.5, 8.5] },
@@ -49,22 +46,22 @@ const SETUP_CFG = {
 const SCALP_PIVOT = 2;
 const DAY_SL_MULT = 1.5;
 
-// Konfigurasi Gold Hit n Run
-const GOLD_HNR = {
-  pivot: 2,                       // swing 5m
-  htfPivot: 3,                    // struktur 15m
-  maxSpikeAtr: 2.5,               // candle 5m terakhir terlalu besar → terlambat
-  maxExtAtr: 1.2,                 // harga terlalu jauh dari EMA20 5m → jangan kejar
-  timeStopBars: 30,               // 30 candle 5m = 150 menit
-  sessions: [[7, 11], [13, 17]],  // UTC: London 07–11, New York 13–17
+// Konfigurasi SL XAUUSD untuk Scalping
+// mode: 'fixed' | 'swing' | 'clamp'
+const GOLD_SL_CFG = {
+  scalpMode: 'clamp',
+  fixedPips: 30,     // dipakai jika mode 'fixed'
+  minPips: 30,       // batas bawah jarak SL (mode 'clamp')
+  maxPips: 35,       // batas atas jarak SL (mode 'clamp')
+  pipSize: 0.1,      // 1 pip = 0.10 (4000 → 4001 = 10 pip)
 };
 
-// Konfigurasi SL M1 terdekat untuk XAUUSD (dipakai Scalping & Gold Hit n Run)
+// Konfigurasi SL M1 terdekat untuk XAUUSD
 const GOLD_M1_SL = {
   pivot: 2,          // swing M1 L=2 agar swing terdekat cukup tersedia
   lookback: 45,      // cari swing dalam 45 candle M1 terakhir
   minDistAtr: 0.4,   // swing yang terlalu dekat dengan harga (noise) diabaikan
-  maxRiskAtr: 3.0,   // jarak SL lebih dari 3 ATR M1 → skip
+  maxRiskAtr: 3.0,   // jarak SL lebih dari 3 ATR M1 → skip (hanya mode 'swing')
   padAtr: 0.2,       // padding dalam ATR M1
 };
 
@@ -616,6 +613,39 @@ function goldNearestM1SL(m1, price, dir) {
   return { sl, risk, level: best.level, pad, atr: a1, src: 'swing M1 terdekat' };
 }
 
+// SL tetap XAUUSD: jarak fixedPips dari entry
+function goldFixedSL(m1, price, dir) {
+  const a1 = atr(m1, 14);
+  const risk = GOLD_SL_CFG.fixedPips * GOLD_SL_CFG.pipSize;
+  const sl = dir === 1 ? price - risk : price + risk;
+  return { sl, risk, level: sl, pad: 0, atr: a1, src: `fixed ${GOLD_SL_CFG.fixedPips} pip` };
+}
+
+// SL swing M1 terdekat, dibatasi ke rentang minPips..maxPips
+function goldClampSL(m1, price, dir) {
+  const base = goldNearestM1SL(m1, price, dir);
+  const minR = GOLD_SL_CFG.minPips * GOLD_SL_CFG.pipSize;
+  const maxR = GOLD_SL_CFG.maxPips * GOLD_SL_CFG.pipSize;
+  const risk = Math.min(Math.max(base.risk, minR), maxR);
+  const sl = dir === 1 ? price - risk : price + risk;
+  const clampedTo = base.risk < minR ? 'min' : base.risk > maxR ? 'max' : 'swing';
+  return {
+    sl,
+    risk,
+    level: sl,
+    pad: 0,
+    atr: base.atr,
+    src: `swing M1 (${clampedTo}, ${GOLD_SL_CFG.minPips}-${GOLD_SL_CFG.maxPips} pip)`,
+  };
+}
+
+// Pemilih mode SL XAUUSD
+function goldSL(m1, price, dir, mode) {
+  if (mode === 'fixed') return goldFixedSL(m1, price, dir);
+  if (mode === 'clamp') return goldClampSL(m1, price, dir);
+  return goldNearestM1SL(m1, price, dir);
+}
+
 function scoreStructure(p, htfZones, aM, emaAligned) {
   let s = 1;
   if (emaAligned) s++;
@@ -626,7 +656,7 @@ function scoreStructure(p, htfZones, aM, emaAligned) {
   return s;
 }
 
-// Scalping: XAUUSD pakai swing M1 terdekat, pair lain pakai swing 5m
+// Scalping: XAUUSD pakai SL mode GOLD_SL_CFG.scalpMode, pair lain pakai swing 5m
 function buildScalpPlan({ htfC, mtfC, m1, price, rrList, symbol, dec }) {
   const s5 = structureBias(mtfC, SCALP_PIVOT);
   const s15 = structureBias(htfC, SETUP_CFG.day.pivot);
@@ -639,10 +669,12 @@ function buildScalpPlan({ htfC, mtfC, m1, price, rrList, symbol, dec }) {
 
   let sc;
   if (GOLD_SYMBOLS.includes(symbol)) {
-    sc = goldNearestM1SL(m1, price, dir);
-    const riskAtrM1 = sc.risk / sc.atr;
-    if (riskAtrM1 > GOLD_M1_SL.maxRiskAtr) {
-      return { plan: null, reason: `SL swing M1 terdekat terlalu jauh (${riskAtrM1.toFixed(1)} ATR M1, batas ${GOLD_M1_SL.maxRiskAtr}).` };
+    sc = goldSL(m1, price, dir, GOLD_SL_CFG.scalpMode);
+    if (GOLD_SL_CFG.scalpMode === 'swing') {
+      const riskAtrM1 = sc.risk / sc.atr;
+      if (riskAtrM1 > GOLD_M1_SL.maxRiskAtr) {
+        return { plan: null, reason: `SL swing M1 terdekat terlalu jauh (${riskAtrM1.toFixed(1)} ATR M1, batas ${GOLD_M1_SL.maxRiskAtr}).` };
+      }
     }
   } else {
     sc = scalpSL(mtfC, price, dir, symbol);
@@ -654,7 +686,7 @@ function buildScalpPlan({ htfC, mtfC, m1, price, rrList, symbol, dec }) {
 
   const reason = [
     `Scalping ${dir === 1 ? 'BUY' : 'SELL'} MARKET pada ${symbol}, arah dari market structure ${srcTxt}.`,
-    `SL: ${sc.src} ${f(sc.level)} + pad ${f(sc.pad)}.`,
+    `SL: ${sc.src} ${f(sc.level)}${sc.pad ? ` + pad ${f(sc.pad)}` : ''}.`,
     `Jarak SL ${f(sc.risk)}.`,
     `RRR: TP1 1:${rrList[0]}, TP2 1:${rrList[1]}, TP3 1:${rrList[2]}.`,
   ].join(' • ');
@@ -679,84 +711,6 @@ function buildScalpPlan({ htfC, mtfC, m1, price, rrList, symbol, dec }) {
       setup: 'CONTINUATION',
       reason,
     },
-  };
-}
-
-// Gold Hit n Run: arah BOS 5m + konfirmasi 15m, SL swing M1 terdekat
-function buildGoldHitRunPlan({ htf15, m5, m1, price, symbol, dec, rrList }) {
-  const f = v => Number(v).toFixed(dec);
-  const cfg = GOLD_HNR;
-
-  // 1) Filter sesi likuid
-  const h = new Date().getUTCHours();
-  const inSession = cfg.sessions.some(([from, to]) => h >= from && h < to);
-  if (!inSession) {
-    return { plan: null, reason: 'Di luar sesi likuid XAUUSD (London 07–11 UTC, New York 13–17 UTC).' };
-  }
-
-  // 2) Arah dari struktur 5m, dikonfirmasi 15m
-  const s5 = structureBias(m5, cfg.pivot);
-  if (s5.dir === 0) {
-    return { plan: null, reason: `Struktur 5m belum jelas (${s5.src}).` };
-  }
-  const dir = s5.dir;
-  const s15 = structureBias(htf15, cfg.htfPivot);
-  if (s15.dir === -dir) {
-    return { plan: null, reason: `Struktur 15m (${s15.src}) berlawanan dengan 5m, skip.` };
-  }
-
-  // 3) Hanya masuk pada BOS 5m segar (momentum)
-  if (!s5.src.startsWith('BOS')) {
-    return { plan: null, reason: `Belum ada BOS 5m segar (${s5.src}). Tunggu break struktur.` };
-  }
-
-  const a5 = atr(m5, 14);
-  const last = m5[m5.length - 1];
-
-  // 4) Anti spike dan anti kejar harga
-  const lastRange = last.h - last.l;
-  if (lastRange > cfg.maxSpikeAtr * a5) {
-    return { plan: null, reason: `Candle 5m terakhir terlalu besar (${(lastRange / a5).toFixed(1)} ATR), entry terlambat.` };
-  }
-  const ema20 = emaSeries(m5.map(c => c.c), 20).pop();
-  const ext = Math.abs(price - ema20) / a5;
-  if (ext > cfg.maxExtAtr) {
-    return { plan: null, reason: `Harga ${ext.toFixed(1)} ATR dari EMA20 5m, tunggu pullback.` };
-  }
-
-  // 5) SL: swing M1 terdekat di sisi SL + padding
-  const sc = goldNearestM1SL(m1, price, dir);
-  const riskAtr = sc.risk / sc.atr;
-  if (riskAtr > GOLD_M1_SL.maxRiskAtr) {
-    return { plan: null, reason: `SL swing M1 terdekat terlalu jauh (${riskAtr.toFixed(1)} ATR M1), skip.` };
-  }
-  const risk = sc.risk;
-  const sl = sc.sl;
-
-  const riskLabel = riskAtr <= 2 ? 'LOW' : riskAtr <= 3 ? 'MEDIUM' : 'HIGH';
-  const tps = rrList.map(rr => price + dir * rr * risk);
-
-  const reason = [
-    `Gold Hit n Run ${dir === 1 ? 'BUY' : 'SELL'} MARKET, BOS 5m, 15m ${s15.src}.`,
-    `SL ${sc.src} ${f(sc.level)} + pad ${f(sc.pad)} → jarak ${f(risk)} (${(risk / sc.atr).toFixed(1)} ATR M1).`,
-    `Manajemen: TP1 1R tutup 50%, geser SL ke BE, TP2 1.5R, TP3 2R. Time stop ${cfg.timeStopBars * 5} menit.`,
-  ].join(' • ');
-
-  return {
-    dir,
-    plan: {
-      kind: 'goldscalp',
-      orderType: 'NOW',
-      status: 'RUNNING',
-      entry: price,
-      bufferEnd: price,
-      sl,
-      tps,
-      zone: { min: Math.min(price, sl), max: Math.max(price, sl) },
-      expireMs: 0,
-      zoneNote: `Gold Hit n Run · SL swing M1 terdekat`,
-    },
-    meta: { confidence: riskLabel === 'LOW' ? 'HIGH' : 'MEDIUM', riskLabel, setup: 'MOMENTUM', reason },
   };
 }
 
@@ -1005,27 +959,7 @@ export default async function handler(req, res) {
 
     let result;
 
-    if (style.kind === 'goldscalp') {
-      if (!GOLD_SYMBOLS.includes(symbol)) {
-        return res.status(200).json(noSignal('Gold Hit n Run hanya untuk XAUUSD.'));
-      }
-      let m5 = cleanCandles(body.candles?.mtf ?? body.candles?.entry);
-      let m15 = cleanCandles(body.candles?.htf);
-      let m1 = cleanCandles(body.candles?.m1);
-      if (m5.length < 30) m5 = (await getCandles(symbol, '5m', 150, apiKey)).candles;
-      if (m15.length < 20) m15 = (await getCandles(symbol, '15m', 100, apiKey)).candles;
-      if (m1.length < 30) m1 = (await getCandles(symbol, '1m', 150, apiKey)).candles;
-
-      m5 = mergeLiveBar(m5, price, 5);
-      m15 = mergeLiveBar(m15, price, 15);
-      m1 = mergeLiveBar(m1, price, 1);
-
-      if (m5.length < 30) return res.status(200).json(noSignal(`Data 5m belum cukup (${m5.length}/30).`));
-      if (m1.length < 30) return res.status(200).json(noSignal(`Data M1 belum cukup untuk SL (${m1.length}/30).`));
-
-      result = buildGoldHitRunPlan({ htf15: m15, m5, m1, price, symbol, dec, rrList: style.rr });
-
-    } else if (style.kind === 'scalp') {
+    if (style.kind === 'scalp') {
       let m1 = [];
       if (GOLD_SYMBOLS.includes(symbol)) {
         m1 = cleanCandles(body.candles?.m1);
