@@ -1,5 +1,5 @@
 // api/generate.js
-// v15
+// v16
 //  - Acuan arah SELALU market structure (BOS / HH-HL / LH-LL). EMA hanya pendukung.
 //  - Day Trading:
 //      1) Zona S/D berbasis BOS (HTF lalu MTF). Harga di dalam zona + reaksi → NOW, di luar zona → LIMIT di tepi terdekat.
@@ -8,8 +8,11 @@
 //      SL = 1,5 × jarak SL scalping 5m. TP 1:2 / 1:3 / 1:4. ATR hanya untuk padding, tanpa batas min/max.
 //  - Scalping (semua pair): arah dari structure 5m (cadangan 15m).
 //      Buffer = entry ∓ 0,5 ATR. SL dihitung dari BUFFER, bukan dari entry.
-//      XAUUSD → SL = buffer − 20 pip (1 pip = 0.10). TP dari ENTRY: 30 / 40 / 60 pip (RR 1:1.5 · 1:2 · 1:3 terhadap risk 20 pip).
+//      TP dihitung dari ENTRY dengan jarak = |entry − SL|.
 //      Pair lain → jarak SL = swing 5m + padding, TP = entry + RR × |entry − SL|.
+//  - Scalping XAUUSD:
+//      Arah = structure M1 (BUY atau SELL, dua arah). M5 hanya label konteks (searah / counter).
+//      SL = buffer − 20 pip (1 pip = 0.10). TP dari ENTRY: 30 / 40 / 60 pip (RR 1:1.5 · 1:2 · 1:3).
 //  - Intraday : Sweep > CHoCH > FVG, skor kekuatan, maks 1 sinyal kuat per hari (UTC) per user per pair.
 //  - Swing    : Sweep > CHoCH > FVG.
 //  - Candle: cache KV (candles_SIMBOL_TF) dulu, lalu TickerLayer berurutan (retry 429 sekali).
@@ -32,7 +35,7 @@ const INDEX_LIST = ['US30', 'NAS100', 'SPX500', 'GER40', 'UK100', 'JPN225', 'FRA
 const GOLD_SYMBOLS = ['XAUUSD', 'XAUUSDX'];
 
 const STYLES = {
-  'Scalping': { label: 'Scalping Agresif (SL dari buffer · XAUUSD: SL 20 pip, TP 1:1.5 · 1:2 · 1:3)', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0] },
+  'Scalping': { label: 'Scalping Agresif (SL dari buffer · XAUUSD: M1 2 arah, SL 20 pip, TP 1:1.5 · 1:2 · 1:3)', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0] },
   'Day Trading': { label: 'Day Trading (Zona BOS HTF-MTF · Continuation EMA · SL 1,5× scalping)', mode: 'LIMIT', kind: 'day', rr: [2.0, 3.0, 4.0] },
   'Intraday': { label: 'Intraday (Sweep > CHoCH > FVG · 1 sinyal kuat/hari)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
   'Swing': { label: 'Swing Trading (Sweep > CHoCH > FVG + Multi EMA + BB)', mode: 'LIMIT', kind: 'swing', rr: [2.0, 4.5, 8.5] },
@@ -68,6 +71,11 @@ const GOLD_M1_SL = {
   minDistAtr: 0.4,
   maxRiskAtr: 3.0,   // hanya mode 'swing'
   padAtr: 0.2,
+};
+
+// Arah scalping XAUUSD: mengikuti structure M1. M5 hanya label konteks.
+const GOLD_M1_DIR = {
+  pivot: 3,          // swing M1 L=3
 };
 
 const STYLE_TF_SERVER = {
@@ -651,6 +659,21 @@ function goldSL(m1, price, dir, mode) {
   return goldNearestM1SL(m1, price, dir);
 }
 
+// Arah scalping XAUUSD = structure M1 saat ini (BUY atau SELL).
+// M5 tidak memblokir sinyal, hanya memberi label searah / counter.
+function goldM1Direction(m1, mtfC) {
+  const m1s = structureBias(m1, GOLD_M1_DIR.pivot);
+  if (m1s.dir === 0) return { dir: 0, src: `M1 ${m1s.src}` };
+
+  const m5s = structureBias(mtfC, SCALP_PIVOT);
+  let ctx;
+  if (m5s.dir === 0) ctx = `M5 ${m5s.src}`;
+  else if (m5s.dir === m1s.dir) ctx = `searah M5 ${m5s.src}`;
+  else ctx = `counter M5 ${m5s.src} (koreksi M1)`;
+
+  return { dir: m1s.dir, src: `M1 ${m1s.src}, ${ctx}` };
+}
+
 function scoreStructure(p, htfZones, aM, emaAligned) {
   let s = 1;
   if (emaAligned) s++;
@@ -662,20 +685,32 @@ function scoreStructure(p, htfZones, aM, emaAligned) {
 }
 
 // Scalping (semua pair): SL dihitung dari BUFFER.
-// XAUUSD: SL = buffer − 20 pip, TP dari entry = 30 / 40 / 60 pip.
-// Pair lain: SL dari buffer dengan jarak swing 5m, TP = entry + RR × |entry − SL|.
+// XAUUSD: arah dari M1 (dua arah), SL = buffer − 20 pip, TP dari entry = 30 / 40 / 60 pip.
+// Pair lain: arah dari 5m → 15m, jarak SL dari swing 5m, TP = entry + RR × |entry − SL|.
 function buildScalpPlan({ htfC, mtfC, m1, price, rrList, symbol, dec }) {
-  const s5 = structureBias(mtfC, SCALP_PIVOT);
-  const s15 = structureBias(htfC, SETUP_CFG.day.pivot);
-  const dir = s5.dir !== 0 ? s5.dir : s15.dir;
-  if (dir === 0) {
-    return { plan: null, reason: `Market structure 5m dan 15m belum jelas (5m: ${s5.src}, 15m: ${s15.src}).` };
-  }
-  const srcTxt = s5.dir !== 0 ? `5m ${s5.src}` : `15m ${s15.src}`;
   const f = v => Number(v).toFixed(dec);
   const isGold = GOLD_SYMBOLS.includes(symbol);
 
-  // Jarak SL dari buffer
+  // 1) Arah
+  let dir, srcTxt;
+  if (isGold) {
+    const d = goldM1Direction(m1, mtfC);
+    if (d.dir === 0) {
+      return { plan: null, reason: `Scalping XAUUSD ditunda: ${d.src}.` };
+    }
+    dir = d.dir;
+    srcTxt = d.src;
+  } else {
+    const s5 = structureBias(mtfC, SCALP_PIVOT);
+    const s15 = structureBias(htfC, SETUP_CFG.day.pivot);
+    dir = s5.dir !== 0 ? s5.dir : s15.dir;
+    if (dir === 0) {
+      return { plan: null, reason: `Market structure 5m dan 15m belum jelas (5m: ${s5.src}, 15m: ${s15.src}).` };
+    }
+    srcTxt = `market structure ${s5.dir !== 0 ? `5m ${s5.src}` : `15m ${s15.src}`}`;
+  }
+
+  // 2) Jarak SL dari buffer
   let sc;
   if (isGold) {
     sc = goldSL(m1, price, dir, GOLD_SL_CFG.scalpMode);
@@ -689,18 +724,13 @@ function buildScalpPlan({ htfC, mtfC, m1, price, rrList, symbol, dec }) {
     sc = scalpSL(mtfC, price, dir, symbol);
   }
 
-  // Buffer: di belakang entry sejauh SCALP_BUFFER_ATR × ATR
+  // 3) Buffer dan SL
   const bufferEnd = price - dir * SCALP_BUFFER_ATR * sc.atr;
-
-  // SL dihitung dari buffer, bukan dari entry
   const slDist = sc.risk;
   const sl = bufferEnd - dir * slDist;
-
-  // Jarak entry ke SL yang sebenarnya
   const risk = Math.abs(price - sl);
 
-  // TP dari entry
-  // XAUUSD: pakai tpPips (30/40/60 pip). Pair lain: RR × jarak entry ke SL.
+  // 4) TP dari entry
   const tps = isGold
     ? GOLD_SL_CFG.tpPips.map(p => price + dir * p * GOLD_SL_CFG.pipSize)
     : rrList.map(rr => price + dir * rr * risk);
@@ -713,7 +743,7 @@ function buildScalpPlan({ htfC, mtfC, m1, price, rrList, symbol, dec }) {
     : `RRR: TP1 1:${rrList[0]}, TP2 1:${rrList[1]}, TP3 1:${rrList[2]} (dihitung dari entry).`;
 
   const reason = [
-    `Scalping ${dir === 1 ? 'BUY' : 'SELL'} MARKET pada ${symbol}, arah dari market structure ${srcTxt}.`,
+    `Scalping ${dir === 1 ? 'BUY' : 'SELL'} MARKET pada ${symbol}, arah dari ${srcTxt}.`,
     `SL dihitung dari buffer ${f(bufferEnd)} (${sc.src}), jarak ${f(slDist)} → SL ${f(sl)}.`,
     `Jarak entry ke SL ${f(risk)}.`,
     tpText,
