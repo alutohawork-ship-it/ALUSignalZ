@@ -1,21 +1,20 @@
 // api/generate.js
-// v17
+// v18
 //  - Acuan arah SELALU market structure (BOS / HH-HL / LH-LL). EMA hanya pendukung.
 //  - Day Trading:
 //      1) Zona S/D berbasis BOS (HTF lalu MTF). Harga di dalam zona + reaksi → NOW, di luar zona → LIMIT di tepi terdekat.
 //      2) Tanpa zona, struktur MTF harus searah HTF:
 //           BOS MTF → NOW | harga sejalan EMA20 MTF → LIMIT di EMA | lainnya → LIMIT di swing MTF terdekat.
 //      SL = 1,5 × jarak SL scalping 5m. TP 1:2 / 1:3 / 1:4. ATR hanya untuk padding, tanpa batas min/max.
-//  - Scalping (semua pair): arah dari structure 5m (cadangan 15m).
+//  - Scalping (semua pair): arah dari structure 5m (cadangan 15m, lalu EMA9/21 5m).
 //      Buffer = entry ∓ 0,5 ATR. SL dihitung dari BUFFER, bukan dari entry.
 //      TP dihitung dari ENTRY dengan jarak = |entry − SL|.
 //      Pair lain → jarak SL = swing 5m + padding, TP = entry + RR × |entry − SL|.
 //  - Scalping XAUUSD:
-//      Keputusan arah: PANTULAN (swing M1) > KONTINUITAS (EMA5/EMA9 M1) > KOREKSI (ikut M1, label M5).
-//      Pemicu: cross EMA baru, atau EMA searah kuat (+ BOS M1 opsional / wajib via smcRequired).
-//      Filter zona lawan M1 (supply untuk BUY, demand untuk SELL) di jalur TP1.
-//      Cooldown per user per pair agar tidak berulang.
-//      SL = buffer − 20 pip (1 pip = 0.10). TP dari ENTRY: 30 / 40 / 60 pip (RR 1:1.5 · 1:2 · 1:3).
+//      Arah = market structure M1 langsung. Jika belum jelas → cadangan EMA5/9 M1 (label FALLBACK).
+//      Zona lawan M1 di jalur TP1 hanya label WASPADA, tidak memblokir sinyal.
+//      Cooldown hanya catatan di reason, tidak menahan sinyal.
+//      SL = buffer − 20 pip (1 pip = 0.10). TP dari ENTRY = 1,5 / 2 / 3 × |entry − SL|.
 //  - Intraday : Sweep > CHoCH > FVG, skor kekuatan, maks 1 sinyal kuat per hari (UTC) per user per pair.
 //  - Swing    : Sweep > CHoCH > FVG.
 //  - Candle: cache KV (candles_SIMBOL_TF) dulu, lalu TickerLayer berurutan (retry 429 sekali).
@@ -38,7 +37,7 @@ const INDEX_LIST = ['US30', 'NAS100', 'SPX500', 'GER40', 'UK100', 'JPN225', 'FRA
 const GOLD_SYMBOLS = ['XAUUSD', 'XAUUSDX'];
 
 const STYLES = {
-  'Scalping': { label: 'Scalping Agresif (SL dari buffer · XAUUSD: EMA5/9 M1 + pantulan, SL 20 pip, TP 1:1.5 · 1:2 · 1:3)', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0] },
+  'Scalping': { label: 'Scalping Agresif (SL dari buffer · XAUUSD: structure M1 + EMA5/9 cadangan, SL 20 pip, TP 1:1.5 · 1:2 · 1:3)', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0] },
   'Day Trading': { label: 'Day Trading (Zona BOS HTF-MTF · Continuation EMA · SL 1,5× scalping)', mode: 'LIMIT', kind: 'day', rr: [2.0, 3.0, 4.0] },
   'Intraday': { label: 'Intraday (Sweep > CHoCH > FVG · 1 sinyal kuat/hari)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
   'Swing': { label: 'Swing Trading (Sweep > CHoCH > FVG + Multi EMA + BB)', mode: 'LIMIT', kind: 'swing', rr: [2.0, 4.5, 8.5] },
@@ -56,7 +55,7 @@ const DAY_SL_MULT = 1.5;
 // Buffer scalping: jarak entry ke buffer, dalam satuan ATR
 const SCALP_BUFFER_ATR = 0.5;
 
-// Konfigurasi SL XAUUSD untuk Scalping
+// Konfigurasi SL & TP XAUUSD untuk Scalping
 // scalpMode: 'fixed' | 'swing' | 'clamp'
 const GOLD_SL_CFG = {
   scalpMode: 'fixed',
@@ -64,7 +63,7 @@ const GOLD_SL_CFG = {
   minPips: 30,            // dipakai jika mode 'clamp'
   maxPips: 35,            // dipakai jika mode 'clamp'
   pipSize: 0.1,           // 1 pip = 0.10
-  tpPips: [30, 40, 60],   // TP1, TP2, TP3 dari entry (RR 1:1.5, 1:2, 1:3 terhadap risk 20 pip)
+  rr: [1.5, 2.0, 3.0],    // RR TP1, TP2, TP3 dari entry, dihitung dari |entry − SL|
 };
 
 // Konfigurasi SL M1 terdekat untuk XAUUSD (hanya dipakai jika mode 'swing' / 'clamp')
@@ -72,44 +71,32 @@ const GOLD_M1_SL = {
   pivot: 2,
   lookback: 45,
   minDistAtr: 0.4,
-  maxRiskAtr: 3.0,   // hanya mode 'swing'
+  maxRiskAtr: 3.0,
   padAtr: 0.2,
 };
 
-// Structure M1 (dipakai SMC opsional, dan pivot dasar)
+// Structure M1 (pivot dasar)
 const GOLD_M1_DIR = {
   pivot: 3,
 };
 
-// Filter arah Scalping XAUUSD: EMA 5 & EMA 9 di M1
+// Cadangan arah XAUUSD: EMA 5 & EMA 9 di M1 (dipakai jika structure M1 belum jelas)
 const GOLD_EMA_CFG = {
   fast: 5,
   slow: 9,
-  minSepAtr: 0.15,     // jarak EMA5-EMA9 minimal 0.15 ATR M1 (di bawah ini = sideways)
-  slopeBars: 3,        // kemiringan EMA5 diukur 3 candle
-  minSlopeAtr: 0.1,    // kemiringan minimal 0.1 ATR M1 untuk dianggap kuat
-  cooldownMin: 15,     // setelah 1 sinyal, tahan sinyal baru 15 menit
+  cooldownMin: 15,     // hanya catatan di reason, tidak menahan sinyal
 };
 
-// Market structure (SMC) M1 sebagai pemicu. EMA tetap penentu arah utama.
+// Arah utama XAUUSD = market structure M1 (pivot swing M1)
 const GOLD_SMC_CFG = {
-  pivot: 2,            // swing M1 untuk BOS
-  smcRequired: false,  // false = SMC opsional, true = wajib BOS M1 searah
+  pivot: 2,
 };
 
-// Filter zona lawan (supply untuk BUY, demand untuk SELL) di M1 sebelum sinyal dikeluarkan
+// Zona lawan M1 (supply untuk BUY, demand untuk SELL) di jalur TP1: hanya label WASPADA, tidak memblokir
 const GOLD_ZONE_CFG = {
   lookback: 60,        // cari zona dalam 60 candle M1 terakhir
   minBodyAtr: 0.8,     // candle impuls minimal 0.8 ATR M1 agar dianggap zona
-  blockDistAtr: 1.0,   // zona lawan dalam 1.0 ATR dari entry dan di jalur TP1 → blok
-  mode: 'block',       // 'block' = tunda sinyal, 'warn' = keluarkan sinyal tapi beri label
-};
-
-// Keputusan arah XAUUSD: pantulan > kontinuitas > koreksi (ikut M1)
-const GOLD_DECIDE_CFG = {
-  swingPivot: 2,     // swing M1 untuk level pantulan
-  reachAtr: 0.6,     // harga harus dalam 0.6 ATR M1 dari level pantulan
-  touchAtr: 0.25,    // toleransi sentuhan level
+  blockDistAtr: 1.0,   // zona lawan dalam 1.0 ATR dari entry dan di jalur TP1 → WASPADA
 };
 
 const STYLE_TF_SERVER = {
@@ -693,98 +680,6 @@ function goldSL(m1, price, dir, mode) {
   return goldNearestM1SL(m1, price, dir);
 }
 
-// Tren M1 dari EMA5 vs EMA9 (sep, slope, sisi harga)
-function goldTrend(m1, price) {
-  const cfg = GOLD_EMA_CFG;
-  const closes = m1.map(c => c.c);
-  const n = closes.length;
-  if (n < cfg.slow + cfg.slopeBars + 5) return { dir: 0, strong: false, fresh: false, src: 'data M1 kurang' };
-
-  const fS = emaSeries(closes, cfg.fast);
-  const sS = emaSeries(closes, cfg.slow);
-  const a1 = atr(m1, 14);
-  const fast = fS[n - 1], slow = sS[n - 1];
-  const sep = (fast - slow) / a1;
-  const slope = (fast - fS[n - 1 - cfg.slopeBars]) / a1;
-
-  if (Math.abs(sep) < cfg.minSepAtr) {
-    return { dir: 0, strong: false, fresh: false, src: `EMA${cfg.fast}/EMA${cfg.slow} M1 sideways` };
-  }
-
-  const dir = sep > 0 ? 1 : -1;
-  const fresh = (fS[n - 2] <= sS[n - 2] && fast > slow) || (fS[n - 2] >= sS[n - 2] && fast < slow);
-  const sideOk = dir === 1 ? (price > fast && price > slow) : (price < fast && price < slow);
-  const slopeOk = dir === 1 ? slope >= cfg.minSlopeAtr : slope <= -cfg.minSlopeAtr;
-
-  return {
-    dir,
-    strong: sideOk && slopeOk,
-    fresh,
-    src: `EMA${cfg.fast}/EMA${cfg.slow} M1 ${dir === 1 ? 'bullish' : 'bearish'}, slope ${slope.toFixed(2)} ATR`,
-  };
-}
-
-// Pantulan di swing M1: harga dekat level, candle terakhir menyentuh lalu close berbalik
-function goldRejection(m1, price, atrV) {
-  const { highs, lows } = findPivots(m1, GOLD_DECIDE_CFG.swingPivot);
-  const last = m1[m1.length - 1];
-  const reach = GOLD_DECIDE_CFG.reachAtr * atrV;
-  const touch = GOLD_DECIDE_CFG.touchAtr * atrV;
-
-  // Pantulan BUY: swing low di bawah/dekat harga, disentuh lalu close kembali di atasnya
-  const sLow = lows.filter(p => p.p <= price + touch && price - p.p <= reach).pop();
-  if (sLow && last.l <= sLow.p + touch && last.c > sLow.p && last.c > last.o) {
-    return { dir: 1, src: `pantulan BUY dari swing low M1 ${sLow.p.toFixed(2)}` };
-  }
-
-  // Pantulan SELL: swing high di atas/dekat harga, disentuh lalu close kembali di bawahnya
-  const sHigh = highs.filter(p => p.p >= price - touch && p.p - price <= reach).pop();
-  if (sHigh && last.h >= sHigh.p - touch && last.c < sHigh.p && last.c < last.o) {
-    return { dir: -1, src: `pantulan SELL dari swing high M1 ${sHigh.p.toFixed(2)}` };
-  }
-
-  return null;
-}
-
-// Keputusan utama: pantulan > kontinuitas EMA > koreksi (ikut M1 saat M5 berlawanan)
-function goldDecide(m1, mtfC, price) {
-  const a1 = atr(m1, 14);
-  const trend = goldTrend(m1, price);
-  const bounce = goldRejection(m1, price, a1);
-
-  let dir = 0, mode = '', src = '';
-  if (bounce) {
-    dir = bounce.dir;
-    mode = 'PANTULAN';
-    src = bounce.src;
-  } else if (trend.dir !== 0 && trend.strong) {
-    dir = trend.dir;
-    src = trend.src;
-    mode = 'KONTINUITAS';
-  } else {
-    return { dir: 0, strong: false, fresh: false, src: `belum ada pantulan, ${trend.src}` };
-  }
-
-  // Label M5: jika berlawanan, ini koreksi dan arah tetap ikut M1
-  let ctx = '';
-  if (mtfC && mtfC.length) {
-    const m5s = structureBias(mtfC, SCALP_PIVOT);
-    if (m5s.dir === 0) ctx = `, M5 ${m5s.src}`;
-    else if (m5s.dir === dir) ctx = `, searah M5 ${m5s.src}`;
-    else {
-      ctx = `, counter M5 ${m5s.src}`;
-      if (mode === 'KONTINUITAS') mode = 'KOREKSI (ikut M1)';
-    }
-  }
-
-  return {
-    dir,
-    strong: true,
-    fresh: mode === 'PANTULAN' || trend.fresh,
-    src: `${mode}: ${src}${ctx}`,
-  };
-}
-
 // Zona lawan di M1: supply (untuk BUY) atau demand (untuk SELL).
 // Zona = base candle berlawanan sebelum impuls kuat.
 function findGoldOpposingZones(m1, dir, atrV) {
@@ -850,47 +745,63 @@ function scoreStructure(p, htfZones, aM, emaAligned) {
   return s;
 }
 
-// Scalping (semua pair): SL dihitung dari BUFFER.
-// XAUUSD: arah dari goldDecide (pantulan > kontinuitas > koreksi), SL = buffer − 20 pip,
-//         TP dari entry = 30 / 40 / 60 pip, filter zona lawan M1 di jalur TP1.
-// Pair lain: arah dari 5m → 15m, jarak SL dari swing 5m, TP = entry + RR × |entry − SL|.
+// Arah cadangan: dipakai jika structure belum jelas. Selalu mengembalikan BUY atau SELL.
+function fallbackDir(candles, price, label, fastP, slowP) {
+  const closes = candles.map(c => c.c);
+  if (closes.length >= slowP + 2) {
+    const fs = emaSeries(closes, fastP);
+    const ss = emaSeries(closes, slowP);
+    const fl = fs[fs.length - 1], sl = ss[ss.length - 1];
+    if (fl !== sl) return { dir: fl > sl ? 1 : -1, src: `EMA${fastP}/EMA${slowP} ${label}` };
+  }
+  const last = candles[candles.length - 1];
+  if (last.c !== last.o) return { dir: last.c > last.o ? 1 : -1, src: `candle ${label} terakhir` };
+  return { dir: price >= last.c ? 1 : -1, src: `harga vs close ${label}` };
+}
+
+// Scalping (semua pair): selalu mengeluarkan sinyal.
+// XAUUSD: arah = market structure M1 langsung, cadangan EMA5/9 M1 (FALLBACK).
+// Pair lain: arah 5m → 15m → cadangan EMA9/21 5m (FALLBACK).
+// SL dihitung dari buffer, TP dari entry dengan jarak = |entry − SL|.
+// Zona lawan M1 di jalur TP1 hanya label WASPADA.
 function buildScalpPlan({ htfC, mtfC, m1, price, rrList, symbol, dec }) {
   const f = v => Number(v).toFixed(dec);
   const isGold = GOLD_SYMBOLS.includes(symbol);
 
   // 1) Arah
-  let dir, srcTxt, fresh = false;
+  let dir, srcTxt, fallback = false;
   if (isGold) {
-    const d = goldDecide(m1, mtfC, price);
-    if (d.dir === 0) {
-      return { plan: null, reason: `Scalping XAUUSD ditunda: ${d.src}.` };
+    const s1 = structureBias(m1, GOLD_SMC_CFG.pivot);
+    if (s1.dir !== 0) {
+      dir = s1.dir;
+      srcTxt = `market structure M1 ${s1.src}`;
+    } else {
+      const fb = fallbackDir(m1, price, 'M1', GOLD_EMA_CFG.fast, GOLD_EMA_CFG.slow);
+      dir = fb.dir;
+      srcTxt = `market structure M1 ${s1.src} → arah cadangan ${fb.src}`;
+      fallback = true;
     }
-    dir = d.dir;
-    srcTxt = d.src;
-    fresh = d.fresh;
   } else {
     const s5 = structureBias(mtfC, SCALP_PIVOT);
     const s15 = structureBias(htfC, SETUP_CFG.day.pivot);
-    dir = s5.dir !== 0 ? s5.dir : s15.dir;
-    if (dir === 0) {
-      return { plan: null, reason: `Market structure 5m dan 15m belum jelas (5m: ${s5.src}, 15m: ${s15.src}).` };
+    if (s5.dir !== 0) {
+      dir = s5.dir;
+      srcTxt = `market structure 5m ${s5.src}`;
+    } else if (s15.dir !== 0) {
+      dir = s15.dir;
+      srcTxt = `market structure 15m ${s15.src}`;
+    } else {
+      const fb = fallbackDir(mtfC, price, '5m', 9, 21);
+      dir = fb.dir;
+      srcTxt = `structure 5m ${s5.src} & 15m ${s15.src} → arah cadangan ${fb.src}`;
+      fallback = true;
     }
-    srcTxt = `market structure ${s5.dir !== 0 ? `5m ${s5.src}` : `15m ${s15.src}`}`;
   }
 
   // 2) Jarak SL dari buffer
-  let sc;
-  if (isGold) {
-    sc = goldSL(m1, price, dir, GOLD_SL_CFG.scalpMode);
-    if (GOLD_SL_CFG.scalpMode === 'swing') {
-      const riskAtrM1 = sc.risk / sc.atr;
-      if (riskAtrM1 > GOLD_M1_SL.maxRiskAtr) {
-        return { plan: null, reason: `SL swing M1 terdekat terlalu jauh (${riskAtrM1.toFixed(1)} ATR M1, batas ${GOLD_M1_SL.maxRiskAtr}).` };
-      }
-    }
-  } else {
-    sc = scalpSL(mtfC, price, dir, symbol);
-  }
+  const sc = isGold
+    ? goldSL(m1, price, dir, GOLD_SL_CFG.scalpMode)
+    : scalpSL(mtfC, price, dir, symbol);
 
   // 3) Buffer dan SL
   const bufferEnd = price - dir * SCALP_BUFFER_ATR * sc.atr;
@@ -898,35 +809,35 @@ function buildScalpPlan({ htfC, mtfC, m1, price, rrList, symbol, dec }) {
   const sl = bufferEnd - dir * slDist;
   const risk = Math.abs(price - sl);
 
-  // 4) TP dari entry
-  const tps = isGold
-    ? GOLD_SL_CFG.tpPips.map(p => price + dir * p * GOLD_SL_CFG.pipSize)
-    : rrList.map(rr => price + dir * rr * risk);
+  // 4) TP dari entry, jarak 1R = |entry − SL|
+  const rr = isGold ? GOLD_SL_CFG.rr : rrList;
+  const tps = rr.map(x => price + dir * x * risk);
 
-  // 5) Filter zona lawan M1 di jalur TP1 (XAUUSD)
+  // 5) Zona lawan M1 di jalur TP1: hanya label peringatan
   let zoneNote = '';
+  let warned = false;
   if (isGold) {
     const hitZone = goldOpposingZoneBlock(m1, dir, price, tps[0], sc.atr);
     if (hitZone) {
       const zText = dir === 1
-        ? `supply ${hitZone.min.toFixed(dec)}–${hitZone.max.toFixed(dec)}`
-        : `demand ${hitZone.min.toFixed(dec)}–${hitZone.max.toFixed(dec)}`;
-      if (GOLD_ZONE_CFG.mode === 'block') {
-        return { plan: null, reason: `Sinyal ${dir === 1 ? 'BUY' : 'SELL'} XAUUSD ditahan: ada ${zText} M1 di jalur TP1.` };
-      }
-      zoneNote = ` · WASPADA ${zText} di jalur TP1`;
+        ? `supply ${f(hitZone.min)}–${f(hitZone.max)}`
+        : `demand ${f(hitZone.min)}–${f(hitZone.max)}`;
+      zoneNote = ` · WASPADA ${zText} M1 di jalur TP1`;
+      warned = true;
     }
   }
 
+  // 6) Label kualitas dan confidence
   const riskAtr = slDist / sc.atr;
   const riskLabel = riskAtr <= 1.5 ? 'LOW' : riskAtr <= 2.5 ? 'MEDIUM' : 'HIGH';
+  const quality = fallback ? 'FALLBACK (arah cadangan)' : warned ? 'WASPADA (zona lawan)' : 'NORMAL';
+  const confidence = fallback || warned ? 'LOW' : riskLabel === 'LOW' ? 'HIGH' : 'MEDIUM';
 
-  const tpText = isGold
-    ? `TP dari entry: TP1 ${f(GOLD_SL_CFG.tpPips[0] * GOLD_SL_CFG.pipSize)}, TP2 ${f(GOLD_SL_CFG.tpPips[1] * GOLD_SL_CFG.pipSize)}, TP3 ${f(GOLD_SL_CFG.tpPips[2] * GOLD_SL_CFG.pipSize)} (RR 1:1.5 · 1:2 · 1:3 terhadap risk ${GOLD_SL_CFG.fixedPips} pip).`
-    : `RRR: TP1 1:${rrList[0]}, TP2 1:${rrList[1]}, TP3 1:${rrList[2]} (dihitung dari entry).`;
+  const tpText = `RRR: TP1 1:${rr[0]}, TP2 1:${rr[1]}, TP3 1:${rr[2]} (dihitung dari entry).`;
 
   const reason = [
     `Scalping ${dir === 1 ? 'BUY' : 'SELL'} MARKET pada ${symbol}, arah dari ${srcTxt}${zoneNote}.`,
+    `Kualitas sinyal: ${quality}.`,
     `SL dihitung dari buffer ${f(bufferEnd)} (${sc.src}), jarak ${f(slDist)} → SL ${f(sl)}.`,
     `Jarak entry ke SL ${f(risk)}.`,
     tpText,
@@ -944,15 +855,9 @@ function buildScalpPlan({ htfC, mtfC, m1, price, rrList, symbol, dec }) {
       tps,
       zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
       expireMs: 0,
-      zoneNote: `Scalp · SL dari buffer`,
+      zoneNote: `Scalp · ${quality}${zoneNote}`,
     },
-    meta: {
-      confidence: riskLabel === 'LOW' ? 'HIGH' : 'MEDIUM',
-      riskLabel,
-      setup: 'CONTINUATION',
-      reason,
-      fresh,   // dipakai cooldown di handler
-    },
+    meta: { confidence, riskLabel, setup: 'CONTINUATION', reason },
   };
 }
 
@@ -1219,19 +1124,14 @@ export default async function handler(req, res) {
       }
       result = buildScalpPlan({ htfC, mtfC, m1, price, rrList: style.rr, symbol, dec });
 
-      // Cooldown sinyal XAUUSD: sinyal searah ditahan selama cooldownMin.
-      // Arah berlawanan hanya lolos jika ada pemicu baru (cross EMA / pantulan).
-      if (result.plan && GOLD_SYMBOLS.includes(symbol)) {
+      // Cooldown XAUUSD hanya catatan di reason, tidak menahan sinyal.
+      // Disimpan hanya saat ada sinyal.
+      if (GOLD_SYMBOLS.includes(symbol) && result.plan) {
         const goldKey = `sig_gold_${email}_${symbol}`;
         const last = await kvGetJSON(goldKey);
-        const cooldownMs = GOLD_EMA_CFG.cooldownMin * 60000;
-        const withinCooldown = last && (Date.now() - last.t) < cooldownMs;
-        const blocked = withinCooldown && (last.dir === result.dir || !result.meta.fresh);
-        if (blocked) {
-          return res.status(200).json(noSignal(
-            `Sinyal ${last.dir === 1 ? 'BUY' : 'SELL'} XAUUSD sudah dikeluarkan ${Math.round((Date.now() - last.t) / 60000)} menit lalu. ` +
-            `Tunggu cooldown ${GOLD_EMA_CFG.cooldownMin} menit atau pemicu baru (cross EMA / pantulan) berlawanan arah.`
-          ));
+        if (last && (Date.now() - last.t) < GOLD_EMA_CFG.cooldownMin * 60000) {
+          const menit = Math.round((Date.now() - last.t) / 60000);
+          result.meta.reason += ` • Catatan: sinyal ${last.dir === 1 ? 'BUY' : 'SELL'} terakhir ${menit} menit lalu.`;
         }
         await kvSetJSON(goldKey, { dir: result.dir, t: Date.now() }, 3600);
       }
