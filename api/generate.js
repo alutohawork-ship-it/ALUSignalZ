@@ -7,7 +7,7 @@
 //  - Day Trading (KONSERVATIF entry): bias struktur HTF, REFINE zona di M5 (OB-BOS / S&D).
 //      Zona M5 yang menumpuk di zona BOS HTF/MTF = refined (prioritas). Harga di zona → NOW, di luar zona → LIMIT di tepi zona.
 //      Tanpa zona M5 → kontinuasi M5 (BOS M5 → NOW | EMA20 M5 → LIMIT | swing M5 → LIMIT).
-//      SL = 1,5 × jarak SL scalping 5m. TP 1:2 / 1:3,5 / 1:5.
+//      SL = 1,5 × jarak SL scalping 5m. TP 1:1 / 1:1,5 / 1:2.
 //  - Intraday (MODERAT entry): bias struktur HTF 4h, REFINE di M15: FVG(Sweep>CHoCH>FVG) / OB / S&D / kontinuasi EMA20.
 //      Skor kekuatan (min 5), maks 1 sinyal kuat per hari (UTC) per user per pair. HANYA TP1 & TP2 berbasis Fibonacci extension.
 //  - Swing (POSITIONING entry): bias struktur HTF 1d, MTF 4h, REFINE di H1: FVG / OB / S&D / kontinuasi. HANYA 1 TP (1:3).
@@ -36,8 +36,8 @@ const STYLES = {
     entryStyle: 'Agresif', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
   'Day Trading': {
-    label: 'Day Trading · Konservatif Entry (Refine zone M5 S/D · Kontinuitas M5 · TP 1:2 · 1:3,5 · 1:5)',
-    entryStyle: 'Konservatif', mode: 'LIMIT', kind: 'day', rr: [2.0, 3.5, 5.0],
+    label: 'Day Trading · Konservatif Entry (Refine zone M5 S/D · Kontinuitas M5 · TP 1:1 · 1:1,5 · 1:2)',
+    entryStyle: 'Konservatif', mode: 'LIMIT', kind: 'day', rr: [1.0, 1.5, 2.0],
   },
   'Intraday': {
     label: 'Intraday · Moderat Entry (Refine M15: S&D / OB / FVG / Kontinuitas · TP1-TP2 Fibonacci · 1 sinyal kuat/hari)',
@@ -966,7 +966,7 @@ function buildScalpPlan({ htfC, mtfC, m1, price, rrList, symbol, dec }) {
 // ═══════════════════════════ DAY TRADING (Konservatif) ═══════════════════════════
 // Bias struktur HTF. Entry di-REFINE pada M5: zona OB-BOS / S&D. Zona M5 yang menumpuk
 // di zona BOS HTF/MTF = refined (prioritas). Tanpa zona M5 → kontinuasi M5.
-// SL = 1,5 × jarak SL scalping 5m. TP 1:2 / 1:3,5 / 1:5.
+// SL = 1,5 × jarak SL scalping 5m. TP 1:1 / 1:1,5 / 1:2.
 function buildDayPlan({ htfC, mtfC, c5, symbol, price, rrList, dec }) {
   const cfg = SETUP_CFG.day;
   const aM = atr(mtfC, 14);
