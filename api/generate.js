@@ -1,5 +1,5 @@
 // api/generate.js
-// v18
+// v19
 //  - Acuan arah SELALU market structure (BOS / HH-HL / LH-LL). EMA hanya pendukung.
 //  - Day Trading:
 //      1) Zona S/D berbasis BOS (HTF lalu MTF). Harga di dalam zona + reaksi → NOW, di luar zona → LIMIT di tepi terdekat.
@@ -11,10 +11,11 @@
 //      TP dihitung dari ENTRY dengan jarak = |entry − SL|.
 //      Pair lain → jarak SL = swing 5m + padding, TP = entry + RR × |entry − SL|.
 //  - Scalping XAUUSD:
-//      Arah = market structure M1 langsung. Jika belum jelas → cadangan EMA5/9 M1 (label FALLBACK).
-//      Zona lawan M1 di jalur TP1 hanya label WASPADA, tidak memblokir sinyal.
-//      Cooldown hanya catatan di reason, tidak menahan sinyal.
-//      SL = buffer − 20 pip (1 pip = 0.10). TP dari ENTRY = 1,5 / 2 / 3 × |entry − SL|.
+//      Zona pantulan M1 (demand / supply): impuls ≥ 0,8 ATR, tinggi ≤ 1,5 ATR, belum ditembus, belum tersentuh 2x.
+//      Harga dalam 25 pip dari zona → PANTULAN: pending LIMIT di tepi zona terdekat (di dalam zona → NOW).
+//      Tidak ada zona dekat → KONTINUASI market searah structure M1 (cadangan EMA5/9 M1).
+//      SL = buffer − 20 pip (1 pip = 0.10), dan di luar sisi jauh zona. TP dari ENTRY = 1,5 / 2 / 3 × |entry − SL|.
+//      Zona lawan M1 di jalur TP1 hanya label WASPADA. Cooldown hanya catatan di reason.
 //  - Intraday : Sweep > CHoCH > FVG, skor kekuatan, maks 1 sinyal kuat per hari (UTC) per user per pair.
 //  - Swing    : Sweep > CHoCH > FVG.
 //  - Candle: cache KV (candles_SIMBOL_TF) dulu, lalu TickerLayer berurutan (retry 429 sekali).
@@ -37,7 +38,7 @@ const INDEX_LIST = ['US30', 'NAS100', 'SPX500', 'GER40', 'UK100', 'JPN225', 'FRA
 const GOLD_SYMBOLS = ['XAUUSD', 'XAUUSDX'];
 
 const STYLES = {
-  'Scalping': { label: 'Scalping Agresif (SL dari buffer · XAUUSD: structure M1 + EMA5/9 cadangan, SL 20 pip, TP 1:1.5 · 1:2 · 1:3)', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0] },
+  'Scalping': { label: 'Scalping Agresif (SL dari buffer · XAUUSD: pantulan zona M1 (LIMIT) / kontinuasi market, SL 20 pip, TP 1:1.5 · 1:2 · 1:3)', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0] },
   'Day Trading': { label: 'Day Trading (Zona BOS HTF-MTF · Continuation EMA · SL 1,5× scalping)', mode: 'LIMIT', kind: 'day', rr: [2.0, 3.0, 4.0] },
   'Intraday': { label: 'Intraday (Sweep > CHoCH > FVG · 1 sinyal kuat/hari)', mode: 'LIMIT', kind: 'intraday', rr: [1.5, 3.0, 5.5] },
   'Swing': { label: 'Swing Trading (Sweep > CHoCH > FVG + Multi EMA + BB)', mode: 'LIMIT', kind: 'swing', rr: [2.0, 4.5, 8.5] },
@@ -87,16 +88,20 @@ const GOLD_EMA_CFG = {
   cooldownMin: 15,     // hanya catatan di reason, tidak menahan sinyal
 };
 
-// Arah utama XAUUSD = market structure M1 (pivot swing M1)
+// Arah dasar XAUUSD = market structure M1 (pivot swing M1)
 const GOLD_SMC_CFG = {
   pivot: 2,
 };
 
-// Zona lawan M1 (supply untuk BUY, demand untuk SELL) di jalur TP1: hanya label WASPADA, tidak memblokir
+// Zona pantulan M1 (demand / supply) dan zona lawan
 const GOLD_ZONE_CFG = {
   lookback: 60,        // cari zona dalam 60 candle M1 terakhir
-  minBodyAtr: 0.8,     // candle impuls minimal 0.8 ATR M1 agar dianggap zona
-  blockDistAtr: 1.0,   // zona lawan dalam 1.0 ATR dari entry dan di jalur TP1 → WASPADA
+  minBodyAtr: 0.8,     // impuls minimal 0.8 ATR M1 agar dianggap zona kuat
+  maxHeightAtr: 1.5,   // tinggi zona maksimal 1.5 ATR M1 (base terlalu besar = tidak valid)
+  maxTests: 2,         // zona yang sudah tersentuh 2 kali atau lebih dianggap lemah
+  nearPips: 25,        // harga dalam 25 pip dari zona → pakai pending di tepi zona
+  expireMin: 30,       // pending pantulan kedaluwarsa setelah 30 menit
+  blockDistAtr: 1.0,   // jarak zona lawan dari entry untuk label WASPADA
 };
 
 const STYLE_TF_SERVER = {
@@ -735,6 +740,74 @@ function goldOpposingZoneBlock(m1, dir, price, tp1, atrV) {
   return hit || null;
 }
 
+// Zona pantulan M1:
+//  - demand = base bearish → impuls bullish kuat (BUY)
+//  - supply = base bullish → impuls bearish kuat (SELL)
+// Valid jika impuls ≥ minBodyAtr × ATR, tinggi zona ≤ maxHeightAtr × ATR,
+// belum ditembus close, dan belum tersentuh ≥ maxTests kali (tidak termasuk candle terakhir).
+function findGoldReactionZones(m1, atrV) {
+  const zones = [];
+  const n = m1.length;
+  const from = Math.max(2, n - GOLD_ZONE_CFG.lookback);
+  for (let i = from; i < n; i++) {
+    const c = m1[i];
+    const body = Math.abs(c.c - c.o);
+    if (body < GOLD_ZONE_CFG.minBodyAtr * atrV) continue;
+
+    const bullImpulse = c.c > c.o;
+    const type = bullImpulse ? 'demand' : 'supply';
+
+    // base = candle berlawanan terakhir sebelum impuls (maks 3 candle ke belakang)
+    let bi = -1;
+    for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
+      const b = m1[j];
+      if (bullImpulse ? b.c < b.o : b.c > b.o) { bi = j; break; }
+    }
+    if (bi < 0) continue;
+
+    const b = m1[bi];
+    const zone = bullImpulse
+      ? { type, min: b.l, max: b.o }
+      : { type, min: b.o, max: b.h };
+    const height = zone.max - zone.min;
+    if (height <= 0 || height > GOLD_ZONE_CFG.maxHeightAtr * atrV) continue;
+
+    let broken = false, touches = 0;
+    for (let y = i + 1; y < n; y++) {
+      const k = m1[y];
+      if (bullImpulse ? k.c < zone.min : k.c > zone.max) { broken = true; break; }
+      if (y < n - 1 && (bullImpulse ? k.l <= zone.max : k.h >= zone.min)) touches++;
+    }
+    if (broken || touches >= GOLD_ZONE_CFG.maxTests) continue;
+
+    zones.push({ ...zone, strength: body / atrV });
+  }
+  return zones;
+}
+
+// Pilih zona pantulan terdekat yang valid dan berjarak ≤ nearPips dari harga.
+// BUY: demand di bawah atau di dalam harga. SELL: supply di atas atau di dalam harga.
+// dist = 0 berarti harga sudah di dalam zona.
+function pickGoldReactionZone(zones, price) {
+  const nearDist = GOLD_ZONE_CFG.nearPips * GOLD_SL_CFG.pipSize;
+  let best = null;
+  for (const z of zones) {
+    let dist;
+    if (z.type === 'demand') {
+      if (price < z.min) continue;                 // harga sudah jatuh di bawah zona
+      dist = price <= z.max ? 0 : price - z.max;
+    } else {
+      if (price > z.max) continue;                 // harga sudah naik di atas zona
+      dist = price >= z.min ? 0 : z.min - price;
+    }
+    if (dist > nearDist) continue;
+    if (!best || dist < best.dist || (dist === best.dist && z.strength > best.strength)) {
+      best = { ...z, dist, dir: z.type === 'demand' ? 1 : -1 };
+    }
+  }
+  return best;
+}
+
 function scoreStructure(p, htfZones, aM, emaAligned) {
   let s = 1;
   if (emaAligned) s++;
@@ -760,15 +833,17 @@ function fallbackDir(candles, price, label, fastP, slowP) {
 }
 
 // Scalping (semua pair): selalu mengeluarkan sinyal.
-// XAUUSD: arah = market structure M1 langsung, cadangan EMA5/9 M1 (FALLBACK).
-// Pair lain: arah 5m → 15m → cadangan EMA9/21 5m (FALLBACK).
-// SL dihitung dari buffer, TP dari entry dengan jarak = |entry − SL|.
-// Zona lawan M1 di jalur TP1 hanya label WASPADA.
+// XAUUSD: jika harga dekat zona pantulan M1 yang valid → PANTULAN
+//         (pending LIMIT di tepi zona, atau NOW jika harga di dalam zona).
+//         Jika tidak ada zona dekat → KONTINUASI market searah structure M1 (cadangan EMA5/9 M1).
+// Pair lain: arah 5m → 15m → cadangan EMA9/21 5m, selalu market (KONTINUASI).
+// SL dari buffer (entry ∓ 0,5 ATR) ∓ jarak SL; pada PANTULAN juga di luar sisi jauh zona.
+// TP dari entry dengan jarak = |entry − SL|. Zona lawan M1 di jalur TP1 hanya label WASPADA.
 function buildScalpPlan({ htfC, mtfC, m1, price, rrList, symbol, dec }) {
   const f = v => Number(v).toFixed(dec);
   const isGold = GOLD_SYMBOLS.includes(symbol);
 
-  // 1) Arah
+  // 1) Arah dasar (kontinuasi)
   let dir, srcTxt, fallback = false;
   if (isGold) {
     const s1 = structureBias(m1, GOLD_SMC_CFG.pivot);
@@ -798,64 +873,104 @@ function buildScalpPlan({ htfC, mtfC, m1, price, rrList, symbol, dec }) {
     }
   }
 
-  // 2) Jarak SL dari buffer
+  // 2) Mode eksekusi XAUUSD: pantulan zona M1 dulu, jika tidak ada → kontinuasi market
+  let mode = 'KONTINUASI';
+  let orderType = 'NOW';
+  let entry = price;
+  let zone = null;
+  let expireMs = 0;
+  if (isGold) {
+    const rz = pickGoldReactionZone(findGoldReactionZones(m1, atr(m1, 14)), price);
+    if (rz) {
+      mode = 'PANTULAN';
+      dir = rz.dir;
+      fallback = false;
+      zone = { min: rz.min, max: rz.max };
+      if (rz.dist === 0) {
+        orderType = 'NOW';
+        entry = price;
+        srcTxt = `pantulan ${rz.type} M1 ${f(rz.min)}–${f(rz.max)} (harga di dalam zona)`;
+      } else {
+        orderType = 'LIMIT';
+        entry = rz.type === 'demand' ? rz.max : rz.min;
+        expireMs = GOLD_ZONE_CFG.expireMin * 60000;
+        const pipsAway = Math.round(rz.dist / GOLD_SL_CFG.pipSize);
+        srcTxt = `pantulan ${rz.type} M1 ${f(rz.min)}–${f(rz.max)} (${pipsAway} pip dari harga, pending di tepi zona)`;
+      }
+    } else {
+      srcTxt += ' · tidak ada zona pantulan M1 dekat → kontinuasi market';
+    }
+  }
+
+  // 3) Jarak SL dari buffer
   const sc = isGold
-    ? goldSL(m1, price, dir, GOLD_SL_CFG.scalpMode)
+    ? goldSL(m1, entry, dir, GOLD_SL_CFG.scalpMode)
     : scalpSL(mtfC, price, dir, symbol);
 
-  // 3) Buffer dan SL
-  const bufferEnd = price - dir * SCALP_BUFFER_ATR * sc.atr;
-  const slDist = sc.risk;
-  const sl = bufferEnd - dir * slDist;
-  const risk = Math.abs(price - sl);
+  // 4) Buffer dan SL
+  const bufferEnd = entry - dir * SCALP_BUFFER_ATR * sc.atr;
+  let sl = bufferEnd - dir * sc.risk;
+  if (zone) {
+    // Pantulan: SL juga harus di luar sisi jauh zona (invalidasi pantulan)
+    const farSl = dir === 1
+      ? zone.min - SCALP_BUFFER_ATR * sc.atr
+      : zone.max + SCALP_BUFFER_ATR * sc.atr;
+    if (dir === 1 ? farSl < sl : farSl > sl) sl = farSl;
+  }
+  const risk = Math.abs(entry - sl);
 
-  // 4) TP dari entry, jarak 1R = |entry − SL|
+  // 5) TP dari entry, jarak 1R = |entry − SL|
   const rr = isGold ? GOLD_SL_CFG.rr : rrList;
-  const tps = rr.map(x => price + dir * x * risk);
+  const tps = rr.map(x => entry + dir * x * risk);
 
-  // 5) Zona lawan M1 di jalur TP1: hanya label peringatan
-  let zoneNote = '';
-  let warned = false;
+  // 6) Zona lawan M1 di jalur TP1: hanya label peringatan
+  let warnText = '';
   if (isGold) {
-    const hitZone = goldOpposingZoneBlock(m1, dir, price, tps[0], sc.atr);
+    const hitZone = goldOpposingZoneBlock(m1, dir, entry, tps[0], sc.atr);
     if (hitZone) {
       const zText = dir === 1
         ? `supply ${f(hitZone.min)}–${f(hitZone.max)}`
         : `demand ${f(hitZone.min)}–${f(hitZone.max)}`;
-      zoneNote = ` · WASPADA ${zText} M1 di jalur TP1`;
-      warned = true;
+      warnText = ` · WASPADA ${zText} M1 di jalur TP1`;
     }
   }
 
-  // 6) Label kualitas dan confidence
-  const riskAtr = slDist / sc.atr;
+  // 7) Label kualitas dan confidence
+  const riskAtr = sc.risk / sc.atr;
   const riskLabel = riskAtr <= 1.5 ? 'LOW' : riskAtr <= 2.5 ? 'MEDIUM' : 'HIGH';
-  const quality = fallback ? 'FALLBACK (arah cadangan)' : warned ? 'WASPADA (zona lawan)' : 'NORMAL';
-  const confidence = fallback || warned ? 'LOW' : riskLabel === 'LOW' ? 'HIGH' : 'MEDIUM';
-
-  const tpText = `RRR: TP1 1:${rr[0]}, TP2 1:${rr[1]}, TP3 1:${rr[2]} (dihitung dari entry).`;
+  let quality;
+  if (mode === 'PANTULAN') {
+    quality = `PANTULAN ZONA M1 (${orderType === 'LIMIT' ? 'LIMIT' : 'NOW di dalam zona'})`;
+  } else {
+    quality = fallback ? 'FALLBACK (arah cadangan)' : 'NORMAL';
+  }
+  quality += warnText;
+  const confidence = warnText || fallback ? 'LOW'
+    : mode === 'PANTULAN' ? 'HIGH'
+    : riskLabel === 'LOW' ? 'HIGH' : 'MEDIUM';
 
   const reason = [
-    `Scalping ${dir === 1 ? 'BUY' : 'SELL'} MARKET pada ${symbol}, arah dari ${srcTxt}${zoneNote}.`,
+    `Scalping ${dir === 1 ? 'BUY' : 'SELL'} ${orderType === 'LIMIT' ? 'LIMIT' : 'MARKET'} pada ${symbol}, arah dari ${srcTxt}.`,
     `Kualitas sinyal: ${quality}.`,
-    `SL dihitung dari buffer ${f(bufferEnd)} (${sc.src}), jarak ${f(slDist)} → SL ${f(sl)}.`,
-    `Jarak entry ke SL ${f(risk)}.`,
-    tpText,
+    `Entry ${f(entry)}, buffer ${f(bufferEnd)} (${sc.src}), SL ${f(sl)}, jarak entry ke SL ${f(risk)}.`,
+    `RRR: TP1 1:${rr[0]}, TP2 1:${rr[1]}, TP3 1:${rr[2]} (dihitung dari entry).`,
   ].join(' • ');
+
+  const zoneDisplay = zone ?? { min: Math.min(entry, bufferEnd), max: Math.max(entry, bufferEnd) };
 
   return {
     dir,
     plan: {
       kind: 'scalp',
-      orderType: 'NOW',
-      status: 'RUNNING',
-      entry: price,
+      orderType,
+      status: orderType === 'LIMIT' ? 'PENDING' : 'RUNNING',
+      entry,
       bufferEnd,
       sl,
       tps,
-      zone: { min: Math.min(price, bufferEnd), max: Math.max(price, bufferEnd) },
-      expireMs: 0,
-      zoneNote: `Scalp · ${quality}${zoneNote}`,
+      zone: zoneDisplay,
+      expireMs,
+      zoneNote: `Scalp · ${quality}`,
     },
     meta: { confidence, riskLabel, setup: 'CONTINUATION', reason },
   };
