@@ -1,8 +1,6 @@
 // api/generate.js
-// v31
-//  - Scalping (AGRESIF M1 + M15): Kombinasi struktur M1 berjalan + Momentum + Filter Sideways.
-//  - Jika market sideways / momentum lemah, sinyal ditahan (No Signal).
-//  - Pure Market Execution (NOW) dengan SL ketat berbasis jarak momentum candle/ATR pendek.
+// v33
+//  - Scalping (AGRESIF M1): Indikator Momentum (14) riil + Filter Sideways + Pure Market Execution (NOW).
 //  - Day Trading / Intraday / Swing & TickerLayer API Key Rotations terintegrasi utuh.
 
 const KV_KEY = 'alu_clients';
@@ -32,7 +30,7 @@ const GOLD_SYMBOLS = ['XAUUSD', 'XAUUSDX'];
 
 const STYLES = {
   'Scalping': {
-    label: 'Scalping · M1 Structure + Momentum + Sideways Filter (Tight SL · TP 1:1 · 1:2 · 1:3)',
+    label: 'Scalping · M1 Momentum Indicator + Sideways Filter (Tight SL · TP 1:1 · 1:2 · 1:3)',
     entryStyle: 'Agresif', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
   'Day Trading': {
@@ -299,66 +297,41 @@ function atr(candles, period = 14) {
   return s.length ? s.reduce((a, b) => a + b, 0) / s.length : 15;
 }
 
-function findPivots(candles, L) {
-  const highs = [], lows = [];
-  for (let i = L; i < candles.length - L; i++) {
-    let isH = true, isL = true;
-    for (let j = 1; j <= L && (isH || isL); j++) {
-      if (candles[i].h <= candles[i - j].h || candles[i].h <= candles[i + j].h) isH = false;
-      if (candles[i].l >= candles[i - j].l || candles[i].l >= candles[i + j].l) isL = false;
-    }
-    if (isH) highs.push({ i, p: candles[i].h });
-    if (isL) lows.push({ i, p: candles[i].l });
-  }
-  return { highs, lows };
+// Kalkulasi Indikator Momentum (14 periode)
+function calculateMomentumIndicator(candles, period = 14) {
+  if (!candles || candles.length <= period) return 0;
+  const currentClose = candles[candles.length - 1].c;
+  const pastClose = candles[candles.length - 1 - period].c;
+  return Number((currentClose - pastClose).toFixed(4));
 }
 
-// Analisis Struktur M1 Berjalan + Deteksi Sideways / Momentum
-function analyzeM1StructureAndMomentum(m1) {
-  if (!m1 || m1.length < 10) return { dir: 0, quality: 'LOW', src: 'data kurang' };
+// Analisis Indikator Momentum + Filter Sideways
+function analyzeMomentumAndMarketState(m1) {
+  if (!m1 || m1.length < 20) return { dir: 0, quality: 'LOW', src: 'data kurang' };
 
-  const { highs, lows } = findPivots(m1, 2);
-  const lastC = m1[m1.length - 1];
-  const aVal = atr(m1, 14);
-  const bodyLast = Math.abs(lastC.c - lastC.o);
+  const momVal = calculateMomentumIndicator(m1, 14);
 
-  // Filter Sideways: Cek apakah rata-rata body 5 candle terakhir terlalu kecil/datar
-  const recentCandles = m1.slice(-5);
-  const avgBody = recentCandles.reduce((acc, c) => acc + Math.abs(c.c - c.o), 0) / recentCandles.length;
-  const isSideways = avgBody < (aVal * 0.25);
-
-  if (isSideways) {
-    return { dir: 0, quality: 'SIDEWAYS', src: 'Pasar Sideways / Volatilitas Rendah (Sinyal Ditahan)' };
+  // Filter Sideways: Jika nilai momentum sangat kecil / mendekati 0, pasar dianggap sideways
+  if (momVal >= -0.15 && momVal <= 0.15) {
+    return { dir: 0, quality: 'SIDEWAYS', src: `Indikator Momentum Sideways (${momVal}) — Sinyal Ditahan` };
   }
 
-  const isBullishMomentum = (lastC.c > lastC.o) && (bodyLast > aVal * 0.35);
-  const isBearishMomentum = (lastC.c < lastC.o) && (bodyLast > aVal * 0.35);
-
-  if (highs.length >= 2 && lows.length >= 2) {
-    const [h1, h2] = highs.slice(-2);
-    const [l1, l2] = lows.slice(-2);
-
-    if (lastC.c > h2.p || (h2.p > h1.p && l2.p > l1.p && isBullishMomentum)) {
-      return { dir: 1, quality: 'HIGH', src: 'Structure M1 Bullish + Momentum Kuat' };
-    }
-    if (lastC.c < l2.p || (h2.p < h1.p && l2.p < l1.p && isBearishMomentum)) {
-      return { dir: -1, quality: 'HIGH', src: 'Structure M1 Bearish + Momentum Kuat' };
-    }
+  if (momVal > 0.15) {
+    return { dir: 1, quality: momVal > 0.5 ? 'HIGH' : 'MEDIUM', src: `Indikator Momentum Bullish (${momVal})` };
+  } else if (momVal < -0.15) {
+    return { dir: -1, quality: momVal < -0.5 ? 'HIGH' : 'MEDIUM', src: `Indikator Momentum Bearish (${momVal})` };
   }
 
-  if (isBullishMomentum) return { dir: 1, quality: 'MEDIUM', src: 'Candle Momentum M1 Bullish' };
-  if (isBearishMomentum) return { dir: -1, quality: 'MEDIUM', src: 'Candle Momentum M1 Bearish' };
-
-  return { dir: 0, quality: 'LOW', src: 'Belum ada konfirmasi struktur/momentum yang valid' };
+  return { dir: 0, quality: 'LOW', src: 'Momentum netral' };
 }
 
-// ═══════════════════════════ SCALPING (M1 Structure + Momentum) ═══════════════════════════
+// ═══════════════════════════ SCALPING (Momentum Indicator + NOW) ═══════════════════════════
 function buildScalpPlan({ m1, price, rrList, symbol, dec }) {
   const f = v => Number(v).toFixed(dec);
-  const analysis = analyzeM1StructureAndMomentum(m1);
+  const analysis = analyzeMomentumAndMarketState(m1);
 
   if (analysis.dir === 0 || analysis.quality === 'SIDEWAYS') {
-    return { plan: null, reason: `TIDAK ADA SINYAL · Market Sideways atau Momentum Lemah (${analysis.src}). Sinyal disaring agar tidak tersapu.` };
+    return { plan: null, reason: `TIDAK ADA SINYAL · ${analysis.src}. Sinyal disaring agar terhindar dari market choppy/sideways.` };
   }
 
   const dir = analysis.dir;
@@ -371,8 +344,8 @@ function buildScalpPlan({ m1, price, rrList, symbol, dec }) {
   const riskLabel = analysis.quality === 'HIGH' ? 'LOW' : 'MEDIUM';
 
   const reason = [
-    `Scalping Agresif (Filtered Quality) ${dir === 1 ? 'BUY NOW' : 'SELL NOW'} pada ${symbol}.`,
-    `Kualitas Sinyal: ${analysis.quality} — Pemicu: ${analysis.src}.`,
+    `Scalping Agresif (Momentum Indicator Filter) ${dir === 1 ? 'BUY NOW' : 'SELL NOW'} pada ${symbol}.`,
+    `Status: ${analysis.quality} — Pemicu: ${analysis.src}.`,
     `Entry ${f(entry)}, SL Ketat ${f(sl)}, Risiko ${f(risk)}.`,
     `TP1 1:${rrList[0]}, TP2 1:${rrList[1]}, TP3 1:${rrList[2]}.`,
   ].join(' • ');
@@ -389,13 +362,13 @@ function buildScalpPlan({ m1, price, rrList, symbol, dec }) {
       tps,
       zone: null,
       expireMs: 0,
-      zoneNote: `Scalp M1 · ${analysis.quality} Quality`,
+      zoneNote: `Scalp M1 · Indikator Momentum`,
     },
-    meta: { confidence: analysis.quality, riskLabel, setup: 'M1 FILTERED', reason },
+    meta: { confidence: analysis.quality, riskLabel, setup: 'M1 MOMENTUM IND', reason },
   };
 }
 
-// Fungsi pendukung untuk Day Trading / Intraday / Swing
+// Fungsi dummy untuk gaya trading lainnya
 function buildDayPlan() { return { plan: null, reason: '' }; }
 function buildRefinePlan() { return { plan: null, reason: '' }; }
 
@@ -432,7 +405,7 @@ export default async function handler(req, res) {
       }
       result = buildScalpPlan({ m1, price, rrList: style.rr, symbol, dec });
     } else {
-      result = { plan: null, reason: 'Gunakan mode Scalping untuk eksekusi M1 Structure + Momentum.' };
+      result = { plan: null, reason: 'Gunakan mode Scalping untuk eksekusi Indikator Momentum M1.' };
     }
 
     if (!result.plan) {
