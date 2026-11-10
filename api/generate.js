@@ -1,9 +1,10 @@
 // api/generate.js
-// v22
-//  - Acuan arah SELALU market structure (BOS / HH-HL / LH-LL). EMA hanya pendukung.
-//  - Scalping (AGRESIF entry): TP 1:1 / 1:2 / 1:3 (semua pair, termasuk XAUUSD).
-//      Arah dari structure 5m (cadangan 15m, lalu EMA9/21 5m). XAUUSD: pantulan zona M1 / kontinuasi M1.
-//      Buffer = entry ∓ 0,5 ATR. SL dihitung dari BUFFER. TP dihitung dari ENTRY dengan jarak = |entry − SL|.
+// v23
+//  - Scalping (AGRESIF entry): Acuan arah SELALU market structure berjalan M1 (BOS / HH-HL / LH-LL).
+//      Cadangan arah: EMA 5/9 M1 → candle/close M1.
+//      Zona Reaksi M1: Mendeteksi OB, Supply/Demand (S&D), dan Fair Value Gap (FVG) M1.
+//      Eksekusi: Harga di dalam zona M1 → NOW (Market Execution) | Harga di luar zona M1 → LIMIT di tepi zona terdekat.
+//      Buffer = entry ∓ 0.5 ATR. SL dihitung dari BUFFER. TP dihitung dari ENTRY dengan RRR 1:1 / 1:2 / 1:3.
 //  - Day Trading (KONSERVATIF entry): bias struktur HTF, REFINE zona di M5 (OB-BOS / S&D).
 //      Zona M5 yang menumpuk di zona BOS HTF/MTF = refined (prioritas). Harga di zona → NOW, di luar zona → LIMIT di tepi zona.
 //      Tanpa zona M5 → kontinuasi M5 (BOS M5 → NOW | EMA20 M5 → LIMIT | swing M5 → LIMIT).
@@ -11,7 +12,7 @@
 //  - Intraday (MODERAT entry): bias struktur HTF 4h, REFINE di M15: FVG(Sweep>CHoCH>FVG) / OB / S&D / kontinuasi EMA20.
 //      Skor kekuatan (min 5), maks 1 sinyal kuat per hari (UTC) per user per pair. HANYA TP1 & TP2 berbasis Fibonacci extension.
 //  - Swing (POSITIONING entry): bias struktur HTF 1d, MTF 4h, REFINE di H1: FVG / OB / S&D / kontinuasi. HANYA 1 TP (1:3).
-//  - Candle: cache KV (candles_SIMBOL_TF) dulu, lalu TickerLayer berurutan (retry 429 sekali).
+//  - TickerLayer: Rotasi 5 API Key sekuensial (TICKERLAYER_API_KEY + _1 s/d _4).
 
 const KV_KEY = 'alu_clients';
 const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
@@ -23,7 +24,7 @@ const API_KEYS = [
   process.env.TICKERLAYER_API_KEY_2,
   process.env.TICKERLAYER_API_KEY_3,
   process.env.TICKERLAYER_API_KEY_4,
-].filter(Boolean); // Hanya mengambil kunci yang terisi nilainya
+].filter(Boolean);
 
 const DECIMALS = {
   DXY: 2, EURUSD: 5, GBPUSD: 5, USDJPY: 3, AUDUSD: 5, USDCAD: 5, USDCHF: 5, NZDUSD: 5,
@@ -41,7 +42,7 @@ const GOLD_SYMBOLS = ['XAUUSD', 'XAUUSDX'];
 
 const STYLES = {
   'Scalping': {
-    label: 'Scalping · Agresif Entry (SL dari buffer · XAUUSD: pantulan zona M1 / kontinuasi · TP 1:1 · 1:2 · 1:3)',
+    label: 'Scalping · Agresif Entry (Structure M1 · Refine Zone M1 OB/S&D/FVG · TP 1:1 · 1:2 · 1:3)',
     entryStyle: 'Agresif', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
   'Day Trading': {
@@ -61,12 +62,12 @@ const STYLES = {
 const SETUP_CFG = {
   day: {
     ema: [20, 50], pivot: 3, lookback: 80, expireMin: 240,
-    m5Pivot: 2, m5Lookback: 100, m5MaxDistAtr: 6,   // zona M5 maks 6 ATR(M5) dari harga
+    m5Pivot: 2, m5Lookback: 100, m5MaxDistAtr: 6,
   },
   intraday: {
     ema: [20, 50], pivot: 3, lookback: 80, riskAtr: [0.8, 3.0], maxDist: 2.0, expireMin: 720, minScore: 5,
     refineTf: 'M15', refineTfKey: '15m', refinePivot: 3, refineLookback: 120,
-    fib: [1.272, 1.618, 2.0, 2.618],  // level extension; 2 pertama yang valid dipakai sebagai TP1 & TP2
+    fib: [1.272, 1.618, 2.0, 2.618],
   },
   swing: {
     ema: [20, 50], pivot: 4, lookback: 80, riskAtr: [1.0, 3.5], maxDist: 1.5, expireMin: 2880, minScore: 4,
@@ -77,18 +78,15 @@ const SETUP_CFG = {
 const SCALP_PIVOT = 2;
 const DAY_SL_MULT = 1.5;
 const MAX_SCORE_REFINE = 8;
-
-// Buffer scalping: jarak entry ke buffer, dalam satuan ATR
 const SCALP_BUFFER_ATR = 0.5;
 
-// Konfigurasi SL & TP XAUUSD untuk Scalping
 const GOLD_SL_CFG = {
   scalpMode: 'fixed',
-  fixedPips: 20,          // SL 20 pip dari buffer
-  minPips: 30,            // dipakai jika mode 'clamp'
-  maxPips: 35,            // dipakai jika mode 'clamp'
-  pipSize: 0.1,           // 1 pip = 0.10
-  rr: [1.0, 2.0, 3.0],    // RR TP1, TP2, TP3 dari entry, dihitung dari |entry − SL|
+  fixedPips: 20,
+  minPips: 30,
+  maxPips: 35,
+  pipSize: 0.1,
+  rr: [1.0, 2.0, 3.0],
 };
 
 const GOLD_M1_SL = {
@@ -99,14 +97,10 @@ const GOLD_M1_SL = {
   padAtr: 0.2,
 };
 
-const GOLD_M1_DIR = {
-  pivot: 3,
-};
-
 const GOLD_EMA_CFG = {
   fast: 5,
   slow: 9,
-  cooldownMin: 15,     // hanya catatan di reason, tidak menahan sinyal
+  cooldownMin: 15,
 };
 
 const GOLD_SMC_CFG = {
@@ -522,6 +516,31 @@ function findBosZones(candles, dir, lookback, pivot) {
   return zones;
 }
 
+// Deteksi FVG Sederhana pada M1
+function findFvgZonesM1(m1, dir, atrV, lookback = 60) {
+  const zones = [];
+  const n = m1.length;
+  const from = Math.max(2, n - lookback);
+
+  for (let i = from; i < n; i++) {
+    const a = m1[i - 2], b = m1[i];
+    const gap = dir === 1 ? a.h < b.l : a.l > b.h;
+    if (!gap) continue;
+
+    const zMin = dir === 1 ? a.h : b.h;
+    const zMax = dir === 1 ? b.l : a.l;
+    
+    let mitigated = false;
+    for (let y = i + 1; y < n; y++) {
+      if (dir === 1 ? m1[y].l <= zMin : m1[y].h >= zMax) { mitigated = true; break; }
+    }
+    if (!mitigated && (zMax - zMin > 0)) {
+      zones.push({ min: zMin, max: zMax, kind: 'FVG' });
+    }
+  }
+  return zones;
+}
+
 const overlaps = (z, list) => list.some(b => b.max >= z.min && b.min <= z.max);
 
 function findStructuralSetup(mtfC, dir, cfg, price, bb, padAtr) {
@@ -762,65 +781,6 @@ function goldOpposingZoneBlock(m1, dir, price, tp1, atrV) {
   return hit || null;
 }
 
-function findGoldReactionZones(m1, atrV) {
-  const zones = [];
-  const n = m1.length;
-  const from = Math.max(2, n - GOLD_ZONE_CFG.lookback);
-  for (let i = from; i < n; i++) {
-    const c = m1[i];
-    const body = Math.abs(c.c - c.o);
-    if (body < GOLD_ZONE_CFG.minBodyAtr * atrV) continue;
-
-    const bullImpulse = c.c > c.o;
-    const type = bullImpulse ? 'demand' : 'supply';
-
-    let bi = -1;
-    for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
-      const b = m1[j];
-      if (bullImpulse ? b.c < b.o : b.c > b.o) { bi = j; break; }
-    }
-    if (bi < 0) continue;
-
-    const b = m1[bi];
-    const zone = bullImpulse
-      ? { type, min: b.l, max: b.o }
-      : { type, min: b.o, max: b.h };
-    const height = zone.max - zone.min;
-    if (height <= 0 || height > GOLD_ZONE_CFG.maxHeightAtr * atrV) continue;
-
-    let broken = false, touches = 0;
-    for (let y = i + 1; y < n; y++) {
-      const k = m1[y];
-      if (bullImpulse ? k.c < zone.min : k.c > zone.max) { broken = true; break; }
-      if (y < n - 1 && (bullImpulse ? k.l <= zone.max : k.h >= zone.min)) touches++;
-    }
-    if (broken || touches >= GOLD_ZONE_CFG.maxTests) continue;
-
-    zones.push({ ...zone, strength: body / atrV });
-  }
-  return zones;
-}
-
-function pickGoldReactionZone(zones, price) {
-  const nearDist = GOLD_ZONE_CFG.nearPips * GOLD_SL_CFG.pipSize;
-  let best = null;
-  for (const z of zones) {
-    let dist;
-    if (z.type === 'demand') {
-      if (price < z.min) continue;
-      dist = price <= z.max ? 0 : price - z.max;
-    } else {
-      if (price > z.max) continue;
-      dist = price >= z.min ? 0 : z.min - price;
-    }
-    if (dist > nearDist) continue;
-    if (!best || dist < best.dist || (dist === best.dist && z.strength > best.strength)) {
-      best = { ...z, dist, dir: z.type === 'demand' ? 1 : -1 };
-    }
-  }
-  return best;
-}
-
 function fallbackDir(candles, price, label, fastP, slowP) {
   const closes = candles.map(c => c.c);
   if (closes.length >= slowP + 2) {
@@ -834,71 +794,79 @@ function fallbackDir(candles, price, label, fastP, slowP) {
   return { dir: price >= last.c ? 1 : -1, src: `harga vs close ${label}` };
 }
 
+// ═══════════════════════════ SCALPING (Agresif M1) ═══════════════════════════
 function buildScalpPlan({ htfC, mtfC, m1, price, rrList, symbol, dec }) {
   const f = v => Number(v).toFixed(dec);
   const isGold = GOLD_SYMBOLS.includes(symbol);
+  const a1 = atr(m1.length >= 14 ? m1 : mtfC, 14);
 
+  // 1) Arah dasar SELALU dari Market Structure M1 berjalan
   let dir, srcTxt, fallback = false;
-  if (isGold) {
-    const s1 = structureBias(m1, GOLD_SMC_CFG.pivot);
-    if (s1.dir !== 0) {
-      dir = s1.dir;
-      srcTxt = `market structure M1 ${s1.src}`;
-    } else {
-      const fb = fallbackDir(m1, price, 'M1', GOLD_EMA_CFG.fast, GOLD_EMA_CFG.slow);
-      dir = fb.dir;
-      srcTxt = `market structure M1 ${s1.src} → arah cadangan ${fb.src}`;
-      fallback = true;
-    }
+  const s1 = structureBias(m1, GOLD_SMC_CFG.pivot);
+  if (s1.dir !== 0) {
+    dir = s1.dir;
+    srcTxt = `market structure M1 (${s1.src})`;
   } else {
-    const s5 = structureBias(mtfC, SCALP_PIVOT);
-    const s15 = structureBias(htfC, SETUP_CFG.day.pivot);
-    if (s5.dir !== 0) {
-      dir = s5.dir;
-      srcTxt = `market structure 5m ${s5.src}`;
-    } else if (s15.dir !== 0) {
-      dir = s15.dir;
-      srcTxt = `market structure 15m ${s15.src}`;
-    } else {
-      const fb = fallbackDir(mtfC, price, '5m', 9, 21);
-      dir = fb.dir;
-      srcTxt = `structure 5m ${s5.src} & 15m ${s15.src} → arah cadangan ${fb.src}`;
-      fallback = true;
-    }
+    const fb = fallbackDir(m1, price, 'M1', GOLD_EMA_CFG.fast, GOLD_EMA_CFG.slow);
+    dir = fb.dir;
+    srcTxt = `market structure M1 (${s1.src}) → arah cadangan ${fb.src}`;
+    fallback = true;
   }
+
+  // 2) Kumpulkan Zona Reaksi M1: OB, S&D, FVG
+  const m1Zones = [
+    ...findBosZones(m1, dir, 60, GOLD_SMC_CFG.pivot).map(z => ({ min: z.min, max: z.max, kind: 'OB' })),
+    ...findSDZones(m1, dir, a1, 60).map(z => ({ min: z.min, max: z.max, kind: 'S&D' })),
+    ...findFvgZonesM1(m1, dir, a1, 60).map(z => ({ min: z.min, max: z.max, kind: 'FVG' })),
+  ];
+
+  const cands = [];
+  for (const z of m1Zones) {
+    let inside, dist;
+    if (dir === 1) {
+      if (price < z.min) continue;
+      inside = price <= z.max;
+      dist = inside ? 0 : price - z.max;
+    } else {
+      if (price > z.max) continue;
+      inside = price >= z.min;
+      dist = inside ? 0 : z.min - price;
+    }
+    if (dist > 6 * a1) continue; // Maksimum 6 ATR M1 dari harga
+    cands.push({ ...z, inside, dist });
+  }
+  cands.sort((a, b) => a.dist - b.dist);
 
   let mode = 'KONTINUASI';
   let orderType = 'NOW';
   let entry = price;
   let zone = null;
   let expireMs = 0;
-  if (isGold) {
-    const rz = pickGoldReactionZone(findGoldReactionZones(m1, atr(m1, 14)), price);
-    if (rz) {
-      mode = 'PANTULAN';
-      dir = rz.dir;
-      fallback = false;
-      zone = { min: rz.min, max: rz.max };
-      if (rz.dist === 0) {
-        orderType = 'NOW';
-        entry = price;
-        srcTxt = `pantulan ${rz.type} M1 ${f(rz.min)}–${f(rz.max)} (harga di dalam zona)`;
-      } else {
-        orderType = 'LIMIT';
-        entry = rz.type === 'demand' ? rz.max : rz.min;
-        expireMs = GOLD_ZONE_CFG.expireMin * 60000;
-        const pipsAway = Math.round(rz.dist / GOLD_SL_CFG.pipSize);
-        srcTxt = `pantulan ${rz.type} M1 ${f(rz.min)}–${f(rz.max)} (${pipsAway} pip dari harga, pending di tepi zona)`;
-      }
+
+  if (cands.length) {
+    const rz = cands[0];
+    mode = 'PANTULAN';
+    zone = { min: rz.min, max: rz.max };
+    if (rz.inside) {
+      orderType = 'NOW';
+      entry = price;
+      srcTxt += ` · pantulan zona ${rz.kind} M1 ${f(rz.min)}–${f(rz.max)} (harga di dalam zona)`;
     } else {
-      srcTxt += ' · tidak ada zona pantulan M1 dekat → kontinuasi market';
+      orderType = 'LIMIT';
+      entry = dir === 1 ? rz.max : rz.min;
+      expireMs = GOLD_ZONE_CFG.expireMin * 60000;
+      srcTxt += ` · pantulan zona ${rz.kind} M1 ${f(rz.min)}–${f(rz.max)} (limit di tepi zona)`;
     }
+  } else {
+    srcTxt += ' · kontinuasi momentum M1';
   }
 
+  // 3) Jarak SL dari buffer
   const sc = isGold
     ? goldSL(m1, entry, dir, GOLD_SL_CFG.scalpMode)
-    : scalpSL(mtfC, price, dir, symbol);
+    : scalpSL(m1.length >= 30 ? m1 : mtfC, entry, dir, symbol);
 
+  // 4) Buffer dan SL
   const bufferEnd = entry - dir * SCALP_BUFFER_ATR * sc.atr;
   let sl = bufferEnd - dir * sc.risk;
   if (zone) {
@@ -909,9 +877,11 @@ function buildScalpPlan({ htfC, mtfC, m1, price, rrList, symbol, dec }) {
   }
   const risk = Math.abs(entry - sl);
 
+  // 5) TP dari entry (RRR 1:1, 1:2, 1:3)
   const rr = isGold ? GOLD_SL_CFG.rr : rrList;
   const tps = rr.map(x => entry + dir * x * risk);
 
+  // 6) Peringatan zona lawan M1
   let warnText = '';
   if (isGold) {
     const hitZone = goldOpposingZoneBlock(m1, dir, entry, tps[0], sc.atr);
@@ -925,16 +895,9 @@ function buildScalpPlan({ htfC, mtfC, m1, price, rrList, symbol, dec }) {
 
   const riskAtr = sc.risk / sc.atr;
   const riskLabel = riskAtr <= 1.5 ? 'LOW' : riskAtr <= 2.5 ? 'MEDIUM' : 'HIGH';
-  let quality;
-  if (mode === 'PANTULAN') {
-    quality = `PANTULAN ZONA M1 (${orderType === 'LIMIT' ? 'LIMIT' : 'NOW di dalam zona'})`;
-  } else {
-    quality = fallback ? 'FALLBACK (arah cadangan)' : 'NORMAL';
-  }
+  let quality = mode === 'PANTULAN' ? `PANTULAN ZONA M1 (${orderType})` : (fallback ? 'FALLBACK' : 'NORMAL');
   quality += warnText;
-  const confidence = warnText || fallback ? 'LOW'
-    : mode === 'PANTULAN' ? 'HIGH'
-    : riskLabel === 'LOW' ? 'HIGH' : 'MEDIUM';
+  const confidence = warnText || fallback ? 'LOW' : 'HIGH';
 
   const reason = [
     `Scalping (agresif) ${dir === 1 ? 'BUY' : 'SELL'} ${orderType === 'LIMIT' ? 'LIMIT' : 'MARKET'} pada ${symbol}, arah dari ${srcTxt}.`,
@@ -957,7 +920,7 @@ function buildScalpPlan({ htfC, mtfC, m1, price, rrList, symbol, dec }) {
       tps,
       zone: zoneDisplay,
       expireMs,
-      zoneNote: `Scalp · ${quality}`,
+      zoneNote: `Scalp M1 · ${quality}`,
     },
     meta: { confidence, riskLabel, setup: 'CONTINUATION', reason },
   };
@@ -1183,13 +1146,11 @@ function buildRefinePlan({ htfC, mtfC, rC, styleKind, price, dec, symbol, rrList
   const rejects = [];
   const raw = [];
 
-  // a) FVG: Sweep > CHoCH > FVG di TF refine (DENGAN PEMBARUAN ACUAN ENTRY)
+  // a) FVG: Sweep > CHoCH > FVG di TF refine
   const rcfg = { pivot: cfg.refinePivot, lookback: cfg.refineLookback, riskAtr: cfg.riskAtr, maxDist: cfg.maxDist };
   const fvg = findStructuralSetup(rC, dir, rcfg, price, bb, padAtr);
   if (fvg.plan) {
     const p = fvg.plan;
-    
-    // Cek apakah harga sudah berada di dalam area FVG
     const insideFvg = dir === 1 ? (price >= p.zone.min && price <= p.zone.max) : (price <= p.zone.max && price >= p.zone.min);
     const equilibriumFvg = (p.zone.min + p.zone.max) / 2;
     let refineEntry, refineOrderType;
@@ -1198,7 +1159,6 @@ function buildRefinePlan({ htfC, mtfC, rC, styleKind, price, dec, symbol, rrList
       refineEntry = price;
       refineOrderType = 'NOW';
     } else {
-      // Limit di tepi FVG terdekat
       refineEntry = dir === 1 ? p.zone.max : p.zone.min;
       refineOrderType = 'LIMIT';
     }
@@ -1413,21 +1373,18 @@ export default async function handler(req, res) {
     let result;
 
     if (style.kind === 'scalp') {
-      let m1 = [];
-      if (GOLD_SYMBOLS.includes(symbol)) {
-        m1 = cleanCandles(body.candles?.m1);
-        if (m1.length < 30) m1 = (await getCandles(symbol, '1m', 150, apiKey)).candles;
-        m1 = mergeLiveBar(m1, price, 1);
-        if (m1.length < 30) {
-          return res.status(200).json(noSignal(`Data M1 belum cukup untuk SL (${m1.length}/30).`));
-        }
-      }
+      let m1 = cleanCandles(body.candles?.m1);
+      if (m1.length < 30) m1 = (await getCandles(symbol, '1m', 150, apiKey)).candles;
+      m1 = mergeLiveBar(m1, price, 1);
+
       if (mtfC.length < 30) mtfC = (await getCandles(symbol, '5m', 150, apiKey)).candles;
       if (htfC.length < 20) htfC = (await getCandles(symbol, '15m', 100, apiKey)).candles;
       mtfC = mergeLiveBar(mtfC, price, 5);
-      if (mtfC.length < 30) {
-        return res.status(200).json(noSignal(`Data candle 5m belum cukup (${mtfC.length}/30).`));
+
+      if (m1.length < 30) {
+        return res.status(200).json(noSignal(`Data candle M1 belum cukup untuk scalp (${m1.length}/30).`));
       }
+
       result = buildScalpPlan({ htfC, mtfC, m1, price, rrList: style.rr, symbol, dec });
 
       if (GOLD_SYMBOLS.includes(symbol) && result.plan) {
