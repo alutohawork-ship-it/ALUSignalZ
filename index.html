@@ -1854,4 +1854,345 @@
     async function fetchCandles(provider, symbol, interval) {
         if (!symbol) {
             const key = selectedKey();
-            symbol = symbolOf[key] || MARKETS
+            symbol = symbolOf[key] || MARKETS[key]?.coins[0];
+        }
+        try {
+            const r = await api('/api/candles', {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({
+                    value: localStorage.getItem(SESSION_EMAIL_KEY) || '',
+                    symbol,
+                    interval,
+                    limit: 100,
+                }),
+            });
+            if (r.ok && r.data && r.data.candles && r.data.candles.length > 0) {
+                return r.data.candles
+                    .map(c => ({ t: c.openTime || c.t, o: c.open || c.o, h: c.high || c.h, l: c.low || c.l, c: c.close || c.c }))
+                    .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite))
+                    .sort((a, b) => a.t - b.t);
+            }
+        } catch (e) {}
+
+        const tfMinutes = { '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 }[interval] || 5;
+        const key = selectedKey();
+        const tfKey = `${tfMinutes}m`;
+        let candles = (marketCandles[key]?.[tfKey] || []).map(c => ({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close }));
+        if (candles.length < 5) {
+            const rawTicks = history[key] || [];
+            if (rawTicks.length > 0) {
+                const intervalMs = tfMinutes * 60 * 1000;
+                const grouped = {};
+                for (const tick of rawTicks) {
+                    const bucketTime = Math.floor(tick.t / intervalMs) * intervalMs;
+                    if (!grouped[bucketTime]) {
+                        grouped[bucketTime] = { t: bucketTime, o: tick.p, h: tick.p, l: tick.p, c: tick.p };
+                    } else {
+                        grouped[bucketTime].h = Math.max(grouped[bucketTime].h, tick.p);
+                        grouped[bucketTime].l = Math.min(grouped[bucketTime].l, tick.p);
+                        grouped[bucketTime].c = tick.p;
+                    }
+                }
+                candles = Object.values(grouped).sort((a, b) => a.t - b.t);
+            }
+        }
+        return candles;
+    }
+
+    async function refreshBias(key, force = false) {
+        const m = MARKETS[key];
+        if (!m) return;
+        const cached = biasCache[key];
+        if (!force && cached && Date.now() - cached.at < 60000) return renderBias(key);
+        if (biasBusy) return;
+
+        biasBusy = true;
+        if (!symbolOf[key]) symbolOf[key] = m.coins[0];
+        const symbol = symbolOf[key];
+        const provider = providerOf[key] || 'xbtfx';
+        const rows = {};
+        try {
+            for (const tf of BIAS_TF) {
+                try {
+                    const candles = await fetchCandles(provider, symbol, tf.interval);
+                    rows[tf.label] = calcBias(candles);
+                } catch (e) {
+                    rows[tf.label] = { bias: 'N/A', score: 0 };
+                }
+            }
+            biasCache[key] = { at: Date.now(), rows };
+        } finally {
+            biasBusy = false;
+        }
+        renderBias(key);
+    }
+
+    function renderBias(key) {
+        if (key !== selectedKey()) return;
+        const box = document.getElementById('biasGrid');
+        const info = document.getElementById('biasInfo');
+        if (!box) return;
+        const cache = biasCache[key];
+        const rows = cache?.rows;
+
+        box.innerHTML = BIAS_TF.map(tf => {
+            const b = rows?.[tf.label];
+            const name = b ? b.bias : 'N/A';
+            const cls = BIAS_STYLE[name] || BIAS_STYLE['N/A'];
+            const text = BIAS_LABEL[name] || 'N/A';
+            const score = (b && b.bias !== 'N/A' && b.score != null) ? `skor ${b.score > 0 ? '+' : ''}${b.score}` : '';
+            return `
+              <div class="bg-darkbg border border-panelborder rounded-lg p-1.5 text-center space-y-0.5">
+                <p class="text-[8px] font-bold text-gray-400">${tf.label}</p>
+                <span class="inline-block text-[9px] font-black px-2 py-0.5 rounded border ${cls}">${text}</span>
+                <p class="text-[7px] text-gray-500 font-mono">${score}</p>
+              </div>`;
+        }).join('');
+
+        const vals = Object.values(rows || {}).map(r => r.bias || 'N/A');
+        const cnt = k => vals.filter(v => v === k).length;
+        info.textContent = `${cnt('BULLISH')} Bullish · ${cnt('BEARISH')} Bearish · ${cnt('NETRAL')} Netral · ${cnt('N/A')} N/A · update ${new Date(cache?.at || Date.now()).toLocaleTimeString('id-ID', { hour12: false })}`;
+    }
+
+    // ================= AI SIGNAL, EMA & BOLLINGER BANDS FILTER LOGIC =================
+    const STYLE_TF = {
+        'Scalping':    { htf: '15m', mtf: '5m',  ltf: '1m' },
+        'Day Trading': { htf: '1h',  mtf: '30m', ltf: '5m' },
+        'Intraday':    { htf: '4h',  mtf: '1h',  ltf: '15m' },
+        'Swing':       { htf: '1d',  mtf: '4h',  ltf: '1h' },
+    };
+
+    // Fungsi helper menghitung nilai EMA (Exponential Moving Average)
+    function calculateEMA(candles, period) {
+        if (!candles || candles.length === 0) return [];
+        const k = 2 / (period + 1);
+        let emaArray = [];
+        let prevEMA = candles[0].c;
+
+        for (let i = 0; i < candles.length; i++) {
+            const close = candles[i].c;
+            if (i === 0) {
+                emaArray.push(prevEMA);
+            } else {
+                const currentEMA = (close * k) + (prevEMA * (1 - k));
+                emaArray.push(currentEMA);
+                prevEMA = currentEMA;
+            }
+        }
+        return emaArray;
+    }
+
+    // Fungsi helper menghitung nilai Bollinger Bands (Periode 20, Deviasi 2)
+    function calculateBollingerBands(candles, period = 20, multiplier = 2) {
+        if (!candles || candles.length < period) return { upper: 0, middle: 0, lower: 0 };
+        const slice = candles.slice(-period);
+        const closes = slice.map(c => c.c);
+
+        const middle = closes.reduce((sum, val) => sum + val, 0) / period;
+        const variance = closes.reduce((sum, val) => sum + Math.pow(val - middle, 2), 0) / period;
+        const stdDev = Math.sqrt(variance);
+
+        return {
+            middle: Number(middle.toFixed(5)),
+            upper: Number((middle + (multiplier * stdDev)).toFixed(5)),
+            lower: Number((middle - (multiplier * stdDev)).toFixed(5))
+        };
+    }
+
+    // Menentukan periode EMA filter berdasarkan Gaya Trading
+    function getEmaPeriodsForStyle(style) {
+        switch (style) {
+            case 'Scalping': return [5, 9];          // Agresif / Eksekusi Langsung
+            case 'Day Trading': return [14, 20];     // Harian
+            case 'Intraday': return [20, 50, 100];   // Menengah
+            case 'Swing': return [20, 200];          // Panjang
+            default: return [5, 9];
+        }
+    }
+
+    const CANDLE_CACHE = {};
+
+    async function loadCandles(key, interval) {
+        const ck = `${key}|${interval}`;
+        const hit = CANDLE_CACHE[ck];
+        if (hit && Date.now() - hit.at < 180000) return hit.rows;
+
+        let rows = [];
+        try {
+            const provider = providerOf[key] || 'xbtfx';
+            const symbol = symbolOf[key] || MARKETS[key].coins[0];
+            const r = await api('/api/candles', {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({
+                    value: localStorage.getItem(SESSION_EMAIL_KEY) || '',
+                    symbol,
+                    interval,
+                    limit: 100,
+                }),
+            });
+            if (r.ok && r.data && Array.isArray(r.data.candles) && r.data.candles.length > 0) {
+                rows = r.data.candles.map(c => ({
+                    t: Number(c.openTime || c.t),
+                    o: Number(c.open || c.o),
+                    h: Number(c.high || c.h),
+                    l: Number(c.low || c.l),
+                    c: Number(c.close || c.c)
+                }));
+            }
+        } catch (err) {
+            console.warn('Gagal ambil candles dari API server, beralih ke local aggregator:', err);
+        }
+
+        if (rows.length < 5) {
+            const tfMinutes = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 }[interval] || 1;
+            const tfKey = `${tfMinutes}m`;
+            rows = (marketCandles[key]?.[tfKey] || []).map(c => ({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close }));
+
+            if (rows.length < 5) {
+                const rawTicks = history[key] || [];
+                if (rawTicks.length > 0) {
+                    const intervalMs = tfMinutes * 60 * 1000;
+                    const grouped = {};
+                    for (const tick of rawTicks) {
+                        const bucketTime = Math.floor(tick.t / intervalMs) * intervalMs;
+                        if (!grouped[bucketTime]) {
+                            grouped[bucketTime] = { t: bucketTime, o: tick.p, h: tick.p, l: tick.p, c: tick.p };
+                        } else {
+                            grouped[bucketTime].h = Math.max(grouped[bucketTime].h, tick.p);
+                            grouped[bucketTime].l = Math.min(grouped[bucketTime].l, tick.p);
+                            grouped[bucketTime].c = tick.p;
+                        }
+                    }
+                    rows = Object.values(grouped).sort((a, b) => a.t - b.t);
+                }
+            }
+        }
+
+        if (rows.length > 0) {
+            CANDLE_CACHE[ck] = { at: Date.now(), rows };
+        }
+        return rows;
+    }
+
+    const shiftCandles = (rows, off) => rows.map(c => ({ t: c.t, o: c.o + off, h: c.h + off, l: c.l + off, c: c.c + off }));
+
+    async function generateAISignal() {
+        const marketId = document.getElementById('marketSelect').value;
+        const tradingStyle = document.getElementById('tradingStyleSelect').value;
+        const symbolKey = marketId.split('|').pop();
+        const live = prices[symbolKey];
+        if (!live || !isLive(symbolKey)) {
+            return alert(`${displayName(symbolKey)} TIDAK TERSAMBUNG ke stream. Pilih pair lain atau tunggu harga masuk.`);
+        }
+
+        const email = localStorage.getItem(SESSION_EMAIL_KEY);
+        if (!email) return alert('Sesi tidak ditemukan. Silakan login ulang.');
+
+        const btn = document.getElementById('signalBtn');
+        btn.disabled = true;
+        btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> Menganalisis SMC + EMA + Bollinger Bands...`;
+
+        try {
+            const tf = STYLE_TF[tradingStyle];
+            if (!tf) throw new Error('gaya trading tidak dikenal');
+
+            const off = getOffset(symbolKey);
+            const [htfRows, mtfRows, ltfRows] = await Promise.all([
+                loadCandles(symbolKey, tf.htf),
+                loadCandles(symbolKey, tf.mtf),
+                tf.ltf ? loadCandles(symbolKey, tf.ltf).catch(() => []) : Promise.resolve([]),
+            ]);
+
+            const shiftedLtf = shiftCandles(ltfRows, off);
+            const shiftedMtf = shiftCandles(mtfRows, off);
+
+            // Hitung EMA Filter
+            const periods = getEmaPeriodsForStyle(tradingStyle);
+            const emaMetrics = {};
+            periods.forEach(p => {
+                const resEma = calculateEMA(shiftedLtf, p);
+                emaMetrics[`EMA_${p}`] = resEma.length ? Number(resEma[resEma.length - 1].toFixed(5)) : 0;
+            });
+
+            // Hitung Bollinger Bands Filter
+            const bbMetrics = calculateBollingerBands(shiftedMtf.length > 0 ? shiftedMtf : shiftedLtf);
+
+            const res = await fetch('/api/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email,
+                    marketId,
+                    tradingStyle,
+                    currentPrice: live.price,
+                    lang: currentLang,
+                    emaFilter: emaMetrics,
+                    bbFilter: bbMetrics, // Menyertakan data Bollinger Bands ke backend
+                    candles: {
+                        htf: shiftCandles(htfRows, off).slice(-200),
+                        mtf: shiftedMtf.slice(-200),
+                        ltf: shiftedLtf.slice(-200),
+                    },
+                }),
+            });
+
+            const txt = await res.text();
+            let data = {};
+            try {
+                data = JSON.parse(txt);
+            } catch {
+                const snippet = txt.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+                data = { error: `Server tidak mengirim JSON (HTTP ${res.status}). ${snippet}` };
+            }
+            if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+            if (!data.signal) return alert('Belum ada setup valid.\n\n' + (data.reason || ''));
+
+            const s = data.signal;
+            const t = {
+                id: Date.now().toString(36), key: symbolKey, style: tradingStyle,
+                signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
+                mode: s.mode, status: s.status, fill: s.fill || null,
+                entry: s.entry, bufferEnd: s.bufferEnd, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
+                zone: s.zone,
+                expiresAt: s.expireMs ? Date.now() + s.expireMs : null,
+                confidence: s.confidence, risk: s.risk, setup: s.setup,
+                setupLabel: s.setupLabel, zoneLabel: s.zoneLabel, zoneNote: s.zoneNote,
+                createdAt: Date.now(), hits: {},
+                card: { reason: s.reason }, no: nextNo(),
+            };
+
+            trades.push(t);
+            activeId = t.id;
+            saveTrades();
+            renderSignalCard(t);
+            renderHistory();
+            refreshActiveUI();
+        } catch (e) {
+            alert('Gagal generate sinyal: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnGenText">${DICT[currentLang].genBtn}</span>`;
+        }
+    }
+
+    // ================= BOOT =================
+    window.onload = () => {
+        checkSession();
+        buildTicker();
+        updateCalibInfo();
+        trades = loadTrades();
+        saveTrades();
+        renderHistory();
+        if (trades.length) viewTrade(trades[trades.length - 1].id);
+        renderBias(selectedKey());
+        requestAnimationFrame(uiFrame);
+        connect();
+        setInterval(() => { watchdog(); expirePending(); }, 1000);
+        setInterval(() => refreshBias(selectedKey()), 60000);
+    };
+    </script>
+</body>
+</html>
