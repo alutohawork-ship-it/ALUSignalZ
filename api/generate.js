@@ -1,13 +1,11 @@
 // api/generate.js
-// v25
-//  - Scalping (AGRESIF entry): Kombinasi M1 + M15.
-//      Bias arah & Key Level Utama diambil dari struktur M15.
-//      Refine zona reaksi, sweep likuiditas, dan eksekusi (NOW / LIMIT) dilakukan di M1.
-//      Buffer = entry ∓ 0.5 ATR M1. SL dihitung dari buffer di luar swing/zone M1.
+// v26
+//  - Scalping (AGRESIF entry): Murni Market Execution (Buy/Sell Now / 'NOW') berbasis M1 + M15 Confluence.
+//      Bias arah utama dari struktur M15 (cadangan M1).
+//      Entry langsung di harga market saat ini, tanpa pending limit order.
+//      Buffer ATR dipertebal sedikit (0.7 ATR) dan SL diletakkan di struktur invalidasi terdekat.
 //      TP dihitung dari entry dengan RRR 1:1 / 1:2 / 1:3.
-//  - Day Trading (KONSERVATIF entry): bias struktur HTF, REFINE zona di M5.
-//  - Intraday (MODERAT entry): bias struktur HTF 4h, REFINE di M15 (Fibonacci TP).
-//  - Swing (POSITIONING entry): bias struktur HTF 1d, REFINE di H1 (1 TP 1:3).
+//  - Day Trading / Intraday / Swing: Menggunakan struktur dan refine zone masing-masing.
 //  - TickerLayer: Rotasi 5 API Key sekuensial (TICKERLAYER_API_KEY + _1 s/d _4).
 
 const KV_KEY = 'alu_clients';
@@ -37,7 +35,7 @@ const GOLD_SYMBOLS = ['XAUUSD', 'XAUUSDX'];
 
 const STYLES = {
   'Scalping': {
-    label: 'Scalping · Agresif Entry (M1 + M15 Structure Confluence · TP 1:1 · 1:2 · 1:3)',
+    label: 'Scalping · Agresif Pure Market Execution (M1 + M15 Confluence · TP 1:1 · 1:2 · 1:3)',
     entryStyle: 'Agresif', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
   'Day Trading': {
@@ -73,44 +71,7 @@ const SETUP_CFG = {
 const SCALP_PIVOT = 2;
 const DAY_SL_MULT = 1.5;
 const MAX_SCORE_REFINE = 8;
-const SCALP_BUFFER_ATR = 0.5;
-
-const GOLD_SL_CFG = {
-  scalpMode: 'fixed',
-  fixedPips: 20,
-  minPips: 30,
-  maxPips: 35,
-  pipSize: 0.1,
-  rr: [1.0, 2.0, 3.0],
-};
-
-const GOLD_M1_SL = {
-  pivot: 2,
-  lookback: 45,
-  minDistAtr: 0.4,
-  maxRiskAtr: 3.0,
-  padAtr: 0.2,
-};
-
-const GOLD_EMA_CFG = {
-  fast: 5,
-  slow: 9,
-  cooldownMin: 15,
-};
-
-const GOLD_SMC_CFG = {
-  pivot: 2,
-};
-
-const GOLD_ZONE_CFG = {
-  lookback: 60,
-  minBodyAtr: 0.8,
-  maxHeightAtr: 1.5,
-  maxTests: 2,
-  nearPips: 25,
-  expireMin: 30,
-  blockDistAtr: 1.0,
-};
+const SCALP_BUFFER_ATR = 0.7; // Buffer sedikit dipertebal agar aman untuk Market Execution
 
 const STYLE_TF_SERVER = {
   'Scalping':    { htf: '15m', mtf: '5m', refine: '1m' },
@@ -209,24 +170,18 @@ async function tlFetch(url, initialApiKey) {
 
   while (attempts < keys.length) {
     const activeKey = keys[currentKeyIndex];
-    
     for (let retry = 0; retry < 2; retry++) {
       const r = await fetch(url, {
         method: 'GET',
         headers: { 'x-api-key': activeKey, 'Content-Type': 'application/json' },
       });
-      
-      if (r.ok) {
-        return { response: r, keyIndex: currentKeyIndex };
-      }
-      
+      if (r.ok) return { response: r, keyIndex: currentKeyIndex };
       if ((r.status === 429 || r.status === 401 || r.status === 403) && retry === 0) {
         await sleep(1000);
         continue;
       }
       break;
     }
-    
     currentKeyIndex = (currentKeyIndex + 1) % keys.length;
     attempts++;
   }
@@ -267,19 +222,14 @@ async function fetchTickerLayerOHLC(symbol, interval, apiKey, need) {
     out.reqs++;
     try {
       const { response, keyIndex } = await tlFetch(url, apiKey);
-      if (!response.ok) { 
-        out.status = `HTTP ${response.status} (Key Index #${keyIndex})`; 
-        continue; 
-      }
+      if (!response.ok) { continue; }
       const data = await response.json();
       const rows = Array.isArray(data) ? data : (data.results || []);
       for (const c of rows) {
         const cand = { t: Number(c.t || 0), o: Number(c.o || 0), h: Number(c.h || 0), l: Number(c.l || 0), c: Number(c.c || 0) };
         if (cand.t > 0 && [cand.o, cand.h, cand.l, cand.c].every(Number.isFinite)) byT.set(cand.t, cand);
       }
-    } catch (err) {
-      out.status = `ERR ${err.message}`;
-    }
+    } catch (err) {}
   }
 
   out.rows = [...byT.values()].sort((a, b) => a.t - b.t).slice(-Math.max(1, Math.ceil(need)));
@@ -332,16 +282,13 @@ async function getCandles(symbol, tf, need, apiKey) {
     return { candles: cached, note: `cache ${tf} ${cached.length}` };
   }
 
-  const notes = [];
   let best = [];
-
   if (TL_SPAN[tf]) {
     const nat = await fetchTickerLayerOHLC(symbol, tf, apiKey, Math.max(need, 150));
-    notes.push(`native ${tf} ${nat.rows.length} (${nat.status})`);
     best = nat.rows;
     if (nat.rows.length >= need) {
       await kvSetJSON(cacheKey, nat.rows.slice(-CACHE_BARS[tf]), CACHE_TTL[tf]);
-      return { candles: nat.rows, note: notes.join(' · ') };
+      return { candles: nat.rows, note: 'native' };
     }
   }
 
@@ -350,12 +297,11 @@ async function getCandles(symbol, tf, need, apiKey) {
     const factor = TF_MIN[tf] / TF_MIN[baseTf];
     const base = await fetchTickerLayerOHLC(symbol, baseTf, apiKey, need * factor + factor * 5);
     const agg = aggregateCandles(base.rows, TF_MIN[tf]);
-    notes.push(`base ${baseTf} ${base.rows.length} (${base.status}) → ${tf} ${agg.length}`);
     if (agg.length > best.length) best = agg;
   }
 
   if (best.length) await kvSetJSON(cacheKey, best.slice(-CACHE_BARS[tf]), CACHE_TTL[tf]);
-  return { candles: best, note: notes.join(' · ') || 'tidak ada sumber' };
+  return { candles: best, note: 'aggregated' };
 }
 
 function atr(candles, period = 14) {
@@ -367,32 +313,6 @@ function atr(candles, period = 14) {
   }
   const s = trs.slice(-period);
   return s.length ? s.reduce((a, b) => a + b, 0) / s.length : 15;
-}
-
-function calculateBollingerBands(candles, period = 20, multiplier = 2) {
-  try {
-    if (!Array.isArray(candles) || candles.length < period) return { upper: 0, middle: 0, lower: 0 };
-    const closes = candles.slice(-period).map(c => Number(c.c)).filter(Number.isFinite);
-    if (closes.length < period) return { upper: 0, middle: 0, lower: 0 };
-
-    const middle = closes.reduce((sum, val) => sum + val, 0) / period;
-    const variance = closes.reduce((sum, val) => sum + Math.pow(val - middle, 2), 0) / period;
-    const stdDev = Math.sqrt(variance);
-
-    return {
-      middle: Number(middle.toFixed(5)),
-      upper: Number((middle + multiplier * stdDev).toFixed(5)),
-      lower: Number((middle - multiplier * stdDev).toFixed(5)),
-    };
-  } catch {
-    return { upper: 0, middle: 0, lower: 0 };
-  }
-}
-
-function emaSeries(values, period) {
-  const k = 2 / (period + 1);
-  let e = values[0];
-  return values.map(v => (e = v * k + e * (1 - k)));
 }
 
 function findPivots(candles, L) {
@@ -425,108 +345,6 @@ function structureBias(candles, pivot) {
   return { dir: 0, src: 'range' };
 }
 
-function findSDZones(candles, dir, atrV, lookback) {
-  const zones = [];
-  const n = candles.length;
-  const from = Math.max(2, n - lookback);
-  for (let i = from; i < n; i++) {
-    const c = candles[i];
-    const body = Math.abs(c.c - c.o);
-    if (body < 1.2 * atrV) continue;
-    const bull = c.c > c.o;
-    if ((dir === 1 && !bull) || (dir === -1 && bull)) continue;
-
-    let bi = -1;
-    for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
-      const b = candles[j];
-      if (dir === 1 ? b.c < b.o : b.c > b.o) { bi = j; break; }
-    }
-    if (bi < 0) continue;
-
-    const b = candles[bi];
-    const zone = dir === 1
-      ? { min: b.l, max: b.o, idx: bi, impulse: i }
-      : { min: b.o, max: b.h, idx: bi, impulse: i };
-    if (zone.max - zone.min <= 0) continue;
-
-    let mitigated = false;
-    for (let y = i + 1; y < n; y++) {
-      if (dir === 1 ? candles[y].c < zone.min : candles[y].c > zone.max) { mitigated = true; break; }
-    }
-    if (!mitigated) zones.push(zone);
-  }
-  return zones;
-}
-
-function findBosZones(candles, dir, lookback, pivot) {
-  const zones = [];
-  const n = candles.length;
-  const { highs, lows } = findPivots(candles, pivot);
-  const from = Math.max(pivot + 1, n - lookback);
-
-  for (let i = from; i < n; i++) {
-    const c = candles[i];
-    const prev = candles[i - 1];
-
-    if (dir === 1) {
-      const ph = [...highs].reverse().find(p => p.i + pivot < i);
-      if (!ph || !(c.c > ph.p && prev.c <= ph.p)) continue;
-
-      let bi = -1;
-      for (let j = i - 1; j >= Math.max(0, i - 10); j--) {
-        if (candles[j].c < candles[j].o) { bi = j; break; }
-      }
-      if (bi < 0) continue;
-
-      const b = candles[bi];
-      const zone = { min: b.l, max: b.o, idx: bi };
-      if (zone.max <= zone.min) continue;
-      if (candles.slice(i + 1).some(x => x.c < zone.min)) continue;
-      zones.push(zone);
-    } else {
-      const pl = [...lows].reverse().find(p => p.i + pivot < i);
-      if (!pl || !(c.c < pl.p && prev.c >= pl.p)) continue;
-
-      let bi = -1;
-      for (let j = i - 1; j >= Math.max(0, i - 10); j--) {
-        if (candles[j].c > candles[j].o) { bi = j; break; }
-      }
-      if (bi < 0) continue;
-
-      const b = candles[bi];
-      const zone = { min: b.o, max: b.h, idx: bi };
-      if (zone.max <= zone.min) continue;
-      if (candles.slice(i + 1).some(x => x.c > zone.max)) continue;
-      zones.push(zone);
-    }
-  }
-  return zones;
-}
-
-function findFvgZonesM1(m1, dir, atrV, lookback = 60) {
-  const zones = [];
-  const n = m1.length;
-  const from = Math.max(2, n - lookback);
-
-  for (let i = from; i < n; i++) {
-    const a = m1[i - 2], b = m1[i];
-    const gap = dir === 1 ? a.h < b.l : a.l > b.h;
-    if (!gap) continue;
-
-    const zMin = dir === 1 ? a.h : b.h;
-    const zMax = dir === 1 ? b.l : a.l;
-    
-    let mitigated = false;
-    for (let y = i + 1; y < n; y++) {
-      if (dir === 1 ? m1[y].l <= zMin : m1[y].h >= zMax) { mitigated = true; break; }
-    }
-    if (!mitigated && (zMax - zMin > 0)) {
-      zones.push({ min: zMin, max: zMax, kind: 'FVG' });
-    }
-  }
-  return zones;
-}
-
 function scalpSL(c1, price, dir, symbol) {
   const a = atr(c1, 14);
   const pad = padAtrFor(symbol) * a;
@@ -552,12 +370,11 @@ function scalpSL(c1, price, dir, symbol) {
   return { sl, risk, level, pad, atr: a, src };
 }
 
-// ═══════════════════════════ SCALPING (M1 + M15 Confluence) ═══════════════════════════
+// ═══════════════════════════ SCALPING (M1 + M15 PURE MARKET NOW) ═══════════════════════════
 function buildScalpPlan({ htfC, m1, price, rrList, symbol, dec }) {
   const f = v => Number(v).toFixed(dec);
-  const a1 = atr(m1, 14);
 
-  // 1) Bias Tren Utama dari M15 (HTF)
+  // Bias arah dari M15 (HTF) & struktur M1
   const stM15 = structureBias(htfC, SETUP_CFG.day.pivot);
   const stM1 = structureBias(m1, SCALP_PIVOT);
 
@@ -571,65 +388,19 @@ function buildScalpPlan({ htfC, m1, price, rrList, symbol, dec }) {
     dir = stM1.dir;
     srcTxt = `Market structure M1 (${stM1.src}) [M15 netral]`;
   } else {
-    // Fallback terakhir ke close M1
     const last = m1[m1.length - 1];
     dir = price >= last.c ? 1 : -1;
     srcTxt = `Harga vs close M1 terakhir`;
   }
 
-  // 2) Kumpulkan Zona M1 (OB, S&D, FVG) yang searah dengan bias M15
-  const m1Zones = [
-    ...findBosZones(m1, dir, 60, SCALP_PIVOT).map(z => ({ min: z.min, max: z.max, kind: 'OB' })),
-    ...findSDZones(m1, dir, a1, 60).map(z => ({ min: z.min, max: z.max, kind: 'S&D' })),
-    ...findFvgZonesM1(m1, dir, a1, 60).map(z => ({ min: z.min, max: z.max, kind: 'FVG' })),
-  ];
-
-  const cands = [];
-  for (const z of m1Zones) {
-    let inside, dist;
-    if (dir === 1) {
-      if (price < z.min) continue;
-      inside = price <= z.max;
-      dist = inside ? 0 : price - z.max;
-    } else {
-      if (price > z.max) continue;
-      inside = price >= z.min;
-      dist = inside ? 0 : z.min - price;
-    }
-    if (dist > 5 * a1) continue;
-    cands.push({ ...z, inside, dist });
-  }
-  cands.sort((a, b) => a.dist - b.dist);
-
-  let orderType = 'NOW';
-  let entry = price;
-  let zone = null;
-  let expireMs = 0;
-
-  if (cands.length) {
-    const rz = cands[0];
-    zone = { min: rz.min, max: rz.max };
-    if (rz.inside) {
-      orderType = 'NOW';
-      entry = price;
-      srcTxt += ` + Reaksi ${rz.kind} M1 (${f(rz.min)}–${f(rz.max)} inside)`;
-    } else {
-      orderType = 'LIMIT';
-      entry = dir === 1 ? rz.max : rz.min;
-      expireMs = 20 * 60000;
-      srcTxt += ` + Limit di tepi zona ${rz.kind} M1 (${f(rz.min)}–${f(rz.max)})`;
-    }
-  } else {
-    srcTxt += ` + Kontinuitas momentum M1`;
-  }
+  // Pure Market Execution (NOW) tanpa limit
+  const orderType = 'NOW';
+  const entry = price;
 
   const sc = scalpSL(m1, entry, dir, symbol);
   const bufferEnd = entry - dir * SCALP_BUFFER_ATR * sc.atr;
-  let sl = bufferEnd - dir * sc.risk;
-  if (zone) {
-    const farSl = dir === 1 ? zone.min - SCALP_BUFFER_ATR * sc.atr : zone.max + SCALP_BUFFER_ATR * sc.atr;
-    if (dir === 1 ? farSl < sl : farSl > sl) sl = farSl;
-  }
+  const sl = bufferEnd - dir * sc.risk;
+  
   const risk = Math.abs(entry - sl);
   const tps = rrList.map(x => entry + dir * x * risk);
 
@@ -638,9 +409,9 @@ function buildScalpPlan({ htfC, m1, price, rrList, symbol, dec }) {
   const confidence = stM15.dir !== 0 ? 'HIGH' : 'MEDIUM';
 
   const reason = [
-    `Scalping Agresif (M1 + M15 Confluence) ${dir === 1 ? 'BUY' : 'SELL'} ${orderType} pada ${symbol}.`,
+    `Scalping Agresif (Pure Market Execution) ${dir === 1 ? 'BUY NOW' : 'SELL NOW'} pada ${symbol}.`,
     `Acuan arah: ${srcTxt}.`,
-    `Entry ${f(entry)}, Buffer ${f(bufferEnd)}, SL ${f(sl)} (${sc.src}), Jarak risiko ${f(risk)}.`,
+    `Entry Market ${f(entry)}, SL ${f(sl)} (${sc.src}), Jarak risiko ${f(risk)}.`,
     `RRR: TP1 1:${rrList[0]}, TP2 1:${rrList[1]}, TP3 1:${rrList[2]}.`,
   ].join(' • ');
 
@@ -649,22 +420,22 @@ function buildScalpPlan({ htfC, m1, price, rrList, symbol, dec }) {
     plan: {
       kind: 'scalp',
       orderType,
-      status: orderType === 'LIMIT' ? 'PENDING' : 'RUNNING',
+      status: 'RUNNING',
       entry,
       bufferEnd,
       sl,
       tps,
-      zone: zone ?? { min: Math.min(entry, bufferEnd), max: Math.max(entry, bufferEnd) },
-      expireMs,
-      zoneNote: `Scalp M1/M15 · ${orderType}`,
+      zone: { min: Math.min(entry, bufferEnd), max: Math.max(entry, bufferEnd) },
+      expireMs: 0,
+      zoneNote: `Scalp M1/M15 · Market Execution (NOW)`,
     },
     meta: { confidence, riskLabel, setup: 'CONTINUATION', reason },
   };
 }
 
-// Fungsi Day Trading, Refine Plan, dan Handler utama tetap terintegrasi utuh...
-function buildDayPlan({ htfC, mtfC, c5, symbol, price, rrList, dec }) { /* ... */ return { dir: 1, plan: null, meta: {} }; }
-function buildRefinePlan(args) { /* ... */ return { plan: null, reason: '' }; }
+// Fungsi pendukung untuk Day Trading / Intraday / Swing
+function buildDayPlan() { return { plan: null, reason: '' }; }
+function buildRefinePlan() { return { plan: null, reason: '' }; }
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -689,7 +460,6 @@ export default async function handler(req, res) {
     const price = Number(body.currentPrice) || (mtfC.length ? mtfC[mtfC.length - 1].c : 2000);
 
     let result;
-
     if (style.kind === 'scalp') {
       let m1 = cleanCandles(body.candles?.m1);
       if (m1.length < 30) m1 = (await getCandles(symbol, '1m', 150, apiKey)).candles;
@@ -704,14 +474,7 @@ export default async function handler(req, res) {
 
       result = buildScalpPlan({ htfC, m1, price, rrList: style.rr, symbol, dec });
     } else {
-      // Style Day Trading / Intraday / Swing
-      const tf = STYLE_TF_SERVER[styleKey];
-      if (htfC.length < 30) htfC = (await getCandles(symbol, tf.htf, 100, apiKey)).candles;
-      if (mtfC.length < 30) mtfC = (await getCandles(symbol, tf.mtf, 100, apiKey)).candles;
-      htfC = mergeLiveBar(htfC, price, TF_MIN[tf.htf]);
-      mtfC = mergeLiveBar(mtfC, price, TF_MIN[tf.mtf]);
-
-      result = { plan: null, reason: 'Gunakan mode Scalping untuk kombinasi M1 + M15.' };
+      result = { plan: null, reason: 'Gunakan mode Scalping untuk kombinasi M1 + M15 Market Execution.' };
     }
 
     if (!result.plan) {
@@ -726,10 +489,10 @@ export default async function handler(req, res) {
       ok: true,
       signal: {
         signal: dir === 1 ? 'BUY' : 'SELL',
-        mode: plan.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET',
-        orderType: plan.orderType,
-        orderLabel: orderLabel(dir, plan.orderType),
-        status: plan.status,
+        mode: 'MARKET',
+        orderType: 'NOW',
+        orderLabel: orderLabel(dir, 'NOW'),
+        status: 'RUNNING',
         entry: r(plan.entry),
         bufferEnd: r(plan.bufferEnd ?? plan.entry),
         sl: r(plan.sl),
@@ -738,13 +501,13 @@ export default async function handler(req, res) {
         tp3: tps[2] != null ? r(tps[2]) : null,
         tpCount: tps.length,
         zone: plan.zone ? { min: r(plan.zone.min), max: r(plan.zone.max) } : null,
-        expireMs: plan.expireMs || 0,
+        expireMs: 0,
         confidence: meta.confidence,
         risk: meta.riskLabel,
         setup: meta.setup,
         entryStyle: style.entryStyle,
         setupLabel: style.label,
-        zoneLabel: plan.orderType === 'LIMIT' ? 'Limit Order Zone (Waiting)' : 'Market Execution Zone',
+        zoneLabel: 'Market Execution Zone',
         zoneNote: plan.zoneNote,
         reason: meta.reason,
       },
