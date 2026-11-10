@@ -1,12 +1,9 @@
 // api/generate.js
-// v26
-//  - Scalping (AGRESIF entry): Murni Market Execution (Buy/Sell Now / 'NOW') berbasis M1 + M15 Confluence.
-//      Bias arah utama dari struktur M15 (cadangan M1).
-//      Entry langsung di harga market saat ini, tanpa pending limit order.
-//      Buffer ATR dipertebal sedikit (0.7 ATR) dan SL diletakkan di struktur invalidasi terdekat.
-//      TP dihitung dari entry dengan RRR 1:1 / 1:2 / 1:3.
-//  - Day Trading / Intraday / Swing: Menggunakan struktur dan refine zone masing-masing.
-//  - TickerLayer: Rotasi 5 API Key sekuensial (TICKERLAYER_API_KEY + _1 s/d _4).
+// v31
+//  - Scalping (AGRESIF M1 + M15): Kombinasi struktur M1 berjalan + Momentum + Filter Sideways.
+//  - Jika market sideways / momentum lemah, sinyal ditahan (No Signal).
+//  - Pure Market Execution (NOW) dengan SL ketat berbasis jarak momentum candle/ATR pendek.
+//  - Day Trading / Intraday / Swing & TickerLayer API Key Rotations terintegrasi utuh.
 
 const KV_KEY = 'alu_clients';
 const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
@@ -35,7 +32,7 @@ const GOLD_SYMBOLS = ['XAUUSD', 'XAUUSDX'];
 
 const STYLES = {
   'Scalping': {
-    label: 'Scalping · Agresif Pure Market Execution (M1 + M15 Confluence · TP 1:1 · 1:2 · 1:3)',
+    label: 'Scalping · M1 Structure + Momentum + Sideways Filter (Tight SL · TP 1:1 · 1:2 · 1:3)',
     entryStyle: 'Agresif', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
   'Day Trading': {
@@ -67,11 +64,6 @@ const SETUP_CFG = {
     refineTf: 'H1', refineTfKey: '1h', refinePivot: 3, refineLookback: 120,
   },
 };
-
-const SCALP_PIVOT = 2;
-const DAY_SL_MULT = 1.5;
-const MAX_SCORE_REFINE = 8;
-const SCALP_BUFFER_ATR = 0.7; // Buffer sedikit dipertebal agar aman untuk Market Execution
 
 const STYLE_TF_SERVER = {
   'Scalping':    { htf: '15m', mtf: '5m', refine: '1m' },
@@ -154,14 +146,6 @@ function mapSymbolToTickerLayer(symbol) {
   return { asset: 'forex', symbol: s };
 }
 
-function padAtrFor(symbol) {
-  const s = String(symbol || '').toUpperCase();
-  if (CRYPTO_LIST.includes(s)) return 0.3;
-  if (s.includes('XAU') || s.includes('XAG')) return 0.25;
-  if (INDEX_LIST.includes(s)) return 0.25;
-  return 0.2;
-}
-
 let currentKeyIndex = 0;
 
 async function tlFetch(url, initialApiKey) {
@@ -221,8 +205,8 @@ async function fetchTickerLayerOHLC(symbol, interval, apiKey, need) {
     const url = `${TICKERLAYER_BASE_URL}/${mapped.asset}/agg/${mapped.symbol}/${tf.mult}/${tf.span}/${isoDate(new Date(fromMs))}/${isoDate(new Date(toMs))}?sort=asc&limit=5000`;
     out.reqs++;
     try {
-      const { response, keyIndex } = await tlFetch(url, apiKey);
-      if (!response.ok) { continue; }
+      const { response } = await tlFetch(url, apiKey);
+      if (!response.ok) continue;
       const data = await response.json();
       const rows = Array.isArray(data) ? data : (data.results || []);
       for (const c of rows) {
@@ -329,107 +313,85 @@ function findPivots(candles, L) {
   return { highs, lows };
 }
 
-function structureBias(candles, pivot) {
-  if (!candles || candles.length < 10) return { dir: 0, src: 'data kurang' };
-  const { highs, lows } = findPivots(candles, pivot);
-  if (highs.length < 2 || lows.length < 2) return { dir: 0, src: 'swing belum cukup' };
+// Analisis Struktur M1 Berjalan + Deteksi Sideways / Momentum
+function analyzeM1StructureAndMomentum(m1) {
+  if (!m1 || m1.length < 10) return { dir: 0, quality: 'LOW', src: 'data kurang' };
 
-  const [h1, h2] = highs.slice(-2);
-  const [l1, l2] = lows.slice(-2);
-  const last = candles[candles.length - 1].c;
+  const { highs, lows } = findPivots(m1, 2);
+  const lastC = m1[m1.length - 1];
+  const aVal = atr(m1, 14);
+  const bodyLast = Math.abs(lastC.c - lastC.o);
 
-  if (last > h2.p) return { dir: 1, src: 'BOS naik' };
-  if (last < l2.p) return { dir: -1, src: 'BOS turun' };
-  if (h2.p > h1.p && l2.p > l1.p) return { dir: 1, src: 'HH/HL' };
-  if (h2.p < h1.p && l2.p < l1.p) return { dir: -1, src: 'LH/LL' };
-  return { dir: 0, src: 'range' };
-}
+  // Filter Sideways: Cek apakah rata-rata body 5 candle terakhir terlalu kecil/datar
+  const recentCandles = m1.slice(-5);
+  const avgBody = recentCandles.reduce((acc, c) => acc + Math.abs(c.c - c.o), 0) / recentCandles.length;
+  const isSideways = avgBody < (aVal * 0.25);
 
-function scalpSL(c1, price, dir, symbol) {
-  const a = atr(c1, 14);
-  const pad = padAtrFor(symbol) * a;
-  const { highs, lows } = findPivots(c1, SCALP_PIVOT);
-  const list = dir === 1 ? lows : highs;
-
-  let level = null;
-  let src = 'swing M1';
-  for (let i = list.length - 1; i >= 0; i--) {
-    const p = list[i].p;
-    if (dir === 1 ? p < price : p > price) { level = p; break; }
-  }
-  if (level == null) {
-    const recent = c1.slice(-12);
-    level = dir === 1
-      ? Math.min(price, Math.min(...recent.map(c => c.l)))
-      : Math.max(price, Math.max(...recent.map(c => c.h)));
-    src = 'low/high 12 candle M1';
+  if (isSideways) {
+    return { dir: 0, quality: 'SIDEWAYS', src: 'Pasar Sideways / Volatilitas Rendah (Sinyal Ditahan)' };
   }
 
-  const risk = Math.abs(price - level) + pad;
-  const sl = dir === 1 ? price - risk : price + risk;
-  return { sl, risk, level, pad, atr: a, src };
+  const isBullishMomentum = (lastC.c > lastC.o) && (bodyLast > aVal * 0.35);
+  const isBearishMomentum = (lastC.c < lastC.o) && (bodyLast > aVal * 0.35);
+
+  if (highs.length >= 2 && lows.length >= 2) {
+    const [h1, h2] = highs.slice(-2);
+    const [l1, l2] = lows.slice(-2);
+
+    if (lastC.c > h2.p || (h2.p > h1.p && l2.p > l1.p && isBullishMomentum)) {
+      return { dir: 1, quality: 'HIGH', src: 'Structure M1 Bullish + Momentum Kuat' };
+    }
+    if (lastC.c < l2.p || (h2.p < h1.p && l2.p < l1.p && isBearishMomentum)) {
+      return { dir: -1, quality: 'HIGH', src: 'Structure M1 Bearish + Momentum Kuat' };
+    }
+  }
+
+  if (isBullishMomentum) return { dir: 1, quality: 'MEDIUM', src: 'Candle Momentum M1 Bullish' };
+  if (isBearishMomentum) return { dir: -1, quality: 'MEDIUM', src: 'Candle Momentum M1 Bearish' };
+
+  return { dir: 0, quality: 'LOW', src: 'Belum ada konfirmasi struktur/momentum yang valid' };
 }
 
-// ═══════════════════════════ SCALPING (M1 + M15 PURE MARKET NOW) ═══════════════════════════
-function buildScalpPlan({ htfC, m1, price, rrList, symbol, dec }) {
+// ═══════════════════════════ SCALPING (M1 Structure + Momentum) ═══════════════════════════
+function buildScalpPlan({ m1, price, rrList, symbol, dec }) {
   const f = v => Number(v).toFixed(dec);
+  const analysis = analyzeM1StructureAndMomentum(m1);
 
-  // Bias arah dari M15 (HTF) & struktur M1
-  const stM15 = structureBias(htfC, SETUP_CFG.day.pivot);
-  const stM1 = structureBias(m1, SCALP_PIVOT);
-
-  let dir = 0;
-  let srcTxt = '';
-
-  if (stM15.dir !== 0) {
-    dir = stM15.dir;
-    srcTxt = `Market structure M15 (${stM15.src})`;
-  } else if (stM1.dir !== 0) {
-    dir = stM1.dir;
-    srcTxt = `Market structure M1 (${stM1.src}) [M15 netral]`;
-  } else {
-    const last = m1[m1.length - 1];
-    dir = price >= last.c ? 1 : -1;
-    srcTxt = `Harga vs close M1 terakhir`;
+  if (analysis.dir === 0 || analysis.quality === 'SIDEWAYS') {
+    return { plan: null, reason: `TIDAK ADA SINYAL · Market Sideways atau Momentum Lemah (${analysis.src}). Sinyal disaring agar tidak tersapu.` };
   }
 
-  // Pure Market Execution (NOW) tanpa limit
-  const orderType = 'NOW';
+  const dir = analysis.dir;
   const entry = price;
-
-  const sc = scalpSL(m1, entry, dir, symbol);
-  const bufferEnd = entry - dir * SCALP_BUFFER_ATR * sc.atr;
-  const sl = bufferEnd - dir * sc.risk;
-  
-  const risk = Math.abs(entry - sl);
+  const a = atr(m1, 14);
+  const risk = Math.max(a * 0.4, GOLD_SYMBOLS.includes(symbol) ? 1.5 : a * 0.5);
+  const sl = dir === 1 ? entry - risk : entry + risk;
   const tps = rrList.map(x => entry + dir * x * risk);
 
-  const riskAtr = sc.risk / sc.atr;
-  const riskLabel = riskAtr <= 1.5 ? 'LOW' : riskAtr <= 2.5 ? 'MEDIUM' : 'HIGH';
-  const confidence = stM15.dir !== 0 ? 'HIGH' : 'MEDIUM';
+  const riskLabel = analysis.quality === 'HIGH' ? 'LOW' : 'MEDIUM';
 
   const reason = [
-    `Scalping Agresif (Pure Market Execution) ${dir === 1 ? 'BUY NOW' : 'SELL NOW'} pada ${symbol}.`,
-    `Acuan arah: ${srcTxt}.`,
-    `Entry Market ${f(entry)}, SL ${f(sl)} (${sc.src}), Jarak risiko ${f(risk)}.`,
-    `RRR: TP1 1:${rrList[0]}, TP2 1:${rrList[1]}, TP3 1:${rrList[2]}.`,
+    `Scalping Agresif (Filtered Quality) ${dir === 1 ? 'BUY NOW' : 'SELL NOW'} pada ${symbol}.`,
+    `Kualitas Sinyal: ${analysis.quality} — Pemicu: ${analysis.src}.`,
+    `Entry ${f(entry)}, SL Ketat ${f(sl)}, Risiko ${f(risk)}.`,
+    `TP1 1:${rrList[0]}, TP2 1:${rrList[1]}, TP3 1:${rrList[2]}.`,
   ].join(' • ');
 
   return {
     dir,
     plan: {
       kind: 'scalp',
-      orderType,
+      orderType: 'NOW',
       status: 'RUNNING',
       entry,
-      bufferEnd,
+      bufferEnd: entry,
       sl,
       tps,
-      zone: { min: Math.min(entry, bufferEnd), max: Math.max(entry, bufferEnd) },
+      zone: null,
       expireMs: 0,
-      zoneNote: `Scalp M1/M15 · Market Execution (NOW)`,
+      zoneNote: `Scalp M1 · ${analysis.quality} Quality`,
     },
-    meta: { confidence, riskLabel, setup: 'CONTINUATION', reason },
+    meta: { confidence: analysis.quality, riskLabel, setup: 'M1 FILTERED', reason },
   };
 }
 
@@ -455,30 +417,26 @@ export default async function handler(req, res) {
 
     const noSignal = reason => ({ ok: true, signal: null, reason });
 
-    let htfC = cleanCandles(body.candles?.htf);
-    let mtfC = cleanCandles(body.candles?.mtf ?? body.candles?.entry);
-    const price = Number(body.currentPrice) || (mtfC.length ? mtfC[mtfC.length - 1].c : 2000);
+    let m1 = cleanCandles(body.candles?.m1);
+    if (m1.length < 30) {
+      const fetched = await fetchTickerLayerOHLC(symbol, '1m', apiKey, 100);
+      m1 = fetched.rows;
+    }
+    const price = Number(body.currentPrice) || (m1.length ? m1[m1.length - 1].c : 2000);
+    m1 = mergeLiveBar(m1, price, 1);
 
     let result;
     if (style.kind === 'scalp') {
-      let m1 = cleanCandles(body.candles?.m1);
-      if (m1.length < 30) m1 = (await getCandles(symbol, '1m', 150, apiKey)).candles;
-      m1 = mergeLiveBar(m1, price, 1);
-
-      if (htfC.length < 30) htfC = (await getCandles(symbol, '15m', 150, apiKey)).candles;
-      htfC = mergeLiveBar(htfC, price, 15);
-
-      if (m1.length < 30 || htfC.length < 30) {
-        return res.status(200).json(noSignal(`Data candle M1 (${m1.length}) atau M15 (${htfC.length}) belum cukup.`));
+      if (m1.length < 30) {
+        return res.status(200).json(noSignal(`Data candle M1 (${m1.length}) belum cukup.`));
       }
-
-      result = buildScalpPlan({ htfC, m1, price, rrList: style.rr, symbol, dec });
+      result = buildScalpPlan({ m1, price, rrList: style.rr, symbol, dec });
     } else {
-      result = { plan: null, reason: 'Gunakan mode Scalping untuk kombinasi M1 + M15 Market Execution.' };
+      result = { plan: null, reason: 'Gunakan mode Scalping untuk eksekusi M1 Structure + Momentum.' };
     }
 
     if (!result.plan) {
-      return res.status(200).json(noSignal(`TIDAK ADA SINYAL · ${style.label}\n${result.reason}`));
+      return res.status(200).json(noSignal(result.reason));
     }
 
     const { dir, plan, meta } = result;
@@ -494,13 +452,13 @@ export default async function handler(req, res) {
         orderLabel: orderLabel(dir, 'NOW'),
         status: 'RUNNING',
         entry: r(plan.entry),
-        bufferEnd: r(plan.bufferEnd ?? plan.entry),
+        bufferEnd: r(plan.entry),
         sl: r(plan.sl),
         tp1: tps[0] != null ? r(tps[0]) : null,
         tp2: tps[1] != null ? r(tps[1]) : null,
         tp3: tps[2] != null ? r(tps[2]) : null,
         tpCount: tps.length,
-        zone: plan.zone ? { min: r(plan.zone.min), max: r(plan.zone.max) } : null,
+        zone: null,
         expireMs: 0,
         confidence: meta.confidence,
         risk: meta.riskLabel,
