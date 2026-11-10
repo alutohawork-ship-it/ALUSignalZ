@@ -1,5 +1,5 @@
 // api/generate.js
-// v21
+// v22
 //  - Acuan arah SELALU market structure (BOS / HH-HL / LH-LL). EMA hanya pendukung.
 //  - Scalping (AGRESIF entry): TP 1:1 / 1:2 / 1:3 (semua pair, termasuk XAUUSD).
 //      Arah dari structure 5m (cadangan 15m, lalu EMA9/21 5m). XAUUSD: pantulan zona M1 / kontinuasi M1.
@@ -15,6 +15,15 @@
 
 const KV_KEY = 'alu_clients';
 const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
+
+// Mengambil semua API key (utama + 4 cadangan) secara berurutan
+const API_KEYS = [
+  process.env.TICKERLAYER_API_KEY,
+  process.env.TICKERLAYER_API_KEY_1,
+  process.env.TICKERLAYER_API_KEY_2,
+  process.env.TICKERLAYER_API_KEY_3,
+  process.env.TICKERLAYER_API_KEY_4,
+].filter(Boolean); // Hanya mengambil kunci yang terisi nilainya
 
 const DECIMALS = {
   DXY: 2, EURUSD: 5, GBPUSD: 5, USDJPY: 3, AUDUSD: 5, USDCAD: 5, USDCHF: 5, NZDUSD: 5,
@@ -202,21 +211,48 @@ function padAtrFor(symbol) {
   return 0.2;
 }
 
-async function tlFetch(url, apiKey) {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const r = await fetch(url, {
-      method: 'GET',
-      headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
-    });
-    if (r.status === 429 && attempt === 0) { await sleep(1500); continue; }
-    return r;
+let currentKeyIndex = 0;
+
+async function tlFetch(url, initialApiKey) {
+  const keys = API_KEYS.length > 0 ? API_KEYS : [initialApiKey];
+  let attempts = 0;
+
+  while (attempts < keys.length) {
+    const activeKey = keys[currentKeyIndex];
+    
+    for (let retry = 0; retry < 2; retry++) {
+      const r = await fetch(url, {
+        method: 'GET',
+        headers: { 'x-api-key': activeKey, 'Content-Type': 'application/json' },
+      });
+      
+      if (r.ok) {
+        return { response: r, keyIndex: currentKeyIndex };
+      }
+      
+      if ((r.status === 429 || r.status === 401 || r.status === 403) && retry === 0) {
+        await sleep(1000);
+        continue;
+      }
+      break;
+    }
+    
+    console.warn(`API Key indeks ke-${currentKeyIndex} habis atau limit. Beralih ke kunci berikutnya.`);
+    currentKeyIndex = (currentKeyIndex + 1) % keys.length;
+    attempts++;
   }
+
+  const finalResponse = await fetch(url, {
+    method: 'GET',
+    headers: { 'x-api-key': keys[0], 'Content-Type': 'application/json' },
+  });
+  return { response: finalResponse, keyIndex: 0 };
 }
 
 async function fetchTickerLayerOHLC(symbol, interval, apiKey, need) {
   const out = { rows: [], status: 'OK', reqs: 0 };
   const tf = TL_SPAN[interval];
-  if (!apiKey) { out.status = 'KEY KOSONG'; return out; }
+  if (!apiKey && API_KEYS.length === 0) { out.status = 'KEY KOSONG'; return out; }
   if (!tf) { out.status = 'TF TIDAK DIDUKUNG'; return out; }
 
   const mapped = mapSymbolToTickerLayer(symbol);
@@ -241,8 +277,11 @@ async function fetchTickerLayerOHLC(symbol, interval, apiKey, need) {
     const url = `${TICKERLAYER_BASE_URL}/${mapped.asset}/agg/${mapped.symbol}/${tf.mult}/${tf.span}/${isoDate(new Date(fromMs))}/${isoDate(new Date(toMs))}?sort=asc&limit=5000`;
     out.reqs++;
     try {
-      const response = await tlFetch(url, apiKey);
-      if (!response.ok) { out.status = `HTTP ${response.status}`; continue; }
+      const { response, keyIndex } = await tlFetch(url, apiKey);
+      if (!response.ok) { 
+        out.status = `HTTP ${response.status} (Key Index #${keyIndex})`; 
+        continue; 
+      }
       const data = await response.json();
       const rows = Array.isArray(data) ? data : (data.results || []);
       for (const c of rows) {
