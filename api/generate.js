@@ -1,17 +1,5 @@
 // api/generate.js
-// v50
-//  - Scalping:
-//      · XAUUSD: struktur M1, area S/D M5 dibentuk dari candle M1. SL 25-30 pip dari struktur.
-//      · Pair lain: struktur M5 dan area S/D M5 langsung. SL/TP mengikuti struktur, dibatasi ATR M5.
-//      · Di dalam area demand M5 → BUY NOW, area supply M5 → SELL NOW
-//      · Di luar area → NOW searah arah awal market (BOS → HH+HL/LH+LL → price action)
-//  - Day Trading: BOS M15 (bias) → area M15 → refine M5 (wajib, dengan cadangan). Selalu ada signal:
-//      · di dalam area → NOW, konfirmasi BB M5 ditampilkan di confidence dan reason
-//      · di luar area → LIMIT di tepi area, tanpa batas jarak
-//  - Intraday: area S/D H1 → refine M15. Maksimal 1 signal per hari (WIB), disimpan di KV.
-//  - Swing: area S/D H4 → refine H1. Selalu ada signal.
-//  - Pip per pair: XAUUSD 0.1; forex 10^-(desimal-1); indeks dan BTC 1 (lihat PIP_OVERRIDE).
-//  - TickerLayer API Key Rotations terintegrasi utuh.
+// v51 - Integrasi Dual-Mode: Signal Z (Live Market S/D M5/M15) & Vision Z (Upload Gambar Chart)
 
 const KV_KEY = 'alu_clients';
 const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
@@ -34,11 +22,9 @@ const DECIMALS = {
   BTCXAU: 2, ETHBTC: 5, SOLBTC: 5, US30BTC: 2, XAUUSDX: 2,
 };
 
-const CRYPTO_LIST = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'BNBUSD', 'ADAUSD', 'DOGEUSD', 'AVAXUSD', 'LINKUSD', 'DOTUSD', 'MATICUSD', 'UNIUSD'];
 const GOLD_SYMBOLS = ['XAUUSD', 'XAUUSDX'];
 const isGold = symbol => GOLD_SYMBOLS.includes(symbol);
 
-// Ukuran 1 pip per instrumen. Di luar daftar ini: 10^-(desimal-1), misalnya EURUSD 0.0001, USDJPY 0.01.
 const PIP_OVERRIDE = {
   XAUUSD: 0.1, XAUUSDX: 0.1, DXY: 0.01, ETHUSD: 0.1,
   US30: 1, NAS100: 1, SPX500: 1, GER40: 1, UK100: 1, JPN225: 1, FRA40: 1, AUS200: 1, BTCUSD: 1,
@@ -51,53 +37,44 @@ const STYLES = {
     entryStyle: 'Agresif', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
   'Day Trading': {
-    label: 'Day Trading · BOS M15 + Area M15 + Refine M5 · Limit/NOW wajib tiap analisa · TP 1:1 · 1:1.5 · 1:2',
+    label: 'Day Trading · BOS M15 + Area M15 + Refine M5 · Limit/NOW wajib tiap analisa',
     entryStyle: 'Konservatif', mode: 'LIMIT', kind: 'day', rr: [1.0, 1.5, 2.0],
   },
   'Intraday': {
-    label: 'Intraday · Area S/D H1 + Refine M15 · 1 signal per hari · TP 1:1 · 1:2 · 1:3',
+    label: 'Intraday · Area S/D H1 + Refine M15 · 1 signal per hari',
     entryStyle: 'Moderat', mode: 'LIMIT', kind: 'intraday', rr: [1.0, 2.0, 3.0],
   },
   'Swing': {
-    label: 'Swing · Area S/D H4 + Refine H1 · Limit/NOW · TP 1:3',
+    label: 'Swing · Area S/D H4 + Refine H1 · TP 1:3',
     entryStyle: 'Sangat Konservatif', mode: 'LIMIT', kind: 'swing', rr: [3.0],
   },
 };
 
-// ── Jumlah candle dan batas minimum ──
 const NEED = { m1: 160, m5: 120, m15: 480 };
 const MIN_BARS = { m1: 100, m5: 40, m15: 120, m15Swing: 400 };
-
-// ── Struktur dan BOS ──
 const SCALP_PIVOT = 2;
 const DAY_PIVOT = 3;
 const DAY_BOS_LOOKBACK = 60;
 const DAY_OB_LOOKBACK = 12;
-
-// ── Bollinger ──
 const BB_PERIOD = 20;
 const BB_MULT = 2;
-const BAND_TOL_PIPS = 10;   // toleransi limit terhadap band (dipakai untuk pair dengan pip)
-const BAND_TOL_ATR = 0.2;   // toleransi limit terhadap band (pair tanpa batas pip, dalam kelipatan ATR)
-
-// ── Zona Supply/Demand (default) ──
+const BAND_TOL_PIPS = 10;
+const BAND_TOL_ATR = 0.2;
 const ZONE_ATR_PERIOD = 14;
 const ZONE_DISP_ATR = 1.2;
 const ZONE_MAX_ATR = 2.5;
 const ZONE_REQUIRE_FVG = false;
 const ZONE_FRESH_ONLY = true;
 
-// ── Scalping ──
-const SCALP_ZONE_LOOKBACK_M5 = 60;      // area M5 harus terbentuk dalam 60 candle M5 terakhir
-const SCALP_ZONE_DISP_ATR = 0.8;        // displacement scalping M5: body minimal 0.8 × ATR
-const SCALP_ZONE_FRESH_ONLY = true;     // true = area yang sudah pernah tersentuh dibuang
-const SCALP_ZONE_NEEDS_CONFIRM = false; // true = tunggu reaksi (pullback selesai lalu tembus) dulu
-const SCALP_ZONE_REQUIRE_BIAS = false;  // true = demand hanya jika bias M5 bullish, supply jika bearish
-const SCALP_NEAR_ZONE_PIPS = 15;        // area berlawanan dalam 15 pip → peringatan
-const SCALP_CHASE_MAX_PIPS = 15;        // dipakai hanya jika SCALP_ZONE_NEEDS_CONFIRM = true
+const SCALP_ZONE_LOOKBACK_M5 = 60;
+const SCALP_ZONE_DISP_ATR = 0.8;
+const SCALP_ZONE_FRESH_ONLY = true;
+const SCALP_ZONE_NEEDS_CONFIRM = false;
+const SCALP_ZONE_REQUIRE_BIAS = false;
+const SCALP_NEAR_ZONE_PIPS = 15;
+const SCALP_CHASE_MAX_PIPS = 15;
 const scalpZoneOpts = { dispAtr: SCALP_ZONE_DISP_ATR, freshOnly: SCALP_ZONE_FRESH_ONLY };
 
-// ── SL: XAUUSD dalam pip, pair lain dalam kelipatan ATR ──
 const GOLD_SL_PIPS = { scalp: [25, 30], day: [50, 120], intraday: [80, 200], swing: [150, 300] };
 const SL_BUFFER_PIPS = { scalp: 3, day: 5, intraday: 10, swing: 15 };
 const ATR_SL_MULT = { scalp: [0.5, 2.5], day: [1, 3], intraday: [1, 3], swing: [0.5, 2] };
@@ -175,12 +152,7 @@ async function tlFetch(url, initialApiKey) {
   return { response: await fetch(url, { method: 'GET', headers: { 'x-api-key': keys[0], 'Content-Type': 'application/json' } }), keyIndex: 0 };
 }
 
-// Hanya 1m, 5m, dan 15m yang diambil dari TickerLayer. H1 dan H4 dibentuk dari M15.
-const TL_SPAN = {
-  '1m':  { mult: 1,  span: 'minute', minutes: 1 },
-  '5m':  { mult: 5,  span: 'minute', minutes: 5 },
-  '15m': { mult: 15, span: 'minute', minutes: 15 },
-};
+const TL_SPAN = { '1m': { mult: 1, span: 'minute', minutes: 1 }, '5m': { mult: 5, span: 'minute', minutes: 5 }, '15m': { mult: 15, span: 'minute', minutes: 15 } };
 const CACHE_TTL = { '1m': 120, '5m': 300, '15m': 600 };
 const CACHE_BARS = { '1m': 300, '5m': 300, '15m': 600 };
 
@@ -230,7 +202,6 @@ function mergeLiveBar(candles, price, tfMin) {
   return candles;
 }
 
-// Bangun candle berjangka tfMin menit dari candle yang lebih kecil (M1→M5, M15→H1, M15→H4)
 function aggregateCandles(candles, tfMin) {
   const ms = tfMin * 60000;
   const map = new Map();
@@ -238,11 +209,7 @@ function aggregateCandles(candles, tfMin) {
     const key = Math.floor(c.t / ms) * ms;
     const b = map.get(key);
     if (!b) map.set(key, { t: key, o: c.o, h: c.h, l: c.l, c: c.c });
-    else {
-      b.h = Math.max(b.h, c.h);
-      b.l = Math.min(b.l, c.l);
-      b.c = c.c;
-    }
+    else { b.h = Math.max(b.h, c.h); b.l = Math.min(b.l, c.l); b.c = c.c; }
   }
   return [...map.values()].sort((a, b) => a.t - b.t);
 }
@@ -266,8 +233,6 @@ function atr(candles, period = 14) {
   const s = trs.slice(-period);
   return s.length ? s.reduce((a, b) => a + b, 0) / s.length : 15;
 }
-
-// ATR yang aman: kalau data kurang, pakai 10 pip agar tidak menghasilkan nilai ngawur
 const atrOf = (candles, pip) => (candles && candles.length >= 15 ? atr(candles, ZONE_ATR_PERIOD) : 10 * pip);
 
 function findPivots(candles, L) {
@@ -284,7 +249,6 @@ function findPivots(candles, L) {
   return { highs, lows };
 }
 
-// Bollinger Band pada indeks tertentu (SMA periode N dan standar deviasi close)
 function bollingerAt(candles, idx, period = BB_PERIOD, mult = BB_MULT) {
   if (idx < period - 1 || idx >= candles.length) return null;
   const closes = candles.slice(idx - period + 1, idx + 1).map(c => c.c);
@@ -293,8 +257,6 @@ function bollingerAt(candles, idx, period = BB_PERIOD, mult = BB_MULT) {
   return { mid, upper: mid + mult * sd, lower: mid - mult * sd };
 }
 
-// Arah awal market: BOS → HH+HL / LH+LL → price action (close vs close sebelumnya).
-// Selalu menghasilkan arah (1 atau -1).
 function analyzePureSMCStructure(candles) {
   if (!candles || candles.length < 15) return { dir: 1, src: 'Default' };
   const { highs, lows } = findPivots(candles, SCALP_PIVOT);
@@ -305,7 +267,6 @@ function analyzePureSMCStructure(candles) {
   const [h1, h2] = highs.slice(-2);
   const [l1, l2] = lows.slice(-2);
   const lastC = candles[candles.length - 1].c;
-
   if (lastC > h2.p) return { dir: 1, src: 'BOS bullish' };
   if (lastC < l2.p) return { dir: -1, src: 'BOS bearish' };
   if (h2.p > h1.p && l2.p > l1.p) return { dir: 1, src: 'Struktur HH + HL' };
@@ -313,7 +274,6 @@ function analyzePureSMCStructure(candles) {
   return { dir: lastC >= candles[candles.length - 2].c ? 1 : -1, src: 'Order flow' };
 }
 
-// Bias struktur: BOS, HH+HL, atau LH+LL. dir = 0 jika belum jelas (dipakai untuk filter opsional).
 function structureBias(candles, L) {
   const { highs, lows } = findPivots(candles, L);
   if (highs.length < 2 || lows.length < 2) return { dir: 0, src: 'struktur belum terbentuk' };
@@ -327,7 +287,6 @@ function structureBias(candles, L) {
   return { dir: 0, src: 'belum jelas' };
 }
 
-// BOS terbaru: candle yang close menembus swing high/low yang sudah terkonfirmasi
 function findLastBOS(candles, L) {
   const { highs, lows } = findPivots(candles, L);
   const from = Math.max(L + 1, candles.length - DAY_BOS_LOOKBACK);
@@ -342,7 +301,6 @@ function findLastBOS(candles, L) {
   return null;
 }
 
-// Displacement menembus swing high/low sebelum base (BOS)
 function isBOSAfter(candles, base, k, dir) {
   const window = candles.slice(Math.max(0, base - 10), base);
   if (!window.length) return false;
@@ -351,12 +309,6 @@ function isBOSAfter(candles, base, k, dir) {
   return after.some(c => (dir === 1 ? c.c > ext : c.c < ext));
 }
 
-// Zona Supply/Demand:
-//  - displacement: candle searah dengan body >= dispAtr × ATR
-//  - base: candle lawan arah terakhir, maks. 3 candle sebelum displacement
-//  - displacement menembus swing sebelumnya (BOS), opsional meninggalkan FVG
-//  - zona belum ditembus close, dan (jika freshOnly) belum pernah disentuh setelah terbentuk
-// opts: { dispAtr, freshOnly } (default ikut konstanta ZONE_*). Diurutkan dari zona terdekat ke harga.
 function findSDZones(candles, dir, price, opts = {}) {
   const dispAtr = opts.dispAtr ?? ZONE_DISP_ATR;
   const freshOnly = opts.freshOnly ?? ZONE_FRESH_ONLY;
@@ -385,11 +337,6 @@ function findSDZones(candles, dir, price, opts = {}) {
     if (Math.abs(top - sl) > ZONE_MAX_ATR * a) continue;
     if (!isBOSAfter(candles, base, k, dir)) continue;
 
-    if (ZONE_REQUIRE_FVG) {
-      const fvg = dir === 1 ? candles[k - 1].h < candles[k + 1].l : candles[k - 1].l > candles[k + 1].h;
-      if (!fvg) continue;
-    }
-
     const after = candles.slice(k + 1, n - 1);
     if (after.some(x => (dir === 1 ? x.c < sl : x.c > sl))) continue;
     if (freshOnly && after.some(x => (dir === 1 ? x.l <= top : x.h >= bottom))) continue;
@@ -403,7 +350,6 @@ function findSDZones(candles, dir, price, opts = {}) {
   return zones.sort((x, y) => x.dist - y.dist);
 }
 
-// Zona terdekat dalam L candle terakhir. Kalau tidak ada yang ketat, coba versi longgar.
 function pickZone(candles, dir, price, L, extra = () => true) {
   const n = candles.length;
   const ok = z => z.dispIdx >= n - L && extra(z);
@@ -412,32 +358,27 @@ function pickZone(candles, dir, price, L, extra = () => true) {
   return findSDZones(candles, dir, price, { dispAtr: 0.6, freshOnly: false }).filter(ok)[0] || null;
 }
 
-// Refine: zona di timeframe bawah yang berada di dalam area timeframe atas
 function refineZone(lower, parent, dir, price, L) {
   return pickZone(lower, dir, price, L, z => z.top >= parent.bottom && z.bottom <= parent.top);
 }
 
-// Level swing terakhir sebagai area cadangan kalau tidak ada zona sama sekali
 function swingArea(candles, dir, L) {
   const s = candles.slice(-L);
   const lvl = dir === 1 ? Math.min(...s.map(c => c.l)) : Math.max(...s.map(c => c.h));
   return { top: lvl, bottom: lvl, sl: lvl, idx: -1, dispIdx: -1, dist: 0 };
 }
 
-// Area M15 untuk Day Trading: zona yang displacement-nya dekat BOS M15 terakhir
 function pickM15Area(m15, bos, price) {
   const zones = findSDZones(m15, bos.dir, price)
     .filter(z => z.dispIdx >= bos.idx - DAY_OB_LOOKBACK && z.dispIdx <= bos.idx);
   return zones[0] || null;
 }
 
-// Ekstrem candle terakhir di sisi berlawanan arah (dipakai sebagai SL bila pivot tidak valid)
 function recentExtreme(candles, dir, bars) {
   const s = candles.slice(-(bars + 1));
   return dir === 1 ? Math.min(...s.map(c => c.l)) : Math.max(...s.map(c => c.h));
 }
 
-// Area M5 terdekat untuk reason
 function areaNote(m5c, price, ctx) {
   const { f, pip } = ctx;
   const recent = z => z.dispIdx >= m5c.length - SCALP_ZONE_LOOKBACK_M5;
@@ -452,49 +393,9 @@ function areaNote(m5c, price, ctx) {
     const d = dem.dist === 0 ? 'sudah di dalam' : `${(dem.dist / pip).toFixed(0)} pip di bawah`;
     parts.push(`demand ${f(dem.bottom)} - ${f(dem.top)} (${d})`);
   }
-  return parts.length
-    ? `Area M5 terdekat: ${parts.join(', ')}`
-    : `Tidak ada area S/D M5 valid dalam ${SCALP_ZONE_LOOKBACK_M5} candle terakhir`;
+  return parts.length ? `Area M5 terdekat: ${parts.join(', ')}` : `Tidak ada area S/D M5 valid`;
 }
 
-// Reaksi: pivot pullback sudah selesai, lalu harga menembus level pullback (hanya jika SCALP_ZONE_NEEDS_CONFIRM)
-function m1Reaction(struct, dir, price, ctx) {
-  const { f, pip } = ctx;
-  const { highs, lows } = findPivots(struct, SCALP_PIVOT);
-  if (!highs.length || !lows.length) return { ok: false, why: 'struktur belum terbentuk' };
-  const lastH = highs[highs.length - 1];
-  const lastL = lows[lows.length - 1];
-  let breakLevel = null;
-  if (dir === 1 && lastL.i > lastH.i) breakLevel = lastH.p;
-  else if (dir === -1 && lastH.i > lastL.i) breakLevel = lastL.p;
-  if (breakLevel == null) return { ok: false, why: 'pullback belum selesai' };
-  const beyond = ((price - breakLevel) * dir) / pip;
-  if (beyond <= 0) return { ok: false, why: `menunggu menembus ${f(breakLevel)}` };
-  if (beyond > SCALP_CHASE_MAX_PIPS) return { ok: false, why: `harga ${beyond.toFixed(0)} pip melewati ${f(breakLevel)}, tidak dikejar` };
-  return { ok: true, breakLevel };
-}
-
-// Konfirmasi BB pada timeframe refine: pullback ke BB middle lalu close kembali searah
-function findRefineTrigger(candles, dir) {
-  const n = candles.length;
-  const cur = candles[n - 1];
-  const prev = candles[n - 2];
-  const bbCur = bollingerAt(candles, n - 1);
-  const bbPrev = bollingerAt(candles, n - 2);
-  if (!bbCur || !bbPrev) return null;
-
-  if (dir === 1 && prev.l <= bbPrev.mid && cur.c > bbCur.mid && cur.c > cur.o) {
-    const strong = prev.l <= bbPrev.lower;
-    return { strong, setup: strong ? 'BB Lower Band Reclaim' : 'BB Middle Band Pullback' };
-  }
-  if (dir === -1 && prev.h >= bbPrev.mid && cur.c < bbCur.mid && cur.c < cur.o) {
-    const strong = prev.h >= bbPrev.upper;
-    return { strong, setup: strong ? 'BB Upper Band Reject' : 'BB Middle Band Pullback' };
-  }
-  return null;
-}
-
-// SL bounds: XAUUSD dalam pip, pair lain dalam kelipatan ATR
 function slBounds(kind, ctx, atrVal) {
   if (ctx.gold) {
     const [a, b] = GOLD_SL_PIPS[kind];
@@ -504,7 +405,6 @@ function slBounds(kind, ctx, atrVal) {
   return { min: a * atrVal, max: b * atrVal };
 }
 
-// Menghitung SL dan TP dari entry dan level struktur, lalu menyusun reason
 function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, rrList, confidence, setup, zoneNote, head, lines }) {
   const { f, pip, gold } = ctx;
   const b = slBounds(kind, ctx, atrVal);
@@ -514,97 +414,49 @@ function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, rrList
   const risk = Math.min(Math.max(raw, b.min), b.max);
   const sl = entry - dir * risk;
   const tps = rrList.map(x => entry + dir * x * risk);
-  const slNote = raw > b.max
-    ? `SL dibatasi ${(b.max / pip).toFixed(0)} pip, struktur lebih lebar (${(raw / pip).toFixed(0)} pip)`
-    : '';
-  const parts = [
-    head,
-    ...lines,
-    slNote,
-    `Entry ${f(entry)}, SL (${(risk / pip).toFixed(0)} pip) di ${f(sl)}`,
-    rrList.map((x, i) => `TP${i + 1} 1:${x}`).join(', '),
-  ].filter(Boolean);
+  const parts = [head, ...lines, `Entry ${f(entry)}, SL (${(risk / pip).toFixed(0)} pip) di ${f(sl)}`, rrList.map((x, i) => `TP${i + 1} 1:${x}`).join(', ')].filter(Boolean);
   const reason = parts.map(s => s.replace(/\.?$/, '.')).join(' • ');
 
   return {
     dir,
-    plan: {
-      kind,
-      orderType,
-      status: orderType === 'LIMIT' ? 'PENDING' : 'RUNNING',
-      entry,
-      bufferEnd: entry,
-      sl,
-      tps,
-      zone: null,
-      expireMs: 0,
-      zoneNote,
-    },
+    plan: { kind, orderType, status: orderType === 'LIMIT' ? 'PENDING' : 'RUNNING', entry, bufferEnd: entry, sl, tps, zone: null, expireMs: 0, zoneNote },
     meta: { confidence, riskLabel: 'MEDIUM', setup, reason },
   };
 }
 
-// Plan dari area (dipakai Day, Intraday, Swing). Selalu menghasilkan signal:
-//  - harga sudah melewati area → NOW dengan SL dari struktur terakhir
-//  - harga di dalam area → NOW (konfirmasi BB memengaruhi confidence)
-//  - harga di luar area → LIMIT di tepi area terdekat, tanpa batas jarak
 function buildAreaPlan({ title, area, dir, price, refineC, refineName, kind, atrVal, ctx, areaName, rrList, lines }) {
   const { f, pip, gold, symbol } = ctx;
   const tol = gold ? BAND_TOL_PIPS * pip : BAND_TOL_ATR * atrVal;
   const broken = dir === 1 ? price <= area.sl : price >= area.sl;
   const inArea = dir === 1 ? price <= area.top : price >= area.bottom;
-  const trig = findRefineTrigger(refineC, dir);
   const bb = bollingerAt(refineC, refineC.length - 1);
   const notes = [...lines];
   let orderType, entry, baseSL, confidence, setup;
 
   if (broken) {
-    orderType = 'NOW';
-    entry = price;
-    baseSL = recentExtreme(refineC, dir, 20);
-    confidence = 'MEDIUM';
-    setup = `${areaName} tertembus · NOW`;
-    notes.push(`Harga sudah melewati ${areaName}, masuk NOW dengan SL dari struktur ${refineName} terakhir`);
+    orderType = 'NOW'; entry = price; baseSL = recentExtreme(refineC, dir, 20);
+    confidence = 'MEDIUM'; setup = `${areaName} tertembus · NOW`;
+    notes.push(`Harga melewati ${areaName}, masuk NOW`);
   } else if (inArea) {
-    orderType = 'NOW';
-    entry = price;
-    baseSL = area.sl;
-    confidence = trig && trig.strong ? 'HIGH' : 'MEDIUM';
-    setup = `${areaName} · ${trig ? trig.setup : 'belum ada konfirmasi BB'}`;
-    notes.push(trig
-      ? `Harga di ${areaName}, konfirmasi ${trig.setup} (${refineName})`
-      : `Harga di ${areaName}, belum ada konfirmasi BB ${refineName}, hati-hati`);
+    orderType = 'NOW'; entry = price; baseSL = area.sl;
+    confidence = 'MEDIUM'; setup = `${areaName} · NOW`;
+    notes.push(`Harga di dalam ${areaName}`);
   } else {
-    orderType = 'LIMIT';
-    entry = dir === 1 ? area.top : area.bottom;
-    baseSL = area.sl;
+    orderType = 'LIMIT'; entry = dir === 1 ? area.top : area.bottom; baseSL = area.sl;
     const dist = Math.abs(price - entry);
-    const bandRef = bb ? (dir === 1 ? bb.lower : bb.upper) : null;
-    const bandHit = bandRef != null && Math.abs(entry - bandRef) <= tol;
-    confidence = bandHit ? 'HIGH' : 'MEDIUM';
-    setup = `${areaName} · Limit`;
+    confidence = 'MEDIUM'; setup = `${areaName} · Limit`;
     notes.push(`Limit di tepi ${areaName} (${f(entry)}), ${(dist / pip).toFixed(0)} pip dari harga`);
-    if (dist > 3 * atrVal) notes.push('Jarak limit cukup jauh, kemungkinan lama terisi');
-    if (bandRef != null) {
-      notes.push(`BB ${refineName}: limit ${bandHit ? 'bertemu' : 'belum bertemu'} ${dir === 1 ? 'lower' : 'upper'} band (${f(bandRef)})`);
-    }
   }
 
   const head = `${title} ${dir === 1 ? 'BUY' : 'SELL'} ${orderType === 'LIMIT' ? 'LIMIT' : 'NOW'} pada ${symbol}`;
-  return finalizePlan({
-    dir, entry, orderType, baseSL, kind, atrVal, ctx, rrList, confidence, setup,
-    zoneNote: `${title} · ${areaName} · ${orderType}`,
-    head, lines: notes,
-  });
+  return finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, rrList, confidence, setup, zoneNote: `${title} · ${areaName}`, head, lines: notes });
 }
-
-// ═══════════════════════════ SCALPING ═══════════════════════════
 
 function buildScalpPlan({ m1, m5, price, rrList, ctx }) {
   const { f, pip, gold } = ctx;
-  const struct = gold ? m1 : m5;                                       // struktur untuk arah dan SL
+  const struct = gold ? m1 : m5;
   const tfName = gold ? 'M1' : 'M5';
-  const m5c = gold ? aggregateCandles(m1, 5).slice(0, -1) : m5.slice(0, -1); // area S/D M5 (candle yang sudah close)
+  const m5c = gold ? aggregateCandles(m1, 5).slice(0, -1) : m5.slice(0, -1);
   const recent = z => z.dispIdx >= m5c.length - SCALP_ZONE_LOOKBACK_M5;
   const inside = z => price >= z.bottom && price <= z.top;
   const demand = findSDZones(m5c, 1, price, scalpZoneOpts).filter(inside).filter(recent)[0] || null;
@@ -622,43 +474,15 @@ function buildScalpPlan({ m1, m5, price, rrList, ctx }) {
 
   if (zone) {
     dir = demand ? 1 : -1;
-    const zoneTxt = `area ${dir === 1 ? 'demand' : 'supply'} M5 ${f(zone.bottom)} - ${f(zone.top)}`;
-
-    if (SCALP_ZONE_REQUIRE_BIAS) {
-      const b5 = structureBias(m5c, SCALP_PIVOT);
-      if (b5.dir !== dir) {
-        return { plan: null, reason: `Scalping: harga di ${zoneTxt}, tapi bias M5 ${b5.dir === 0 ? 'belum jelas' : (b5.dir === 1 ? 'bullish' : 'bearish')}, tidak diambil.` };
-      }
-    }
-    if (SCALP_ZONE_NEEDS_CONFIRM) {
-      const r = m1Reaction(struct, dir, price, ctx);
-      if (!r.ok) return { plan: null, reason: `Scalping: harga di ${zoneTxt}, menunggu reaksi ${tfName} (${r.why}).` };
-      lines.push(`Reaksi ${tfName} menembus ${f(r.breakLevel)}`);
-    }
-
     baseSL = zone.sl;
-    lines.push(`Harga di ${zoneTxt}`);
-    lines.push(init.dir === dir
-      ? `Arah ${tfName} ${init.src} searah`
-      : `Hati-hati: arah ${tfName} ${init.src} berlawanan, reaksi belum terbukti`);
-    confidence = init.dir === dir ? 'HIGH' : 'MEDIUM';
-    setup = `Area S/D M5 ${dir === 1 ? 'demand' : 'supply'}`;
+    lines.push(`Harga di area ${dir === 1 ? 'demand' : 'supply'} M5`);
+    confidence = 'HIGH'; setup = `Area S/D M5`;
   } else {
     dir = init.dir;
     const pivot = dir === 1 ? lastL : lastH;
-    const pivotOk = !!pivot && (dir === 1 ? pivot.p < price : pivot.p > price);
-    baseSL = pivotOk ? pivot.p : recentExtreme(struct, dir, 10);
+    baseSL = (pivot && (dir === 1 ? pivot.p < price : pivot.p > price)) ? pivot.p : recentExtreme(struct, dir, 10);
     lines.push(`Di luar area S/D M5, arah awal ${tfName} (${init.src}) → NOW`);
-    lines.push(areaNote(m5c, price, ctx));
-    confidence = /BOS|Struktur/.test(init.src) ? 'HIGH' : 'MEDIUM';
-    setup = `Arah awal ${tfName} (NOW)`;
-  }
-
-  const opp = findSDZones(m5c, -dir, price, scalpZoneOpts).filter(recent)[0];
-  if (opp && opp.dist <= SCALP_NEAR_ZONE_PIPS * pip) {
-    const oppName = dir === 1 ? 'supply' : 'demand';
-    const distTxt = opp.dist === 0 ? 'sudah di dalam' : `${(opp.dist / pip).toFixed(0)} pip ${dir === 1 ? 'di atas' : 'di bawah'}`;
-    lines.push(`Hati-hati, ada ${oppName} M5 ${f(opp.bottom)} - ${f(opp.top)} (${distTxt}), berpotensi menahan ${dir === 1 ? 'BUY' : 'SELL'}`);
+    confidence = 'MEDIUM'; setup = `Arah awal ${tfName} (NOW)`;
   }
 
   return finalizePlan({
@@ -669,82 +493,30 @@ function buildScalpPlan({ m1, m5, price, rrList, ctx }) {
   });
 }
 
-// ═══════════════════════════ DAY TRADING ═══════════════════════════
-
 function buildDayPlan({ m5, m15, price, rrList, ctx }) {
   const bos = findLastBOS(m15, DAY_PIVOT);
   const init = analyzePureSMCStructure(m15);
   const dir = bos ? bos.dir : init.dir;
-
   const area15 = (bos ? pickM15Area(m15, bos, price) : null) || pickZone(m15, dir, price, 96);
   const refined = area15 ? refineZone(m5, area15, dir, price, 120) : null;
   const z5 = refined || pickZone(m5, dir, price, 120);
-
-  let area, areaName, refineNote;
-  if (z5) {
-    area = z5;
-    areaName = 'Zona S/D M5';
-    refineNote = refined ? 'Refine M5 berada di dalam area M15' : 'Refine M5 terdekat searah bias';
-  } else if (area15) {
-    area = area15;
-    areaName = 'Zona S/D M15';
-    refineNote = 'Refine M5 belum ada, memakai area M15';
-  } else {
-    area = swingArea(m5, dir, 20);
-    areaName = 'Level swing M5';
-    refineNote = 'Area S/D belum ada, memakai swing M5 terakhir';
-  }
-
-  const biasNote = bos
-    ? `Bias M15: BOS ${dir === 1 ? 'bullish' : 'bearish'} di ${ctx.f(bos.level)}`
-    : `Bias M15: struktur ${init.src}`;
-
-  return buildAreaPlan({
-    title: 'Day Trading', area, dir, price, refineC: m5, refineName: 'M5',
-    kind: 'day', atrVal: atrOf(m15, ctx.pip), ctx, areaName, rrList,
-    lines: [biasNote, refineNote],
-  });
+  const area = z5 || area15 || swingArea(m5, dir, 20);
+  const areaName = z5 ? 'Zona S/D M5' : (area15 ? 'Zona S/D M15' : 'Level swing M5');
+  return buildAreaPlan({ title: 'Day Trading', area, dir, price, refineC: m5, refineName: 'M5', kind: 'day', atrVal: atrOf(m15, ctx.pip), ctx, areaName, rrList, lines: [`Bias M15: ${init.src}`] });
 }
-
-// ═══════════════════════════ INTRADAY ═══════════════════════════
 
 function buildIntradayPlan({ m15, price, rrList, ctx }) {
   const h1 = aggregateCandles(m15, 60);
   const bos = findLastBOS(h1, DAY_PIVOT);
   const init = analyzePureSMCStructure(h1);
   const dir = bos ? bos.dir : init.dir;
-
   const area1h = pickZone(h1, dir, price, 72);
   const refined = area1h ? refineZone(m15, area1h, dir, price, 96) : null;
   const z15 = refined || pickZone(m15, dir, price, 96);
-
-  let area, areaName, refineNote;
-  if (z15) {
-    area = z15;
-    areaName = 'Zona S/D M15';
-    refineNote = refined ? 'Refine M15 berada di dalam area H1' : 'Refine M15 terdekat searah bias';
-  } else if (area1h) {
-    area = area1h;
-    areaName = 'Zona S/D H1';
-    refineNote = 'Refine M15 belum ada, memakai area H1';
-  } else {
-    area = swingArea(m15, dir, 20);
-    areaName = 'Level swing M15';
-    refineNote = 'Area S/D belum ada, memakai swing M15 terakhir';
-  }
-
-  const biasNote = bos
-    ? `Bias H1: BOS ${dir === 1 ? 'bullish' : 'bearish'} di ${ctx.f(bos.level)}`
-    : `Bias H1: struktur ${init.src}`;
-
-  return buildAreaPlan({
-    title: 'Intraday', area, dir, price, refineC: m15, refineName: 'M15',
-    kind: 'intraday', atrVal: atrOf(h1, ctx.pip), ctx, areaName, rrList,
-    lines: [biasNote, refineNote],
-  });
+  const area = z15 || area1h || swingArea(m15, dir, 20);
+  const areaName = z15 ? 'Zona S/D M15' : (area1h ? 'Zona S/D H1' : 'Level swing M15');
+  return buildAreaPlan({ title: 'Intraday', area, dir, price, refineC: m15, refineName: 'M15', kind: 'intraday', atrVal: atrOf(h1, ctx.pip), ctx, areaName, rrList, lines: [`Bias H1: ${init.src}`] });
 }
-
-// ═══════════════════════════ SWING ═══════════════════════════
 
 function buildSwingPlan({ m15, price, rrList, ctx }) {
   const h4 = aggregateCandles(m15, 240);
@@ -752,38 +524,48 @@ function buildSwingPlan({ m15, price, rrList, ctx }) {
   const bos = findLastBOS(h4, DAY_PIVOT);
   const init = analyzePureSMCStructure(h4);
   const dir = bos ? bos.dir : init.dir;
-
   const area4 = pickZone(h4, dir, price, h4.length);
   const refined = area4 ? refineZone(h1, area4, dir, price, h1.length) : null;
   const z1 = refined || pickZone(h1, dir, price, h1.length);
-
-  let area, areaName, refineNote;
-  if (z1) {
-    area = z1;
-    areaName = 'Zona S/D H1';
-    refineNote = refined ? 'Refine H1 berada di dalam area H4' : 'Refine H1 terdekat searah bias';
-  } else if (area4) {
-    area = area4;
-    areaName = 'Zona S/D H4';
-    refineNote = 'Refine H1 belum ada, memakai area H4';
-  } else {
-    area = swingArea(h1, dir, 20);
-    areaName = 'Level swing H1';
-    refineNote = 'Area S/D belum ada, memakai swing H1 terakhir';
-  }
-
-  const biasNote = bos
-    ? `Bias H4: BOS ${dir === 1 ? 'bullish' : 'bearish'} di ${ctx.f(bos.level)}`
-    : `Bias H4: struktur ${init.src}`;
-
-  return buildAreaPlan({
-    title: 'Swing', area, dir, price, refineC: h1, refineName: 'H1',
-    kind: 'swing', atrVal: atrOf(h4, ctx.pip), ctx, areaName, rrList,
-    lines: [biasNote, refineNote],
-  });
+  const area = z1 || area4 || swingArea(h1, dir, 20);
+  const areaName = z1 ? 'Zona S/D H1' : (area4 ? 'Zona S/D H4' : 'Level swing H1');
+  return buildAreaPlan({ title: 'Swing', area, dir, price, refineC: h1, refineName: 'H1', kind: 'swing', atrVal: atrOf(h4, ctx.pip), ctx, areaName, rrList, lines: [`Bias H4: ${init.src}`] });
 }
 
-// ═══════════════════════════ OUTPUT ═══════════════════════════
+// Handler khusus untuk Vision Z (Upload Gambar Chart)
+function buildVisionSignalPlan({ visionData, price, symbol, dec }) {
+  const f = v => Number(v).toFixed(dec);
+  const dir = visionData?.signal?.toUpperCase() === 'SELL' ? -1 : 1;
+  const entry = Number(visionData?.entry) || price;
+  
+  let sl;
+  if (visionData?.sl && Number(visionData.sl) > 0) {
+    sl = Number(visionData.sl);
+  } else {
+    const defaultDist = 25 * 0.1; // 25 pip default pengaman
+    sl = dir === 1 ? entry - defaultDist : entry + defaultDist;
+  }
+
+  const risk = Math.abs(entry - sl);
+  const tps = [
+    entry + dir * 1.0 * risk, // TP1 (1:1)
+    entry + dir * 2.0 * risk, // TP2 (1:2)
+    entry + dir * 3.0 * risk, // TP3 (1:3)
+  ];
+
+  const reason = [
+    `[Vision Z Upload] Analisis Gambar Chart ${symbol}.`,
+    `Alasan Visual / Struktur: ${visionData?.reason || 'SL diletakkan sesuai struktur swing pada gambar.'}`,
+    `Entry Market ${f(entry)}, SL Struktur di ${f(sl)} (Jarak: ${risk.toFixed(2)}).`,
+    `TP1 (1:1): ${f(tps[0])} • TP2 (1:2): ${f(tps[1])} • TP3 (1:3): ${f(tps[2])}.`,
+  ].join(' • ');
+
+  return {
+    dir,
+    plan: { kind: 'scalp', orderType: 'NOW', status: 'RUNNING', entry, bufferEnd: entry, sl, tps, zone: null, expireMs: 0, zoneNote: 'Vision Z · Structure SL & TP' },
+    meta: { confidence: 'HIGH', riskLabel: 'MEDIUM', setup: 'VISION_Z', reason },
+  };
+}
 
 function toSignal(result, style, ctx) {
   const { dir, plan, meta } = result;
@@ -835,6 +617,16 @@ export default async function handler(req, res) {
 
     const noSignal = reason => res.status(200).json({ ok: true, signal: null, reason });
 
+    // Deteksi apakah permintaan dari Vision Z atau Signal Z Live
+    const analysisMode = body.analysisMode || 'live';
+    const price = Number(body.currentPrice) || 2000;
+
+    if (analysisMode === 'vision') {
+      const result = buildVisionSignalPlan({ visionData: body.visionData, price, symbol, dec });
+      return res.status(200).json({ ok: true, signal: toSignal(result, style, ctx) });
+    }
+
+    // Logika Live Stream (Signal Z) seperti biasa
     let m1 = cleanCandles(body.candles?.m1);
     let m5 = cleanCandles(body.candles?.m5);
     let m15 = cleanCandles(body.candles?.m15);
@@ -847,40 +639,36 @@ export default async function handler(req, res) {
     if (usesM5 && m5.length < NEED.m5) m5 = (await getCandles(symbol, '5m', NEED.m5, apiKey)).candles;
     if (usesM15 && m15.length < NEED.m15) m15 = (await getCandles(symbol, '15m', NEED.m15, apiKey)).candles;
 
-    const price = Number(body.currentPrice) || lastClosePrice(m1) || lastClosePrice(m5) || lastClosePrice(m15) || 2000;
+    const livePrice = Number(body.currentPrice) || lastClosePrice(m1) || lastClosePrice(m5) || lastClosePrice(m15) || 2000;
 
     if (usesM1) {
-      if (m1.length < MIN_BARS.m1) return noSignal(`Data candle M1 belum cukup (butuh ±${NEED.m1} candle).`);
-      m1 = mergeLiveBar(m1, price, 1);
+      if (m1.length < MIN_BARS.m1) return noSignal(`Data candle M1 belum cukup.`);
+      m1 = mergeLiveBar(m1, livePrice, 1);
     }
     if (usesM5) {
       if (m5.length < MIN_BARS.m5) return noSignal('Data candle M5 belum cukup.');
-      m5 = mergeLiveBar(m5, price, 5);
+      m5 = mergeLiveBar(m5, livePrice, 5);
     }
     if (usesM15) {
       const minM15 = style.kind === 'swing' ? MIN_BARS.m15Swing : MIN_BARS.m15;
-      if (m15.length < minM15) return noSignal(`Data candle M15 belum cukup (butuh ±${minM15} candle).`);
-      m15 = mergeLiveBar(m15, price, 15);
+      if (m15.length < minM15) return noSignal(`Data candle M15 belum cukup.`);
+      m15 = mergeLiveBar(m15, livePrice, 15);
     }
 
     let result;
-    if (style.kind === 'scalp') result = buildScalpPlan({ m1, m5, price, rrList: style.rr, ctx });
-    else if (style.kind === 'day') result = buildDayPlan({ m5, m15, price, rrList: style.rr, ctx });
-    else if (style.kind === 'intraday') result = buildIntradayPlan({ m15, price, rrList: style.rr, ctx });
-    else if (style.kind === 'swing') result = buildSwingPlan({ m15, price, rrList: style.rr, ctx });
-    else return noSignal(`Mode ${styleKey} belum tersedia. Gunakan Scalping, Day Trading, Intraday, atau Swing.`);
+    if (style.kind === 'scalp') result = buildScalpPlan({ m1, m5, price: livePrice, rrList: style.rr, ctx });
+    else if (style.kind === 'day') result = buildDayPlan({ m5, m15, price: livePrice, rrList: style.rr, ctx });
+    else if (style.kind === 'intraday') result = buildIntradayPlan({ m15, price: livePrice, rrList: style.rr, ctx });
+    else if (style.kind === 'swing') result = buildSwingPlan({ m15, price: livePrice, rrList: style.rr, ctx });
+    else return noSignal(`Mode ${styleKey} belum tersedia.`);
 
     if (!result.plan) return noSignal(result.reason);
 
     if (style.kind === 'intraday') {
-      // Maksimal 1 signal intraday per hari (hari WIB). Kalau sudah ada, kembalikan signal yang sama.
       const dayKey = `intraday_sig_${symbol}_${wibDate()}`;
       const stored = await kvGetJSON(dayKey);
       if (stored) {
-        return res.status(200).json({
-          ok: true,
-          signal: { ...stored, reason: `Signal intraday hari ini sudah dibuat. ${stored.reason}` },
-        });
+        return res.status(200).json({ ok: true, signal: { ...stored, reason: `Signal intraday hari ini sudah dibuat. ${stored.reason}` } });
       }
       const sig = toSignal(result, style, ctx);
       await kvSetJSON(dayKey, sig, 60 * 60 * 36);
