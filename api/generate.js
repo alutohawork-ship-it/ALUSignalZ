@@ -1,7 +1,10 @@
 // api/generate.js
-// v37
-//  - Scalping (AGRESIF entry): Pure SMC + Struktur M1 + Bollinger M1 (konfirmasi) + Minimum SL 25-30 pip.
-//  - Day Trading: BOS M15 (bias) → Order Block M15 (area) → Trigger M5 Bollinger Band (20, 2).
+// v39
+//  - Scalping: setup Bollinger M1 (reject band + struktur, kontinuitas mid band) sebagai penentu arah.
+//    Tanpa setup BB, fallback ke Pure SMC (confidence MEDIUM), kecuali SCALP_REQUIRE_BB = true.
+//  - Day Trading: BOS M15 (bias) → Order Block M15 → refine ke OB M5 → entry:
+//      · harga di luar area  → LIMIT di tepi area (maks. 50 pip dari harga)
+//      · harga sudah di area → NOW, hanya jika konfirmasi Bollinger Band M5
 //    Tanpa area valid, sinyal tidak dikeluarkan.
 //  - Pure Market Execution (NOW) dengan SL aman anti-noise.
 //  - TickerLayer API Key Rotations terintegrasi utuh.
@@ -32,12 +35,12 @@ const GOLD_SYMBOLS = ['XAUUSD', 'XAUUSDX'];
 
 const STYLES = {
   'Scalping': {
-    label: 'Scalping · Pure SMC + M1 Structure + BB M1 (Min SL 25-30 Pip · TP 1:1 · 1:2 · 1:3)',
+    label: 'Scalping · Pure SMC + BB M1 (Reject & Kontinuitas) · Min SL 25-30 Pip · TP 1:1 · 1:2 · 1:3',
     entryStyle: 'Agresif', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
   'Day Trading': {
-    label: 'Day Trading · M15 BOS + Order Block + M5 Bollinger Band (SL 50-120 Pip · TP 1:1 · 1:1.5 · 1:2)',
-    entryStyle: 'Konservatif', mode: 'MARKET', kind: 'day', rr: [1.0, 1.5, 2.0],
+    label: 'Day Trading · M15 BOS + OB M5/M15 + BB M5 · Limit di tepi area (SL 50-120 Pip · TP 1:1 · 1:1.5 · 1:2)',
+    entryStyle: 'Konservatif', mode: 'LIMIT', kind: 'day', rr: [1.0, 1.5, 2.0],
   },
   'Intraday': { label: 'Intraday', kind: 'intraday', rr: [] },
   'Swing': { label: 'Swing', kind: 'swing', rr: [3.0] },
@@ -47,13 +50,17 @@ const STYLES = {
 const SCALP_PIVOT = 2;
 const MIN_SL_PIPS = 25;
 const MAX_SL_PIPS = 30;
-const PIP_SIZE = 0.1; // XAUUSD: 1 pip = 0.1
+const PIP_SIZE = 0.1;          // XAUUSD: 1 pip = 0.1
+const SCALP_BB_LOOKBACK = 5;   // sentuhan band/mid dicari dalam 5 candle M1 terakhir
+const SCALP_REQUIRE_BB = false; // true = tanpa setup BB, tidak ada sinyal scalping
 
 // ── Day Trading ──
-const DAY_PIVOT = 3;           // pivot M15 untuk BOS
-const DAY_BOS_LOOKBACK = 60;   // BOS dicari dalam 60 candle M15 terakhir
-const DAY_OB_LOOKBACK = 12;    // order block dicari maks. 12 candle sebelum BOS
-const DAY_ZONE_TOL_PIPS = 10;  // toleransi harga dari tepi area
+const DAY_PIVOT = 3;            // pivot M15 untuk BOS
+const DAY_BOS_LOOKBACK = 60;    // BOS dicari dalam 60 candle M15 terakhir
+const DAY_OB_LOOKBACK = 12;     // order block M15 dicari maks. 12 candle sebelum BOS
+const DAY_REFINE_LOOKBACK = 60; // refine ke OB M5 dicari dalam 60 candle M5 terakhir
+const DAY_LIMIT_MAX_PIPS = 50;  // limit hanya dipasang jika harga maks. 50 pip dari tepi area
+const DAY_ZONE_TOL_PIPS = 10;   // toleransi harga untuk konfirmasi BB pada harga limit
 const DT_MIN_SL_PIPS = 50;
 const DT_MAX_SL_PIPS = 120;
 const DT_SL_BUFFER_PIPS = 5;
@@ -248,38 +255,82 @@ function analyzePureSMCStructure(m1) {
   return { dir: lastC >= m1[m1.length - 2].c ? 1 : -1, src: 'M1 Order Flow' };
 }
 
-// ═══════════════════════════ SCALPING (Pure SMC + Min SL 25-30 Pip + BB M1) ═══════════════════════════
+// ═══════════════════════════ SCALPING (Pure SMC + Setup BB M1) ═══════════════════════════
 
-// BB M1 sebagai konfirmasi: hanya memengaruhi confidence dan label, tidak memblokir sinyal
-function scalpBBConfluence(m1, dir) {
+// Status struktur M1 dari pivot yang sudah terkonfirmasi
+function m1Structure(m1) {
+  const { highs, lows } = findPivots(m1, SCALP_PIVOT);
+  const lastC = m1[m1.length - 1].c;
+  const sh = highs.slice(-2);
+  const sl = lows.slice(-2);
+  const lastHigh = sh.length ? sh[sh.length - 1] : null;
+  const lastLow = sl.length ? sl[sl.length - 1] : null;
+  const prevHigh = sh.length === 2 ? sh[0] : null;
+  const prevLow = sl.length === 2 ? sl[0] : null;
+  return {
+    bosUp: !!lastHigh && lastC > lastHigh.p,
+    bosDown: !!lastLow && lastC < lastLow.p,
+    higherHigh: !!prevHigh && lastHigh.p > prevHigh.p,
+    higherLow: !!prevLow && lastLow.p > prevLow.p,
+    lowerHigh: !!prevHigh && lastHigh.p < prevHigh.p,
+    lowerLow: !!prevLow && lastLow.p < prevLow.p,
+  };
+}
+
+// Setup BB M1:
+//  1. REJECT SELL : sentuh upper band, close kembali di bawah upper, struktur BOS turun atau LH
+//  2. REJECT BUY  : sentuh lower band, close kembali di atas lower, struktur BOS naik atau HL
+//  3. KONTINUITAS BUY : tren HH+HL, pullback ke mid band, close reclaim mid, belum di upper band
+//  4. KONTINUITAS SELL: tren LH+LL, pullback ke mid band, close reject mid, belum di lower band
+function detectScalpBBSetup(m1) {
   const n = m1.length;
   const cur = m1[n - 1];
-  const prev = m1[n - 2];
   const bbCur = bollingerAt(m1, n - 1);
-  const bbPrev = bollingerAt(m1, n - 2);
-  if (!bbCur || !bbPrev) return { label: 'data belum cukup', pullback: false, mid: null };
+  if (!bbCur) return null;
 
-  if (dir === 1) {
-    if (prev.l <= bbPrev.mid && cur.c > bbCur.mid && cur.c > cur.o) {
-      return { label: 'pullback ke mid band lalu reclaim, searah', pullback: true, mid: bbCur.mid };
-    }
-    if (cur.c > bbCur.upper) return { label: 'harga di atas upper band (overextended)', pullback: false, mid: bbCur.mid };
-    if (cur.c > bbCur.mid) return { label: 'harga di atas mid band, searah', pullback: false, mid: bbCur.mid };
-    return { label: 'harga di bawah mid band, berlawanan', pullback: false, mid: bbCur.mid };
+  const hist = [];
+  for (let i = Math.max(0, n - SCALP_BB_LOOKBACK); i < n; i++) {
+    const bb = bollingerAt(m1, i);
+    if (bb) hist.push({ c: m1[i], bb });
   }
+  if (!hist.length) return null;
 
-  if (prev.h >= bbPrev.mid && cur.c < bbCur.mid && cur.c < cur.o) {
-    return { label: 'pullback ke mid band lalu reject, searah', pullback: true, mid: bbCur.mid };
+  const touchedUpper = hist.some(x => x.c.h >= x.bb.upper);
+  const touchedLower = hist.some(x => x.c.l <= x.bb.lower);
+  const pulledToMidFromAbove = hist.some(x => x.c.l <= x.bb.mid);
+  const pulledToMidFromBelow = hist.some(x => x.c.h >= x.bb.mid);
+
+  const s = m1Structure(m1);
+  const trendUp = s.higherHigh && s.higherLow;
+  const trendDown = s.lowerHigh && s.lowerLow;
+  const bullCandle = cur.c > cur.o;
+  const bearCandle = cur.c < cur.o;
+
+  if (touchedUpper && cur.c < bbCur.upper && (s.bosDown || s.lowerHigh)) {
+    return { dir: -1, type: 'REJECT', label: 'reject upper band + struktur turun', bb: bbCur };
   }
-  if (cur.c < bbCur.lower) return { label: 'harga di bawah lower band (overextended)', pullback: false, mid: bbCur.mid };
-  if (cur.c < bbCur.mid) return { label: 'harga di bawah mid band, searah', pullback: false, mid: bbCur.mid };
-  return { label: 'harga di atas mid band, berlawanan', pullback: false, mid: bbCur.mid };
+  if (touchedLower && cur.c > bbCur.lower && (s.bosUp || s.higherLow)) {
+    return { dir: 1, type: 'REJECT', label: 'reject lower band + struktur naik', bb: bbCur };
+  }
+  if (trendUp && pulledToMidFromAbove && cur.c > bbCur.mid && cur.c < bbCur.upper && bullCandle) {
+    return { dir: 1, type: 'CONT', label: 'kontinuitas tren naik, reclaim mid band', bb: bbCur };
+  }
+  if (trendDown && pulledToMidFromBelow && cur.c < bbCur.mid && cur.c > bbCur.lower && bearCandle) {
+    return { dir: -1, type: 'CONT', label: 'kontinuitas tren turun, reject mid band', bb: bbCur };
+  }
+  return null;
 }
 
 function buildScalpPlan({ m1, price, rrList, symbol, dec }) {
   const f = v => Number(v).toFixed(dec);
+
+  const bbSetup = detectScalpBBSetup(m1);
+  if (!bbSetup && SCALP_REQUIRE_BB) {
+    return { plan: null, reason: 'Scalping: belum ada setup BB M1 (reject band atau kontinuitas mid band).' };
+  }
+
   const smc = analyzePureSMCStructure(m1);
-  const dir = smc.dir;
+  const dir = bbSetup ? bbSetup.dir : smc.dir;
   const entry = price;
 
   const minRisk = MIN_SL_PIPS * PIP_SIZE;
@@ -307,14 +358,18 @@ function buildScalpPlan({ m1, price, rrList, symbol, dec }) {
   const tps = rrList.map(x => entry + dir * x * risk);
   const riskLabel = 'MEDIUM';
 
-  const bb = scalpBBConfluence(m1, dir);
-  const confidence = bb.pullback ? 'HIGH' : 'MEDIUM';
-  const setup = bb.pullback ? 'M1 PURE SMC + BB PULLBACK' : 'M1 PURE SMC MIN SL';
+  const setupName = bbSetup
+    ? (bbSetup.type === 'REJECT' ? 'M1 BB REJECT + SMC' : 'M1 BB KONTINUITAS + SMC')
+    : 'M1 PURE SMC MIN SL (tanpa setup BB)';
+  const confidence = bbSetup ? 'HIGH' : 'MEDIUM';
+  const bbText = bbSetup
+    ? `Setup BB: ${bbSetup.label} (BB mid ${f(bbSetup.bb.mid)}, upper ${f(bbSetup.bb.upper)}, lower ${f(bbSetup.bb.lower)})`
+    : 'Setup BB: tidak ada, memakai arah SMC';
 
   const reason = [
-    `Scalping Agresif (Pure SMC + Min SL 25-30 Pip + BB M1) ${dir === 1 ? 'BUY NOW' : 'SELL NOW'} pada ${symbol}.`,
+    `Scalping ${bbSetup ? (bbSetup.type === 'REJECT' ? 'Reject' : 'Kontinuitas') : 'SMC'} ${dir === 1 ? 'BUY NOW' : 'SELL NOW'} pada ${symbol}.`,
     `Struktur M1: ${smc.src}.`,
-    `BB M1 (${BB_PERIOD}, ${BB_MULT}): ${bb.label}${bb.mid != null ? ` (mid ${f(bb.mid)})` : ''}.`,
+    `${bbText}.`,
     `Entry ${f(entry)}, SL (${(risk / PIP_SIZE).toFixed(0)} pip) di ${f(sl)}.`,
     `TP1 1:${rrList[0]}, TP2 1:${rrList[1]}, TP3 1:${rrList[2]}.`,
   ].join(' • ');
@@ -331,13 +386,13 @@ function buildScalpPlan({ m1, price, rrList, symbol, dec }) {
       tps,
       zone: null,
       expireMs: 0,
-      zoneNote: 'Scalp M1 · Pure SMC + BB M1 (Min 25-30 Pip SL)',
+      zoneNote: `Scalp M1 · ${setupName}`,
     },
-    meta: { confidence, riskLabel, setup, reason },
+    meta: { confidence, riskLabel, setup: setupName, reason },
   };
 }
 
-// ═══════════════════════════ DAY TRADING (BOS M15 + Order Block M15 + BB M5) ═══════════════════════════
+// ═══════════════════════════ DAY TRADING (BOS M15 + OB M15/M5 + BB M5 + LIMIT) ═══════════════════════════
 
 // BOS terbaru: candle yang close menembus swing high/low yang sudah terkonfirmasi
 function findLastBOS(candles, L) {
@@ -354,7 +409,7 @@ function findLastBOS(candles, L) {
   return null;
 }
 
-// Order block: candle lawan arah terakhir sebelum BOS, belum ditembus close setelahnya
+// Order block M15: candle lawan arah terakhir sebelum BOS, belum ditembus close setelahnya
 function findOrderBlock(m15, bos) {
   const minIdx = Math.max(0, bos.idx - DAY_OB_LOOKBACK);
   for (let k = bos.idx - 1; k >= minIdx; k--) {
@@ -370,7 +425,24 @@ function findOrderBlock(m15, bos) {
   return null;
 }
 
-// Trigger M5: pullback ke Bollinger middle band, lalu close kembali searah dengan candle konfirmasi
+// Refine ke M5: candle lawan arah terakhir di M5 yang overlap dengan area M15, belum ditembus setelahnya
+function refineZoneM5(m5, zone15, dir) {
+  const minIdx = Math.max(0, m5.length - 1 - DAY_REFINE_LOOKBACK);
+  for (let k = m5.length - 2; k >= minIdx; k--) {
+    const c = m5[k];
+    if (c.h < zone15.bottom || c.l > zone15.top) continue;
+    let zone = null;
+    if (dir === 1 && c.c < c.o) zone = { top: c.o, bottom: c.c, sl: c.l };
+    if (dir === -1 && c.c > c.o) zone = { top: c.c, bottom: c.o, sl: c.h };
+    if (zone) {
+      const broken = m5.slice(k + 1).some(x => (dir === 1 ? x.c < zone.sl : x.c > zone.sl));
+      return broken ? null : zone;
+    }
+  }
+  return null;
+}
+
+// Trigger M5 (dipakai saat harga sudah di dalam area): pullback ke BB middle lalu close kembali searah
 function findDayTrigger(m5, dir) {
   const n = m5.length;
   const cur = m5[n - 1];
@@ -396,36 +468,74 @@ function buildDayPlan({ m5, m15, price, rrList, symbol, dec }) {
   const bos = findLastBOS(m15, DAY_PIVOT);
   if (!bos) return { plan: null, reason: 'Day Trading: belum ada BOS M15 terbaru sebagai bias.' };
   const dir = bos.dir;
+  const biasTxt = dir === 1 ? 'bullish' : 'bearish';
 
-  const zone = findOrderBlock(m15, bos);
-  if (!zone) {
-    return { plan: null, reason: `Day Trading: bias M15 ${dir === 1 ? 'bullish' : 'bearish'}, tapi belum ada area (order block) yang valid.` };
+  const zone15 = findOrderBlock(m15, bos);
+  if (!zone15) {
+    return { plan: null, reason: `Day Trading: bias M15 ${biasTxt}, tapi belum ada area (order block) yang valid.` };
   }
+
+  const zone5 = refineZoneM5(m5, zone15, dir);
+  const area = zone5 || zone15;
+  const areaName = zone5 ? 'OB M5 (refine)' : 'OB M15';
+  const areaTxt = `${areaName} ${f(area.bottom)} - ${f(area.top)}`;
+
+  // Area sudah ditembus (harga lewat SL area): setup batal
+  const broken = dir === 1 ? price <= area.sl : price >= area.sl;
+  if (broken) return { plan: null, reason: `Day Trading: ${areaTxt} sudah ditembus, setup batal.` };
 
   const tol = DAY_ZONE_TOL_PIPS * PIP_SIZE;
-  const nearZone = dir === 1 ? price <= zone.top + tol : price >= zone.bottom - tol;
-  const notBroken = dir === 1 ? price > zone.sl : price < zone.sl;
-  if (!nearZone || !notBroken) {
-    return { plan: null, reason: `Day Trading: harga belum di area M15 (${f(zone.bottom)} - ${f(zone.top)}).` };
-  }
+  const limitMax = DAY_LIMIT_MAX_PIPS * PIP_SIZE;
+  const bb5 = bollingerAt(m5, m5.length - 1);
+  const inArea = dir === 1 ? price <= area.top : price >= area.bottom;
 
-  const trig = findDayTrigger(m5, dir);
-  if (!trig) return { plan: null, reason: 'Day Trading: harga sudah di area, menunggu konfirmasi Bollinger Band M5.' };
+  let orderType, entry, setup, confidence, bbNote, distPips = '0';
+
+  if (inArea) {
+    // Harga sudah di dalam area: NOW hanya jika ada konfirmasi Bollinger Band M5
+    const trig = findDayTrigger(m5, dir);
+    if (!trig) return { plan: null, reason: `Day Trading: harga di ${areaTxt}, menunggu konfirmasi Bollinger Band M5.` };
+    orderType = 'NOW';
+    entry = price;
+    setup = `${areaName} · ${trig.setup}`;
+    confidence = trig.strong ? 'HIGH' : 'MEDIUM';
+    bbNote = `Trigger M5: ${trig.setup} (BB mid ${f(trig.bbMid)}).`;
+  } else {
+    // Harga di luar area: pasang LIMIT di tepi area terdekat dari harga
+    const nearEdge = dir === 1 ? area.top : area.bottom;
+    const dist = Math.abs(price - nearEdge);
+    if (dist > limitMax) {
+      return { plan: null, reason: `Day Trading: harga ${f(price)} masih ${(dist / PIP_SIZE).toFixed(0)} pip dari ${areaTxt}, menunggu.` };
+    }
+    orderType = 'LIMIT';
+    entry = nearEdge;
+    distPips = (dist / PIP_SIZE).toFixed(0);
+
+    const bandRef = bb5 ? (dir === 1 ? bb5.lower : bb5.upper) : null;
+    const bandHit = bandRef != null && Math.abs(nearEdge - bandRef) <= tol;
+    confidence = bandHit ? 'HIGH' : 'MEDIUM';
+    setup = `${areaName} · Limit`;
+    bbNote = bandRef != null
+      ? `BB M5 (${BB_PERIOD}, ${BB_MULT}): limit ${bandHit ? 'bertemu' : 'belum bertemu'} ${dir === 1 ? 'lower' : 'upper'} band (${f(bandRef)}).`
+      : 'BB M5 belum cukup data.';
+  }
 
   const minRisk = DT_MIN_SL_PIPS * PIP_SIZE;
   const maxRisk = DT_MAX_SL_PIPS * PIP_SIZE;
   const buffer = DT_SL_BUFFER_PIPS * PIP_SIZE;
-  const rawRisk = Math.abs(price - zone.sl) + buffer;
+  const rawRisk = Math.abs(entry - area.sl) + buffer;
   const risk = Math.min(Math.max(rawRisk, minRisk), maxRisk);
-  const entry = price;
   const sl = entry - dir * risk;
   const tps = rrList.map(x => entry + dir * x * risk);
 
   const reason = [
-    `Day Trading (M15 BOS + Order Block + M5 Bollinger Band) ${dir === 1 ? 'BUY NOW' : 'SELL NOW'} pada ${symbol}.`,
-    `Bias M15: BOS ${dir === 1 ? 'bullish' : 'bearish'} di ${f(bos.level)}.`,
-    `Area M15: ${f(zone.bottom)} - ${f(zone.top)}.`,
-    `Trigger M5: ${trig.setup} (BB mid ${f(trig.bbMid)}).`,
+    `Day Trading (BOS M15 + ${areaName} + BB M5) ${dir === 1 ? 'BUY' : 'SELL'} ${orderType === 'LIMIT' ? 'LIMIT' : 'NOW'} pada ${symbol}.`,
+    `Bias M15: BOS ${biasTxt} di ${f(bos.level)}.`,
+    `Area: ${areaTxt}.`,
+    orderType === 'LIMIT'
+      ? `Harga ${f(price)}, limit di ${f(entry)} (${distPips} pip dari harga).`
+      : `Harga ${f(price)} sudah di dalam area.`,
+    bbNote,
     `Entry ${f(entry)}, SL (${(risk / PIP_SIZE).toFixed(0)} pip) di ${f(sl)}.`,
     rrList.map((x, i) => `TP${i + 1} 1:${x}`).join(', ') + '.',
   ].join(' • ');
@@ -434,20 +544,20 @@ function buildDayPlan({ m5, m15, price, rrList, symbol, dec }) {
     dir,
     plan: {
       kind: 'day',
-      orderType: 'NOW',
-      status: 'RUNNING',
+      orderType,
+      status: orderType === 'LIMIT' ? 'PENDING' : 'RUNNING',
       entry,
       bufferEnd: entry,
       sl,
       tps,
       zone: null,
       expireMs: 0,
-      zoneNote: 'Day · M15 OB + M5 BB',
+      zoneNote: `Day · ${areaTxt} · ${orderType}`,
     },
     meta: {
-      confidence: trig.strong ? 'HIGH' : 'MEDIUM',
+      confidence,
       riskLabel: 'MEDIUM',
-      setup: trig.setup,
+      setup,
       reason,
     },
   };
@@ -500,6 +610,7 @@ export default async function handler(req, res) {
     if (!result.plan) return res.status(200).json(noSignal(result.reason));
 
     const { dir, plan, meta } = result;
+    const isLimit = plan.orderType === 'LIMIT';
     const r = v => Number(v.toFixed(dec));
     const tps = plan.tps;
 
@@ -507,10 +618,10 @@ export default async function handler(req, res) {
       ok: true,
       signal: {
         signal: dir === 1 ? 'BUY' : 'SELL',
-        mode: 'MARKET',
-        orderType: 'NOW',
-        orderLabel: orderLabel(dir, 'NOW'),
-        status: 'RUNNING',
+        mode: isLimit ? 'LIMIT' : 'MARKET',
+        orderType: plan.orderType,
+        orderLabel: orderLabel(dir, plan.orderType),
+        status: plan.status,
         entry: r(plan.entry),
         bufferEnd: r(plan.entry),
         sl: r(plan.sl),
@@ -525,7 +636,7 @@ export default async function handler(req, res) {
         setup: meta.setup,
         entryStyle: style.entryStyle,
         setupLabel: style.label,
-        zoneLabel: 'Market Execution Zone',
+        zoneLabel: isLimit ? 'Limit Entry Zone' : 'Market Execution Zone',
         zoneNote: plan.zoneNote,
         reason: meta.reason,
       },
