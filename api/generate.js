@@ -1,5 +1,5 @@
 // api/generate.js
-// v51.1 (Integrated with Gutsai Gateway for Visual mode)
+// v51.2 (Universal Model Support via Gutsai Gateway)
 //  - Scalping:
 //      · XAUUSD: struktur M1, area S/D M5 dibentuk dari candle M1. SL 25-30 pip dari struktur.
 //      · Pair lain: struktur M5 dan area S/D M5 langsung. SL/TP mengikuti struktur, dibatasi ATR M5.
@@ -9,10 +9,10 @@
 //      zona terkuat (Supply/Demand/OB/FVG) dipilih, tidak terkunci ke arah bias.
 //  - Intraday: area S/D H1 → refine M15. DUA ARAH. Maksimal 1 signal per hari (WIB), disimpan di KV.
 //  - Swing: area S/D H4 → refine H1. Selalu ada signal.
-//  - Visual: upload gambar chart → dianalisa AI vision via Gutsai → entry/SL sesuai struktur gambar, TP 1:1 · 1:2 · 1:3.
+//  - Visual: upload gambar chart → dianalisa AI vision via Gutsai (bebas ganti model) → entry/SL sesuai struktur gambar, TP 1:1 · 1:2 · 1:3.
 //  - Pip per pair: XAUUSD 0.1; forex 10^-(desimal-1); indeks dan BTC 1 (lihat PIP_OVERRIDE).
 //  - TickerLayer API Key Rotations terintegrasi utuh.
-//  - Butuh env GUTSAI_API_KEY atau ANTHROPIC_API_KEY untuk mode Visual (opsional VISION_MODEL).
+//  - Butuh env GUTSAI_API_KEY (opsional AI_MODEL / VISION_MODEL untuk atur model bebas).
 
 export const config = { api: { bodyParser: { sizeLimit: '6mb' } } };
 
@@ -780,7 +780,7 @@ function buildSwingPlan({ m15, price, rrList, ctx }) {
   } else if (area4) {
     area = area4;
     areaName = 'Zona S/D H4';
-    refineNote = 'Refine H1 belum ada, memakai area H4';
+    refineNote = Refine H1 belum ada, memakai area H4;
   } else {
     area = swingArea(h1, dir, 20);
     areaName = 'Level swing H1';
@@ -798,7 +798,7 @@ function buildSwingPlan({ m15, price, rrList, ctx }) {
   });
 }
 
-// ═══════════════════════════ VISUAL (GAMBAR CHART) - VIA GUTSAI GATEWAY ═══════════════════════════
+// ═══════════════════════════ VISUAL (GAMBAR CHART) - UNIVERSAL MODEL VIA GUTSAI ═══════════════════════════
 
 async function buildVisualPlan({ body, ctx, rrList }) {
   const { f, pip, symbol } = ctx;
@@ -825,6 +825,9 @@ Balas HANYA JSON tanpa teks lain:
 
   let out;
   try {
+    // Model dibuat bebas/dinamis: membaca dari env AI_MODEL / VISION_MODEL, default ke gpt-4o agar universal & kompatibel
+    const chosenModel = process.env.AI_MODEL || process.env.VISION_MODEL || 'gpt-4o';
+
     const r = await fetch('https://api.gutsai.id/v1/chat/completions', {
       method: 'POST',
       headers: { 
@@ -832,7 +835,7 @@ Balas HANYA JSON tanpa teks lain:
         'Content-Type': 'application/json' 
       },
       body: JSON.stringify({
-        model: process.env.VISION_MODEL || 'guts/claude-3-5-sonnet',
+        model: chosenModel,
         max_tokens: 800,
         messages: [{ 
           role: 'user', 
