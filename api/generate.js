@@ -1,13 +1,11 @@
 // api/generate.js
-// v48
+// v49
 //  - Scalping:
 //      · harga di area demand M5 → BUY NOW, area supply M5 → SELL NOW (area dari candle M5 yang sudah close)
-//      · di luar kedua area → NOW searah arah kuat:
-//          1) struktur M1 (BOS / HH+HL / LH+LL) jika sudah jelas
-//          2) momentum M1 (perpindahan 10 candle terakhir ≥ 1.5 × ATR) jika struktur belum jelas
-//          3) jika keduanya lemah → menunggu
+//      · di luar kedua area → NOW langsung searah arah awal market M1:
+//          BOS M1 → HH+HL / LH+LL → price action M1 (close vs close sebelumnya). Selalu ada arah, tanpa menunggu.
 //      · SL dari tepi wick area, atau pivot M1 berlawanan / ekstrem 10 candle terakhir. Dibatasi 25-30 pip.
-//      · reason memberi peringatan jika ada area berlawanan dekat harga
+//      · reason memberi peringatan jika arah M1 berlawanan dengan area, atau ada area berlawanan dekat harga
 //  - Day Trading: BOS M15 (bias) → zona S/D M15 (displacement + BOS, fresh) → refine zona S/D M5 → entry:
 //      · harga di luar zona  → LIMIT di tepi zona (maks. 50 pip dari harga)
 //      · harga sudah di zona → NOW, hanya jika konfirmasi Bollinger Band M5
@@ -41,7 +39,7 @@ const GOLD_SYMBOLS = ['XAUUSD', 'XAUUSDX'];
 
 const STYLES = {
   'Scalping': {
-    label: 'Scalping · Area S/D M5 (BUY demand / SELL supply) + arah kuat M1 NOW di luar area · SL 25-30 Pip · TP 1:1 · 1:2 · 1:3',
+    label: 'Scalping · Area S/D M5 (BUY demand / SELL supply) + NOW arah awal M1 di luar area · SL 25-30 Pip · TP 1:1 · 1:2 · 1:3',
     entryStyle: 'Agresif', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
   'Day Trading': {
@@ -52,7 +50,7 @@ const STYLES = {
   'Swing': { label: 'Swing', kind: 'swing', rr: [3.0] },
 };
 
-// ── Scalping (area S/D M5, struktur dan momentum M1) ──
+// ── Scalping (area S/D M5, arah awal M1) ──
 const SCALP_PIVOT = 2;
 const SCALP_ZONE_TF = 5;                // area scalping dari candle M5 (agregasi M1), hanya candle yang sudah close
 const SCALP_ZONE_LOOKBACK_M5 = 60;      // area M5 harus terbentuk dalam 60 candle M5 terakhir
@@ -61,8 +59,6 @@ const SCALP_ZONE_FRESH_ONLY = true;     // true = area yang sudah pernah tersent
 const SCALP_ZONE_NEEDS_CONFIRM = false; // false = masuk langsung saat harga di area; true = tunggu reaksi M1 dulu
 const SCALP_ZONE_REQUIRE_BIAS = false;  // true = demand hanya dipakai jika bias M5 bullish, supply jika bearish
 const SCALP_NEAR_ZONE_PIPS = 15;        // area berlawanan dalam 15 pip dari harga → diberi peringatan
-const SCALP_MOM_BARS = 10;              // momentum: perpindahan harga dalam 10 candle M1 terakhir
-const SCALP_MOM_ATR = 1.5;              // momentum dianggap kuat jika perpindahan ≥ 1.5 × ATR M1
 const SCALP_M1_NEED = 160;              // ±160 candle M1 (≈32 candle M5)
 const SCALP_CHASE_MAX_PIPS = 15;        // dipakai hanya jika SCALP_ZONE_NEEDS_CONFIRM = true
 const SCALP_SL_BUFFER_PIPS = 3;         // buffer SL di luar wick area / pivot M1
@@ -276,7 +272,27 @@ function bollingerAt(candles, idx, period = BB_PERIOD, mult = BB_MULT) {
   return { mid, upper: mid + mult * sd, lower: mid - mult * sd };
 }
 
-// Bias struktur: BOS, HH+HL, atau LH+LL. dir = 0 jika belum jelas.
+// Arah awal market M1: BOS → HH+HL / LH+LL → price action (close vs close sebelumnya).
+// Selalu menghasilkan arah (1 atau -1), sehingga jalur di luar area tidak menunggu.
+function analyzePureSMCStructure(m1) {
+  if (!m1 || m1.length < 15) return { dir: 1, src: 'SMC Default' };
+  const { highs, lows } = findPivots(m1, SCALP_PIVOT);
+  if (highs.length < 2 || lows.length < 2) {
+    const last = m1[m1.length - 1], prev = m1[m1.length - 2];
+    return { dir: last.c >= prev.c ? 1 : -1, src: 'Price action M1' };
+  }
+  const [h1, h2] = highs.slice(-2);
+  const [l1, l2] = lows.slice(-2);
+  const lastC = m1[m1.length - 1].c;
+
+  if (lastC > h2.p) return { dir: 1, src: 'M1 BOS Bullish' };
+  if (lastC < l2.p) return { dir: -1, src: 'M1 BOS Bearish' };
+  if (h2.p > h1.p && l2.p > l1.p) return { dir: 1, src: 'M1 Structure HH + HL' };
+  if (h2.p < h1.p && l2.p < l1.p) return { dir: -1, src: 'M1 Structure LH + LL' };
+  return { dir: lastC >= m1[m1.length - 2].c ? 1 : -1, src: 'M1 Order Flow' };
+}
+
+// Bias struktur: BOS, HH+HL, atau LH+LL. dir = 0 jika belum jelas (dipakai untuk filter M5 opsional).
 function structureBias(candles, L) {
   const { highs, lows } = findPivots(candles, L);
   if (highs.length < 2 || lows.length < 2) return { dir: 0, src: 'struktur belum terbentuk' };
@@ -369,7 +385,7 @@ function findSDZones(candles, dir, price, opts = {}) {
   return zones.sort((x, y) => x.dist - y.dist);
 }
 
-// ═══════════════════════════ SCALPING (area S/D M5 + struktur / momentum M1) ═══════════════════════════
+// ═══════════════════════════ SCALPING (area S/D M5 + arah awal M1) ═══════════════════════════
 
 const scalpZoneOpts = { dispAtr: SCALP_ZONE_DISP_ATR, freshOnly: SCALP_ZONE_FRESH_ONLY };
 const scalpRecent = m5c => z => z.dispIdx >= m5c.length - SCALP_ZONE_LOOKBACK_M5;
@@ -402,26 +418,9 @@ function m1Reaction(m1, dir, price, dec) {
   return { ok: true, why: '', breakLevel, pullbackExtreme, beyondPips };
 }
 
-// Arah kuat dari momentum M1: perpindahan close dalam SCALP_MOM_BARS candle terakhir dibanding ATR M1
-function momentumBias(m1) {
-  const n = m1.length;
-  if (n < SCALP_MOM_BARS + 2) return { dir: 0, txt: 'data M1 belum cukup' };
-  const net = m1[n - 1].c - m1[n - 1 - SCALP_MOM_BARS].c;
-  const a = atr(m1, 14);
-  const ratio = Math.abs(net) / a;
-  const pips = (net / PIP_SIZE).toFixed(0);
-  if (ratio < SCALP_MOM_ATR) {
-    return { dir: 0, txt: `${pips} pip dalam ${SCALP_MOM_BARS} candle, ${ratio.toFixed(1)}× ATR, belum kuat` };
-  }
-  return {
-    dir: net > 0 ? 1 : -1,
-    txt: `${net > 0 ? '+' : ''}${pips} pip dalam ${SCALP_MOM_BARS} candle, ${ratio.toFixed(1)}× ATR`,
-  };
-}
-
 // Ekstrem 10 candle M1 terakhir di sisi berlawanan arah (dipakai sebagai SL jika pivot tidak valid)
 function recentExtreme(m1, dir) {
-  const slice = m1.slice(-(SCALP_MOM_BARS + 1));
+  const slice = m1.slice(-11);
   return dir === 1 ? Math.min(...slice.map(c => c.l)) : Math.max(...slice.map(c => c.h));
 }
 
@@ -459,8 +458,8 @@ function buildScalpPlan({ m1, price, rrList, symbol, dec }) {
   const supply = demand ? null : (findSDZones(m5c, -1, price, scalpZoneOpts).filter(inside).filter(recent)[0] || null);
   const zone = demand || supply;
 
-  // 2. Struktur M1 yang berjalan
-  const b1 = structureBias(m1, SCALP_PIVOT);
+  // 2. Arah awal market M1 (selalu ada arahnya)
+  const init = analyzePureSMCStructure(m1);
   const { highs, lows } = findPivots(m1, SCALP_PIVOT);
   const lastH = highs.length ? highs[highs.length - 1] : null;
   const lastL = lows.length ? lows[lows.length - 1] : null;
@@ -474,7 +473,7 @@ function buildScalpPlan({ m1, price, rrList, symbol, dec }) {
   let setupName;
 
   if (zone) {
-    // Di dalam area: BUY di demand, SELL di supply. Struktur M1 hanya sebagai catatan.
+    // Di dalam area: BUY di demand, SELL di supply. Arah M1 hanya sebagai catatan.
     dir = demand ? 1 : -1;
     const zoneTxt = `area ${dir === 1 ? 'demand' : 'supply'} M5 ${f(zone.bottom)} - ${f(zone.top)}`;
 
@@ -496,38 +495,21 @@ function buildScalpPlan({ m1, price, rrList, symbol, dec }) {
 
     baseLevel = zone.sl; // SL di luar wick area
     zoneLine = `Harga di ${zoneTxt}, ${reactionTxt}`;
-    m1Line = b1.dir === dir
-      ? `Struktur M1 ${b1.src} searah`
-      : `Hati-hati: struktur M1 ${b1.src} berlawanan, reaksi belum terbukti`;
-    confidence = b1.dir === dir ? 'HIGH' : 'MEDIUM';
+    m1Line = init.dir === dir
+      ? `Arah M1 ${init.src} searah`
+      : `Hati-hati: arah M1 ${init.src} berlawanan, reaksi belum terbukti`;
+    confidence = init.dir === dir ? 'HIGH' : 'MEDIUM';
     setupName = `Area S/D M5 ${dir === 1 ? 'demand' : 'supply'}`;
   } else {
-    // Di luar area: NOW searah arah kuat (struktur M1 dulu, lalu momentum M1)
-    let strengthDir;
-    let strengthSrc;
-    let strengthConf;
-    if (b1.dir !== 0) {
-      strengthDir = b1.dir;
-      strengthSrc = `struktur M1 ${b1.src}`;
-      strengthConf = b1.src.startsWith('BOS') ? 'HIGH' : 'MEDIUM';
-    } else {
-      const mom = momentumBias(m1);
-      if (mom.dir === 0) {
-        return { plan: null, reason: `Scalping: di luar area S/D M5, struktur M1 belum jelas dan momentum M1 belum cukup kuat (${mom.txt}), menunggu. ${areaNote(m5c, price, dec)}.` };
-      }
-      strengthDir = mom.dir;
-      strengthSrc = `momentum M1 (${mom.txt})`;
-      strengthConf = 'MEDIUM';
-    }
-
-    dir = strengthDir;
+    // Di luar area: NOW langsung searah arah awal market M1
+    dir = init.dir;
     const pivot = dir === 1 ? lastL : lastH; // SL di pivot M1 berlawanan arah
     const pivotOk = pivot && (dir === 1 ? pivot.p < price : pivot.p > price);
     baseLevel = pivotOk ? pivot.p : recentExtreme(m1, dir);
-    zoneLine = `Di luar area S/D M5, arah kuat dari ${strengthSrc} → ${dir === 1 ? 'BUY' : 'SELL'} NOW`;
+    zoneLine = `Di luar area S/D M5, arah awal market M1 (${init.src}) → ${dir === 1 ? 'BUY' : 'SELL'} NOW`;
     areaLine = areaNote(m5c, price, dec);
-    confidence = strengthConf;
-    setupName = b1.dir !== 0 ? 'Struktur M1 (NOW)' : 'Momentum M1 (NOW)';
+    confidence = init.src.startsWith('M1 BOS') || init.src.startsWith('M1 Structure') ? 'HIGH' : 'MEDIUM';
+    setupName = 'Arah awal M1 (NOW)';
   }
 
   // 3. Peringatan jika ada area berlawanan dekat harga
