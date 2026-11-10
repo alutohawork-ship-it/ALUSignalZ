@@ -128,7 +128,7 @@
                         </select>
                     </div>
                     <button onclick="registerNewClientByAdmin()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg text-xs transition shadow-md">
-                        + SIMPAN &amp; DAFTARKAN KLIEN
+                        + SIMPAN & DAFTARKAN KLIEN
                     </button>
                 </div>
             </div>
@@ -177,7 +177,7 @@
                     </div>
 
                     <select id="marketSelect" onchange="syncSelectedMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                        <optgroup label="XBTFX Dollar Index &amp; Majors">
+                        <optgroup label="XBTFX Dollar Index & Majors">
                             <option value="xbtfx|DXY">DXY / US Dollar Index</option>
                             <option value="xbtfx|EURUSD">EUR/USD</option>
                             <option value="xbtfx|GBPUSD">GBP/USD</option>
@@ -199,7 +199,7 @@
                             <option value="xbtfx|CHFJPY">CHF/JPY</option>
                             <option value="xbtfx|EURNZD">EUR/NZD</option>
                         </optgroup>
-                        <optgroup label="XBTFX Metals &amp; Precious">
+                        <optgroup label="XBTFX Metals & Precious">
                             <option value="xbtfx|XAUUSD">XAUUSD / Gold</option>
                             <option value="xbtfx|XAGUSD">XAGUSD / Silver</option>
                             <option value="xbtfx|XPTUSD">XPTUSD / Platinum</option>
@@ -207,7 +207,7 @@
                             <option value="xbtfx|XAUEUR">XAUEUR / Gold in EUR</option>
                             <option value="xbtfx|XAGEUR">XAGEUR / Silver in EUR</option>
                         </optgroup>
-                        <optgroup label="XBTFX Energy &amp; Commodities">
+                        <optgroup label="XBTFX Energy & Commodities">
                             <option value="xbtfx|BRENT">Brent Oil (BRENT)</option>
                             <option value="xbtfx|WTI">Crude Oil WTI (WTI)</option>
                             <option value="xbtfx|NATGAS">Natural Gas (NATGAS)</option>
@@ -257,21 +257,14 @@
                     <p id="calibInfo" class="text-[8px] font-mono text-gray-500">Offset: 0</p>
                     <p class="text-[8px] text-gray-500 leading-snug">Jika harga di MT4/MT5 dan di web berbeda, isi harga Bid dari MT lalu tekan KALIBRASI. Selisihnya disimpan sebagai offset untuk pair ini. Perbedaan kecil wajar karena sumber dan waktu pengambilan harga berbeda.</p>
 
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <div>
-                            <label id="lblTradingStyle" class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
-                            <select id="tradingStyleSelect" onchange="toggleVisualInputs()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                                <option value="Scalping">Scalping (M1+M3+M5)</option>
-                                <option value="Day Trading">Day Trading (M5+M15+M30/H1)</option>
-                                <option value="Intraday">Intraday</option>
-                                <option value="Swing">Swing</option>
-                                <option value="Visual">Visual (Upload Chart)</option>
-                            </select>
-                        </div>
-                        <div id="visualUploadBox" class="hidden">
-                            <label class="text-[8px] font-bold text-accentblue block mb-1">UPLOAD SCREENSHOT CHART</label>
-                            <input type="file" id="chartImageFile" accept="image/*" class="w-full bg-darkbg border border-accentblue/40 text-[10px] text-gray-300 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-[9px] file:font-bold file:bg-accentblue file:text-white cursor-pointer rounded-lg">
-                        </div>
+                    <div>
+                        <label id="lblTradingStyle" class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
+                        <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
+                            <option value="Scalping">Scalping (M1+M3+M5)</option>
+                            <option value="Day Trading">Day Trading (M5+M15+M30/H1)</option>
+                            <option value="Intraday">Intraday</option>
+                            <option value="Swing">Swing</option>
+                        </select>
                     </div>
 
                     <button onclick="generateAISignal()" id="signalBtn" class="w-full bg-gradient-to-r from-accentblue to-indigo-600 hover:from-blue-600 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-accentblue/20 transition active:scale-95">
@@ -837,17 +830,6 @@
         updateCalibInfo();
     }
 
-    // Toggle input upload file saat mode "Visual" dipilih
-    function toggleVisualInputs() {
-        const style = document.getElementById('tradingStyleSelect').value;
-        const box = document.getElementById('visualUploadBox');
-        if (style === 'Visual') {
-            box.classList.remove('hidden');
-        } else {
-            box.classList.add('hidden');
-        }
-    }
-
     // ================= TICKER & UI =================
     const PROV_COLOR = { hyperliquid: 'text-yellow-400', veranta: 'text-blue-400', ostium: 'text-orange-400', binance: 'text-emerald-400', xbtfx: 'text-emerald-400' };
     function buildTicker() {
@@ -925,14 +907,16 @@
         return [...new Set([...(COIN_KEY.get(`xbtfx|${n}`) || []), ...(COIN_KEY.get(`*|${n}`) || [])])];
     };
 
+    // Status diagnosa per socket dan per key
     const sockState = { 1: 'idle', 2: 'idle' };
-    const sockOf = {};
-    const subAt = {};
-    const aliasIdx = {};
-    const workingSym = {};
+    const sockOf = {};        // key -> socket yang dipakai untuk subscribe (1/2)
+    const subAt = {};         // key -> waktu subscribe terakhir
+    const aliasIdx = {};      // key -> indeks alias yang sedang dicoba
+    const workingSym = {};    // key -> simbol yang terbukti mengirim quote
     const s2 = { fallback: false };
     let s2Timer = null;
 
+    // Simbol untuk subscribe: yang sudah terbukti jalan, atau alias yang sedang dicoba
     const aliasOf = key => {
         if (workingSym[key]) return workingSym[key];
         const list = MARKETS[key]?.coins || [];
@@ -950,6 +934,7 @@
         setWsStatus(txt, s1ok ? 'green' : 'yellow');
     }
 
+    // Subscribe per batch 8 simbol
     function subscribeKeys(sock, sockNo, keyList) {
         const batchSize = 8;
         for (let i = 0; i < keyList.length; i += batchSize) {
@@ -967,6 +952,7 @@
         }
     }
 
+    // Subscribe satu key saja, dipakai saat mencoba alias berikutnya
     function resubscribeKey(key) {
         const preferred = sockOf[key] === 2 ? ws2 : ws1;
         const sock = (preferred && preferred.readyState === WebSocket.OPEN) ? preferred : ws1;
@@ -1016,6 +1002,7 @@
 
                 if (started && waited > 15000 && !workingSym[key] && idx < total - 1) {
                     aliasIdx[key] = idx + 1;
+                    if (DEBUG) console.log('coba alias', key, aliasOf(key));
                     resubscribeKey(key);
                 } else if (started && waited > 15000) {
                     markSrc(key, 'NOQ', 'text-red-400');
@@ -1116,6 +1103,7 @@
                 if (ws2 === sock2 && !authFailed) reconnectTimer2 = setTimeout(connect, 5000);
             };
 
+            // Socket 2 belum auth dalam 10 detik: pindahkan key-nya ke socket 1
             s2Timer = setTimeout(() => {
                 if (myId !== connectId || sockState[2] === 'ok') return;
                 s2.fallback = true;
@@ -1403,16 +1391,9 @@
         const badgeBase = 'text-[8px] font-mono font-bold px-2 py-0.5 rounded border ';
 
         set('cardMarketTitle', `${displayName(t.key)} (Pure SMC AI)`);
-        
-        // Memperbaiki tampilan Entry Zone agar tidak menampilkan '--' jika data zone atau entry tersedia
-        if (t.zone && t.zone.min != null && t.zone.max != null) {
-            set('cardEntryZone', `${money(t.zone.min)} - ${money(t.zone.max)}`);
-        } else if (t.entry != null) {
-            set('cardEntryZone', money(t.entry));
-        } else {
-            set('cardEntryZone', '--');
-        }
-
+        set('cardEntryZone', t.zone
+            ? `${money(t.zone.min)} - ${money(t.zone.max)}`
+            : (t.card?.entry_min ? `${t.card.entry_min} - ${t.card.entry_max}` : '--'));
         set('cardZoneNote', t.zoneNote || '');
 
         const lz = document.getElementById('lblEntryZone');
@@ -1425,7 +1406,7 @@
 
         const bs = document.getElementById('badgeSetup');
         if (bs) {
-            bs.textContent = SETUP_SHORT[t.setup] ? SETUP_SHORT[t.setup].toUpperCase() : (t.setup || '--');
+            bs.textContent = SETUP_SHORT[t.setup] ? SETUP_SHORT[t.setup].toUpperCase() : '--';
             bs.className = badgeBase + 'bg-darkbg text-gray-300 border-panelborder';
         }
         const bc = document.getElementById('badgeConf');
@@ -1443,7 +1424,7 @@
         set('cardTP1', money(t.tp1));
         set('cardTP2', money(t.tp2));
         set('cardTP3', money(t.tp3));
-        set('cardReason', t.card?.reason ?? t.reason ?? '---');
+        set('cardReason', t.card?.reason ?? '---');
 
         const sig = t.signal || '';
         const badge = document.getElementById('signalBadgeBtn');
@@ -1719,6 +1700,7 @@
         const pad = (hi - lo) * 0.15; lo -= pad; hi += pad;
         const yOf = p => Math.max(plotT, Math.min(plotB, plotT + (1 - (p - lo) / (hi - lo)) * plotH));
 
+        // Background Grid Lines
         ctx.save();
         ctx.lineWidth = 1;
         ctx.strokeStyle = 'rgba(148,163,184,0.06)';
@@ -1730,6 +1712,7 @@
         ctx.beginPath(); ctx.moveTo((CW - CHART_GUT) + 0.5, plotT); ctx.lineTo((CW - CHART_GUT) + 0.5, plotB); ctx.stroke();
         ctx.restore();
 
+        // Level Lines (SL, Entry, TP)
         for (const l of levels) {
             const y = yOf(l.value);
             ctx.save();
@@ -1741,6 +1724,7 @@
             ctx.restore();
         }
 
+        // --- SMOOTH REALTIME LINE CHART ---
         const step = plotW / Math.max(1, ticks.length - 1);
         ctx.save();
         ctx.lineWidth = 2;
@@ -1870,337 +1854,4 @@
     async function fetchCandles(provider, symbol, interval) {
         if (!symbol) {
             const key = selectedKey();
-            symbol = symbolOf[key] || MARKETS[key]?.coins[0];
-        }
-        try {
-            const r = await api('/api/candles', {
-                method: 'POST',
-                headers: JSON_HEADERS,
-                body: JSON.stringify({
-                    value: localStorage.getItem(SESSION_EMAIL_KEY) || '',
-                    symbol,
-                    interval,
-                    limit: 100,
-                }),
-            });
-            if (r.ok && r.data && r.data.candles && r.data.candles.length > 0) {
-                return r.data.candles
-                    .map(c => ({ t: c.openTime || c.t, o: c.open || c.o, h: c.high || c.h, l: c.low || c.l, c: c.close || c.c }))
-                    .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite))
-                    .sort((a, b) => a.t - b.t);
-            }
-        } catch (e) {}
-
-        const tfMinutes = { '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 }[interval] || 5;
-        const key = selectedKey();
-        const tfKey = `${tfMinutes}m`;
-        let candles = (marketCandles[key]?.[tfKey] || []).map(c => ({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close }));
-        if (candles.length < 5) {
-            const rawTicks = history[key] || [];
-            if (rawTicks.length > 0) {
-                const intervalMs = tfMinutes * 60 * 1000;
-                const grouped = {};
-                for (const tick of rawTicks) {
-                    const bucketTime = Math.floor(tick.t / intervalMs) * intervalMs;
-                    if (!grouped[bucketTime]) {
-                        grouped[bucketTime] = { t: bucketTime, o: tick.p, h: tick.p, l: tick.p, c: tick.p };
-                    } else {
-                        grouped[bucketTime].h = Math.max(grouped[bucketTime].h, tick.p);
-                        grouped[bucketTime].l = Math.min(grouped[bucketTime].l, tick.p);
-                        grouped[bucketTime].c = tick.p;
-                    }
-                }
-                candles = Object.values(grouped).sort((a, b) => a.t - b.t);
-            }
-        }
-        return candles;
-    }
-
-    async function refreshBias(key, force = false) {
-        const m = MARKETS[key];
-        if (!m) return;
-        const cached = biasCache[key];
-        if (!force && cached && Date.now() - cached.at < 60000) return renderBias(key);
-        if (biasBusy) return;
-
-        biasBusy = true;
-        if (!symbolOf[key]) symbolOf[key] = m.coins[0];
-        const symbol = symbolOf[key];
-        const provider = providerOf[key] || 'xbtfx';
-        const rows = {};
-        try {
-            for (const tf of BIAS_TF) {
-                try {
-                    const candles = await fetchCandles(provider, symbol, tf.interval);
-                    rows[tf.label] = calcBias(candles);
-                } catch (e) {
-                    rows[tf.label] = { bias: 'N/A', score: 0 };
-                }
-            }
-            biasCache[key] = { at: Date.now(), rows };
-        } finally {
-            biasBusy = false;
-        }
-        renderBias(key);
-    }
-
-    function renderBias(key) {
-        if (key !== selectedKey()) return;
-        const box = document.getElementById('biasGrid');
-        const info = document.getElementById('biasInfo');
-        if (!box) return;
-        const cache = biasCache[key];
-        const rows = cache?.rows;
-
-        box.innerHTML = BIAS_TF.map(tf => {
-            const b = rows?.[tf.label];
-            const name = b ? b.bias : 'N/A';
-            const cls = BIAS_STYLE[name] || BIAS_STYLE['N/A'];
-            const text = BIAS_LABEL[name] || 'N/A';
-            const score = (b && b.bias !== 'N/A' && b.score != null) ? `skor ${b.score > 0 ? '+' : ''}${b.score}` : '';
-            return `
-              <div class="bg-darkbg border border-panelborder rounded-lg p-1.5 text-center space-y-0.5">
-                <p class="text-[8px] font-bold text-gray-400">${tf.label}</p>
-                <span class="inline-block text-[9px] font-black px-2 py-0.5 rounded border ${cls}">${text}</span>
-                <p class="text-[7px] text-gray-500 font-mono">${score}</p>
-              </div>`;
-        }).join('');
-
-        const vals = Object.values(rows || {}).map(r => r.bias || 'N/A');
-        const cnt = k => vals.filter(v => v === k).length;
-        info.textContent = `${cnt('BULLISH')} Bullish · ${cnt('BEARISH')} Bearish · ${cnt('NETRAL')} Netral · ${cnt('N/A')} N/A · update ${new Date(cache?.at || Date.now()).toLocaleTimeString('id-ID', { hour12: false })}`;
-    }
-
-    // ================= AI SIGNAL & VISUAL HANDLER =================
-    const STYLE_TF = {
-        'Scalping':    { htf: '15m', mtf: '5m',  ltf: '1m' },
-        'Day Trading': { htf: '1h',  mtf: '30m', ltf: '5m' },
-        'Intraday':    { htf: '4h',  mtf: '1h',  ltf: '15m' },
-        'Swing':       { htf: '1d',  mtf: '4h',  ltf: '1h' },
-        'Visual':      { htf: '1h',  mtf: '15m', ltf: '5m' },
-    };
-
-    function calculateEMA(candles, period) {
-        if (!candles || candles.length === 0) return [];
-        const k = 2 / (period + 1);
-        let emaArray = [];
-        let prevEMA = candles[0].c;
-
-        for (let i = 0; i < candles.length; i++) {
-            const close = candles[i].c;
-            if (i === 0) {
-                emaArray.push(prevEMA);
-            } else {
-                const currentEMA = (close * k) + (prevEMA * (1 - k));
-                emaArray.push(currentEMA);
-                prevEMA = currentEMA;
-            }
-        }
-        return emaArray;
-    }
-
-    function calculateBollingerBands(candles, period = 20, multiplier = 2) {
-        if (!candles || candles.length < period) return { upper: 0, middle: 0, lower: 0 };
-        const slice = candles.slice(-period);
-        const closes = slice.map(c => c.c);
-
-        const middle = closes.reduce((sum, val) => sum + val, 0) / period;
-        const variance = closes.reduce((sum, val) => sum + Math.pow(val - middle, 2), 0) / period;
-        const stdDev = Math.sqrt(variance);
-
-        return {
-            middle: Number(middle.toFixed(5)),
-            upper: Number((middle + (multiplier * stdDev)).toFixed(5)),
-            lower: Number((middle - (multiplier * stdDev)).toFixed(5))
-        };
-    }
-
-    function getEmaPeriodsForStyle(style) {
-        switch (style) {
-            case 'Scalping': return [5, 9];
-            case 'Day Trading': return [14, 20];
-            case 'Intraday': return [20, 50, 100];
-            case 'Swing': return [20, 200];
-            default: return [5, 9];
-        }
-    }
-
-    const CANDLE_CACHE = {};
-
-    async function loadCandles(key, interval) {
-        const ck = `${key}|${interval}`;
-        const hit = CANDLE_CACHE[ck];
-        if (hit && Date.now() - hit.at < 180000) return hit.rows;
-
-        let rows = [];
-        try {
-            const provider = providerOf[key] || 'xbtfx';
-            const symbol = symbolOf[key] || MARKETS[key].coins[0];
-            const r = await api('/api/candles', {
-                method: 'POST',
-                headers: JSON_HEADERS,
-                body: JSON.stringify({
-                    value: localStorage.getItem(SESSION_EMAIL_KEY) || '',
-                    symbol,
-                    interval,
-                    limit: 100,
-                }),
-            });
-            if (r.ok && r.data && Array.isArray(r.data.candles) && r.data.candles.length > 0) {
-                rows = r.data.candles.map(c => ({
-                    t: Number(c.openTime || c.t),
-                    o: Number(c.open || c.o),
-                    h: Number(c.high || c.h),
-                    l: Number(c.low || c.l),
-                    c: Number(c.close || c.c)
-                }));
-            }
-        } catch (err) {}
-
-        if (rows.length < 5) {
-            const tfMinutes = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 }[interval] || 1;
-            const tfKey = `${tfMinutes}m`;
-            rows = (marketCandles[key]?.[tfKey] || []).map(c => ({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close }));
-        }
-
-        if (rows.length > 0) {
-            CANDLE_CACHE[ck] = { at: Date.now(), rows };
-        }
-        return rows;
-    }
-
-    const shiftCandles = (rows, off) => rows.map(c => ({ t: c.t, o: c.o + off, h: c.h + off, l: c.l + off, c: c.c + off }));
-
-    function readFileAsDataURL(file) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
-        });
-    }
-
-    async function generateAISignal() {
-        const marketId = document.getElementById('marketSelect').value;
-        const tradingStyle = document.getElementById('tradingStyleSelect').value;
-        const symbolKey = marketId.split('|').pop();
-        const live = prices[symbolKey];
-        if (!live || !isLive(symbolKey)) {
-            return alert(`${displayName(symbolKey)} TIDAK TERSAMBUNG ke stream. Pilih pair lain atau tunggu harga masuk.`);
-        }
-
-        const email = localStorage.getItem(SESSION_EMAIL_KEY);
-        if (!email) return alert('Sesi tidak ditemukan. Silakan login ulang.');
-
-        const btn = document.getElementById('signalBtn');
-        btn.disabled = true;
-        btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> Menganalisis...`;
-
-        try {
-            let imageBase64 = null;
-            if (tradingStyle === 'Visual') {
-                const fileInput = document.getElementById('chartImageFile');
-                if (fileInput.files.length === 0) {
-                    throw new Error('Silakan pilih dan upload gambar screenshot chart terlebih dahulu untuk mode Visual.');
-                }
-                imageBase64 = await readFileAsDataURL(fileInput.files[0]);
-            }
-
-            const tf = STYLE_TF[tradingStyle];
-            const off = getOffset(symbolKey);
-            const [htfRows, mtfRows, ltfRows] = tradingStyle === 'Visual' ? [[], [], []] : await Promise.all([
-                loadCandles(symbolKey, tf.htf),
-                loadCandles(symbolKey, tf.mtf),
-                tf.ltf ? loadCandles(symbolKey, tf.ltf).catch(() => []) : Promise.resolve([]),
-            ]);
-
-            const shiftedLtf = shiftCandles(ltfRows, off);
-            const shiftedMtf = shiftCandles(mtfRows, off);
-
-            const periods = getEmaPeriodsForStyle(tradingStyle);
-            const emaMetrics = {};
-            periods.forEach(p => {
-                const resEma = calculateEMA(shiftedLtf, p);
-                emaMetrics[`EMA_${p}`] = resEma.length ? Number(resEma[resEma.length - 1].toFixed(5)) : 0;
-            });
-
-            const bbMetrics = calculateBollingerBands(shiftedMtf.length > 0 ? shiftedMtf : shiftedLtf);
-
-            const res = await fetch('/api/generate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    email,
-                    marketId,
-                    tradingStyle,
-                    currentPrice: live.price,
-                    lang: currentLang,
-                    image: imageBase64,
-                    emaFilter: emaMetrics,
-                    bbFilter: bbMetrics,
-                    candles: {
-                        htf: shiftCandles(htfRows, off).slice(-200),
-                        mtf: shiftedMtf.slice(-200),
-                        ltf: shiftedLtf.slice(-200),
-                    },
-                }),
-            });
-
-            const txt = await res.text();
-            let data = {};
-            try {
-                data = JSON.parse(txt);
-            } catch {
-                const snippet = txt.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
-                data = { error: `Server tidak mengirim JSON (HTTP ${res.status}). ${snippet}` };
-            }
-            if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-
-            if (!data.signal) return alert('Belum ada setup valid.\n\n' + (data.reason || ''));
-
-            const s = data.signal;
-            const t = {
-                id: Date.now().toString(36), key: symbolKey, style: tradingStyle,
-                signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
-                mode: s.mode, status: s.status, fill: s.fill || null,
-                entry: s.entry, bufferEnd: s.bufferEnd, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
-                zone: s.zone,
-                expiresAt: s.expireMs ? Date.now() + s.expireMs : null,
-                confidence: s.confidence, risk: s.risk, setup: s.setup,
-                setupLabel: s.setupLabel, zoneLabel: s.zoneLabel, zoneNote: s.zoneNote,
-                createdAt: Date.now(), hits: {},
-                card: { reason: s.reason }, no: nextNo(),
-            };
-
-            trades.push(t);
-            activeId = t.id;
-            saveTrades();
-            renderSignalCard(t);
-            renderHistory();
-            refreshActiveUI();
-        } catch (e) {
-            alert('Gagal generate sinyal: ' + e.message);
-        } finally {
-            btn.disabled = false;
-            btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnGenText">${DICT[currentLang].genBtn}</span>`;
-        }
-    }
-
-    // ================= BOOT =================
-    window.onload = () => {
-        checkSession();
-        buildTicker();
-        updateCalibInfo();
-        trades = loadTrades();
-        saveTrades();
-        renderHistory();
-        if (trades.length) viewTrade(trades[trades.length - 1].id);
-        renderBias(selectedKey());
-        requestAnimationFrame(uiFrame);
-        connect();
-        setInterval(() => { watchdog(); expirePending(); }, 1000);
-        setInterval(() => refreshBias(selectedKey()), 60000);
-    };
-    </script>
-</body>
-</html>
+            symbol = symbolOf[key] || MARKETS
