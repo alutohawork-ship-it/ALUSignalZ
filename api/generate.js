@@ -1,5 +1,5 @@
 // api/generate.js
-// v51
+// v51.1 (Integrated with Gutsai Gateway for Visual mode)
 //  - Scalping:
 //      · XAUUSD: struktur M1, area S/D M5 dibentuk dari candle M1. SL 25-30 pip dari struktur.
 //      · Pair lain: struktur M5 dan area S/D M5 langsung. SL/TP mengikuti struktur, dibatasi ATR M5.
@@ -9,10 +9,10 @@
 //      zona terkuat (Supply/Demand/OB/FVG) dipilih, tidak terkunci ke arah bias.
 //  - Intraday: area S/D H1 → refine M15. DUA ARAH. Maksimal 1 signal per hari (WIB), disimpan di KV.
 //  - Swing: area S/D H4 → refine H1. Selalu ada signal.
-//  - Visual: upload gambar chart → dianalisa AI vision → entry/SL sesuai struktur gambar, TP 1:1 · 1:2 · 1:3.
+//  - Visual: upload gambar chart → dianalisa AI vision via Gutsai → entry/SL sesuai struktur gambar, TP 1:1 · 1:2 · 1:3.
 //  - Pip per pair: XAUUSD 0.1; forex 10^-(desimal-1); indeks dan BTC 1 (lihat PIP_OVERRIDE).
 //  - TickerLayer API Key Rotations terintegrasi utuh.
-//  - Butuh env ANTHROPIC_API_KEY untuk mode Visual (opsional VISION_MODEL).
+//  - Butuh env GUTSAI_API_KEY atau ANTHROPIC_API_KEY untuk mode Visual (opsional VISION_MODEL).
 
 export const config = { api: { bodyParser: { sizeLimit: '6mb' } } };
 
@@ -798,12 +798,12 @@ function buildSwingPlan({ m15, price, rrList, ctx }) {
   });
 }
 
-// ═══════════════════════════ VISUAL (GAMBAR CHART) ═══════════════════════════
+// ═══════════════════════════ VISUAL (GAMBAR CHART) - VIA GUTSAI GATEWAY ═══════════════════════════
 
 async function buildVisualPlan({ body, ctx, rrList }) {
   const { f, pip, symbol } = ctx;
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return { plan: null, reason: 'ANTHROPIC_API_KEY belum diset di server.' };
+  const gutsaiKey = process.env.GUTSAI_API_KEY || process.env.ANTHROPIC_API_KEY;
+  if (!gutsaiKey) return { plan: null, reason: 'GUTSAI_API_KEY / ANTHROPIC_API_KEY belum diset di server.' };
 
   const raw = String(body.image || '');
   const m = /^data:(image\/(?:png|jpeg|webp|gif));base64,(.+)$/s.exec(raw);
@@ -825,22 +825,30 @@ Balas HANYA JSON tanpa teks lain:
 
   let out;
   try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
+    const r = await fetch('https://api.gutsai.id/v1/chat/completions', {
       method: 'POST',
-      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      headers: { 
+        'Authorization': `Bearer ${gutsaiKey}`, 
+        'Content-Type': 'application/json' 
+      },
       body: JSON.stringify({
-        model: process.env.VISION_MODEL || 'claude-sonnet-5-5',
+        model: process.env.VISION_MODEL || 'guts/claude-3-5-sonnet',
         max_tokens: 800,
-        messages: [{ role: 'user', content: [
-          { type: 'image', source: { type: 'base64', media_type: mediaType, data } },
-          { type: 'text', text: prompt },
-        ] }],
+        messages: [{ 
+          role: 'user', 
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: `data:${mediaType};base64,${data}` } }
+          ] 
+        }],
       }),
     });
     const j = await r.json();
     if (!r.ok) return { plan: null, reason: `Analisa gambar gagal: ${j?.error?.message || r.status}` };
-    const txt = (j.content || []).map(x => x.text || '').join('').replace(/```json|```/g, '').trim();
-    out = JSON.parse(txt);
+    
+    const txt = j.choices?.[0]?.message?.content || '';
+    const cleanTxt = txt.replace(/```json|```/g, '').trim();
+    out = JSON.parse(cleanTxt);
   } catch (e) {
     return { plan: null, reason: 'Hasil analisa gambar tidak bisa dibaca, coba upload ulang.' };
   }
