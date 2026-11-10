@@ -1,7 +1,8 @@
 // api/generate.js
-// v33
-//  - Scalping (AGRESIF M1): Indikator Momentum (14) riil + Filter Sideways + Pure Market Execution (NOW).
-//  - Day Trading / Intraday / Swing & TickerLayer API Key Rotations terintegrasi utuh.
+// v35
+//  - Scalping (AGRESIF entry): Pure SMC + Struktur M1 Berjalan + Minimum SL dipatok 25-30 pip.
+//  - Pure Market Execution (NOW) dengan SL aman anti-noise.
+//  - TickerLayer API Key Rotations terintegrasi utuh.
 
 const KV_KEY = 'alu_clients';
 const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
@@ -25,71 +26,23 @@ const DECIMALS = {
 };
 
 const CRYPTO_LIST = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'BNBUSD', 'ADAUSD', 'DOGEUSD', 'AVAXUSD', 'LINKUSD', 'DOTUSD', 'MATICUSD', 'UNIUSD'];
-const INDEX_LIST = ['US30', 'NAS100', 'SPX500', 'GER40', 'UK100', 'JPN225', 'FRA40', 'AUS200'];
 const GOLD_SYMBOLS = ['XAUUSD', 'XAUUSDX'];
 
 const STYLES = {
   'Scalping': {
-    label: 'Scalping · M1 Momentum Indicator + Sideways Filter (Tight SL · TP 1:1 · 1:2 · 1:3)',
+    label: 'Scalping · Pure SMC + M1 Structure (Min SL 25-30 Pip · TP 1:1 · 1:2 · 1:3)',
     entryStyle: 'Agresif', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
-  'Day Trading': {
-    label: 'Day Trading · Konservatif Entry (Refine zone M5 S/D · Kontinuitas M5 · TP 1:1 · 1:1,5 · 1:2)',
-    entryStyle: 'Konservatif', mode: 'LIMIT', kind: 'day', rr: [1.0, 1.5, 2.0],
-  },
-  'Intraday': {
-    label: 'Intraday · Moderat Entry (Refine M15: S&D / OB / FVG / Kontinuitas · TP1-TP2 Fibonacci)',
-    entryStyle: 'Moderat', mode: 'LIMIT', kind: 'intraday', rr: [],
-  },
-  'Swing': {
-    label: 'Swing Trading · Positioning Entry (Refine H1: S&D / OB / FVG / Kontinuitas · 1 TP)',
-    entryStyle: 'Positioning', mode: 'LIMIT', kind: 'swing', rr: [3.0],
-  },
+  'Day Trading': { label: 'Day Trading', kind: 'day', rr: [1.0, 1.5, 2.0] },
+  'Intraday': { label: 'Intraday', kind: 'intraday', rr: [] },
+  'Swing': { label: 'Swing', kind: 'swing', rr: [3.0] },
 };
 
-const SETUP_CFG = {
-  day: {
-    ema: [20, 50], pivot: 3, lookback: 80, expireMin: 240,
-    m5Pivot: 2, m5Lookback: 100, m5MaxDistAtr: 6,
-  },
-  intraday: {
-    ema: [20, 50], pivot: 3, lookback: 80, riskAtr: [0.8, 3.0], maxDist: 2.0, expireMin: 720, minScore: 5,
-    refineTf: 'M15', refineTfKey: '15m', refinePivot: 3, refineLookback: 120,
-    fib: [1.272, 1.618, 2.0, 2.618],
-  },
-  swing: {
-    ema: [20, 50], pivot: 4, lookback: 80, riskAtr: [1.0, 3.5], maxDist: 1.5, expireMin: 2880, minScore: 4,
-    refineTf: 'H1', refineTfKey: '1h', refinePivot: 3, refineLookback: 120,
-  },
-};
-
-const STYLE_TF_SERVER = {
-  'Scalping':    { htf: '15m', mtf: '5m', refine: '1m' },
-  'Day Trading': { htf: '1h', mtf: '30m' },
-  'Intraday':    { htf: '4h', mtf: '1h', refine: '15m' },
-  'Swing':       { htf: '1d', mtf: '4h', refine: '1h' },
-};
-
-const TF_MIN = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 };
-
-const TL_SPAN = {
-  '1m':  { mult: 1,  span: 'minute', minutes: 1 },
-  '5m':  { mult: 5,  span: 'minute', minutes: 5 },
-  '15m': { mult: 15, span: 'minute', minutes: 15 },
-  '1h':  { mult: 1,  span: 'hour',   minutes: 60 },
-  '4h':  { mult: 4,  span: 'hour',   minutes: 240 },
-  '1d':  { mult: 1,  span: 'day',    minutes: 1440 },
-};
-
-const BASE_OF = { '5m': '1m', '15m': '5m', '30m': '15m', '1h': '15m', '4h': '15m' };
-
-const CACHE_TTL = { '1m': 120, '5m': 600, '15m': 900, '30m': 900, '1h': 1800, '4h': 3600, '1d': 7200 };
-const CACHE_BARS = { '1m': 300, '5m': 300, '15m': 1600, '30m': 300, '1h': 300, '4h': 300, '1d': 300 };
-
-const CHUNK_MS = 2 * 86400000;
-const MAX_CHUNKS = 30;
-const MINUTE_CHUNK_THRESHOLD = 4500;
-const TIME_FMT = { timeZone: 'Asia/Jakarta', hour12: false, hour: '2-digit', minute: '2-digit' };
+const SCALP_PIVOT = 2;
+// Konfigurasi Min & Max SL pip (untuk Gold, 1 pip = 0.1 jadi 25-30 pip = 2.5 - 3.0 USD distance)
+const MIN_SL_PIPS = 25;
+const MAX_SL_PIPS = 30;
+const PIP_SIZE = 0.1; // Sesuaikan untuk XAUUSD
 
 const orderLabel = (dir, orderType) => `${dir === 1 ? 'BUY' : 'SELL'} ${orderType === 'LIMIT' ? 'LIMIT' : 'NOW'}`;
 const isoDate = d => d.toISOString().slice(0, 10);
@@ -111,19 +64,15 @@ async function kvGetJSON(key) {
   try {
     const raw = await kv(['GET', key]);
     return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 async function kvSetJSON(key, value, ttl) {
-  try {
-    await kv(['SET', key, JSON.stringify(value), 'EX', ttl]);
-  } catch (e) {}
+  try { await kv(['SET', key, JSON.stringify(value), 'EX', ttl]); } catch (e) {}
 }
 
 async function checkAccess(email) {
-  if (!email) return { ok: false, msg: 'Sesi tidak punya email. Silakan logout lalu login ulang.' };
+  if (!email) return { ok: false, msg: 'Sesi tidak punya email.' };
   try {
     const raw = await kv(['GET', KV_KEY]);
     if (!raw) return { ok: true };
@@ -145,18 +94,13 @@ function mapSymbolToTickerLayer(symbol) {
 }
 
 let currentKeyIndex = 0;
-
 async function tlFetch(url, initialApiKey) {
   const keys = API_KEYS.length > 0 ? API_KEYS : [initialApiKey];
   let attempts = 0;
-
   while (attempts < keys.length) {
     const activeKey = keys[currentKeyIndex];
     for (let retry = 0; retry < 2; retry++) {
-      const r = await fetch(url, {
-        method: 'GET',
-        headers: { 'x-api-key': activeKey, 'Content-Type': 'application/json' },
-      });
+      const r = await fetch(url, { method: 'GET', headers: { 'x-api-key': activeKey, 'Content-Type': 'application/json' } });
       if (r.ok) return { response: r, keyIndex: currentKeyIndex };
       if ((r.status === 429 || r.status === 401 || r.status === 403) && retry === 0) {
         await sleep(1000);
@@ -167,78 +111,41 @@ async function tlFetch(url, initialApiKey) {
     currentKeyIndex = (currentKeyIndex + 1) % keys.length;
     attempts++;
   }
-
-  const finalResponse = await fetch(url, {
-    method: 'GET',
-    headers: { 'x-api-key': keys[0], 'Content-Type': 'application/json' },
-  });
-  return { response: finalResponse, keyIndex: 0 };
+  return { response: await fetch(url, { method: 'GET', headers: { 'x-api-key': keys[0], 'Content-Type': 'application/json' } }), keyIndex: 0 };
 }
 
 async function fetchTickerLayerOHLC(symbol, interval, apiKey, need) {
-  const out = { rows: [], status: 'OK', reqs: 0 };
+  const out = { rows: [] };
   const tf = TL_SPAN[interval];
-  if (!apiKey && API_KEYS.length === 0) { out.status = 'KEY KOSONG'; return out; }
-  if (!tf) { out.status = 'TF TIDAK DIDUKUNG'; return out; }
-
+  if (!tf) return out;
   const mapped = mapSymbolToTickerLayer(symbol);
   const now = Date.now();
   const startMs = now - Math.ceil(need * 1.2 * tf.minutes * 60000) - 86400000;
   const byT = new Map();
-
-  const ranges = [];
-  const barsEst = (now - startMs) / (tf.minutes * 60000);
-  if (tf.span === 'minute' && barsEst > MINUTE_CHUNK_THRESHOLD) {
-    let to = now + 86400000;
-    while (to > startMs && ranges.length < MAX_CHUNKS) {
-      const from = Math.max(startMs, to - CHUNK_MS);
-      ranges.push([from, to]);
-      to = from;
-    }
-  } else {
-    ranges.push([startMs, now + 86400000]);
-  }
-
-  for (const [fromMs, toMs] of ranges) {
-    const url = `${TICKERLAYER_BASE_URL}/${mapped.asset}/agg/${mapped.symbol}/${tf.mult}/${tf.span}/${isoDate(new Date(fromMs))}/${isoDate(new Date(toMs))}?sort=asc&limit=5000`;
-    out.reqs++;
-    try {
-      const { response } = await tlFetch(url, apiKey);
-      if (!response.ok) continue;
+  const url = `${TICKERLAYER_BASE_URL}/${mapped.asset}/agg/${mapped.symbol}/${tf.mult}/${tf.span}/${isoDate(new Date(startMs))}/${isoDate(new Date(now + 86400000))}?sort=asc&limit=5000`;
+  try {
+    const { response } = await tlFetch(url, apiKey);
+    if (response.ok) {
       const data = await response.json();
       const rows = Array.isArray(data) ? data : (data.results || []);
       for (const c of rows) {
         const cand = { t: Number(c.t || 0), o: Number(c.o || 0), h: Number(c.h || 0), l: Number(c.l || 0), c: Number(c.c || 0) };
         if (cand.t > 0 && [cand.o, cand.h, cand.l, cand.c].every(Number.isFinite)) byT.set(cand.t, cand);
       }
-    } catch (err) {}
-  }
-
+    }
+  } catch (err) {}
   out.rows = [...byT.values()].sort((a, b) => a.t - b.t).slice(-Math.max(1, Math.ceil(need)));
   return out;
 }
+
+const TL_SPAN = { '1m': { mult: 1, span: 'minute', minutes: 1 } };
+const CACHE_TTL = { '1m': 120 };
+const CACHE_BARS = { '1m': 300 };
 
 function cleanCandles(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return [];
   return rows.map(c => ({ t: Number(c?.t), o: Number(c?.o), h: Number(c?.h), l: Number(c?.l), c: Number(c?.c) }))
     .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite)).sort((a, b) => a.t - b.t);
-}
-
-function aggregateCandles(candles, tfMin) {
-  const ms = tfMin * 60 * 1000;
-  const buckets = new Map();
-  for (const c of candles) {
-    const b = Math.floor(c.t / ms) * ms;
-    const g = buckets.get(b);
-    if (!g) {
-      buckets.set(b, { t: b, o: c.o, h: c.h, l: c.l, c: c.c });
-    } else {
-      g.h = Math.max(g.h, c.h);
-      g.l = Math.min(g.l, c.l);
-      g.c = c.c;
-    }
-  }
-  return [...buckets.values()].sort((a, b) => a.t - b.t);
 }
 
 function mergeLiveBar(candles, price, tfMin) {
@@ -260,30 +167,10 @@ function mergeLiveBar(candles, price, tfMin) {
 async function getCandles(symbol, tf, need, apiKey) {
   const cacheKey = `candles_${symbol}_${tf}`;
   const cached = await kvGetJSON(cacheKey);
-  if (Array.isArray(cached) && cached.length >= need) {
-    return { candles: cached, note: `cache ${tf} ${cached.length}` };
-  }
-
-  let best = [];
-  if (TL_SPAN[tf]) {
-    const nat = await fetchTickerLayerOHLC(symbol, tf, apiKey, Math.max(need, 150));
-    best = nat.rows;
-    if (nat.rows.length >= need) {
-      await kvSetJSON(cacheKey, nat.rows.slice(-CACHE_BARS[tf]), CACHE_TTL[tf]);
-      return { candles: nat.rows, note: 'native' };
-    }
-  }
-
-  const baseTf = BASE_OF[tf];
-  if (baseTf) {
-    const factor = TF_MIN[tf] / TF_MIN[baseTf];
-    const base = await fetchTickerLayerOHLC(symbol, baseTf, apiKey, need * factor + factor * 5);
-    const agg = aggregateCandles(base.rows, TF_MIN[tf]);
-    if (agg.length > best.length) best = agg;
-  }
-
-  if (best.length) await kvSetJSON(cacheKey, best.slice(-CACHE_BARS[tf]), CACHE_TTL[tf]);
-  return { candles: best, note: 'aggregated' };
+  if (Array.isArray(cached) && cached.length >= need) return { candles: cached };
+  const nat = await fetchTickerLayerOHLC(symbol, tf, apiKey, need);
+  if (nat.rows.length) await kvSetJSON(cacheKey, nat.rows.slice(-CACHE_BARS[tf]), CACHE_TTL[tf]);
+  return { candles: nat.rows };
 }
 
 function atr(candles, period = 14) {
@@ -297,56 +184,74 @@ function atr(candles, period = 14) {
   return s.length ? s.reduce((a, b) => a + b, 0) / s.length : 15;
 }
 
-// Kalkulasi Indikator Momentum (14 periode)
-function calculateMomentumIndicator(candles, period = 14) {
-  if (!candles || candles.length <= period) return 0;
-  const currentClose = candles[candles.length - 1].c;
-  const pastClose = candles[candles.length - 1 - period].c;
-  return Number((currentClose - pastClose).toFixed(4));
+function findPivots(candles, L) {
+  const highs = [], lows = [];
+  for (let i = L; i < candles.length - L; i++) {
+    let isH = true, isL = true;
+    for (let j = 1; j <= L && (isH || isL); j++) {
+      if (candles[i].h <= candles[i - j].h || candles[i].h <= candles[i + j].h) isH = false;
+      if (candles[i].l >= candles[i - j].l || candles[i].l >= candles[i + j].l) isL = false;
+    }
+    if (isH) highs.push({ i, p: candles[i].h });
+    if (isL) lows.push({ i, p: candles[i].l });
+  }
+  return { highs, lows };
 }
 
-// Analisis Indikator Momentum + Filter Sideways
-function analyzeMomentumAndMarketState(m1) {
-  if (!m1 || m1.length < 20) return { dir: 0, quality: 'LOW', src: 'data kurang' };
-
-  const momVal = calculateMomentumIndicator(m1, 14);
-
-  // Filter Sideways: Jika nilai momentum sangat kecil / mendekati 0, pasar dianggap sideways
-  if (momVal >= -0.15 && momVal <= 0.15) {
-    return { dir: 0, quality: 'SIDEWAYS', src: `Indikator Momentum Sideways (${momVal}) — Sinyal Ditahan` };
+function analyzePureSMCStructure(m1) {
+  if (!m1 || m1.length < 15) return { dir: 1, src: 'SMC Default' };
+  const { highs, lows } = findPivots(m1, SCALP_PIVOT);
+  if (highs.length < 2 || lows.length < 2) {
+    const last = m1[m1.length - 1], prev = m1[m1.length - 2];
+    return { dir: last.c >= prev.c ? 1 : -1, src: 'Price action M1' };
   }
+  const [h1, h2] = highs.slice(-2);
+  const [l1, l2] = lows.slice(-2);
+  const lastClose = m1[m1.length - 1].c;
 
-  if (momVal > 0.15) {
-    return { dir: 1, quality: momVal > 0.5 ? 'HIGH' : 'MEDIUM', src: `Indikator Momentum Bullish (${momVal})` };
-  } else if (momVal < -0.15) {
-    return { dir: -1, quality: momVal < -0.5 ? 'HIGH' : 'MEDIUM', src: `Indikator Momentum Bearish (${momVal})` };
-  }
-
-  return { dir: 0, quality: 'LOW', src: 'Momentum netral' };
+  if (lastClose > h2.p) return { dir: 1, src: 'M1 BOS Bullish' };
+  if (lastClose < l2.p) return { dir: -1, src: 'M1 BOS Bearish' };
+  if (h2.p > h1.p && l2.p > l1.p) return { dir: 1, src: 'M1 Structure HH + HL' };
+  if (h2.p < h1.p && l2.p < l1.p) return { dir: -1, src: 'M1 Structure LH + LL' };
+  return { dir: lastClose >= m1[m1.length - 2].c ? 1 : -1, src: 'M1 Order Flow' };
 }
 
-// ═══════════════════════════ SCALPING (Momentum Indicator + NOW) ═══════════════════════════
+// ═══════════════════════════ SCALPING (Pure SMC + Min SL 25-30 Pip) ═══════════════════════════
 function buildScalpPlan({ m1, price, rrList, symbol, dec }) {
   const f = v => Number(v).toFixed(dec);
-  const analysis = analyzeMomentumAndMarketState(m1);
+  const smc = analyzePureSMCStructure(m1);
+  const dir = smc.dir;
+  const entry = price;
 
-  if (analysis.dir === 0 || analysis.quality === 'SIDEWAYS') {
-    return { plan: null, reason: `TIDAK ADA SINYAL · ${analysis.src}. Sinyal disaring agar terhindar dari market choppy/sideways.` };
+  const minRisk = MIN_SL_PIPS * PIP_SIZE;
+  const maxRisk = MAX_SL_PIPS * PIP_SIZE;
+
+  const { highs, lows } = findPivots(m1, SCALP_PIVOT);
+  const pivotList = dir === 1 ? lows : highs;
+  let invalidationLevel = null;
+
+  for (let i = pivotList.length - 1; i >= 0; i--) {
+    const p = pivotList[i].p;
+    if (dir === 1 ? p < price : p > price) { invalidationLevel = p; break; }
   }
 
-  const dir = analysis.dir;
-  const entry = price;
-  const a = atr(m1, 14);
-  const risk = Math.max(a * 0.4, GOLD_SYMBOLS.includes(symbol) ? 1.5 : a * 0.5);
+  let risk;
+  if (invalidationLevel != null) {
+    const rawDist = Math.abs(entry - invalidationLevel);
+    // Batasi dalam rentang 25 - 30 pip (atau setara)
+    risk = Math.min(Math.max(rawDist, minRisk), maxRisk);
+  } else {
+    risk = minRisk; // Default aman ke batas minimum 25 pip
+  }
+
   const sl = dir === 1 ? entry - risk : entry + risk;
   const tps = rrList.map(x => entry + dir * x * risk);
-
-  const riskLabel = analysis.quality === 'HIGH' ? 'LOW' : 'MEDIUM';
+  const riskLabel = 'MEDIUM';
 
   const reason = [
-    `Scalping Agresif (Momentum Indicator Filter) ${dir === 1 ? 'BUY NOW' : 'SELL NOW'} pada ${symbol}.`,
-    `Status: ${analysis.quality} — Pemicu: ${analysis.src}.`,
-    `Entry ${f(entry)}, SL Ketat ${f(sl)}, Risiko ${f(risk)}.`,
+    `Scalping Agresif (Pure SMC + Min SL 25-30 Pip) ${dir === 1 ? 'BUY NOW' : 'SELL NOW'} pada ${symbol}.`,
+    `Struktur M1: ${smc.src}.`,
+    `Entry ${f(entry)}, SL (${(risk / PIP_SIZE).toFixed(0)} pip) di ${f(sl)}.`,
     `TP1 1:${rrList[0]}, TP2 1:${rrList[1]}, TP3 1:${rrList[2]}.`,
   ].join(' • ');
 
@@ -362,24 +267,21 @@ function buildScalpPlan({ m1, price, rrList, symbol, dec }) {
       tps,
       zone: null,
       expireMs: 0,
-      zoneNote: `Scalp M1 · Indikator Momentum`,
+      zoneNote: 'Scalp M1 · Pure SMC (Min 25-30 Pip SL)',
     },
-    meta: { confidence: analysis.quality, riskLabel, setup: 'M1 MOMENTUM IND', reason },
+    meta: { confidence: 'HIGH', riskLabel, setup: 'M1 PURE SMC MIN SL', reason },
   };
 }
 
-// Fungsi dummy untuk gaya trading lainnya
 function buildDayPlan() { return { plan: null, reason: '' }; }
 function buildRefinePlan() { return { plan: null, reason: '' }; }
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
     const email = String(body.email || req.headers['x-user-email'] || '').trim().toLowerCase();
     const apiKey = String(process.env.TICKERLAYER_API_KEY || '').trim();
-
     const styleKey = body.tradingStyle || 'Scalping';
     const style = STYLES[styleKey] || STYLES['Scalping'];
     const symbol = String(body.marketId || '').split('|').pop().toUpperCase();
@@ -389,28 +291,23 @@ export default async function handler(req, res) {
     if (!access.ok) return res.status(403).json({ error: access.msg });
 
     const noSignal = reason => ({ ok: true, signal: null, reason });
-
     let m1 = cleanCandles(body.candles?.m1);
     if (m1.length < 30) {
-      const fetched = await fetchTickerLayerOHLC(symbol, '1m', apiKey, 100);
-      m1 = fetched.rows;
+      const fetched = await getCandles(symbol, '1m', 100, apiKey);
+      m1 = fetched.candles;
     }
     const price = Number(body.currentPrice) || (m1.length ? m1[m1.length - 1].c : 2000);
     m1 = mergeLiveBar(m1, price, 1);
 
     let result;
     if (style.kind === 'scalp') {
-      if (m1.length < 30) {
-        return res.status(200).json(noSignal(`Data candle M1 (${m1.length}) belum cukup.`));
-      }
+      if (m1.length < 30) return res.status(200).json(noSignal(`Data candle M1 belum cukup.`));
       result = buildScalpPlan({ m1, price, rrList: style.rr, symbol, dec });
     } else {
-      result = { plan: null, reason: 'Gunakan mode Scalping untuk eksekusi Indikator Momentum M1.' };
+      result = { plan: null, reason: 'Gunakan mode Scalping untuk eksekusi ini.' };
     }
 
-    if (!result.plan) {
-      return res.status(200).json(noSignal(result.reason));
-    }
+    if (!result.plan) return res.status(200).json(noSignal(result.reason));
 
     const { dir, plan, meta } = result;
     const r = v => Number(v.toFixed(dec));
@@ -444,7 +341,6 @@ export default async function handler(req, res) {
       },
     });
   } catch (err) {
-    console.error('generate error stack:', err);
-    return res.status(200).json({ ok: false, error: 'Server error: ' + (err.message || 'Unknown error') });
+    return res.status(200).json({ ok: false, error: 'Server error: ' + err.message });
   }
 }
