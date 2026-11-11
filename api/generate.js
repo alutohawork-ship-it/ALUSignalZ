@@ -811,8 +811,8 @@ function toSignal(result, style, ctx) {
 // ═══════════════ MAPING ZONE (SMC + ICT: OB, SND, FVG, SNR, QM) ═══════════════
 
 const MAP_PIVOT = { 'Scalping': 2, 'Day Trading': 2, 'Intraday': 3, 'Swing': 3 };
-const ZONE_TF_NAME = { 'Scalping': 'M5', 'Day Trading': 'M5', 'Intraday': 'M15', 'Swing': 'H1' };
-const HTF_NAME = { 'Scalping': 'M15', 'Day Trading': 'M15', 'Intraday': 'H1', 'Swing': 'H4' };
+const ZONE_TF_NAME = { 'Scalping': 'M1', 'Day Trading': 'M5', 'Intraday': 'M15', 'Swing': 'H1' };
+const HTF_NAME = { 'Scalping': 'M15', 'Day Trading': 'H1', 'Intraday': 'H4', 'Swing': 'H4' };
 
 function findFVG(c, dir, price) {
   const out = [];
@@ -865,17 +865,19 @@ function buildZoneMap(c, style, price, htfBias) {
   const tfName = ZONE_TF_NAME[style] || 'M5';
   const htfName = HTF_NAME[style] || 'M15';
   const kz = inKillzone();
+  const styleLabel = STYLE_ZONE_CFG[style]?.label || style;
   const res = { sell: null, buy: null };
 
   for (const dir of [1, -1]) {
-    const blocks = [
-      ...findSDZones(c, dir, price).map(z => ({
-        bottom: z.bottom, top: z.top, type: z.fvg ? 'OB' : 'SND', fresh: z.fresh,
-      })),
-      ...findFVG(c, dir, price),
-      ...findSNR(c, dir, price, L, tol),
-      ...findQM(c, dir, price, L, tol),
-    ];
+    // Kumpulkan semua block SMC + ICT untuk arah ini
+    const sndBlocks = findSDZones(c, dir, price).map(z => ({
+      bottom: z.bottom, top: z.top, type: z.fvg ? 'OB' : 'SND', fresh: z.fresh,
+    }));
+    const fvgBlocks = findFVG(c, dir, price);
+    const snrBlocks = findSNR(c, dir, price, L, tol);
+    const qmBlocks = findQM(c, dir, price, L, tol);
+    const blocks = [...sndBlocks, ...fvgBlocks, ...snrBlocks, ...qmBlocks];
+
     const dist = b => Math.max(0, dir === 1 ? price - b.top : b.bottom - price);
     const overlapOf = b => blocks.filter(o => o !== b && o.bottom <= b.top && o.top >= b.bottom);
     const score = b => overlapOf(b).length
@@ -883,21 +885,63 @@ function buildZoneMap(c, style, price, htfBias) {
       + (htfBias === dir ? 2 : 0)
       + (b.type === 'QM' ? 1 : 0);
 
-    const best = blocks
+    // 1) Zona dalam 5 ATR
+    let best = blocks
       .filter(b => dist(b) <= 5 * a)
       .sort((x, y) => score(y) - score(x) || dist(x) - dist(y))[0];
-    if (!best) continue;
+
+    // 2) Fallback dalam 10 ATR
+    if (!best) {
+      best = blocks
+        .filter(b => dist(b) <= 10 * a)
+        .sort((x, y) => score(y) - score(x) || dist(x) - dist(y))[0];
+    }
+
+    // 3) Fallback S/D longgar (displacement 0.5×ATR, boleh sudah tersentuh)
+    if (!best) {
+      const relaxed = findSDZones(c, dir, price, { dispAtr: 0.5, freshOnly: false })[0];
+      if (relaxed) {
+        best = {
+          bottom: relaxed.bottom,
+          top: relaxed.top,
+          type: relaxed.fvg ? 'OB' : 'SND',
+          fresh: relaxed.fresh,
+        };
+      }
+    }
+
+    // 4) Fallback level swing terakhir — WAJIB ada output
+    if (!best) {
+      const s = c.slice(-50);
+      if (!s.length) continue;
+      const lvl = dir === 1 ? Math.min(...s.map(x => x.l)) : Math.max(...s.map(x => x.h));
+      best = { bottom: lvl - tol, top: lvl + tol, type: 'SWING', fresh: true };
+    }
 
     const s = score(best);
     const overlap = [...new Set(overlapOf(best).map(o => o.type))];
-    const styleLabel = STYLE_ZONE_CFG[style]?.label || style;
+    const isFallback = best.type === 'SWING';
+    
+    // Narasi Teknikal SMC / ICT Alchemist
+    const typeLabel = {
+      'OB': 'Order Block (OB)',
+      'SND': 'Supply & Demand (SND)',
+      'FVG': 'Fair Value Gap (FVG)',
+      'SNR': 'Support & Resistance (SNR)',
+      'QM': 'Quasimodo (QM)',
+      'SWING': 'Swing Level'
+    }[best.type] || best.type;
+
     const reasons = [
-      `${styleLabel}: block ${tfName} ${best.type}`,
-      overlap.length ? `Konfluensi dengan ${overlap.join(', ')}` : 'Tanpa konfluensi',
-      htfBias === dir ? `Searah bias ${htfName}` : `Lawan bias ${htfName}, risiko lebih tinggi`,
-      best.fresh !== false ? 'Zona belum tersentuh' : 'Zona sudah pernah tersentuh',
-      best.type === 'QM' ? 'Pola QM terbentuk dengan patahan struktur' : null,
-      kz ? `Di dalam killzone ${kz}` : 'Di luar killzone',
+      `${styleLabel}: ${typeLabel} di ${tfName}`,
+      overlap.length ? `Konfluensi zona: ${overlap.map(o => {
+        return { 'OB': 'Order Block', 'SND': 'Supply/Demand', 'FVG': 'FVG', 'SNR': 'SNR', 'QM': 'QM' }[o] || o;
+      }).join(' + ')}` : 'Zona Tunggal (Tanpa Konfluensi)',
+      htfBias === dir ? `Bias ${htfName}: Searah (BOS/Struktur)` : `Bias ${htfName}: Counter-trend (Hati-hati)`,
+      best.fresh !== false ? 'Status Zona: Fresh (Belum Termitigasi)' : 'Status Zona: Sudah Pernah Disentuh (Risiko Retest)',
+      best.type === 'QM' ? 'Pola: Quasimodo (QM) dengan Patahan Struktur' : null,
+      isFallback ? 'Fallback: Level Swing Ekstrem (Tidak Ada Blok Valid)' : null,
+      kz ? `Waktu: Di dalam Killzone ${kz}` : 'Waktu: Di luar Killzone Institusional',
     ].filter(Boolean);
 
     res[dir === 1 ? 'buy' : 'sell'] = {
@@ -905,7 +949,7 @@ function buildZoneMap(c, style, price, htfBias) {
       max: best.top,
       type: best.type,
       score: s,
-      conf: s >= 4 ? 'CONFIDENT' : s >= 2 ? 'WARNING' : 'LOW_CONFIDENT',
+      conf: isFallback ? 'LOW_CONFIDENT' : (s >= 4 ? 'CONFIDENT' : s >= 2 ? 'WARNING' : 'LOW_CONFIDENT'),
       reasons,
     };
   }
@@ -915,29 +959,45 @@ function buildZoneMap(c, style, price, htfBias) {
 async function handleZones(body, ctx, styleKey, apiKey) {
   const { symbol, dec } = ctx;
   const style = MAP_PIVOT[styleKey] ? styleKey : 'Scalping';
-  const lowTF = style === 'Scalping' || style === 'Day Trading';
 
+  let m1 = cleanCandles(body.candles?.m1);
   let m5 = cleanCandles(body.candles?.m5);
   let m15 = cleanCandles(body.candles?.m15);
-  if (lowTF && m5.length < NEED.m5) m5 = (await getCandles(symbol, '5m', NEED.m5, apiKey)).candles;
+
+  // Pastikan data primer tersedia untuk masing-masing gaya
+  if ((style === 'Scalping') && m1.length < NEED.m1) m1 = (await getCandles(symbol, '1m', NEED.m1, apiKey)).candles;
+  if ((style === 'Scalping' || style === 'Day Trading') && m5.length < NEED.m5) m5 = (await getCandles(symbol, '5m', NEED.m5, apiKey)).candles;
   if (m15.length < NEED.m15) m15 = (await getCandles(symbol, '15m', NEED.m15, apiKey)).candles;
 
-  const price = Number(body.currentPrice) || lastClosePrice(m5) || lastClosePrice(m15);
-  if (!(price > 0)) return { ok: false, error: 'Harga belum tersedia.' };
-  if (lowTF) m5 = mergeLiveBar(m5, price, 5);
-  m15 = mergeLiveBar(m15, price, 15);
+  const price = Number(body.currentPrice) || lastClosePrice(m1) || lastClosePrice(m5) || lastClosePrice(m15);
+  if (!(price > 0)) return { ok: false, error: 'Harga belum tersedia dari server. Coba klik ulang atau tunggu pergerakan harga.' };
+
+  // Suntikkan harga live ke candle terakhir
+  if (m1.length) m1 = mergeLiveBar(m1, price, 1);
+  if (m5.length) m5 = mergeLiveBar(m5, price, 5);
+  if (m15.length) m15 = mergeLiveBar(m15, price, 15);
 
   const h1 = aggregateCandles(m15, 60);
   const h4 = aggregateCandles(m15, 240);
-  const [zoneTF, htfTF] = {
-    'Scalping': [m5, m15],
-    'Day Trading': [m5, m15],
-    'Intraday': [m15, h1],
-    'Swing': [h1, h4],
-  }[style];
+
+  // Pilih TF Zona sesuai permintaan user
+  let zoneTF, htfTF;
+  if (style === 'Scalping') {
+    zoneTF = m1; htfTF = m15;
+  } else if (style === 'Day Trading') {
+    zoneTF = m5; htfTF = m15;
+  } else if (style === 'Intraday') {
+    zoneTF = m15; htfTF = h1;
+  } else if (style === 'Swing') {
+    zoneTF = h1; htfTF = h4;
+  }
+
+  if (!zoneTF || zoneTF.length < 20) {
+    return { ok: false, error: `Data candle ${ZONE_TF_NAME[style]} belum cukup (minimal 20 candle). Silakan ganti pair atau tunggu pergerakan pasar.` };
+  }
+
   const zc = zoneTF.slice(0, -1);
-  const hc = htfTF.slice(0, -1);
-  if (zc.length < 20) return { ok: false, error: 'Data candle belum cukup untuk maping zone.' };
+  const hc = htfTF.length >= 10 ? htfTF.slice(0, -1) : zoneTF.slice(0, -1);
 
   const zones = buildZoneMap(zc, style, price, structureBias(hc, MAP_PIVOT[style]).dir);
   const fmt = v => Number(Number(v).toFixed(dec));
