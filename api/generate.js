@@ -1,10 +1,16 @@
 // api/generate.js
-// v53 (Robust Zone Fetching + Sanity Check)
-//  - Maping Zone: Mendukung mode 'zones' (SMC + ICT: OB, SND, FVG, SNR, QM).
-//  - Setiap gaya trading memiliki Time Frame analisa yang berbeda:
-//    Scalping (M1), Day Trading (M5), Intraday (M15), Swing (H1).
-//  - Fetching data Maping Zone dipaksa dari API untuk mencegah cache frontend.
-//  - Sanity Check: Mencegah kalkulasi SL/TP error jika harga frontend tidak sinkron.
+// v53 (No Mapping Zone - Focus on Signal Quality)
+//  - Scalping:
+//      · XAUUSD: struktur M1, area S/D M5 dibentuk dari candle M1. SL 25-30 pip dari struktur.
+//      · Pair lain: struktur M5 dan area S/D M5 langsung. SL/TP mengikuti struktur, dibatasi ATR M5.
+//      · Di dalam area demand M5 → BUY NOW, area supply M5 → SELL NOW
+//      · Di luar area → NOW searah arah awal market (BOS → HH+HL/LH+LL → price action)
+//  - Day Trading: BOS M15 (bias) → area M15 → refine M5. DUA ARAH: BUY dan SELL dinilai,
+//      zona terkuat (Supply/Demand/OB/FVG) dipilih, tidak terkunci ke arah bias.
+//  - Intraday: area S/D H1 → refine M15. DUA ARAH. Maksimal 1 signal per hari (WIB), disimpan di KV.
+//  - Swing: area S/D H4 → refine H1. Selalu ada signal.
+//  - Pip per pair: XAUUSD 0.1; forex 10^-(desimal-1); indeks dan BTC 1 (lihat PIP_OVERRIDE).
+//  - TickerLayer API Key Rotations terintegrasi utuh.
 
 export const config = { api: { bodyParser: { sizeLimit: '6mb' } } };
 
@@ -33,6 +39,7 @@ const CRYPTO_LIST = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'BNBUSD', 'ADAUSD',
 const GOLD_SYMBOLS = ['XAUUSD', 'XAUUSDX'];
 const isGold = symbol => GOLD_SYMBOLS.includes(symbol);
 
+// Ukuran 1 pip per instrumen. Di luar daftar ini: 10^-(desimal-1), misalnya EURUSD 0.0001, USDJPY 0.01.
 const PIP_OVERRIDE = {
   XAUUSD: 0.1, XAUUSDX: 0.1, DXY: 0.01, ETHUSD: 0.1,
   US30: 1, NAS100: 1, SPX500: 1, GER40: 1, UK100: 1, JPN225: 1, FRA40: 1, AUS200: 1, BTCUSD: 1,
@@ -58,41 +65,40 @@ const STYLES = {
   },
 };
 
-const STYLE_ZONE_CFG = {
-  'Scalping':    { label: 'Scalping agresif' },
-  'Day Trading': { label: 'Day Trading konservatif' },
-  'Intraday':    { label: 'Intraday moderat' },
-  'Swing':       { label: 'Swing positioning' },
-};
-
+// ── Jumlah candle dan batas minimum ──
 const NEED = { m1: 160, m5: 120, m15: 480 };
 const MIN_BARS = { m1: 100, m5: 40, m15: 120, m15Swing: 400 };
 
+// ── Struktur dan BOS ──
 const SCALP_PIVOT = 2;
 const DAY_PIVOT = 3;
 const DAY_BOS_LOOKBACK = 60;
 const DAY_OB_LOOKBACK = 12;
 
+// ── Bollinger ──
 const BB_PERIOD = 20;
 const BB_MULT = 2;
-const BAND_TOL_PIPS = 10;
-const BAND_TOL_ATR = 0.2;
+const BAND_TOL_PIPS = 10;   // toleransi limit terhadap band (dipakai untuk pair dengan pip)
+const BAND_TOL_ATR = 0.2;   // toleransi limit terhadap band (pair tanpa batas pip, dalam kelipatan ATR)
 
+// ── Zona Supply/Demand (default) ──
 const ZONE_ATR_PERIOD = 14;
 const ZONE_DISP_ATR = 1.2;
 const ZONE_MAX_ATR = 2.5;
 const ZONE_REQUIRE_FVG = false;
 const ZONE_FRESH_ONLY = true;
 
-const SCALP_ZONE_LOOKBACK_M5 = 60;
-const SCALP_ZONE_DISP_ATR = 0.8;
-const SCALP_ZONE_FRESH_ONLY = true;
-const SCALP_ZONE_NEEDS_CONFIRM = false;
-const SCALP_ZONE_REQUIRE_BIAS = false;
-const SCALP_NEAR_ZONE_PIPS = 15;
-const SCALP_CHASE_MAX_PIPS = 15;
+// ── Scalping ──
+const SCALP_ZONE_LOOKBACK_M5 = 60;      // area M5 harus terbentuk dalam 60 candle M5 terakhir
+const SCALP_ZONE_DISP_ATR = 0.8;        // displacement scalping M5: body minimal 0.8 × ATR
+const SCALP_ZONE_FRESH_ONLY = true;     // true = area yang sudah pernah tersentuh dibuang
+const SCALP_ZONE_NEEDS_CONFIRM = false; // true = tunggu reaksi (pullback selesai lalu tembus) dulu
+const SCALP_ZONE_REQUIRE_BIAS = false;  // true = demand hanya jika bias M5 bullish, supply jika bearish
+const SCALP_NEAR_ZONE_PIPS = 15;        // area berlawanan dalam 15 pip → peringatan
+const SCALP_CHASE_MAX_PIPS = 15;        // dipakai hanya jika SCALP_ZONE_NEEDS_CONFIRM = true
 const scalpZoneOpts = { dispAtr: SCALP_ZONE_DISP_ATR, freshOnly: SCALP_ZONE_FRESH_ONLY };
 
+// ── SL: XAUUSD dalam pip, pair lain dalam kelipatan ATR ──
 const GOLD_SL_PIPS = { scalp: [25, 30], day: [50, 120], intraday: [80, 200], swing: [150, 300] };
 const SL_BUFFER_PIPS = { scalp: 3, day: 5, intraday: 10, swing: 15 };
 const ATR_SL_MULT = { scalp: [0.5, 2.5], day: [1, 3], intraday: [1, 3], swing: [0.5, 2] };
@@ -170,6 +176,7 @@ async function tlFetch(url, initialApiKey) {
   return { response: await fetch(url, { method: 'GET', headers: { 'x-api-key': keys[0], 'Content-Type': 'application/json' } }), keyIndex: 0 };
 }
 
+// Hanya 1m, 5m, dan 15m yang diambil dari TickerLayer. H1 dan H4 dibentuk dari M15.
 const TL_SPAN = {
   '1m':  { mult: 1,  span: 'minute', minutes: 1 },
   '5m':  { mult: 5,  span: 'minute', minutes: 5 },
@@ -224,6 +231,7 @@ function mergeLiveBar(candles, price, tfMin) {
   return candles;
 }
 
+// Bangun candle berjangka tfMin menit dari candle yang lebih kecil (M1→M5, M15→H1, M15→H4)
 function aggregateCandles(candles, tfMin) {
   const ms = tfMin * 60000;
   const map = new Map();
@@ -791,189 +799,6 @@ function toSignal(result, style, ctx) {
   };
 }
 
-// ═══════════════ MAPING ZONE (SMC + ICT: OB, SND, FVG, SNR, QM) ═══════════════
-
-const MAP_PIVOT = { 'Scalping': 2, 'Day Trading': 2, 'Intraday': 3, 'Swing': 3 };
-const ZONE_TF_NAME = { 'Scalping': 'M1', 'Day Trading': 'M5', 'Intraday': 'M15', 'Swing': 'H1' };
-const HTF_NAME = { 'Scalping': 'M15', 'Day Trading': 'H1', 'Intraday': 'H4', 'Swing': 'H4' };
-
-function findFVG(c, dir, price) {
-  const out = [];
-  for (let k = 1; k < c.length - 1; k++) {
-    const a = c[k - 1], b = c[k + 1];
-    let bottom, top;
-    if (dir === 1 && a.h < b.l && b.l <= price) { bottom = a.h; top = b.l; }
-    else if (dir === -1 && a.l > b.h && b.h >= price) { bottom = b.h; top = a.l; }
-    else continue;
-    if (c.slice(k + 2).some(x => x.l <= top && x.h >= bottom)) continue;
-    out.push({ bottom, top, type: 'FVG' });
-  }
-  return out;
-}
-
-function findSNR(c, dir, price, L, tol) {
-  const { highs, lows } = findPivots(c, L);
-  return (dir === 1 ? lows : highs)
-    .filter(p => (dir === 1 ? p.p <= price : p.p >= price))
-    .map(p => ({ bottom: p.p - tol, top: p.p + tol, type: 'SNR' }));
-}
-
-function findQM(c, dir, price, L, tol) {
-  const { highs, lows } = findPivots(c, L);
-  const seq = [
-    ...highs.map(p => ({ ...p, hi: true })),
-    ...lows.map(p => ({ ...p, hi: false })),
-  ].sort((x, y) => x.i - y.i);
-  if (seq.length < 3) return [];
-  const [ls, mid, hd] = seq.slice(-3);
-  const close = c[c.length - 1].c;
-  if (dir === -1 && ls.hi && !mid.hi && hd.hi && hd.p > ls.p && hd.p >= price && close < mid.p)
-    return [{ bottom: hd.p - tol, top: hd.p, type: 'QM' }];
-  if (dir === 1 && !ls.hi && mid.hi && !hd.hi && hd.p < ls.p && hd.p <= price && close > mid.p)
-    return [{ bottom: hd.p, top: hd.p + tol, type: 'QM' }];
-  return [];
-}
-
-function inKillzone() {
-  const h = new Date().getUTCHours();
-  if (h >= 7 && h < 10) return 'London';
-  if (h >= 12 && h < 15) return 'New York';
-  return null;
-}
-
-function buildZoneMap(c, style, price, htfBias) {
-  const L = MAP_PIVOT[style] || 2;
-  const a = atr(c, ZONE_ATR_PERIOD);
-  const tol = BAND_TOL_ATR * a;
-  const tfName = ZONE_TF_NAME[style] || 'M5';
-  const htfName = HTF_NAME[style] || 'M15';
-  const kz = inKillzone();
-  const styleLabel = STYLE_ZONE_CFG[style]?.label || style;
-  const res = { sell: null, buy: null };
-
-  for (const dir of [1, -1]) {
-    const sndBlocks = findSDZones(c, dir, price).map(z => ({
-      bottom: z.bottom, top: z.top, type: z.fvg ? 'OB' : 'SND', fresh: z.fresh,
-    }));
-    const fvgBlocks = findFVG(c, dir, price);
-    const snrBlocks = findSNR(c, dir, price, L, tol);
-    const qmBlocks = findQM(c, dir, price, L, tol);
-    const blocks = [...sndBlocks, ...fvgBlocks, ...snrBlocks, ...qmBlocks];
-
-    const dist = b => Math.max(0, dir === 1 ? price - b.top : b.bottom - price);
-    const overlapOf = b => blocks.filter(o => o !== b && o.bottom <= b.top && o.top >= b.bottom);
-    const score = b => overlapOf(b).length
-      + (b.fresh !== false ? 1 : 0)
-      + (htfBias === dir ? 2 : 0)
-      + (b.type === 'QM' ? 1 : 0);
-
-    let best = blocks.filter(b => dist(b) <= 5 * a).sort((x, y) => score(y) - score(x) || dist(x) - dist(y))[0];
-    if (!best) best = blocks.filter(b => dist(b) <= 10 * a).sort((x, y) => score(y) - score(x) || dist(x) - dist(y))[0];
-    if (!best) {
-      const relaxed = findSDZones(c, dir, price, { dispAtr: 0.5, freshOnly: false })[0];
-      if (relaxed) best = { bottom: relaxed.bottom, top: relaxed.top, type: relaxed.fvg ? 'OB' : 'SND', fresh: relaxed.fresh };
-    }
-    if (!best) {
-      const s = c.slice(-50);
-      if (!s.length) continue;
-      const lvl = dir === 1 ? Math.min(...s.map(x => x.l)) : Math.max(...s.map(x => x.h));
-      best = { bottom: lvl - tol, top: lvl + tol, type: 'SWING', fresh: true };
-    }
-
-    const s = score(best);
-    const overlap = [...new Set(overlapOf(best).map(o => o.type))];
-    const isFallback = best.type === 'SWING';
-    
-    const typeLabel = {
-      'OB': 'Order Block (OB)',
-      'SND': 'Supply & Demand (SND)',
-      'FVG': 'Fair Value Gap (FVG)',
-      'SNR': 'Support & Resistance (SNR)',
-      'QM': 'Quasimodo (QM)',
-      'SWING': 'Swing Level'
-    }[best.type] || best.type;
-
-    const reasons = [
-      `${styleLabel}: ${typeLabel} di ${tfName}`,
-      overlap.length ? `Konfluensi zona: ${overlap.map(o => {
-        return { 'OB': 'Order Block', 'SND': 'Supply/Demand', 'FVG': 'FVG', 'SNR': 'SNR', 'QM': 'QM' }[o] || o;
-      }).join(' + ')}` : 'Zona Tunggal (Tanpa Konfluensi)',
-      htfBias === dir ? `Bias ${htfName}: Searah (BOS/Struktur)` : `Bias ${htfName}: Counter-trend (Hati-hati)`,
-      best.fresh !== false ? 'Status Zona: Fresh (Belum Termitigasi)' : 'Status Zona: Sudah Pernah Disentuh (Risiko Retest)',
-      best.type === 'QM' ? 'Pola: Quasimodo (QM) dengan Patahan Struktur' : null,
-      isFallback ? 'Fallback: Level Swing Ekstrem (Tidak Ada Blok Valid)' : null,
-      kz ? `Waktu: Di dalam Killzone ${kz}` : 'Waktu: Di luar Killzone Institusional',
-    ].filter(Boolean);
-
-    res[dir === 1 ? 'buy' : 'sell'] = {
-      min: best.bottom, max: best.top, type: best.type, score: s,
-      conf: isFallback ? 'LOW_CONFIDENT' : (s >= 4 ? 'CONFIDENT' : s >= 2 ? 'WARNING' : 'LOW_CONFIDENT'),
-      reasons,
-    };
-  }
-  return res;
-}
-
-async function handleZones(body, ctx, styleKey, apiKey) {
-  const { symbol, dec } = ctx;
-  const style = MAP_PIVOT[styleKey] ? styleKey : 'Scalping';
-
-  // FIX 1: Paksa fetch data langsung dari API, abaikan body.candles yang mungkin nyasar dari frontend
-  let m1 = [], m5 = [], m15 = [];
-  
-  if (style === 'Scalping') {
-    m1 = (await getCandles(symbol, '1m', NEED.m1, apiKey)).candles;
-  } else if (style === 'Day Trading') {
-    m5 = (await getCandles(symbol, '5m', NEED.m5, apiKey)).candles;
-  } else if (style === 'Intraday') {
-    m15 = (await getCandles(symbol, '15m', NEED.m15, apiKey)).candles;
-  } else if (style === 'Swing') {
-    m15 = (await getCandles(symbol, '15m', NEED.m15, apiKey)).candles;
-  }
-
-  // Pastikan m15 terisi untuk HTF bias
-  if (m15.length < NEED.m15) m15 = (await getCandles(symbol, '15m', NEED.m15, apiKey)).candles;
-
-  const lastC = lastClosePrice(m15) || lastClosePrice(m5) || lastClosePrice(m1);
-  
-  // FIX 2: Sanity check harga. Jika frontend mengirim harga ngawur (misal EURUSD 1.12 tapi data XAUUSD 4000)
-  let price = Number(body.currentPrice);
-  if (!(price > 0) || (lastC > 0 && (price > lastC * 1.5 || price < lastC * 0.5))) {
-    price = lastC; // Paksa pakai harga pasar asli
-  }
-
-  if (!(price > 0)) return { ok: false, error: 'Harga belum tersedia dari server.' };
-
-  if (m1.length) m1 = mergeLiveBar(m1, price, 1);
-  if (m5.length) m5 = mergeLiveBar(m5, price, 5);
-  if (m15.length) m15 = mergeLiveBar(m15, price, 15);
-
-  const h1 = aggregateCandles(m15, 60);
-  const h4 = aggregateCandles(m15, 240);
-
-  let zoneTF, htfTF;
-  if (style === 'Scalping') { zoneTF = m1; htfTF = m15; }
-  else if (style === 'Day Trading') { zoneTF = m5; htfTF = m15; }
-  else if (style === 'Intraday') { zoneTF = m15; htfTF = h1; }
-  else if (style === 'Swing') { zoneTF = h1; htfTF = h4; }
-
-  if (!zoneTF || zoneTF.length < 20) {
-    return { ok: false, error: `Data candle ${ZONE_TF_NAME[style]} belum cukup.` };
-  }
-
-  const zc = zoneTF.slice(0, -1);
-  const hc = htfTF.length >= 10 ? htfTF.slice(0, -1) : zoneTF.slice(0, -1);
-
-  const zones = buildZoneMap(zc, style, price, structureBias(hc, MAP_PIVOT[style]).dir);
-  const fmt = v => Number(Number(v).toFixed(dec));
-  const out = {};
-  for (const side of ['sell', 'buy']) {
-    const z = zones[side];
-    out[side] = z ? { min: fmt(z.min), max: fmt(z.max), type: z.type, conf: z.conf, score: z.score, reasons: z.reasons } : null;
-  }
-  return { ok: true, style, price: fmt(price), zones: out };
-}
-
 // ═══════════════════════════ MAIN HANDLER ═══════════════════════════
 
 export default async function handler(req, res) {
@@ -996,20 +821,15 @@ export default async function handler(req, res) {
 
   let apiKey = API_KEYS[0] || process.env.TICKERLAYER_API_KEY || '';
 
-  if (body.mode === 'zones') {
-    const out = await handleZones(body, ctx, styleKey, apiKey);
-    return res.status(200).json(out);
-  }
-
+  // Mode Standar (Signal Generation)
   let m1 = cleanCandles(body.candles?.m1);
   let m5 = cleanCandles(body.candles?.m5);
   let m15 = cleanCandles(body.candles?.m15);
 
-  // FIX 3: Sanity check data candle frontend
+  // Sanity check data candle frontend (mencegah kalkulasi ngawur jika frontend mismatch pair)
   const lastC = lastClosePrice(m5) || lastClosePrice(m15) || lastClosePrice(m1);
   let price = Number(body.currentPrice);
   if (lastC > 0 && price > 0 && (price > lastC * 1.5 || price < lastC * 0.5)) {
-    // Harga ngawur! Buang data frontend, paksa fetch ulang.
     m1 = []; m5 = []; m15 = []; price = lastC;
   }
 
