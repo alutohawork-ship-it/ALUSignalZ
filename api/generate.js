@@ -11,11 +11,17 @@
 //  - Swing: area S/D H4 → refine H1. Selalu ada signal.
 //  - Pip per pair: XAUUSD 0.1; forex 10^-(desimal-1); indeks dan BTC 1 (lihat PIP_OVERRIDE).
 //  - TickerLayer API Key Rotations terintegrasi utuh.
+//  - Integrasi AI GutsAI (DeepSeek) untuk narasi reasoning SMC/ICT.
 
 export const config = { api: { bodyParser: { sizeLimit: '6mb' } } };
 
 const KV_KEY = 'alu_clients';
 const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
+
+// ── AI CONFIG ──
+const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const AI_MODEL = 'deepseek-v4.1-flash';
 
 const API_KEYS = [
   process.env.TICKERLAYER_API_KEY,
@@ -482,8 +488,57 @@ function slBounds(kind, ctx, atrVal) {
   return { min: a * atrVal, max: b * atrVal };
 }
 
-function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, rrList, confidence, setup, zoneNote, zoneRange, head, lines }) {
-  const { f, pip, gold } = ctx;
+// ── AI REASONING FUNCTION ──
+async function getAIReasoning(signalData) {
+  if (!OPENAI_API_KEY) return null;
+
+  const prompt = `
+Anda adalah analis teknikal SMC (Smart Money Concepts) dan ICT profesional.
+Buat 1 paragraf ringkas (maksimal 400 karakter) alasan entry berdasarkan data:
+- Pair: ${signalData.symbol} | Sinyal: ${signalData.dir === 1 ? 'BUY' : 'SELL'} (${signalData.style})
+- Order: ${signalData.orderType} | Entry: ${signalData.entry} | SL: ${signalData.sl}
+- TP: ${signalData.tps.join(', ')}
+- Setup: ${signalData.setup}
+- Konteks: ${signalData.rawReason}
+
+Aturan:
+1. Gunakan istilah teknikal (BOS, CHoCH, Order Block, FVG, Liquidity Sweep, Displacement).
+2. Jangan mengarang berita fundamental. Fokus HANYA pada price action.
+3. Jelaskan alasan arah entry (contoh: "BOS bullish M15 mengonfirmasi tren, limit di area Demand M5 fresh").
+4. Bahasa Indonesia tegas dan profesional.
+`;
+
+  try {
+    const res = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: AI_MODEL,
+        messages: [
+          { role: 'system', content: 'Anda adalah AI analis trading SMC/ICT yang objektif dan presisi.' },
+          { role: 'user', content: prompt }
+        ],
+        max_tokens: 200,
+        temperature: 0.4,
+      })
+    });
+    
+    const data = await res.json();
+    if (data.choices && data.choices[0]) {
+      return data.choices[0].message.content.trim();
+    }
+    return null;
+  } catch (err) {
+    console.error('AI Error:', err.message);
+    return null;
+  }
+}
+
+async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, rrList, confidence, setup, zoneNote, zoneRange, head, lines }) {
+  const { f, pip, gold, symbol } = ctx;
   const b = slBounds(kind, ctx, atrVal);
   const buf = gold ? SL_BUFFER_PIPS[kind] * pip : SL_BUFFER_ATR * atrVal;
   let raw = Math.abs(entry - baseSL) + buf;
@@ -501,7 +556,12 @@ function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, rrList
     `Entry ${f(entry)}, SL (${(risk / pip).toFixed(0)} pip) di ${f(sl)}`,
     rrList.map((x, i) => `TP${i + 1} 1:${x}`).join(', '),
   ].filter(Boolean);
-  const reason = parts.map(s => s.replace(/\.?$/, '.')).join(' • ');
+  const manualReason = parts.map(s => s.replace(/\.?$/, '.')).join(' • ');
+
+  // Panggil AI
+  let finalReason = manualReason;
+  const aiReason = await getAIReasoning({ symbol, dir, style: kind, orderType, entry, sl, tps, setup, rawReason: manualReason });
+  if (aiReason) finalReason = aiReason;
 
   return {
     dir,
@@ -517,11 +577,11 @@ function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, rrList
       expireMs: 0,
       zoneNote,
     },
-    meta: { confidence, riskLabel: 'MEDIUM', setup, reason },
+    meta: { confidence, riskLabel: 'MEDIUM', setup, reason: finalReason },
   };
 }
 
-function buildAreaPlan({ title, area, dir, price, refineC, refineName, kind, atrVal, ctx, areaName, rrList, lines }) {
+async function buildAreaPlan({ title, area, dir, price, refineC, refineName, kind, atrVal, ctx, areaName, rrList, lines }) {
   const { f, pip, gold, symbol } = ctx;
   const tol = gold ? BAND_TOL_PIPS * pip : BAND_TOL_ATR * atrVal;
   const broken = dir === 1 ? price <= area.sl : price >= area.sl;
@@ -564,7 +624,7 @@ function buildAreaPlan({ title, area, dir, price, refineC, refineName, kind, atr
   }
 
   const head = `${title} ${dir === 1 ? 'BUY' : 'SELL'} ${orderType === 'LIMIT' ? 'LIMIT' : 'NOW'} pada ${symbol}`;
-  return finalizePlan({
+  return await finalizePlan({
     dir, entry, orderType, baseSL, kind, atrVal, ctx, rrList, confidence, setup,
     zoneNote: `${title} · ${areaName} · ${orderType}`,
     zoneRange: { min: area.bottom, max: area.top },
@@ -574,7 +634,7 @@ function buildAreaPlan({ title, area, dir, price, refineC, refineName, kind, atr
 
 // ═══════════════════════════ SCALPING ═══════════════════════════
 
-function buildScalpPlan({ m1, m5, price, rrList, ctx }) {
+async function buildScalpPlan({ m1, m5, price, rrList, ctx }) {
   const { f, pip, gold } = ctx;
   const struct = gold ? m1 : m5;
   const tfName = gold ? 'M1' : 'M5';
@@ -636,7 +696,7 @@ function buildScalpPlan({ m1, m5, price, rrList, ctx }) {
   }
 
   const refZone = zone || findSDZones(m5c, dir, price, scalpZoneOpts).filter(recent)[0] || null;
-  return finalizePlan({
+  return await finalizePlan({
     dir, entry: price, orderType: 'NOW', baseSL, kind: 'scalp', atrVal, ctx, rrList,
     confidence, setup, zoneNote: `Scalp · ${setup}`,
     zoneRange: refZone ? { min: refZone.bottom, max: refZone.top } : null,
@@ -681,7 +741,7 @@ function evalSide(dir, o) {
   return { dir, area, areaName, refineNote, score };
 }
 
-function buildTwoWayPlan(o) {
+async function buildTwoWayPlan(o) {
   const { title, kind, price, ctx, rrList, bias, biasNote, refineC, refineName, atrVal } = o;
   const [best, other] = [evalSide(1, o), evalSide(-1, o)].sort((a, b) => b.score - a.score);
   const lines = [
@@ -690,20 +750,20 @@ function buildTwoWayPlan(o) {
     `Dua arah dinilai: ${best.dir === 1 ? 'BUY' : 'SELL'} skor ${best.score.toFixed(1)} vs ${other.dir === 1 ? 'BUY' : 'SELL'} ${other.score.toFixed(1)}`,
     best.dir !== bias.dir ? 'Counter-trend: zona lawan bias lebih kuat, risiko lebih tinggi' : '',
   ].filter(Boolean);
-  return buildAreaPlan({
+  return await buildAreaPlan({
     title, area: best.area, dir: best.dir, price, refineC, refineName,
     kind, atrVal, ctx, areaName: best.areaName, rrList, lines,
   });
 }
 
-function buildDayPlan({ m5, m15, price, rrList, ctx }) {
+async function buildDayPlan({ m5, m15, price, rrList, ctx }) {
   const bos = findLastBOS(m15, DAY_PIVOT);
   const init = analyzePureSMCStructure(m15);
   const bias = { dir: bos ? bos.dir : init.dir };
   const biasNote = bos
     ? `Bias M15: BOS ${bos.dir === 1 ? 'bullish' : 'bearish'} di ${ctx.f(bos.level)}`
     : `Bias M15: struktur ${init.src}`;
-  return buildTwoWayPlan({
+  return await buildTwoWayPlan({
     title: 'Day Trading', kind: 'day', price, ctx, rrList, bias, biasNote,
     parentName: 'M15',
     parentPick: d => (bos && bos.dir === d ? pickM15Area(m15, bos, price) : null) || pickZone(m15, d, price, 96),
@@ -711,7 +771,7 @@ function buildDayPlan({ m5, m15, price, rrList, ctx }) {
   });
 }
 
-function buildIntradayPlan({ m15, price, rrList, ctx }) {
+async function buildIntradayPlan({ m15, price, rrList, ctx }) {
   const h1 = aggregateCandles(m15, 60);
   const bos = findLastBOS(h1, DAY_PIVOT);
   const init = analyzePureSMCStructure(h1);
@@ -719,7 +779,7 @@ function buildIntradayPlan({ m15, price, rrList, ctx }) {
   const biasNote = bos
     ? `Bias H1: BOS ${bos.dir === 1 ? 'bullish' : 'bearish'} di ${ctx.f(bos.level)}`
     : `Bias H1: struktur ${init.src}`;
-  return buildTwoWayPlan({
+  return await buildTwoWayPlan({
     title: 'Intraday', kind: 'intraday', price, ctx, rrList, bias, biasNote,
     parentName: 'H1',
     parentPick: d => pickZone(h1, d, price, 72),
@@ -729,7 +789,7 @@ function buildIntradayPlan({ m15, price, rrList, ctx }) {
 
 // ═══════════════════════════ SWING ═══════════════════════════
 
-function buildSwingPlan({ m15, price, rrList, ctx }) {
+async function buildSwingPlan({ m15, price, rrList, ctx }) {
   const h4 = aggregateCandles(m15, 240);
   const h1 = aggregateCandles(m15, 60);
   const bos = findLastBOS(h4, DAY_PIVOT);
@@ -759,7 +819,7 @@ function buildSwingPlan({ m15, price, rrList, ctx }) {
     ? `Bias H4: BOS ${dir === 1 ? 'bullish' : 'bearish'} di ${ctx.f(bos.level)}`
     : `Bias H4: struktur ${init.src}`;
 
-  return buildAreaPlan({
+  return await buildAreaPlan({
     title: 'Swing', area, dir, price, refineC: h1, refineName: 'H1',
     kind: 'swing', atrVal: atrOf(h4, ctx.pip), ctx, areaName, rrList,
     lines: [biasNote, refineNote],
@@ -806,7 +866,9 @@ export default async function handler(req, res) {
 
   const body = req.body || {};
   const symbol = String(body.symbol || 'XAUUSD').toUpperCase().trim();
-  const styleKey = String(body.style || 'Scalping').trim();
+  
+  // FIX: Terima 'style' atau 'tradingStyle' dari frontend
+  const styleKey = String(body.style || body.tradingStyle || 'Scalping').trim();
   const style = STYLES[styleKey] ? styleKey : 'Scalping';
   const styleCfg = STYLES[style];
 
@@ -852,13 +914,13 @@ export default async function handler(req, res) {
   let result = { plan: null, reason: 'Belum diproses' };
 
   if (style === 'Scalping') {
-    result = buildScalpPlan({ m1, m5, price, rrList, ctx });
+    result = await buildScalpPlan({ m1, m5, price, rrList, ctx });
   } else if (style === 'Day Trading') {
-    result = buildDayPlan({ m5, m15, price, rrList, ctx });
+    result = await buildDayPlan({ m5, m15, price, rrList, ctx });
   } else if (style === 'Intraday') {
-    result = buildIntradayPlan({ m15, price, rrList, ctx });
+    result = await buildIntradayPlan({ m15, price, rrList, ctx });
   } else if (style === 'Swing') {
-    result = buildSwingPlan({ m15, price, rrList, ctx });
+    result = await buildSwingPlan({ m15, price, rrList, ctx });
   }
 
   if (!result.plan) {
