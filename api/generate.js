@@ -66,6 +66,14 @@ const STYLES = {
   },
 };
 
+// ── Label zona per gaya (dipakai untuk Maping Zone) ──
+const STYLE_ZONE_CFG = {
+  'Scalping':    { label: 'Scalping agresif' },
+  'Day Trading': { label: 'Day Trading konservatif' },
+  'Intraday':    { label: 'Intraday moderat' },
+  'Swing':       { label: 'Swing positioning' },
+};
+
 // ── Jumlah candle dan batas minimum ──
 const NEED = { m1: 160, m5: 120, m15: 480 };
 const MIN_BARS = { m1: 100, m5: 40, m15: 120, m15Swing: 400 };
@@ -882,8 +890,9 @@ function buildZoneMap(c, style, price, htfBias) {
 
     const s = score(best);
     const overlap = [...new Set(overlapOf(best).map(o => o.type))];
+    const styleLabel = STYLE_ZONE_CFG[style]?.label || style;
     const reasons = [
-      `${best.type} ${tfName} (${style})`,
+      `${styleLabel}: block ${tfName} ${best.type}`,
       overlap.length ? `Konfluensi dengan ${overlap.join(', ')}` : 'Tanpa konfluensi',
       htfBias === dir ? `Searah bias ${htfName}` : `Lawan bias ${htfName}, risiko lebih tinggi`,
       best.fresh !== false ? 'Zona belum tersentuh' : 'Zona sudah pernah tersentuh',
