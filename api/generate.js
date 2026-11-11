@@ -1017,5 +1017,6 @@ export default async function handler(req, res) {
   }
 
   const payload = toSignal(result, styleCfg, ctx);
-  return res.status(200).json({ ok: true, ...payload });
+  // PERBAIKAN: Mengirim payload di dalam objek 'signal' agar sesuai dengan frontend HTML/JS
+  return res.status(200).json({ ok: true, signal: payload });
 }
