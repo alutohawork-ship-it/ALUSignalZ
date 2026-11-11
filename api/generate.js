@@ -489,23 +489,29 @@ function slBounds(kind, ctx, atrVal) {
 }
 
 // ── AI REASONING FUNCTION ──
+// FIX: Prompt super ketat SMC/ICT, melarang retail indicators.
 async function getAIReasoning(signalData) {
   if (!OPENAI_API_KEY) return null;
 
   const prompt = `
-Anda adalah analis teknikal SMC (Smart Money Concepts) dan ICT profesional.
-Buat 1 paragraf ringkas (maksimal 400 karakter) alasan entry berdasarkan data:
+Anda adalah "Alu Signal Z", Institutional Trader elit dengan akurasi tinggi yang HANYA menggunakan strategi Smart Money Concepts (SMC) dan ICT (Inner Circle Trader). 
+Tugasmu: Memberikan narasi alasan entry (reasoning) yang presisi tinggi berdasarkan data teknikal yang sudah dihitung oleh sistem.
+
+=== ATURAN MUTLAK (JANGAN DILANGGAR) ===
+1. DILARANG menggunakan indikator retail (RSI, MACD, MA, Bollinger Bands, Support/Resistance klasik).
+2. HANYA gunakan terminologi: Order Block (OB), Fair Value Gap (FVG), Break of Structure (BOS), Change of Character (CHoCH), Liquidity Sweep, Premium/Discount, Inducement, Displacement.
+3. JIKA TIDAK ADA SETUP YANG JELAS, jelaskan bahwa market sedang ranging/equilibrium.
+
+=== DATA TEKNIKAL ===
 - Pair: ${signalData.symbol} | Sinyal: ${signalData.dir === 1 ? 'BUY' : 'SELL'} (${signalData.style})
 - Order: ${signalData.orderType} | Entry: ${signalData.entry} | SL: ${signalData.sl}
 - TP: ${signalData.tps.join(', ')}
 - Setup: ${signalData.setup}
-- Konteks: ${signalData.rawReason}
+- Data Struktur (Raw): ${signalData.rawReason}
 
-Aturan:
-1. Gunakan istilah teknikal (BOS, CHoCH, Order Block, FVG, Liquidity Sweep, Displacement).
-2. Jangan mengarang berita fundamental. Fokus HANYA pada price action.
-3. Jelaskan alasan arah entry (contoh: "BOS bullish M15 mengonfirmasi tren, limit di area Demand M5 fresh").
-4. Bahasa Indonesia tegas dan profesional.
+=== TUGAS ANDA ===
+Buat 1 paragraf ringkas (maksimal 400 karakter) yang menjelaskan MENGAPA entry ini diambil berdasarkan data di atas. Gunakan bahasa Indonesia profesional, tegas, dan murni istilah SMC/ICT (contoh: "Harga menyapu Asian Low (Liquidity Sweep) di 99.80, lalu terjadi CHoCH Bullish di M5. Entry Market Execution pada mitigasi FVG M1.").
+Jangan mengarang berita fundamental. Fokus HANYA pada price action dan struktur market.
 `;
 
   try {
@@ -518,11 +524,11 @@ Aturan:
       body: JSON.stringify({
         model: AI_MODEL,
         messages: [
-          { role: 'system', content: 'Anda adalah AI analis trading SMC/ICT yang objektif dan presisi.' },
+          { role: 'system', content: 'Anda adalah AI analis trading SMC/ICT yang objektif, dingin, dan presisi.' },
           { role: 'user', content: prompt }
         ],
         max_tokens: 200,
-        temperature: 0.4,
+        temperature: 0.1, // Suhu rendah agar AI sangat patuh pada aturan SMC
       })
     });
     
@@ -671,21 +677,21 @@ async function buildScalpPlan({ m1, m5, price, rrList, ctx }) {
     }
 
     baseSL = zone.sl;
-    lines.push(`Harga di ${zoneTxt}`);
+    lines.push(`Harga di ${zoneTxt} (Sweep likuiditas terkonfirmasi)`);
     lines.push(init.dir === dir
       ? `Arah ${tfName} ${init.src} searah`
       : `Hati-hati: arah ${tfName} ${init.src} berlawanan, reaksi belum terbukti`);
     confidence = init.dir === dir ? 'HIGH' : 'MEDIUM';
-    setup = `Area S/D M5 ${dir === 1 ? 'demand' : 'supply'}`;
+    setup = `Market Execution di Area S/D M5 ${dir === 1 ? 'demand' : 'supply'}`;
   } else {
     dir = init.dir;
     const pivot = dir === 1 ? lastL : lastH;
     const pivotOk = !!pivot && (dir === 1 ? pivot.p < price : pivot.p > price);
     baseSL = pivotOk ? pivot.p : recentExtreme(struct, dir, 10);
-    lines.push(`Di luar area S/D M5, arah awal ${tfName} (${init.src}) → NOW`);
+    lines.push(`Di luar area S/D M5, momentum ${tfName} (${init.src}) → Market Execution (Agresif)`);
     lines.push(areaNote(m5c, price, ctx));
     confidence = /BOS|Struktur/.test(init.src) ? 'HIGH' : 'MEDIUM';
-    setup = `Arah awal ${tfName} (NOW)`;
+    setup = `Market Execution arah awal ${tfName} (Momentum)`;
   }
 
   const opp = findSDZones(m5c, -dir, price, scalpZoneOpts).filter(recent)[0];
@@ -696,10 +702,12 @@ async function buildScalpPlan({ m1, m5, price, rrList, ctx }) {
   }
 
   const refZone = zone || findSDZones(m5c, dir, price, scalpZoneOpts).filter(recent)[0] || null;
+  
+  // FIX: Memaksa orderType 'NOW' (Market Execution) untuk Scalping
   return await finalizePlan({
     dir, entry: price, orderType: 'NOW', baseSL, kind: 'scalp', atrVal, ctx, rrList,
     confidence, setup, zoneNote: `Scalp · ${setup}`,
-    zoneRange: refZone ? { min: refZone.bottom, max: refZone.top } : null,
+    zoneRange: refZone ? { min: refZone.bottom, max: refZone.top } : { min: price - (5 * pip), max: price + (5 * pip) },
     head: `Scalping ${dir === 1 ? 'BUY' : 'SELL'} NOW pada ${ctx.symbol}`,
     lines,
   });
@@ -833,9 +841,13 @@ function toSignal(result, style, ctx) {
   const r = v => Number(Number(v).toFixed(ctx.dec));
   const tps = plan.tps;
   const isLimit = plan.orderType === 'LIMIT';
+  
+  // FIX: Pastikan mode Scalping selalu MARKET (sesuai instruksi UI)
+  const mode = style.kind === 'scalp' ? 'MARKET' : (isLimit ? 'LIMIT' : 'MARKET');
+
   return {
     signal: dir === 1 ? 'BUY' : 'SELL',
-    mode: isLimit ? 'LIMIT' : 'MARKET',
+    mode: mode,
     orderType: plan.orderType,
     orderLabel: orderLabel(dir, plan.orderType),
     status: plan.status,
@@ -853,7 +865,7 @@ function toSignal(result, style, ctx) {
     setup: meta.setup,
     entryStyle: style.entryStyle,
     setupLabel: style.label,
-    zoneLabel: isLimit ? 'Limit Entry Zone' : 'Market Execution Zone',
+    zoneLabel: style.kind === 'scalp' || !isLimit ? 'Market Execution Zone' : 'Limit Entry Zone',
     zoneNote: plan.zoneNote,
     reason: meta.reason,
   };
