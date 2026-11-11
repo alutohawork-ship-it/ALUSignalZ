@@ -155,7 +155,7 @@
                 </div>
                 <div class="min-w-0">
                     <h1 class="font-bold text-xs text-white">Alu <span class="text-accentblue">Signal Z</span></h1>
-                    <p id="txtSubHeader" class="text-[8px] text-gray-400 truncate">Pure SMC 3-Layer Terminal</p>
+                    <p id="txtSubHeader" class="text-[8px] text-gray-400 truncate">SMC x ICT x Alchemist</p>
                 </div>
             </div>
             <div class="flex items-center gap-1.5 flex-wrap justify-end">
@@ -257,13 +257,27 @@
                     <p id="calibInfo" class="text-[8px] font-mono text-gray-500">Offset: 0</p>
                     <p class="text-[8px] text-gray-500 leading-snug">Jika harga di MT4/MT5 dan di web berbeda, isi harga Bid dari MT lalu tekan KALIBRASI. Selisihnya disimpan sebagai offset untuk pair ini. Perbedaan kecil wajar karena sumber dan waktu pengambilan harga berbeda.</p>
 
+                    <button id="mapBtn" onclick="toggleMapZone()" class="w-full bg-darkbg border border-accentblue/50 text-accentblue font-bold py-2 rounded-xl text-[10px] tracking-wider flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-layer-group"></i> <span id="mapBtnText">MAPING ZONE (WAJIB SEBELUM GENERATE)</span>
+                    </button>
+                    <div id="mapPanel" class="hidden bg-darkbg border border-accentblue/40 rounded-xl p-2.5 space-y-2">
+                        <div class="flex justify-between items-center">
+                            <span class="text-[9px] font-bold text-gray-400">MAPING ZONE</span>
+                            <span id="mapStyleTag" class="text-[8px] font-mono text-accentblue"></span>
+                        </div>
+                        <div id="mapSell" class="space-y-1.5"></div>
+                        <div id="mapBuy" class="space-y-1.5"></div>
+                        <div id="mapReason" class="hidden bg-cardbg border border-panelborder rounded-lg p-2 text-[9px] text-gray-300 leading-relaxed"></div>
+                        <p id="mapInfo" class="text-[8px] font-mono text-gray-500"></p>
+                    </div>
+
                     <div>
                         <label id="lblTradingStyle" class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
-                        <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
-                            <option value="Scalping">Scalping (M1+M3+M5)</option>
-                            <option value="Day Trading">Day Trading (M5+M15+M30/H1)</option>
-                            <option value="Intraday">Intraday</option>
-                            <option value="Swing">Swing</option>
+                        <select id="tradingStyleSelect" onchange="onStyleChange()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
+                            <option value="Scalping">Scalping (Agresif)</option>
+                            <option value="Day Trading">Day Trade (Konservatif)</option>
+                            <option value="Intraday">Intraday (Moderat)</option>
+                            <option value="Swing">Swing (Positioning)</option>
                         </select>
                     </div>
 
@@ -648,8 +662,8 @@
     // ================= BAHASA =================
     let currentLang = 'id';
     const DICT = {
-        id: { subHeader: "Pure SMC 3-Layer Terminal", targetAsset: "TARGET ASET AKTIF", tradingStyle: "GAYA TRADING / STRATEGI", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE MAP CHART", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "Belum ada history.", running: "berjalan", liveStream: "LIVE MARKET STREAM", disclaimer: "Aktivitas trading beresiko dan tidak ada jaminan profit. Aplikasi ini bukan financial advisor dan sinyal bukan ajakan untuk membeli atau menjual. Atur risiko dan ukuran posisi sesuai kemampuanmu sendiri." },
-        en: { subHeader: "Pure SMC 3-Layer Terminal", targetAsset: "ACTIVE TARGET ASSET", tradingStyle: "TRADING STYLE / STRATEGY", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE MAP CHART", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "No trading history yet.", running: "running", liveStream: "LIVE MARKET STREAM", disclaimer: "Trading involves risk and there is no guarantee of profit. This app is not a financial advisor and signals are not an invitation to buy or sell. Manage your risk and position size according to your own ability." }
+        id: { subHeader: "SMC x ICT x Alchemist", targetAsset: "TARGET ASET AKTIF", tradingStyle: "GAYA TRADING / STRATEGI", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE MAP CHART", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "Belum ada history.", running: "berjalan", liveStream: "LIVE MARKET STREAM", disclaimer: "Aktivitas trading beresiko dan tidak ada jaminan profit. Aplikasi ini bukan financial advisor dan sinyal bukan ajakan untuk membeli atau menjual. Atur risiko dan ukuran posisi sesuai kemampuanmu sendiri." },
+        en: { subHeader: "SMC x ICT x Alchemist", targetAsset: "ACTIVE TARGET ASSET", tradingStyle: "TRADING STYLE / STRATEGY", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE MAP CHART", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "No trading history yet.", running: "running", liveStream: "LIVE MARKET STREAM", disclaimer: "Trading involves risk and there is no guarantee of profit. This app is not a financial advisor and signals are not an invitation to buy or sell. Manage your risk and position size according to your own ability." }
     };
     function toggleLang() {
         currentLang = currentLang === 'id' ? 'en' : 'id';
@@ -870,6 +884,7 @@
         }
         renderBias(key);
         refreshBias(key);
+        if (mapState.open) fetchZones(true);
     }
     function selectTicker(marketId) {
         document.getElementById('marketSelect').value = marketId;
@@ -907,16 +922,14 @@
         return [...new Set([...(COIN_KEY.get(`xbtfx|${n}`) || []), ...(COIN_KEY.get(`*|${n}`) || [])])];
     };
 
-    // Status diagnosa per socket dan per key
     const sockState = { 1: 'idle', 2: 'idle' };
-    const sockOf = {};        // key -> socket yang dipakai untuk subscribe (1/2)
-    const subAt = {};         // key -> waktu subscribe terakhir
-    const aliasIdx = {};      // key -> indeks alias yang sedang dicoba
-    const workingSym = {};    // key -> simbol yang terbukti mengirim quote
+    const sockOf = {};
+    const subAt = {};
+    const aliasIdx = {};
+    const workingSym = {};
     const s2 = { fallback: false };
     let s2Timer = null;
 
-    // Simbol untuk subscribe: yang sudah terbukti jalan, atau alias yang sedang dicoba
     const aliasOf = key => {
         if (workingSym[key]) return workingSym[key];
         const list = MARKETS[key]?.coins || [];
@@ -934,7 +947,6 @@
         setWsStatus(txt, s1ok ? 'green' : 'yellow');
     }
 
-    // Subscribe per batch 8 simbol
     function subscribeKeys(sock, sockNo, keyList) {
         const batchSize = 8;
         for (let i = 0; i < keyList.length; i += batchSize) {
@@ -952,7 +964,6 @@
         }
     }
 
-    // Subscribe satu key saja, dipakai saat mencoba alias berikutnya
     function resubscribeKey(key) {
         const preferred = sockOf[key] === 2 ? ws2 : ws1;
         const sock = (preferred && preferred.readyState === WebSocket.OPEN) ? preferred : ws1;
@@ -1103,7 +1114,6 @@
                 if (ws2 === sock2 && !authFailed) reconnectTimer2 = setTimeout(connect, 5000);
             };
 
-            // Socket 2 belum auth dalam 10 detik: pindahkan key-nya ke socket 1
             s2Timer = setTimeout(() => {
                 if (myId !== connectId || sockState[2] === 'ok') return;
                 s2.fallback = true;
@@ -1150,6 +1160,113 @@
 
         processTick(key, price);
     }
+
+    // ================= MAPING ZONE (SMC + ICT) =================
+    let mapState = { open: false, loading: false, key: null, style: null, data: null, at: 0, sel: null, err: null };
+    const MAP_CONF = {
+        CONFIDENT: { label: 'Confident', cls: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' },
+        WARNING: { label: 'Warning', cls: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40' },
+        LOW_CONFIDENT: { label: 'Low Confident', cls: 'bg-red-500/20 text-red-400 border-red-500/40' },
+    };
+    const curStyle = () => document.getElementById('tradingStyleSelect').value;
+    const mapReady = () => !!(mapState.data && mapState.key === selectedKey() && mapState.style === curStyle());
+    const setMapInfo = t => { const el = document.getElementById('mapInfo'); if (el) el.textContent = t; };
+
+    function zoneBox(side, label, z, off, key) {
+        if (!z) return `<div class="bg-cardbg border border-panelborder rounded-lg p-2 text-[9px] text-gray-500 font-mono">${label}: belum ada zona valid</div>`;
+        const c = MAP_CONF[z.conf] || MAP_CONF.LOW_CONFIDENT;
+        const sel = mapState.sel === side ? 'ring-1 ring-accentblue' : '';
+        return `
+          <div onclick="showMapReason('${side}')" class="cursor-pointer bg-cardbg border border-panelborder ${sel} rounded-lg p-2 flex justify-between items-center gap-2">
+            <div>
+              <p class="text-[8px] font-bold ${side === 'sell' ? 'text-red-400' : 'text-sky-400'}">${label}</p>
+              <p class="font-mono text-xs font-black text-white">${fmt(key, z.min + off)} - ${fmt(key, z.max + off)}</p>
+            </div>
+            <span class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border ${c.cls}">${c.label}</span>
+          </div>`;
+    }
+
+    function renderMap() {
+        const btnText = document.getElementById('mapBtnText');
+        if (btnText) btnText.textContent = mapReady() ? 'MAPING ZONE · AKTIF (klik untuk tutup)' : 'MAPING ZONE (WAJIB SEBELUM GENERATE)';
+        const sellEl = document.getElementById('mapSell'), buyEl = document.getElementById('mapBuy');
+        if (!mapState.open || !sellEl) return;
+        const key = selectedKey(), off = getOffset(key);
+        document.getElementById('mapStyleTag').textContent = STYLE_NAME[curStyle()] || curStyle();
+        if (!mapReady()) {
+            sellEl.innerHTML = ''; buyEl.innerHTML = '';
+            setMapInfo(mapState.loading ? 'Menghitung maping zone...'
+                : mapState.err ? 'Gagal memuat maping: ' + mapState.err
+                : 'Maping untuk pair dan gaya ini belum ada.');
+            return;
+        }
+        const z = mapState.data.zones || {};
+        sellEl.innerHTML = zoneBox('sell', 'SELL ZONE', z.sell, off, key);
+        buyEl.innerHTML = zoneBox('buy', 'BUY ZONE', z.buy, off, key);
+        setMapInfo(`Update ${new Date(mapState.at).toLocaleTimeString('id-ID', { hour12: false })} · harga ${fmt(key, mapState.data.price + off)}`);
+    }
+
+    async function fetchZones(force = false) {
+        const key = selectedKey(), style = curStyle();
+        if (!force && mapReady() && Date.now() - mapState.at < 60000) return renderMap();
+        const live = prices[key];
+        if (!live || !isLive(key)) {
+            mapState.data = null; mapState.err = 'harga live belum masuk';
+            return renderMap();
+        }
+        mapState.loading = true;
+        renderMap();
+        try {
+            const r = await fetch('/api/generate', {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({
+                    email: localStorage.getItem(SESSION_EMAIL_KEY) || '',
+                    mode: 'zones',
+                    marketId: document.getElementById('marketSelect').value,
+                    tradingStyle: style,
+                    currentPrice: live.price,
+                }),
+            });
+            const data = await r.json();
+            if (!data.ok) throw new Error(data.error || 'respons tidak valid');
+            mapState = { ...mapState, key, style, data, at: Date.now(), sel: null, err: null };
+        } catch (e) {
+            mapState.data = null;
+            mapState.err = e.message;
+        } finally {
+            mapState.loading = false;
+            renderMap();
+        }
+    }
+
+    function showMapReason(side) {
+        mapState.sel = mapState.sel === side ? null : side;
+        const box = document.getElementById('mapReason');
+        const z = mapReady() ? mapState.data.zones?.[side] : null;
+        if (!mapState.sel || !z) {
+            box.classList.add('hidden');
+        } else {
+            box.classList.remove('hidden');
+            box.innerHTML = `<p class="font-bold text-gray-400 mb-1">${side === 'sell' ? 'REASON SELL ZONE' : 'REASON BUY ZONE'} · ${STYLE_NAME[curStyle()] || curStyle()}</p>`
+                + z.reasons.map(x => `<p>• ${x}</p>`).join('');
+        }
+        renderMap();
+    }
+
+    function toggleMapZone() {
+        mapState.open = !mapState.open;
+        document.getElementById('mapPanel').classList.toggle('hidden', !mapState.open);
+        document.getElementById('mapBtn').classList.toggle('bg-accentblue/20', mapState.open);
+        if (mapState.open) fetchZones(true);
+        else renderMap();
+    }
+
+    function onStyleChange() {
+        if (mapState.open || mapState.data) fetchZones(true);
+    }
+
+    setInterval(() => { if (mapState.open) fetchZones(true); }, 60000);
 
     // ================= TRADE & HISTORY =================
     const TP_KEYS = ['tp1', 'tp2', 'tp3'];
@@ -1351,10 +1468,11 @@
             const s = statusOf(t);
             const hits = hitList(t).map(k => `✓${k.toUpperCase()}`).join(' ');
             const active = t.id === activeId ? 'ring-1 ring-accentblue' : '';
+            const modeTxt = t.mode === 'LIMIT' ? 'Entry zona' : 'Entry market';
             return `
             <div onclick="viewTrade('${t.id}')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1.5 rounded cursor-pointer space-y-0.5 ${active}">
               <div class="flex justify-between items-center gap-2 text-[9px] font-bold">
-                <span class="text-white truncate">${t.no}. ${displayName(t.key)} <span class="text-[8px] text-gray-400">${t.style} · ${t.signal}</span></span>
+                <span class="text-white truncate">${t.no}. ${displayName(t.key)} <span class="text-[8px] text-gray-400">${STYLE_NAME[t.style] || t.style} · ${t.signal}</span></span>
                 <span class="font-mono whitespace-nowrap ${TEXT_COLOR[s.color]}">${s.text}</span>
               </div>
               <div class="font-mono text-[10px] font-bold ${pipColor(f.pips)}">${f.main}</div>
@@ -1372,6 +1490,8 @@
         renderHistory();
         refreshActiveUI();
     }
+
+    const STYLE_NAME = { 'Scalping': 'Scalping (Agresif)', 'Day Trading': 'Day Trade (Konservatif)', 'Intraday': 'Intraday (Moderat)', 'Swing': 'Swing (Positioning)' };
 
     const SETUP_SHORT = { CONTINUATION: 'Continuation', REVERSAL: 'Reversal', NEUTRAL: 'Netral' };
     const CONF_STYLE = {
@@ -1433,7 +1553,7 @@
             badge.innerHTML = `<i class="fa-solid ${sig === 'BUY' ? 'fa-caret-up' : 'fa-caret-down'}"></i> ${sig}`;
         }
         const modeTxt = t.mode === 'LIMIT' ? 'Entry zona' : 'Entry market';
-        set('cardStyleSub', `${t.style} · ${modeTxt} / ${new Date(t.createdAt).toLocaleTimeString('id-ID', { hour12: false })}`);
+        set('cardStyleSub', `${STYLE_NAME[t.style] || t.style} · ${modeTxt} / ${new Date(t.createdAt).toLocaleTimeString('id-ID', { hour12: false })}`);
         document.getElementById('standbyView')?.classList.add('hidden');
         document.getElementById('activeSignalCard')?.classList.remove('hidden');
 
@@ -1700,7 +1820,6 @@
         const pad = (hi - lo) * 0.15; lo -= pad; hi += pad;
         const yOf = p => Math.max(plotT, Math.min(plotB, plotT + (1 - (p - lo) / (hi - lo)) * plotH));
 
-        // Background Grid Lines
         ctx.save();
         ctx.lineWidth = 1;
         ctx.strokeStyle = 'rgba(148,163,184,0.06)';
@@ -1712,7 +1831,6 @@
         ctx.beginPath(); ctx.moveTo((CW - CHART_GUT) + 0.5, plotT); ctx.lineTo((CW - CHART_GUT) + 0.5, plotB); ctx.stroke();
         ctx.restore();
 
-        // Level Lines (SL, Entry, TP)
         for (const l of levels) {
             const y = yOf(l.value);
             ctx.save();
@@ -1724,7 +1842,6 @@
             ctx.restore();
         }
 
-        // --- SMOOTH REALTIME LINE CHART ---
         const step = plotW / Math.max(1, ticks.length - 1);
         ctx.save();
         ctx.lineWidth = 2;
@@ -1926,6 +2043,7 @@
             biasBusy = false;
         }
         renderBias(key);
+        if (mapState.open) fetchZones(true);
     }
 
     function renderBias(key) {
@@ -1963,7 +2081,6 @@
         'Swing':       { htf: '1d',  mtf: '4h',  ltf: '1h' },
     };
 
-    // Fungsi helper menghitung nilai EMA (Exponential Moving Average)
     function calculateEMA(candles, period) {
         if (!candles || candles.length === 0) return [];
         const k = 2 / (period + 1);
@@ -1983,7 +2100,6 @@
         return emaArray;
     }
 
-    // Fungsi helper menghitung nilai Bollinger Bands (Periode 20, Deviasi 2)
     function calculateBollingerBands(candles, period = 20, multiplier = 2) {
         if (!candles || candles.length < period) return { upper: 0, middle: 0, lower: 0 };
         const slice = candles.slice(-period);
@@ -2000,13 +2116,12 @@
         };
     }
 
-    // Menentukan periode EMA filter berdasarkan Gaya Trading
     function getEmaPeriodsForStyle(style) {
         switch (style) {
-            case 'Scalping': return [5, 9];          // Agresif / Eksekusi Langsung
-            case 'Day Trading': return [14, 20];     // Harian
-            case 'Intraday': return [20, 50, 100];   // Menengah
-            case 'Swing': return [20, 200];          // Panjang
+            case 'Scalping': return [5, 9];
+            case 'Day Trading': return [14, 20];
+            case 'Intraday': return [20, 50, 100];
+            case 'Swing': return [20, 200];
             default: return [5, 9];
         }
     }
@@ -2079,6 +2194,7 @@
     const shiftCandles = (rows, off) => rows.map(c => ({ t: c.t, o: c.o + off, h: c.h + off, l: c.l + off, c: c.c + off }));
 
     async function generateAISignal() {
+        if (!mapReady()) return alert('Maping Zone belum dibuat untuk pair dan gaya ini. Tekan MAPING ZONE dulu, lalu generate.');
         const marketId = document.getElementById('marketSelect').value;
         const tradingStyle = document.getElementById('tradingStyleSelect').value;
         const symbolKey = marketId.split('|').pop();
@@ -2108,7 +2224,6 @@
             const shiftedLtf = shiftCandles(ltfRows, off);
             const shiftedMtf = shiftCandles(mtfRows, off);
 
-            // Hitung EMA Filter
             const periods = getEmaPeriodsForStyle(tradingStyle);
             const emaMetrics = {};
             periods.forEach(p => {
@@ -2116,7 +2231,6 @@
                 emaMetrics[`EMA_${p}`] = resEma.length ? Number(resEma[resEma.length - 1].toFixed(5)) : 0;
             });
 
-            // Hitung Bollinger Bands Filter
             const bbMetrics = calculateBollingerBands(shiftedMtf.length > 0 ? shiftedMtf : shiftedLtf);
 
             const res = await fetch('/api/generate', {
@@ -2129,7 +2243,7 @@
                     currentPrice: live.price,
                     lang: currentLang,
                     emaFilter: emaMetrics,
-                    bbFilter: bbMetrics, // Menyertakan data Bollinger Bands ke backend
+                    bbFilter: bbMetrics,
                     candles: {
                         htf: shiftCandles(htfRows, off).slice(-200),
                         mtf: shiftedMtf.slice(-200),
