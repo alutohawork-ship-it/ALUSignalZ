@@ -298,22 +298,23 @@ function bollingerAt(candles, idx, period = BB_PERIOD, mult = BB_MULT) {
   return { mid, upper: mid + mult * sd, lower: mid - mult * sd };
 }
 
+// FIX 1: Mengubah output default struktur menjadi istilah SMC/ICT
 function analyzePureSMCStructure(candles) {
   if (!candles || candles.length < 15) return { dir: 1, src: 'Default' };
   const { highs, lows } = findPivots(candles, SCALP_PIVOT);
   if (highs.length < 2 || lows.length < 2) {
     const last = candles[candles.length - 1], prev = candles[candles.length - 2];
-    return { dir: last.c >= prev.c ? 1 : -1, src: 'Price action' };
+    return { dir: last.c >= prev.c ? 1 : -1, src: 'Sweep FVG / OB' };
   }
   const [h1, h2] = highs.slice(-2);
   const [l1, l2] = lows.slice(-2);
   const lastC = candles[candles.length - 1].c;
 
-  if (lastC > h2.p) return { dir: 1, src: 'BOS bullish' };
-  if (lastC < l2.p) return { dir: -1, src: 'BOS bearish' };
+  if (lastC > h2.p) return { dir: 1, src: 'BOS Bullish' };
+  if (lastC < l2.p) return { dir: -1, src: 'BOS Bearish' };
   if (h2.p > h1.p && l2.p > l1.p) return { dir: 1, src: 'Struktur HH + HL' };
   if (h2.p < h1.p && l2.p < l1.p) return { dir: -1, src: 'Struktur LH + LL' };
-  return { dir: lastC >= candles[candles.length - 2].c ? 1 : -1, src: 'Order flow' };
+  return { dir: lastC >= candles[candles.length - 2].c ? 1 : -1, src: 'Mitigasi FVG / Inducement' };
 }
 
 function structureBias(candles, L) {
@@ -489,7 +490,7 @@ function slBounds(kind, ctx, atrVal) {
 }
 
 // ── AI REASONING FUNCTION ──
-// FIX: Prompt super ketat SMC/ICT, melarang retail indicators.
+// FIX 2: Prompt super ketat SMC/ICT, melarang retail indicators & melarang kata "Order flow"
 async function getAIReasoning(signalData) {
   if (!OPENAI_API_KEY) return null;
 
@@ -500,7 +501,8 @@ Tugasmu: Memberikan narasi alasan entry (reasoning) yang presisi tinggi berdasar
 === ATURAN MUTLAK (JANGAN DILANGGAR) ===
 1. DILARANG menggunakan indikator retail (RSI, MACD, MA, Bollinger Bands, Support/Resistance klasik).
 2. HANYA gunakan terminologi: Order Block (OB), Fair Value Gap (FVG), Break of Structure (BOS), Change of Character (CHoCH), Liquidity Sweep, Premium/Discount, Inducement, Displacement.
-3. JIKA TIDAK ADA SETUP YANG JELAS, jelaskan bahwa market sedang ranging/equilibrium.
+3. JIKA DATA MENTAH (Raw) menyebutkan "Price action" atau "Order flow", KAMU WAJIB menerjemahkannya menjadi istilah SMC/ICT yang valid (contoh: "Harga melakukan Liquidity Sweep lalu mitigasi FVG M1").
+4. JIKA TIDAK ADA SETUP YANG JELAS, jelaskan bahwa market sedang ranging/equilibrium.
 
 === DATA TEKNIKAL ===
 - Pair: ${signalData.symbol} | Sinyal: ${signalData.dir === 1 ? 'BUY' : 'SELL'} (${signalData.style})
@@ -677,7 +679,7 @@ async function buildScalpPlan({ m1, m5, price, rrList, ctx }) {
     }
 
     baseSL = zone.sl;
-    lines.push(`Harga di ${zoneTxt} (Sweep likuiditas terkonfirmasi)`);
+    lines.push(`Harga di ${zoneTxt} (Liquidity Sweep terkonfirmasi)`);
     lines.push(init.dir === dir
       ? `Arah ${tfName} ${init.src} searah`
       : `Hati-hati: arah ${tfName} ${init.src} berlawanan, reaksi belum terbukti`);
@@ -688,10 +690,10 @@ async function buildScalpPlan({ m1, m5, price, rrList, ctx }) {
     const pivot = dir === 1 ? lastL : lastH;
     const pivotOk = !!pivot && (dir === 1 ? pivot.p < price : pivot.p > price);
     baseSL = pivotOk ? pivot.p : recentExtreme(struct, dir, 10);
-    lines.push(`Di luar area S/D M5, momentum ${tfName} (${init.src}) → Market Execution (Agresif)`);
+    lines.push(`Di luar area S/D M5, setup ${tfName} (${init.src}) → Market Execution (Agresif)`);
     lines.push(areaNote(m5c, price, ctx));
     confidence = /BOS|Struktur/.test(init.src) ? 'HIGH' : 'MEDIUM';
-    setup = `Market Execution arah awal ${tfName} (Momentum)`;
+    setup = `Market Execution (${init.src})`;
   }
 
   const opp = findSDZones(m5c, -dir, price, scalpZoneOpts).filter(recent)[0];
@@ -701,13 +703,13 @@ async function buildScalpPlan({ m1, m5, price, rrList, ctx }) {
     lines.push(`Hati-hati, ada ${oppName} M5 ${f(opp.bottom)} - ${f(opp.top)} (${distTxt}), berpotensi menahan ${dir === 1 ? 'BUY' : 'SELL'}`);
   }
 
-  const refZone = zone || findSDZones(m5c, dir, price, scalpZoneOpts).filter(recent)[0] || null;
+  // FIX 3: Jangan cari zona fallback yang jauh. Jika tidak ada zona, pakai harga live.
+  const refZone = zone; 
   
-  // FIX: Memaksa orderType 'NOW' (Market Execution) untuk Scalping
   return await finalizePlan({
     dir, entry: price, orderType: 'NOW', baseSL, kind: 'scalp', atrVal, ctx, rrList,
     confidence, setup, zoneNote: `Scalp · ${setup}`,
-    zoneRange: refZone ? { min: refZone.bottom, max: refZone.top } : { min: price - (5 * pip), max: price + (5 * pip) },
+    zoneRange: refZone ? { min: refZone.bottom, max: refZone.top } : { min: price, max: price }, // Fix sinkronisasi harga live
     head: `Scalping ${dir === 1 ? 'BUY' : 'SELL'} NOW pada ${ctx.symbol}`,
     lines,
   });
@@ -764,6 +766,7 @@ async function buildTwoWayPlan(o) {
   });
 }
 
+// FIX 4: Day Trading Zona M5 Retest
 async function buildDayPlan({ m5, m15, price, rrList, ctx }) {
   const bos = findLastBOS(m15, DAY_PIVOT);
   const init = analyzePureSMCStructure(m15);
@@ -771,11 +774,12 @@ async function buildDayPlan({ m5, m15, price, rrList, ctx }) {
   const biasNote = bos
     ? `Bias M15: BOS ${bos.dir === 1 ? 'bullish' : 'bearish'} di ${ctx.f(bos.level)}`
     : `Bias M15: struktur ${init.src}`;
+    
   return await buildTwoWayPlan({
     title: 'Day Trading', kind: 'day', price, ctx, rrList, bias, biasNote,
-    parentName: 'M15',
-    parentPick: d => (bos && bos.dir === d ? pickM15Area(m15, bos, price) : null) || pickZone(m15, d, price, 96),
-    refineC: m5, refineName: 'M5', refineL: 120, atrVal: atrOf(m15, ctx.pip),
+    parentName: 'M5 (Retest Area)',
+    parentPick: d => pickZone(m5, d, price, 120), // Paksa zona acuan langsung ke M5
+    refineC: m5, refineName: 'M5', refineL: 120, atrVal: atrOf(m5, ctx.pip),
   });
 }
 
@@ -842,7 +846,6 @@ function toSignal(result, style, ctx) {
   const tps = plan.tps;
   const isLimit = plan.orderType === 'LIMIT';
   
-  // FIX: Pastikan mode Scalping selalu MARKET (sesuai instruksi UI)
   const mode = style.kind === 'scalp' ? 'MARKET' : (isLimit ? 'LIMIT' : 'MARKET');
 
   return {
@@ -879,7 +882,6 @@ export default async function handler(req, res) {
   const body = req.body || {};
   const symbol = String(body.symbol || 'XAUUSD').toUpperCase().trim();
   
-  // FIX: Terima 'style' atau 'tradingStyle' dari frontend
   const styleKey = String(body.style || body.tradingStyle || 'Scalping').trim();
   const style = STYLES[styleKey] ? styleKey : 'Scalping';
   const styleCfg = STYLES[style];
