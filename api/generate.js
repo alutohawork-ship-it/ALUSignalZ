@@ -21,7 +21,7 @@ const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
 // ── AI CONFIG ──
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const AI_MODEL = 'deepseek-v4.1-flash';
+const AI_MODEL = 'deepseek-v4.1-flash-uncensored'; // <-- SUDAH DIGANTI KE UNCENSORED
 
 const API_KEYS = [
   process.env.TICKERLAYER_API_KEY,
