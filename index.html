@@ -785,6 +785,9 @@
     const symbolOf = {}, providerOf = {};
     const dirty = new Set();
 
+    const chartCandles = {}; // Tambahan untuk menyimpan data OHLC chart
+    const chartLoading = {}; // Mencegah spam API
+
     const getActive = () => trades.find(t => t.id === activeId) || null;
     const selectedKey = () => document.getElementById('marketSelect').value.split('|').pop();
     const fmt = (key, p) => Number(p).toLocaleString('en-US', { minimumFractionDigits: MARKETS[key]?.decimals ?? 2, maximumFractionDigits: MARKETS[key]?.decimals ?? 2 });
@@ -1364,6 +1367,7 @@
         activeId = id;
         const t = trades.find(x => x.id === id);
         if (!t) return;
+        loadChartCandles(t.key); // <-- Tambahan: load candle saat buka history
         renderSignalCard(t);
         renderHistory();
         refreshActiveUI();
@@ -1617,7 +1621,7 @@
         renderCalendar();
     }
 
-    // ================= LIVE MAP CHART (SMOOTH LINE CHART) =================
+    // ================= LIVE MAP CHART (CANDLESTICK CHART) =================
     const cv = document.getElementById('priceChart');
     const ctx = cv ? cv.getContext('2d') : null;
     const CHART_GUT = 110;
@@ -1644,6 +1648,23 @@
         ctx.closePath();
     }
 
+    async function loadChartCandles(key) {
+        if (chartCandles[key] && Date.now() - chartCandles[key].at < 60000) return;
+        if (chartLoading[key]) return;
+        
+        chartLoading[key] = true;
+        try {
+            const rows = await loadCandles(key, '5m');
+            if (rows && rows.length) {
+                chartCandles[key] = { at: Date.now(), rows };
+            }
+        } catch(e) {
+            console.error("Gagal load candles chart", e);
+        } finally {
+            chartLoading[key] = false;
+        }
+    }
+
     function drawChart() {
         if (!cv || !ctx) return;
         const r = cv.getBoundingClientRect();
@@ -1657,42 +1678,53 @@
 
         const t = getActive();
         if (!t) return;
-        let ticks = history[t.key] || [];
-        const livePrice = prices[t.key]?.price;
 
-        if (!ticks.length && livePrice != null) {
-            ticks = [{ t: Date.now(), p: livePrice }];
-        } else if (ticks.length && livePrice != null && ticks[ticks.length - 1].p !== livePrice) {
-            ticks.push({ t: Date.now(), p: livePrice });
-        }
+        let candleData = chartCandles[t.key]?.rows;
 
-        if (!ticks.length) {
+        if (!candleData || !candleData.length) {
             ctx.font = 'bold 11px ui-monospace, monospace';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillStyle = '#94a3b8';
-            ctx.fillText('Menunggu data live tick...', r.width / 2, r.height / 2);
+            ctx.fillText('Memuat candle...', r.width / 2, r.height / 2);
             ctx.textAlign = 'left';
+            loadChartCandles(t.key);
             return;
         }
 
-        const dec = MARKETS[t.key]?.decimals ?? 2;
-        const fmtP = v => Number(v).toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+        const livePrice = prices[t.key]?.price;
+        const candles = candleData.map(c => ({ t: c.t, o: c.o, h: c.h, l: c.l, c: c.c }));
+        
+        // Update candle terakhir dengan live tick
+        if (livePrice != null) {
+            const last = candles[candles.length - 1];
+            last.c = livePrice;
+            last.h = Math.max(last.h, livePrice);
+            last.l = Math.min(last.l, livePrice);
+        }
 
         const CW = r.width, CH = r.height;
         const plotL = 6, plotT = 20, plotB = CH - 8, plotR = Math.min(CW - CHART_GUT, Math.round(CW * 0.55));
         const plotW = plotR - plotL, plotH = plotB - plotT;
 
         const levels = chartLevels(t);
+        const zMin = parseLevel(t.zone?.min ?? t.card?.entry_min);
+        const zMax = parseLevel(t.zone?.max ?? t.card?.entry_max);
+
         let lo = Infinity, hi = -Infinity;
-        for (const tk of ticks) {
-            lo = Math.min(lo, tk.p);
-            hi = Math.max(hi, tk.p);
+        for (const c of candles) {
+            lo = Math.min(lo, c.l);
+            hi = Math.max(hi, c.h);
         }
         for (const l of levels) {
             lo = Math.min(lo, l.value);
             hi = Math.max(hi, l.value);
         }
+        if (zMin != null && zMax != null) {
+            lo = Math.min(lo, zMin, zMax);
+            hi = Math.max(hi, zMin, zMax);
+        }
+
         if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
         if (hi - lo <= 0) { const d = Math.abs(hi) * 0.001 || 1; lo -= d; hi += d; }
         const pad = (hi - lo) * 0.15; lo -= pad; hi += pad;
@@ -1709,6 +1741,42 @@
         ctx.beginPath(); ctx.moveTo((CW - CHART_GUT) + 0.5, plotT); ctx.lineTo((CW - CHART_GUT) + 0.5, plotB); ctx.stroke();
         ctx.restore();
 
+        // Gambar Zona Entry (Area Biru)
+        if (zMin != null && zMax != null && zMin !== zMax) {
+            const top = yOf(Math.max(zMin, zMax)), bot = yOf(Math.min(zMin, zMax));
+            ctx.fillStyle = 'rgba(96,165,250,0.15)';
+            ctx.fillRect(plotL, top, plotW, Math.max(bot - top, 1));
+        }
+
+        // Gambar Candlestick
+        const candleW = Math.max(2, (plotW / candles.length) * 0.7);
+        const gapW = (plotW / candles.length) - candleW;
+        const xOfIdx = idx => plotL + idx * (candleW + gapW) + (candleW / 2);
+
+        for (let i = 0; i < candles.length; i++) {
+            const c = candles[i];
+            const x = xOfIdx(i);
+            const isGreen = c.c >= c.o;
+            const color = isGreen ? '#00c076' : '#ff3b69';
+
+            ctx.strokeStyle = color;
+            ctx.fillStyle = color;
+            ctx.lineWidth = 1;
+
+            // Wick
+            ctx.beginPath();
+            ctx.moveTo(x, yOf(c.h));
+            ctx.lineTo(x, yOf(c.l));
+            ctx.stroke();
+
+            // Body
+            const bodyTop = yOf(Math.max(c.o, c.c));
+            const bodyBot = yOf(Math.min(c.o, c.c));
+            const bodyH = Math.max(1, bodyBot - bodyTop);
+            ctx.fillRect(x - candleW / 2, bodyTop, candleW, bodyH);
+        }
+
+        // Gambar Garis Level (Entry, SL, TP)
         for (const l of levels) {
             const y = yOf(l.value);
             ctx.save();
@@ -1720,49 +1788,9 @@
             ctx.restore();
         }
 
-        const step = plotW / Math.max(1, ticks.length - 1);
-        ctx.save();
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = '#2962ff';
-        ctx.beginPath();
-        for (let i = 0; i < ticks.length; i++) {
-            const x = plotL + i * step;
-            const y = yOf(ticks[i].p);
-            if (i === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-
-        const lastX = plotL + (ticks.length - 1) * step;
-        ctx.lineTo(lastX, plotB);
-        ctx.lineTo(plotL, plotB);
-        ctx.closePath();
-        const grad = ctx.createLinearGradient(0, plotT, 0, plotB);
-        grad.addColorStop(0, 'rgba(41, 98, 255, 0.35)');
-        grad.addColorStop(1, 'rgba(41, 98, 255, 0.0)');
-        ctx.fillStyle = grad;
-        ctx.fill();
-        ctx.restore();
-
-        if (ticks.length > 0) {
-            const headX = plotL + (ticks.length - 1) * step;
-            const headY = yOf(ticks[ticks.length - 1].p);
-            const pulseR = 3 + Math.sin(Date.now() / 150) * 1.5;
-
-            ctx.save();
-            ctx.beginPath();
-            ctx.arc(headX, headY, pulseR + 3, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(41, 98, 255, 0.4)';
-            ctx.fill();
-
-            ctx.beginPath();
-            ctx.arc(headX, headY, 3.5, 0, Math.PI * 2);
-            ctx.fillStyle = '#ffffff';
-            ctx.shadowColor = '#2962ff';
-            ctx.shadowBlur = 8;
-            ctx.fill();
-            ctx.restore();
-        }
+        // Gambar Label Kanan
+        const dec = MARKETS[t.key]?.decimals ?? 2;
+        const fmtP = v => Number(v).toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
 
         const tags = levels.map(l => ({
             text: `${l.hit ? '✓ ' : ''}${l.label} ${fmtP(l.value)}`,
@@ -1777,6 +1805,7 @@
             const cap = i === tags.length - 1 ? plotB - 8 : tags[i + 1].y - GAP;
             if (tags[i].y > cap) tags[i].y = cap;
         }
+        
         const rightAnchor = CW - CHART_GUT + 6;
         ctx.font = 'bold 9px ui-monospace, monospace';
         ctx.textBaseline = 'middle';
@@ -1788,6 +1817,14 @@
             ctx.strokeStyle = tg.c; ctx.lineWidth = 0.8; ctx.stroke();
             ctx.fillStyle = tg.c;
             ctx.fillText(tg.text, rightAnchor + 5, tg.y + 0.5);
+        }
+
+        // Gambar Harga Terakhir (Garis Putih)
+        if (livePrice != null) {
+            const yLive = yOf(livePrice);
+            const xLive = xOfIdx(candles.length - 1);
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath(); ctx.arc(xLive, yLive, 3, 0, Math.PI * 2); ctx.fill();
         }
     }
 
@@ -2162,6 +2199,7 @@
             trades.push(t);
             activeId = t.id;
             saveTrades();
+            loadChartCandles(t.key); // <-- Tambahan load chart candle saat generate
             renderSignalCard(t);
             renderHistory();
             refreshActiveUI();
