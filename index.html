@@ -1496,7 +1496,7 @@
         document.getElementById('activeSignalCard')?.classList.remove('hidden');
 
         const pipEl = (id, price) => { const e = document.getElementById(id); if (e) e.textContent = price != null ? fmtPips(pipsOf(t, price)) : '--'; };
-        pipEl('cardSLPips', t.sl); pipel('cardTP1Pips', t.tp1); pipel('cardTP2Pips', t.tp2); pipel('cardTP3Pips', t.tp3);
+        pipEl('cardSLPips', t.sl); pipEl('cardTP1Pips', t.tp1); pipEl('cardTP2Pips', t.tp2); pipEl('cardTP3Pips', t.tp3);
     }
 
     function refreshActiveUI() {
@@ -1978,7 +1978,7 @@
             const endSec = s.endUTC * 3600;
             let isActive = currentUTCSeconds >= startSec && currentUTCSeconds < endSec;
             
-            // Jika sesi melewati tengah malam (belum ada di list ini, tapi untuk jaga-jaga)
+            // Jika sesi melewati tengah malam
             if (endSec < startSec) {
                 isActive = currentUTCSeconds >= startSec || currentUTCSeconds < endSec;
             }
@@ -2000,7 +2000,7 @@
                 
                 // Hitung sisa waktu
                 let remainingSec = endSec - currentUTCSeconds;
-                if (remainingSec < 0) remainingSec += 86400; // Jika lewat tengah malam
+                if (remainingSec < 0) remainingSec += 86400;
                 
                 statusHtml = `<span class="text-emerald-400 font-bold animate-pulse">Remaining >${formatDuration(remainingSec * 1000)}/close</span>`;
             } else if (currentUTCSeconds < startSec) {
@@ -2010,10 +2010,6 @@
                 statusHtml = `<span class="text-gray-600">Closed</span>`;
             }
 
-            // Tampilkan HANYA sesi yang sedang aktif, atau sesi berikutnya.
-            // Supaya tidak terlalu panjang, kita tampilkan yang aktif dan 2 yang akan datang.
-            // Tapi untuk kelengkapan, kita tampilkan semua saja dengan highlight.
-            
             html += `
                 <div class="flex justify-between items-center bg-darkbg border ${isActive ? s.border : 'border-panelborder'} px-2 py-1.5 rounded transition-all">
                     <div class="flex flex-col">
