@@ -35,7 +35,6 @@
 
     <title>Alu Signal Z & Terminal</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Script TradingView -->
     <script src="https://s3.tradingview.com/tv.js"></script>
     <script>
         if (window.tailwind) {
@@ -260,17 +259,39 @@
                     <p class="text-[8px] text-gray-500 leading-snug">Jika harga di MT4/MT5 dan di web berbeda, isi harga Bid dari MT lalu tekan KALIBRASI. Selisihnya disimpan sebagai offset untuk pair ini. Perbedaan kecil wajar karena sumber dan waktu pengambilan harga berbeda.</p>
 
                     <div>
-                        <label id="lblTradingStyle" class="text-[8px] font-bold text-gray-400 block mb-1">GAYA TRADING / STRATEGI</label>
+                        <div class="flex justify-between items-center mb-1">
+                            <label id="lblTradingStyle" class="text-[8px] font-bold text-gray-400">GAYA TRADING / STRATEGI</label>
+                            <button onclick="toggleStyleInfo()" class="text-[9px] text-accentblue hover:text-blue-400 transition" title="Info Konsep"><i class="fa-solid fa-circle-info"></i></button>
+                        </div>
                         <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
                             <option value="Scalping">Scalping (Agresif)</option>
                             <option value="Day Trading">Day Trade (Konservatif)</option>
                             <option value="Intraday">Intraday (Moderat)</option>
                             <option value="Swing">Swing (Positioning)</option>
                         </select>
+                        <!-- INFO BOX TRADING STYLE -->
+                        <div id="styleInfoBox" class="hidden mt-2 bg-darkbg border border-panelborder rounded-lg p-2 text-[9px] text-gray-300 space-y-2 leading-relaxed">
+                            <div>
+                                <span class="font-bold text-accentblue">1. Scalping (Agresif)</span><br>
+                                TF: M1 - M5. Entry market (NOW) cepat mengikuti struktur M1. Fokus pada *liquidity sweep* dan mitigasi *Fair Value Gap* (FVG) kecil di LTF. SL sangat ketat (5-10 pips).
+                            </div>
+                            <div>
+                                <span class="font-bold text-accentblue">2. Day Trade (Konservatif)</span><br>
+                                TF: M15 - H1. Menunggu harga retest ke area S/D (Order Block) di M15. Konfirmasi entry melihat *BOS/CHoCH* di M5. Target TP di likuiditas harian (High/Low hari ini).
+                            </div>
+                            <div>
+                                <span class="font-bold text-accentblue">3. Intraday (Moderat)</span><br>
+                                TF: H1 - H4. Menunggu area Premium/Discount di H1. Refine zona entry di M15. Menahan posisi beberapa jam hingga target *swing* mingguan.
+                            </div>
+                            <div>
+                                <span class="font-bold text-accentblue">4. Swing (Positioning)</span><br>
+                                TF: H4 - Daily. Entry di Order Block besar (H4/Daily). Posisi ditahan berhari-hari hingga likuiditas makro tersapu.
+                            </div>
+                        </div>
                     </div>
 
                     <button onclick="generateAISignal()" id="signalBtn" class="w-full bg-gradient-to-r from-accentblue to-indigo-600 hover:from-blue-600 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-accentblue/20 transition active:scale-95">
-                        <i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnGenText">GENERATE PURE SMC SIGNAL</span>
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnGenText">Analisa Signal</span>
                     </button>
                 </div>
 
@@ -286,6 +307,19 @@
                     <p id="biasInfo" class="text-[8px] font-mono text-gray-500">memuat...</p>
                 </div>
 
+                <!-- SESI MARKET -->
+                <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
+                    <div class="flex justify-between items-center border-b border-panelborder pb-2">
+                        <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
+                            <i class="fa-solid fa-clock text-accentblue"></i> MARKET SESSIONS
+                        </span>
+                        <span id="currentSessionBadge" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-gray-500/20 text-gray-400 border-gray-500/40">--</span>
+                    </div>
+                    <div id="sessionList" class="space-y-1.5 text-[9px] font-mono">
+                        <!-- Diisi oleh JS -->
+                    </div>
+                </div>
+
                 <!-- KARTU SIGNAL -->
                 <div class="bg-cardbg rounded-xl border border-panelborder p-3 shadow-md space-y-3">
                     <div class="flex items-center justify-between border-b border-panelborder pb-2">
@@ -294,7 +328,7 @@
                     </div>
 
                     <div id="standbyView" class="py-5 text-center text-xs text-gray-400">
-                        Pilih pair, pastikan harga live bergerak, lalu tekan <b>GENERATE PURE SMC SIGNAL</b>.
+                        Pilih pair, pastikan harga live bergerak, lalu tekan <b>Analisa Signal</b>.
                     </div>
 
                     <div id="activeSignalCard" class="hidden space-y-3">
@@ -663,8 +697,8 @@
     // ================= BAHASA =================
     let currentLang = 'id';
     const DICT = {
-        id: { subHeader: "SMC x ICT x Alchemist", targetAsset: "TARGET ASET AKTIF", tradingStyle: "GAYA TRADING / STRATEGI", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE MAP CHART", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "Belum ada history.", running: "berjalan", liveStream: "LIVE MARKET STREAM", disclaimer: "Aktivitas trading beresiko dan tidak ada jaminan profit. Aplikasi ini bukan financial advisor dan sinyal bukan ajakan untuk membeli atau menjual. Atur risiko dan ukuran posisi sesuai kemampuanmu sendiri." },
-        en: { subHeader: "SMC x ICT x Alchemist", targetAsset: "ACTIVE TARGET ASSET", tradingStyle: "TRADING STYLE / STRATEGY", genBtn: "GENERATE PURE SMC SIGNAL", entryZone: "ENTRY ZONE", priceMap: "LIVE MAP CHART", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "No trading history yet.", running: "running", liveStream: "LIVE MARKET STREAM", disclaimer: "Trading involves risk and there is no guarantee of profit. This app is not a financial advisor and signals are not an invitation to buy or sell. Manage your risk and position size according to your own ability." }
+        id: { subHeader: "SMC x ICT x Alchemist", targetAsset: "TARGET ASET AKTIF", tradingStyle: "GAYA TRADING / STRATEGI", genBtn: "Analisa Signal", entryZone: "ENTRY ZONE", priceMap: "LIVE MAP CHART", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "Belum ada history.", running: "berjalan", liveStream: "LIVE MARKET STREAM", disclaimer: "Aktivitas trading beresiko dan tidak ada jaminan profit. Aplikasi ini bukan financial advisor dan sinyal bukan ajakan untuk membeli atau menjual. Atur risiko dan ukuran posisi sesuai kemampuanmu sendiri." },
+        en: { subHeader: "SMC x ICT x Alchemist", targetAsset: "ACTIVE TARGET ASSET", tradingStyle: "TRADING STYLE / STRATEGY", genBtn: "Analyze Signal", entryZone: "ENTRY ZONE", priceMap: "LIVE MAP CHART", analysisReason: "ANALYSIS REASON (CONFLUENCE SCORE):", tradingHistory: "TRADING HISTORY", totalPnl: "TOTAL PNL (WIN − LOSE)", winRatio: "WIN RATIO", noHistory: "No trading history yet.", running: "running", liveStream: "LIVE MARKET STREAM", disclaimer: "Trading involves risk and there is no guarantee of profit. This app is not a financial advisor and signals are not an invitation to buy or sell. Manage your risk and position size according to your own ability." }
     };
     function toggleLang() {
         currentLang = currentLang === 'id' ? 'en' : 'id';
@@ -688,6 +722,12 @@
         refreshActiveUI();
         const a = getActive();
         if (a) renderSignalCard(a);
+    }
+
+    // ================= TOGGLE INFO TRADING STYLE =================
+    function toggleStyleInfo() {
+        const box = document.getElementById('styleInfoBox');
+        box.classList.toggle('hidden');
     }
 
     // ================= KONFIG MARKET =================
@@ -1456,7 +1496,7 @@
         document.getElementById('activeSignalCard')?.classList.remove('hidden');
 
         const pipEl = (id, price) => { const e = document.getElementById(id); if (e) e.textContent = price != null ? fmtPips(pipsOf(t, price)) : '--'; };
-        pipEl('cardSLPips', t.sl); pipEl('cardTP1Pips', t.tp1); pipEl('cardTP2Pips', t.tp2); pipEl('cardTP3Pips', t.tp3);
+        pipEl('cardSLPips', t.sl); pipel('cardTP1Pips', t.tp1); pipel('cardTP2Pips', t.tp2); pipel('cardTP3Pips', t.tp3);
     }
 
     function refreshActiveUI() {
@@ -1903,6 +1943,97 @@
         }
     }
 
+    // ================= MARKET SESSION LOGIC =================
+    const SESSIONS = [
+        { name: 'Asia Session', startUTC: 0, endUTC: 9, color: 'text-yellow-400', border: 'border-yellow-500/50' },
+        { name: 'London Kill Zone', startUTC: 7, endUTC: 10, color: 'text-red-400', border: 'border-red-500/50' },
+        { name: 'London Session', startUTC: 8, endUTC: 17, color: 'text-blue-400', border: 'border-blue-500/50' },
+        { name: 'NY Kill Zone', startUTC: 12, endUTC: 15, color: 'text-red-400', border: 'border-red-500/50' },
+        { name: 'NY Session', startUTC: 13, endUTC: 22, color: 'text-emerald-400', border: 'border-emerald-500/50' }
+    ];
+
+    function formatDuration(ms) {
+        if (ms < 0) return "00.00.00";
+        const totalSec = Math.floor(ms / 1000);
+        const h = Math.floor(totalSec / 3600).toString().padStart(2, '0');
+        const m = Math.floor((totalSec % 3600) / 60).toString().padStart(2, '0');
+        const s = (totalSec % 60).toString().padStart(2, '0');
+        return `${h}.${m}.${s}`;
+    }
+
+    function updateSessionCard() {
+        const now = new Date();
+        const currentUTCSeconds = now.getUTCHours() * 3600 + now.getUTCMinutes() * 60 + now.getUTCSeconds();
+
+        let activeSessionName = 'No Session';
+        let activeColor = 'text-gray-400';
+        let activeBorder = 'border-gray-500/40';
+        let html = '';
+
+        // Urutkan sesi berdasarkan waktu mulai untuk tampilan
+        const sortedSessions = [...SESSIONS].sort((a, b) => a.startUTC - b.startUTC);
+
+        sortedSessions.forEach(s => {
+            const startSec = s.startUTC * 3600;
+            const endSec = s.endUTC * 3600;
+            let isActive = currentUTCSeconds >= startSec && currentUTCSeconds < endSec;
+            
+            // Jika sesi melewati tengah malam (belum ada di list ini, tapi untuk jaga-jaga)
+            if (endSec < startSec) {
+                isActive = currentUTCSeconds >= startSec || currentUTCSeconds < endSec;
+            }
+
+            // Format Waktu Lokal Pengguna
+            const d1 = new Date(); d1.setUTCHours(s.startUTC, 0, 0, 0);
+            const d2 = new Date(); d2.setUTCHours(s.endUTC, 0, 0, 0);
+            
+            const formatOpt = { hour: '2-digit', minute: '2-digit', hour12: true };
+            const localStart = d1.toLocaleTimeString('en-US', formatOpt).toLowerCase().replace(' ', '');
+            const localEnd = d2.toLocaleTimeString('en-US', formatOpt).toLowerCase().replace(' ', '');
+
+            let statusHtml = '';
+            
+            if (isActive) {
+                activeSessionName = s.name;
+                activeColor = s.color;
+                activeBorder = s.border;
+                
+                // Hitung sisa waktu
+                let remainingSec = endSec - currentUTCSeconds;
+                if (remainingSec < 0) remainingSec += 86400; // Jika lewat tengah malam
+                
+                statusHtml = `<span class="text-emerald-400 font-bold animate-pulse">Remaining >${formatDuration(remainingSec * 1000)}/close</span>`;
+            } else if (currentUTCSeconds < startSec) {
+                const untilStartSec = startSec - currentUTCSeconds;
+                statusHtml = `<span class="text-gray-500">Open in ${formatDuration(untilStartSec * 1000)}</span>`;
+            } else {
+                statusHtml = `<span class="text-gray-600">Closed</span>`;
+            }
+
+            // Tampilkan HANYA sesi yang sedang aktif, atau sesi berikutnya.
+            // Supaya tidak terlalu panjang, kita tampilkan yang aktif dan 2 yang akan datang.
+            // Tapi untuk kelengkapan, kita tampilkan semua saja dengan highlight.
+            
+            html += `
+                <div class="flex justify-between items-center bg-darkbg border ${isActive ? s.border : 'border-panelborder'} px-2 py-1.5 rounded transition-all">
+                    <div class="flex flex-col">
+                        <span class="${s.color} font-bold text-[9px]">${s.name}</span>
+                        <span class="text-gray-400 text-[8px]">${localStart} - ${localEnd}</span>
+                    </div>
+                    <div class="text-[8px] text-right font-mono">
+                        ${statusHtml}
+                    </div>
+                </div>
+            `;
+        });
+
+        const badge = document.getElementById('currentSessionBadge');
+        badge.textContent = activeSessionName;
+        badge.className = `text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-darkbg ${activeColor} ${activeBorder}`;
+        
+        document.getElementById('sessionList').innerHTML = html;
+    }
+
     // ================= BIAS MULTI-TIMEFRAME =================
     const BIAS_TF = [
         { label: 'M5', interval: '5m' },
@@ -2314,6 +2445,11 @@
         renderBias(selectedKey());
         requestAnimationFrame(uiFrame);
         connect();
+        
+        // Sesi Update
+        updateSessionCard();
+        setInterval(updateSessionCard, 1000);
+
         setInterval(() => { watchdog(); expirePending(); }, 1000);
         setInterval(() => refreshBias(selectedKey()), 60000);
         
