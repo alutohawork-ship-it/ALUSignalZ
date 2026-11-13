@@ -870,6 +870,10 @@
     const symbolOf = {}, providerOf = {};
     const dirty = new Set();
     
+    // --- FIX: Tambahkan seq dan nextId ---
+    let seq = 10;
+    const nextId = () => seq++;
+    
     const HIGHLIGHT_KEYS = ['XAUUSD', 'BTCUSD', 'EURUSD', 'US30'];
 
     const getActive = () => trades.find(t => t.id === activeId) || null;
@@ -2215,7 +2219,7 @@
             'CHFJPY': 'OANDA:CHFJPY', 'EURNZD': 'OANDA:EURNZD', 'DXY': 'TVC:DXY',
             
             // Metals
-            'XAUUSD': 'OANDA:XAUUSD', 'XAGUSD': 'OANDA:XAGUSD', 'XPTUSD': 'OANDA:XPTUSD',
+            'XAUUSD': 'OANDA:XAUUSD', 'XAGUSD': 'TVC:SILVER', 'XPTUSD': 'OANDA:XPTUSD',
             'XPDUSD': 'OANDA:XPDUSD', 'XAUEUR': 'OANDA:XAUEUR', 'XAGEUR': 'OANDA:XAGEUR',
             
             // Energy & Commodities
