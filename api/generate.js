@@ -942,17 +942,69 @@ function toSignal(result, style, ctx) {
   };
 }
 
+// ═══════════════════════════ RESOLVE PAIR DARI REQUEST ═══════════════════════════
+// Pair dicari dari beberapa nama field dan format (EUR/USD, xbtfx|EURUSD, FX:EURUSD).
+// Tidak ada default XAUUSD: kalau pair tidak terbaca, request ditolak.
+
+// Cek pakai hasOwnProperty, bukan truthy, karena JPN225 punya desimal 0.
+const isKnownSymbol = s => Object.prototype.hasOwnProperty.call(DECIMALS, s);
+
+// "EUR/USD", "xbtfx|EURUSD", "FX:EURUSD", "eur_usd" → "EURUSD"
+const normalizeSymbol = raw => String(raw ?? '')
+  .split(/[|:]/).pop()
+  .toUpperCase()
+  .replace(/[\s\/_\-]/g, '')
+  .trim();
+
+const SYMBOL_KEYS = ['symbol', 'pair', 'instrument', 'asset', 'target', 'pairName', 'ticker', 'market', 'code', 'sym'];
+
+// Cari string yang cocok dengan daftar pair, maksimal 2 level. Array (misalnya candles) dilewati.
+function findPairString(obj, depth = 0) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj) || depth > 2) return null;
+  for (const v of Object.values(obj)) {
+    if (typeof v === 'string') {
+      const s = normalizeSymbol(v);
+      if (isKnownSymbol(s)) return s;
+    }
+  }
+  for (const v of Object.values(obj)) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const s = findPairString(v, depth + 1);
+      if (s) return s;
+    }
+  }
+  return null;
+}
+
+function resolveSymbol(body, query) {
+  for (const src of [body, query]) {
+    if (!src || typeof src !== 'object') continue;
+    for (const key of SYMBOL_KEYS) {
+      const s = normalizeSymbol(src[key]);
+      if (isKnownSymbol(s)) return s;
+    }
+  }
+  return findPairString(body) || findPairString(query) || null;
+}
+
 // ═══════════════════════════ MAIN HANDLER ═══════════════════════════
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const body = req.body || {};
+  // Body bisa datang sebagai string jika frontend tidak mengirim Content-Type JSON.
+  let body = req.body || {};
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body); } catch { body = {}; }
+  }
 
-  // Pair wajib dikirim. Tidak ada default XAUUSD, karena fallback diam-diam itulah yang membuat semua pair terbaca sebagai emas.
-  const symbol = String(body.symbol || body.pair || body.instrument || '').toUpperCase().trim();
-  if (!DECIMALS[symbol]) {
-    return res.status(400).json({ error: `Pair tidak dikenal: "${symbol || '(kosong)'}"` });
+  // Pair wajib ada di request. Tidak ada default XAUUSD.
+  const symbol = resolveSymbol(body, req.query);
+  if (!symbol) {
+    const keys = Object.keys(body).join(', ') || '(body kosong)';
+    return res.status(400).json({
+      error: `Pair tidak terbaca dari request. Field yang diterima: ${keys}. Pastikan frontend mengirim field "symbol".`,
+    });
   }
 
   const styleKey = String(body.style || body.tradingStyle || 'Scalping').trim();
