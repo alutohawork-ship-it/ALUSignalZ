@@ -60,6 +60,10 @@
         .hit-badge.show { display: flex; animation: pop .45s ease-out; }
         @keyframes pop { 0% { transform: scale(0); } 60% { transform: scale(1.4); } 100% { transform: scale(1); } }
         input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        
+        /* Sembunyikan scrollbar untuk highlight ticker */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 </head>
 <body class="bg-darkbg text-gray-200 font-sans min-h-screen flex flex-col justify-between p-2 sm:p-4">
@@ -525,6 +529,13 @@
                     </div>
                 </div>
 
+                <!-- HIGHLIGHT TICKER POPUP -->
+                <div class="w-full overflow-x-auto pb-1 no-scrollbar">
+                    <div id="highlightTickerList" class="flex gap-2">
+                        <!-- Diisi oleh JS -->
+                    </div>
+                </div>
+
                 <!-- LIVE MARKET STREAM -->
                 <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md">
                     <div class="flex justify-between items-center pb-1.5 mb-1.5 border-b border-panelborder">
@@ -857,6 +868,8 @@
     const prices = {}, history = {}, rawPrices = {}, marketCandles = {};
     const symbolOf = {}, providerOf = {};
     const dirty = new Set();
+    
+    const HIGHLIGHT_KEYS = ['XAUUSD', 'BTCUSD', 'EURUSD', 'US30'];
 
     const getActive = () => trades.find(t => t.id === activeId) || null;
     const selectedKey = () => document.getElementById('marketSelect').value.split('|').pop();
@@ -1754,7 +1767,6 @@
         const box = document.getElementById('newsList');
         
         if (currentNewsTab === 'issues') {
-            // Tampilan Berita Global
             if (issuesData.length === 0) {
                 box.innerHTML = `<p class="text-[10px] text-gray-500 text-center py-3">Belum ada berita.</p>`;
                 return;
@@ -1796,17 +1808,19 @@
             else if (e.impact === 'Medium') { impactColor = 'text-yellow-400 border-yellow-500/40 bg-yellow-500/10'; impactLabel = 'MED'; }
 
             let statusHtml = '';
-            if (e.actual !== null) {
+            if (e.actual !== null && e.actual !== "") {
                 const isGood = Number(e.actual) >= Number(e.estimate);
                 const color = isGood ? 'text-emerald-400' : 'text-red-400';
                 statusHtml = `<span class="${color} font-bold">Act: ${e.actual}</span>`;
-            } else if (e.estimate !== null) {
+            } else if (e.estimate !== null && e.estimate !== "") {
                 statusHtml = `<span class="text-yellow-400 font-bold">Est: ${e.estimate}</span>`;
             } else {
                 statusHtml = `<span class="text-gray-600">--</span>`;
             }
 
-            const prevHtml = e.previous !== null ? `<span class="text-gray-500">Prev: ${e.previous}</span>` : `<span class="text-gray-600">Prev: --</span>`;
+            const prevHtml = e.previous !== null && e.previous !== "" 
+                ? `<span class="text-gray-500">Prev: ${e.previous}</span>` 
+                : `<span class="text-gray-600">Prev: --</span>`;
 
             return `
             <div class="bg-darkbg border border-panelborder p-2 rounded-lg space-y-1">
@@ -2001,6 +2015,8 @@
     }
 
     let lastHistPaint = 0;
+    let lastHighlightPaint = 0;
+
     function uiFrame() {
         requestAnimationFrame(uiFrame);
         if (dirty.size) {
@@ -2014,7 +2030,93 @@
             lastHistPaint = nowMs;
             renderHistory();
         }
+        
+        // Update highlight ticker tiap 1 detik (biar ga berat)
+        if (nowMs - lastHighlightPaint > 1000) {
+            lastHighlightPaint = nowMs;
+            updateHighlightTickers();
+        }
+
         drawChart();
+    }
+
+    // ================= HIGHLIGHT TICKER LOGIC =================
+    function buildHighlightTickers() {
+        const container = document.getElementById('highlightTickerList');
+        container.innerHTML = HIGHLIGHT_KEYS.map(key => `
+            <div class="bg-cardbg border border-panelborder rounded-xl p-2 flex-shrink-0 w-[130px] flex flex-col justify-between cursor-pointer" onclick="selectTicker('xbtfx|${key}')">
+                <div class="flex justify-between items-center mb-1">
+                    <span class="text-[10px] font-bold text-white">${displayName(key)}</span>
+                    <span id="hl-dir-${key}" class="text-[10px] font-mono font-bold"></span>
+                </div>
+                <div class="flex items-end justify-between">
+                    <div>
+                        <p id="hl-price-${key}" class="text-[11px] font-mono font-bold text-gray-200">--.--</p>
+                        <p id="hl-pct-${key}" class="text-[8px] font-mono font-bold">0.00%</p>
+                    </div>
+                    <canvas id="hl-chart-${key}" width="45" height="25" class="mb-1"></canvas>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function updateHighlightTickers() {
+        HIGHLIGHT_KEYS.forEach(key => {
+            const p = prices[key];
+            if (!p) return;
+            
+            // Price
+            const priceEl = document.getElementById(`hl-price-${key}`);
+            if (priceEl) priceEl.textContent = fmt(key, p.price);
+
+            // % Change (from first tick in history to current)
+            const hist = history[key] || [];
+            let pct = 0;
+            if (hist.length > 1) {
+                const first = hist[0].p;
+                const last = hist[hist.length - 1].p;
+                pct = ((last - first) / first) * 100;
+            }
+
+            const pctEl = document.getElementById(`hl-pct-${key}`);
+            const dirEl = document.getElementById(`hl-dir-${key}`);
+            if (pctEl) {
+                pctEl.textContent = `${pct > 0 ? '+' : ''}${pct.toFixed(3)}%`;
+                pctEl.className = `text-[8px] font-mono font-bold ${pct > 0 ? 'text-emerald-400' : pct < 0 ? 'text-red-400' : 'text-gray-400'}`;
+            }
+            if (dirEl) {
+                dirEl.textContent = pct > 0 ? '▲' : pct < 0 ? '▼' : '-';
+                dirEl.className = `text-[10px] ${pct > 0 ? 'text-emerald-400' : pct < 0 ? 'text-red-400' : 'text-gray-500'}`;
+            }
+
+            // Draw Sparkline
+            drawSparkline(`hl-chart-${key}`, hist);
+        });
+    }
+
+    function drawSparkline(canvasId, data) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas || data.length < 2) return;
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width;
+        const h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        let min = Infinity, max = -Infinity;
+        data.forEach(d => { if(d.p < min) min = d.p; if(d.p > max) max = d.p; });
+        if (max === min) max += 1;
+
+        ctx.beginPath();
+        ctx.strokeStyle = data[data.length-1].p >= data[0].p ? '#10b981' : '#ef4444';
+        ctx.lineWidth = 1.5;
+        
+        data.forEach((d, i) => {
+            const x = (i / (data.length - 1)) * w;
+            const y = h - ((d.p - min) / (max - min)) * h;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
     }
 
     // ================= TRADINGVIEW WIDGET =================
@@ -2582,6 +2684,7 @@
     window.onload = () => {
         checkSession();
         buildTicker();
+        buildHighlightTickers(); // Bangun mini chart
         updateCalibInfo();
         trades = loadTrades();
         saveTrades();
