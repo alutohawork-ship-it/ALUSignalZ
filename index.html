@@ -761,6 +761,7 @@
 
     // ================= KONFIG MARKET =================
     const WS_URL = 'wss://ws.xbtfx.com/v1/ws';
+    const MF_URL = 'wss://api-stream.myfundedperpetuals.com/v1/market-data'; // Fallback URL
     let XBTFX_TOKEN = '';
     const HISTORY_MS = 10 * 60 * 1000;
     const STALE_MS = 30000;
@@ -858,10 +859,10 @@
     const KEYS_SOCKET_2 = SUB_KEYS.slice(HALF_INDEX);
 
     // ================= STATE =================
-    let ws1 = null, ws2 = null;
-    let reconnectTimer1 = null, reconnectTimer2 = null;
+    let ws1 = null, ws2 = null, wsMf = null;
+    let reconnectTimer1 = null, reconnectTimer2 = null, mfReconnectTimer = null;
     let pingTimer1 = null, pingTimer2 = null;
-    let streamReady1 = false, streamReady2 = false;
+    let streamReady1 = false, streamReady2 = false, mfReady = false;
     let authFailed = false;
     let connectId = 0;
     let trades = [], activeId = null;
@@ -917,7 +918,7 @@
     }
 
     // ================= TICKER & UI =================
-    const PROV_COLOR = { hyperliquid: 'text-yellow-400', veranta: 'text-blue-400', ostium: 'text-orange-400', binance: 'text-emerald-400', xbtfx: 'text-emerald-400' };
+    const PROV_COLOR = { hyperliquid: 'text-yellow-400', veranta: 'text-blue-400', ostium: 'text-orange-400', binance: 'text-emerald-400', xbtfx: 'text-emerald-400', myfunded: 'text-purple-400' };
     function buildTicker() {
         const opts = [...document.querySelectorAll('#marketSelect option')];
         document.getElementById('tickerListContainer').innerHTML = opts.map(o => {
@@ -954,6 +955,16 @@
             const m = MARKETS[key];
             if (m) symbolOf[key] = m.coins[0];
         }
+        
+        // Clear active signal card if switching to a different pair
+        const t = getActive();
+        if (t && t.key !== key) {
+            activeId = null;
+            document.getElementById('standbyView')?.classList.remove('hidden');
+            document.getElementById('activeSignalCard')?.classList.add('hidden');
+            renderHistory();
+        }
+
         renderBias(key);
         refreshBias(key);
         
@@ -1016,7 +1027,8 @@
         const s1ok = sockState[1] === 'ok';
         const s2ok = sockState[2] === 'ok';
         let txt;
-        if (s1ok && s2ok) txt = 'CONNECTED (DUAL)';
+        if (s1ok && s2ok && mfReady) txt = 'CONNECTED (TRIO)';
+        else if (s1ok && s2ok) txt = 'CONNECTED (DUAL)';
         else if (s1ok && s2.fallback) txt = 'CONNECTED (S1 + FALLBACK)';
         else if (s1ok) txt = 'CONNECTED (S1 ONLY)';
         else txt = 'CONNECTING';
@@ -1052,13 +1064,42 @@
     function handleQuote(msg) {
         const p0 = pickPrice(msg.bid, msg.mid, msg.price, msg.ask);
         if (!(p0 > 0)) return;
+        
         for (const key of keysOf(msg.symbol)) {
+            // === SANITY CHECK: Filter Bad Tick ===
+            const lastPrice = prices[key]?.price;
+            if (lastPrice && Math.abs(p0 - lastPrice) / lastPrice > 0.15) {
+                if (DEBUG) console.warn(`Rejected bad tick for ${key}: ${p0} (last: ${lastPrice})`);
+                continue; // Abaikan harga yang meloncat lebih dari 15%
+            }
+
             symbolOf[key] = msg.symbol;
             workingSym[key] = msg.symbol;
             providerOf[key] = 'xbtfx';
             rawPrices[key] = p0;
             markSrc(key, 'LIVE', 'text-emerald-400');
             updatePrice(key, p0 + getOffset(key), msg);
+        }
+    }
+
+    function handleMfQuote(msg) {
+        if (msg.op === 'events' && Array.isArray(msg.events)) {
+            for (const ev of msg.events) {
+                if (!ev || !ev.symbol) continue;
+                const p = pickPrice(ev.price, ev.bid, ev.mid, ev.ask);
+                if (!(p > 0)) continue;
+                
+                const keys = keysOf(ev.symbol);
+                for (const key of keys) {
+                    // Hanya update jika XBTFX tidak tersedia atau datanya basi (> 5 detik)
+                    const last = prices[key];
+                    if (!last || Date.now() - last.recv > 5000) {
+                        rawPrices[key] = p;
+                        updatePrice(key, p + getOffset(key), ev);
+                        markSrc(key, 'MF', 'text-purple-400');
+                    }
+                }
+            }
         }
     }
 
@@ -1073,7 +1114,7 @@
 
     function watchdog() {
         const now = Date.now();
-        const anyReady = streamReady1 || streamReady2;
+        const anyReady = streamReady1 || streamReady2 || mfReady;
         for (const key of SUB_KEYS) {
             if (!symbolOf[key]) {
                 const m = MARKETS[key];
@@ -1116,6 +1157,34 @@
         if (r.ok && r.data.token) return { token: r.data.token };
         if (r.status === 401) return { fatal: true, msg: r.data.msg };
         return { error: r.data.msg || 'Gagal mengambil token' };
+    }
+
+    function connectMf() {
+        clearTimeout(mfReconnectTimer);
+        if (wsMf) { const old = wsMf; wsMf = null; old.onclose = null; old.close(); }
+        mfReady = false;
+        refreshWsBadge();
+
+        const sock = new WebSocket(MF_URL);
+        wsMf = sock;
+        
+        sock.onopen = () => {
+            mfReady = true;
+            refreshWsBadge();
+            // Subscribe to all keys
+            const syms = SUB_KEYS.map(k => MARKETS[k].coins[0]);
+            sendJSON(sock, { op: 'sub', id: nextId(), channel: 'ticks', payload: { symbols: syms } });
+        };
+        
+        sock.onmessage = e => {
+            try { const msg = JSON.parse(e.data); handleMfQuote(msg); } catch { }
+        };
+        
+        sock.onclose = () => {
+            mfReady = false;
+            refreshWsBadge();
+            mfReconnectTimer = setTimeout(connectMf, 5000);
+        };
     }
 
     async function connect() {
@@ -1221,7 +1290,7 @@
     function updatePrice(key, price, ev) {
         const prev = prices[key]?.price;
         const dir = prev == null ? 0 : price > prev ? 1 : price < prev ? -1 : (prices[key].dir ?? 0);
-        prices[key] = { price, dir, recv: Date.now(), kind: ev.kind, provider: 'xbtfx' };
+        prices[key] = { price, dir, recv: Date.now(), kind: ev.kind, provider: ev.provider || 'xbtfx' };
 
         processTickToCandle(key, price, 1);
         processTickToCandle(key, price, 5);
@@ -1942,6 +2011,21 @@
             ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(CW - CHART_GUT, y); ctx.stroke();
             ctx.restore();
         }
+
+        // --- PERBAIKAN: Gambar Marker Posisi Entry Signal (Waktu signal) ---
+        const entryX = plotL + (ticks.length - 1) * (plotW / Math.max(1, ticks.length - 1));
+        const entryY = yOf(t.entry);
+        
+        // Titik entry (dot biru)
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(entryX, entryY, 4, 0, Math.PI * 2);
+        ctx.fillStyle = '#2962ff';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.restore();
 
         const step = plotW / Math.max(1, ticks.length - 1);
         ctx.save();
@@ -2693,6 +2777,7 @@
         renderBias(selectedKey());
         requestAnimationFrame(uiFrame);
         connect();
+        connectMf(); // Start fallback connection
         
         // Sesi Update
         updateSessionCard();
