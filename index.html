@@ -461,6 +461,22 @@
                     </div>
                 </div>
 
+                <!-- NEWS CARD BARU -->
+                <div id="newsCard" class="hidden bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
+                    <div class="flex justify-between items-center border-b border-panelborder pb-2">
+                        <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
+                            <i class="fa-solid fa-newspaper text-yellow-400"></i> ECONOMIC NEWS
+                        </span>
+                        <div class="flex items-center gap-1">
+                            <button id="tabRecentNews" onclick="switchNewsTab('recent')" class="text-[8px] font-bold px-2 py-0.5 rounded bg-accentblue/30 text-accentblue">Recent</button>
+                            <button id="tabUpcomingNews" onclick="switchNewsTab('upcoming')" class="text-[8px] font-bold px-2 py-0.5 rounded bg-gray-500/20 text-gray-400">Upcoming</button>
+                        </div>
+                    </div>
+                    <div id="newsList" class="space-y-1.5 max-h-[250px] overflow-y-auto pr-1">
+                        <p class="text-[10px] text-gray-500 text-center py-3">Memuat berita...</p>
+                    </div>
+                </div>
+
                 <!-- TRADING HISTORY -->
                 <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
                     <div class="flex justify-between items-center">
@@ -469,6 +485,7 @@
                         </span>
                         <div class="flex items-center gap-1.5">
                             <button id="calToggle" onclick="calToggle()" class="text-[9px] font-bold px-2 py-0.5 rounded bg-accentblue/20 text-accentblue border border-accentblue/40">📅 PNL</button>
+                            <button id="newsToggle" onclick="newsToggle()" class="text-[9px] font-bold px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-400 border border-yellow-500/40">📰 NEWS</button>
                             <select id="histFilter" onchange="renderHistory()" class="bg-darkbg border border-panelborder text-[9px] font-bold text-white px-1.5 py-0.5 rounded focus:outline-none">
                                 <option value="today">Hari ini</option>
                                 <option value="all">Semua</option>
@@ -1677,6 +1694,102 @@
         renderCalendar();
     }
 
+    // ================= NEWS & ECONOMIC CALENDAR =================
+    let newsData = [];
+    let currentNewsTab = 'recent';
+
+    function newsToggle() {
+        const card = document.getElementById('newsCard');
+        const btn = document.getElementById('newsToggle');
+        const hiddenNow = card.classList.toggle('hidden');
+        btn.classList.toggle('bg-yellow-500/40', !hiddenNow);
+        
+        if (!hiddenNow && newsData.length === 0) {
+            fetchNews();
+        }
+    }
+
+    async function fetchNews() {
+        const box = document.getElementById('newsList');
+        box.innerHTML = '<p class="text-[10px] text-gray-500 text-center py-3">Memuat berita...</p>';
+        
+        try {
+            const res = await fetch('/api/news');
+            const data = await res.json();
+            
+            if (!data.ok) {
+                throw new Error(data.error || 'Gagal memuat berita.');
+            }
+            
+            newsData = data.events || [];
+            renderNews();
+        } catch (e) {
+            box.innerHTML = `<p class="text-[10px] text-red-400 text-center py-3">${e.message}</p>`;
+        }
+    }
+
+    function switchNewsTab(tab) {
+        currentNewsTab = tab;
+        document.getElementById('tabRecentNews').className = tab === 'recent' 
+            ? 'text-[8px] font-bold px-2 py-0.5 rounded bg-accentblue/30 text-accentblue' 
+            : 'text-[8px] font-bold px-2 py-0.5 rounded bg-gray-500/20 text-gray-400';
+        document.getElementById('tabUpcomingNews').className = tab === 'upcoming' 
+            ? 'text-[8px] font-bold px-2 py-0.5 rounded bg-accentblue/30 text-accentblue' 
+            : 'text-[8px] font-bold px-2 py-0.5 rounded bg-gray-500/20 text-gray-400';
+        renderNews();
+    }
+
+    function renderNews() {
+        const box = document.getElementById('newsList');
+        const now = new Date();
+        
+        const filtered = newsData.filter(e => {
+            const eventDate = new Date(e.date);
+            return currentNewsTab === 'recent' ? eventDate <= now : eventDate > now;
+        });
+
+        if (filtered.length === 0) {
+            box.innerHTML = `<p class="text-[10px] text-gray-500 text-center py-3">Tidak ada berita ${currentNewsTab === 'recent' ? 'terbaru' : 'mendatang'}.</p>`;
+            return;
+        }
+
+        box.innerHTML = filtered.slice(0, 50).map(e => {
+            const eventDate = new Date(e.date);
+            const timeStr = eventDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+            const dateStr = eventDate.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+            
+            let impactColor = 'text-gray-400 border-gray-500/40 bg-gray-500/10';
+            let impactLabel = 'LOW';
+            if (e.impact === 'High') {
+                impactColor = 'text-red-400 border-red-500/40 bg-red-500/10';
+                impactLabel = 'HIGH';
+            } else if (e.impact === 'Medium') {
+                impactColor = 'text-yellow-400 border-yellow-500/40 bg-yellow-500/10';
+                impactLabel = 'MED';
+            }
+
+            const statusHtml = e.actual !== null 
+                ? `<span class="text-emerald-400 font-bold">Act: ${e.actual}</span>` 
+                : `<span class="text-gray-500">Est: ${e.estimate ?? '--'}</span>`;
+
+            return `
+            <div class="bg-darkbg border border-panelborder p-2 rounded-lg space-y-1">
+                <div class="flex justify-between items-start gap-2">
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-[8px] font-mono font-bold text-gray-400">${dateStr} ${timeStr}</span>
+                        <span class="text-[7px] font-mono font-bold px-1.5 py-0.5 rounded border ${impactColor}">${impactLabel}</span>
+                    </div>
+                    <span class="text-[8px] font-bold text-white">${e.currency || e.country}</span>
+                </div>
+                <p class="text-[9px] font-bold text-gray-200 leading-tight">${e.event}</p>
+                <div class="flex justify-between items-center text-[8px] font-mono">
+                    <span class="text-gray-500">Prev: ${e.previous ?? '--'}</span>
+                    ${statusHtml}
+                </div>
+            </div>`;
+        }).join('');
+    }
+
     // ================= LIVE MAP CHART (SMOOTH LINE CHART) =================
     const cv = document.getElementById('priceChart');
     const ctx = cv ? cv.getContext('2d') : null;
@@ -2451,6 +2564,13 @@
         
         // Fallback polling untuk memastikan harga Index tetap masuk
         setInterval(pollIndexPrices, 15000);
+
+        // Auto-refresh berita jika tab News sedang terbuka
+        setInterval(() => {
+            if (!document.getElementById('newsCard').classList.contains('hidden')) {
+                fetchNews();
+            }
+        }, 300000); // 5 menit
     };
     </script>
 </body>
