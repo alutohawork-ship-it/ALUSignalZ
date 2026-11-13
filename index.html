@@ -2359,9 +2359,9 @@
         BULLISH: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40',
         BEARISH: 'bg-red-500/20 text-red-400 border-red-500/40',
         NETRAL:  'bg-yellow-500/20 text-yellow-400 border-yellow-500/40',
-        'N/A':   'bg-gray-500/20 text-gray-400 border-gray-500/40',
+        'WAIT':  'bg-gray-500/20 text-gray-400 border-gray-500/40',
     };
-    const BIAS_LABEL = { BULLISH: 'Bullish', BEARISH: 'Bearish', NETRAL: 'Netral', 'N/A': 'N/A' };
+    const BIAS_LABEL = { BULLISH: 'Bullish', BEARISH: 'Bearish', NETRAL: 'Netral', 'WAIT': 'Loading' };
     const biasCache = {};
     let biasBusy = false;
 
@@ -2372,14 +2372,19 @@
     }
 
     function calcBias(candles) {
-        if (!candles || candles.length < 5) return { bias: 'N/A', score: 0 };
+        // Jika benar-benar tidak ada data sama sekali
+        if (!candles || candles.length === 0) return { bias: 'WAIT', score: 0 };
+        
         const closes = candles.map(c => c.c);
-        const period = Math.min(20, Math.floor(closes.length / 2));
-        const e20 = emaSeries(closes, Math.max(2, period));
+        // Jika data sedikit, kurangi periode EMA agar tetap bisa hitung
+        const period = Math.min(20, Math.max(2, Math.floor(closes.length / 2)));
+        const e20 = emaSeries(closes, period);
         const i = closes.length - 1;
+        
         let score = 0;
         score += closes[i] >= e20[i] ? 1 : -1;
         score += closes[i] >= closes[0] ? 1 : -1;
+        
         const bias = score > 0 ? 'BULLISH' : score < 0 ? 'BEARISH' : 'NETRAL';
         return { bias, score };
     }
@@ -2456,7 +2461,7 @@
                     const candles = await fetchCandles(provider, symbol, tf.interval);
                     rows[tf.label] = calcBias(candles);
                 } catch (e) {
-                    rows[tf.label] = { bias: 'N/A', score: 0 };
+                    rows[tf.label] = { bias: 'WAIT', score: 0 };
                 }
             }
             biasCache[key] = { at: Date.now(), rows };
@@ -2476,10 +2481,10 @@
 
         box.innerHTML = BIAS_TF.map(tf => {
             const b = rows?.[tf.label];
-            const name = b ? b.bias : 'N/A';
-            const cls = BIAS_STYLE[name] || BIAS_STYLE['N/A'];
-            const text = BIAS_LABEL[name] || 'N/A';
-            const score = (b && b.bias !== 'N/A' && b.score != null) ? `skor ${b.score > 0 ? '+' : ''}${b.score}` : '';
+            const name = b ? b.bias : 'WAIT';
+            const cls = BIAS_STYLE[name] || BIAS_STYLE['WAIT'];
+            const text = BIAS_LABEL[name] || 'Loading';
+            const score = (b && b.bias !== 'WAIT' && b.score != null) ? `skor ${b.score > 0 ? '+' : ''}${b.score}` : '';
             return `
               <div class="bg-darkbg border border-panelborder rounded-lg p-1.5 text-center space-y-0.5">
                 <p class="text-[8px] font-bold text-gray-400">${tf.label}</p>
@@ -2488,9 +2493,9 @@
               </div>`;
         }).join('');
 
-        const vals = Object.values(rows || {}).map(r => r.bias || 'N/A');
+        const vals = Object.values(rows || {}).map(r => r.bias || 'WAIT');
         const cnt = k => vals.filter(v => v === k).length;
-        info.textContent = `${cnt('BULLISH')} Bullish · ${cnt('BEARISH')} Bearish · ${cnt('NETRAL')} Netral · ${cnt('N/A')} N/A · update ${new Date(cache?.at || Date.now()).toLocaleTimeString('id-ID', { hour12: false })}`;
+        info.textContent = `${cnt('BULLISH')} Bullish · ${cnt('BEARISH')} Bearish · ${cnt('NETRAL')} Netral · ${cnt('WAIT')} Loading · update ${new Date(cache?.at || Date.now()).toLocaleTimeString('id-ID', { hour12: false })}`;
     }
 
     // ================= AI SIGNAL, EMA & BOLLINGER BANDS FILTER LOGIC =================
