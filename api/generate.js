@@ -146,9 +146,16 @@ async function checkAccess(email) {
   return { ok: true };
 }
 
+// FIX: Menambahkan konversi USD ke USDT untuk Crypto agar TickerLayer bisa membaca datanya
 function mapSymbolToTickerLayer(symbol) {
   const s = symbol.toUpperCase().trim();
-  if (CRYPTO_LIST.includes(s)) return { asset: 'crypto', symbol: s };
+  if (CRYPTO_LIST.includes(s)) {
+    // TickerLayer umumnya pakai USDT untuk Crypto (contoh: BTCUSD -> BTCUSDT)
+    if (s.endsWith('USD')) {
+      return { asset: 'crypto', symbol: s.replace('USD', 'USDT') };
+    }
+    return { asset: 'crypto', symbol: s };
+  }
   if (s === 'US30' || s === 'SPX500') return { asset: 'stocks', symbol: `US:${s}` };
   if (s === 'NAS100') return { asset: 'stocks', symbol: 'US:NDX' };
   if (s.includes('XAU') || s.includes('XAG')) return { asset: 'forex', symbol: s };
