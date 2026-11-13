@@ -44,7 +44,8 @@ const MAX_SRC_DEVIATION = 0.05; // candle sumber harus dekat harga live (5%), ka
 
 const pairClassOf = symbol => {
   if (isGold(symbol)) return 'gold';
-  if (['XAGUSD', 'XPTUSD', 'XPDUSD'].includes(symbol)) return 'metal';
+  if (symbol === 'XAGUSD' || symbol === 'XAGEUR') return 'silver';
+  if (['XPTUSD', 'XPDUSD'].includes(symbol)) return 'metal';
   if (CRYPTO_LIST.includes(symbol) || symbol.endsWith('BTC')) return 'crypto';
   if (['US30', 'NAS100', 'SPX500', 'GER40', 'UK100', 'JPN225', 'FRA40', 'AUS200'].includes(symbol)) return 'index';
   if (['BRENT', 'WTI', 'NATGAS', 'COPPER', 'COFFEE', 'SUGAR'].includes(symbol)) return 'commodity';
@@ -54,6 +55,7 @@ const pairClassOf = symbol => {
 
 const PAIR_CLASS_PROFILE = {
   gold:      { label: 'Emas',      structTf: 'M1', zoneTf: 'M5', zoneDisp: 0.8, nearAtr: 0.5, slMul: 1.0, bufAtr: 0.2,  range: [100, 50000] },
+  silver:    { label: 'Perak',     structTf: 'M5', zoneTf: 'M5', zoneDisp: 0.9, nearAtr: 0.6, slMul: 1.1, bufAtr: 0.25, range: [5, 300] },
   metal:     { label: 'Logam',     structTf: 'M5', zoneTf: 'M5', zoneDisp: 0.9, nearAtr: 0.6, slMul: 1.1, bufAtr: 0.25, range: [0.5, 50000] },
   fx:        { label: 'Forex',     structTf: 'M5', zoneTf: 'M5', zoneDisp: 0.8, nearAtr: 0.6, slMul: 1.0, bufAtr: 0.2,  range: [0.00001, 50000] },
   fx_jpy:    { label: 'Forex JPY', structTf: 'M5', zoneTf: 'M5', zoneDisp: 0.8, nearAtr: 0.6, slMul: 1.0, bufAtr: 0.2,  range: [0.01, 100000] },
@@ -181,20 +183,19 @@ async function checkAccess(email) {
   return { ok: true };
 }
 
-// FIX: Menambahkan konversi USD ke USDT untuk Crypto agar TickerLayer bisa membaca datanya
-function mapSymbolToTickerLayer(symbol) {
+// Nama simbol yang dicoba ke TickerLayer, urut prioritas. Crypto dicoba sebagai USDT lalu USD.
+function tlCandidates(symbol) {
   const s = symbol.toUpperCase().trim();
   if (CRYPTO_LIST.includes(s)) {
-    // TickerLayer umumnya pakai USDT untuk Crypto (contoh: BTCUSD -> BTCUSDT)
-    if (s.endsWith('USD')) {
-      return { asset: 'crypto', symbol: s.replace('USD', 'USDT') };
-    }
-    return { asset: 'crypto', symbol: s };
+    const base = s.replace(/USD$/, '');
+    return [
+      { asset: 'crypto', symbol: `${base}USDT` },
+      { asset: 'crypto', symbol: `${base}USD` },
+    ];
   }
-  if (s === 'US30' || s === 'SPX500') return { asset: 'stocks', symbol: `US:${s}` };
-  if (s === 'NAS100') return { asset: 'stocks', symbol: 'US:NDX' };
-  if (s.includes('XAU') || s.includes('XAG')) return { asset: 'forex', symbol: s };
-  return { asset: 'forex', symbol: s };
+  if (s === 'US30' || s === 'SPX500') return [{ asset: 'stocks', symbol: `US:${s}` }];
+  if (s === 'NAS100') return [{ asset: 'stocks', symbol: 'US:NDX' }];
+  return [{ asset: 'forex', symbol: s }];
 }
 
 let currentKeyIndex = 0;
@@ -227,28 +228,42 @@ const TL_SPAN = {
 const CACHE_TTL = { '1m': 120, '5m': 300, '15m': 600 };
 const CACHE_BARS = { '1m': 300, '5m': 300, '15m': 600 };
 
-async function fetchTickerLayerOHLC(symbol, interval, apiKey, need) {
-  const out = { rows: [] };
+// Timestamp bisa berupa milidetik, detik, atau teks tanggal. Semuanya diubah ke milidetik.
+function toEpochMs(v) {
+  if (typeof v === 'string' && v.trim() !== '' && Number.isNaN(Number(v))) return Date.parse(v) || 0;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n < 1e11 ? n * 1000 : n;
+}
+
+// Ambil candle dari TickerLayer untuk satu kandidat simbol. Tidak pernah melempar error.
+async function fetchTickerLayerRows(cand, interval, apiKey, need) {
+  const info = { cand: `${cand.asset}/${cand.symbol}`, status: null, rows: [], error: null };
   const tf = TL_SPAN[interval];
-  if (!tf) return out;
-  const mapped = mapSymbolToTickerLayer(symbol);
+  if (!tf) return info;
   const now = Date.now();
   const startMs = now - Math.ceil(need * 1.2 * tf.minutes * 60000) - 86400000;
-  const byT = new Map();
-  const url = `${TICKERLAYER_BASE_URL}/${mapped.asset}/agg/${mapped.symbol}/${tf.mult}/${tf.span}/${isoDate(new Date(startMs))}/${isoDate(new Date(now + 86400000))}?sort=asc&limit=5000`;
+  const url = `${TICKERLAYER_BASE_URL}/${cand.asset}/agg/${cand.symbol}/${tf.mult}/${tf.span}/${isoDate(new Date(startMs))}/${isoDate(new Date(now + 86400000))}?sort=asc&limit=5000`;
   try {
     const { response } = await tlFetch(url, apiKey);
-    if (response.ok) {
-      const data = await response.json();
-      const rows = Array.isArray(data) ? data : (data.results || []);
-      for (const c of rows) {
-        const cand = { t: Number(c.t || 0), o: Number(c.o || 0), h: Number(c.h || 0), l: Number(c.l || 0), c: Number(c.c || 0) };
-        if (cand.t > 0 && [cand.o, cand.h, cand.l, cand.c].every(Number.isFinite)) byT.set(cand.t, cand);
-      }
+    info.status = response.status;
+    if (!response.ok) return info;
+    const data = await response.json();
+    const raw = Array.isArray(data) ? data : (data.results || []);
+    const byT = new Map();
+    for (const bar of raw) {
+      const t = toEpochMs(bar.t ?? bar.timestamp ?? bar.time);
+      const o = Number(bar.o ?? bar.open);
+      const h = Number(bar.h ?? bar.high);
+      const l = Number(bar.l ?? bar.low);
+      const c = Number(bar.c ?? bar.close);
+      if (t > 0 && [o, h, l, c].every(Number.isFinite)) byT.set(t, { t, o, h, l, c });
     }
-  } catch (err) {}
-  out.rows = [...byT.values()].sort((a, b) => a.t - b.t).slice(-Math.max(1, Math.ceil(need)));
-  return out;
+    info.rows = [...byT.values()].sort((a, b) => a.t - b.t).slice(-Math.max(1, Math.ceil(need)));
+  } catch (err) {
+    info.error = err.message;
+  }
+  return info;
 }
 
 function cleanCandles(rows) {
@@ -290,13 +305,40 @@ function aggregateCandles(candles, tfMin) {
   return [...map.values()].sort((a, b) => a.t - b.t);
 }
 
-async function getCandles(symbol, tf, need, apiKey) {
-  const cacheKey = `candles_${symbol}_${tf}`;
+// Versi cache candle. Naikkan jika sumber data berubah, supaya cache lama yang mungkin salah tidak dipakai lagi.
+const CANDLE_CACHE_VER = 'v2';
+
+// Candle dianggap valid jika close terakhirnya dekat harga live (toleransi MAX_SRC_DEVIATION).
+const matchesRef = (arr, ref) =>
+  arr.length > 0 && ref > 0 && Math.abs(arr[arr.length - 1].c - ref) / ref <= MAX_SRC_DEVIATION;
+
+async function getCandles(symbol, tf, need, apiKey, ref) {
+  const cacheKey = `candles_${CANDLE_CACHE_VER}_${symbol}_${tf}`;
   const cached = await kvGetJSON(cacheKey);
-  if (Array.isArray(cached) && cached.length >= need) return { candles: cached };
-  const nat = await fetchTickerLayerOHLC(symbol, tf, apiKey, need);
-  if (nat.rows.length) await kvSetJSON(cacheKey, nat.rows.slice(-CACHE_BARS[tf]), CACHE_TTL[tf]);
-  return { candles: nat.rows };
+  if (Array.isArray(cached) && cached.length >= need && matchesRef(cached, ref)) {
+    return { candles: cached, source: 'cache', tried: [] };
+  }
+
+  const tried = [];
+  const minBars = Math.min(need, 60);
+  for (const cand of tlCandidates(symbol)) {
+    const info = await fetchTickerLayerRows(cand, tf, apiKey, need);
+    tried.push(info);
+    if (info.rows.length >= minBars && matchesRef(info.rows, ref)) {
+      await kvSetJSON(cacheKey, info.rows.slice(-CACHE_BARS[tf]), CACHE_TTL[tf]);
+      return { candles: info.rows, source: `tickerlayer ${info.cand}`, tried };
+    }
+  }
+  return { candles: [], source: 'none', tried };
+}
+
+function describeTried(tried, ref) {
+  if (!tried || !tried.length) return 'tidak ada sumber';
+  return tried.map(t => {
+    const last = t.rows.length ? `, close ${t.rows[t.rows.length - 1].c} vs live ${ref}` : '';
+    const err = t.error ? `, error ${t.error}` : '';
+    return `${t.cand} HTTP ${t.status ?? '-'}, ${t.rows.length} bar${last}${err}`;
+  }).join('; ');
 }
 
 function atr(candles, period = 14) {
@@ -1038,24 +1080,38 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: `Harga ${price} di luar rentang wajar ${symbol} (${lo} - ${hi}).` });
   }
 
-  // Candle frontend hanya dipakai jika close-nya cocok dengan harga live.
-  const sameAsPrice = arr => arr.length > 0 && Math.abs(lastClosePrice(arr) - price) / price <= MAX_SRC_DEVIATION;
-  if (!sameAsPrice(m1)) m1 = [];
-  if (!sameAsPrice(m5)) m5 = [];
-  if (!sameAsPrice(m15)) m15 = [];
-
   const needM1 = gold && style === 'Scalping' ? NEED.m1 : 0;
   const needM5 = style === 'Scalping' || style === 'Day Trading' ? NEED.m5 : 0;
   const needM15 = NEED.m15;
 
-  if (needM1 && m1.length < needM1) m1 = (await getCandles(symbol, '1m', needM1, apiKey)).candles;
-  if (needM5 && m5.length < needM5) m5 = (await getCandles(symbol, '5m', needM5, apiKey)).candles;
-  if (m15.length < needM15) m15 = (await getCandles(symbol, '15m', needM15, apiKey)).candles;
+  // Candle frontend dipakai hanya jika cukup dan cocok dengan harga live. Selain itu ambil dari server.
+  const pick = async (arr, tf, need) => {
+    const frontOk = arr.length >= Math.min(need, 60) && matchesRef(arr, price);
+    if (frontOk && arr.length >= need) return { candles: arr, source: 'frontend', tried: [] };
+    const r = await getCandles(symbol, tf, need, apiKey, price);
+    if (!r.candles.length && frontOk) return { candles: arr, source: 'frontend (parsial)', tried: r.tried };
+    return r;
+  };
 
-  // Data dari sumber juga dicek. Lebih baik gagal daripada menghasilkan sinyal yang salah.
-  if ((needM1 && !sameAsPrice(m1)) || (needM5 && !sameAsPrice(m5)) || !sameAsPrice(m15)) {
-    return res.status(502).json({ error: `Data candle ${symbol} tidak tersedia atau tidak cocok dengan harga live.` });
+  const [r1, r5, r15] = await Promise.all([
+    needM1 ? pick(m1, '1m', needM1) : null,
+    needM5 ? pick(m5, '5m', needM5) : null,
+    pick(m15, '15m', needM15),
+  ]);
+  if (r1) m1 = r1.candles;
+  if (r5) m5 = r5.candles;
+  m15 = r15.candles;
+
+  // Data harus cocok dengan harga live. Kalau tidak, gagal dengan detail, bukan sinyal yang salah.
+  const failed = [['m1', r1], ['m5', r5], ['m15', r15]].filter(([, r]) => r && r.candles.length === 0);
+  if (failed.length) {
+    const detail = failed.map(([k, r]) => `${k}: ${describeTried(r.tried, price)}`).join(' | ');
+    console.error('candle gagal', symbol, detail);
+    return res.status(502).json({
+      error: `Data candle ${symbol} tidak cocok dengan harga live (${price}). ${detail}`,
+    });
   }
+  console.log('candle source', symbol, r1 ? r1.source : '-', r5 ? r5.source : '-', r15.source);
 
   if (needM1) m1 = mergeLiveBar(m1, price, 1);
   if (needM5) m5 = mergeLiveBar(m5, price, 5);
