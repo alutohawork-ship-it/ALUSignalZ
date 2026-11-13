@@ -1,16 +1,9 @@
 // api/generate.js
-// v53 (No Mapping Zone - Focus on Signal Quality)
-//  - Scalping:
-//      · XAUUSD: struktur M1, area S/D M5 dibentuk dari candle M1. SL 25-30 pip dari struktur.
-//      · Pair lain: struktur M5 dan area S/D M5 langsung. SL/TP mengikuti struktur, dibatasi ATR M5.
-//      · Di dalam area demand M5 → BUY NOW, area supply M5 → SELL NOW
-//      · Di luar area → NOW searah arah awal market (BOS → HH+HL/LH+LL → price action)
-//  - Day Trading: BOS M15 (bias) → area M15 → refine M5. DUA ARAH: BUY dan SELL dinilai,
-//      zona terkuat (Supply/Demand/OB/FVG) dipilih, tidak terkunci ke arah bias.
-//  - Intraday: area S/D H1 → refine M15. DUA ARAH. Maksimal 1 signal per hari (WIB), disimpan di KV.
-//  - Swing: area S/D H4 → refine H1. Selalu ada signal.
-//  - Pip per pair: XAUUSD 0.1; forex 10^-(desimal-1); indeks dan BTC 1 (lihat PIP_OVERRIDE).
-//  - TickerLayer API Key Rotations terintegrasi utuh.
+// v54 (Day Trading: Scalping Konservatif - Fresh FVG/OB Retest)
+//  - Scalping: Market Execution (NOW), FVG M1-M5.
+//  - Day Trading: Konsep Scalping Konservatif. Menunggu retest FVG/OB baru (fresh) di M15 akibat BOS. Limit Order.
+//  - Intraday: Area S/D H1 + Refine M15. 2 arah.
+//  - Swing: Area S/D H4 + Refine H1.
 //  - Integrasi AI GutsAI (DeepSeek) untuk narasi reasoning SMC/ICT.
 
 export const config = { api: { bodyParser: { sizeLimit: '6mb' } } };
@@ -58,7 +51,8 @@ const STYLES = {
     entryStyle: 'Agresif', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
   'Day Trading': {
-    label: 'Day Trading · BOS M15 + Area M15 + Refine M5 · 2 arah · Limit/NOW · TP 1:1 · 1:1.5 · 1:2',
+    // Ubah label dan RR untuk Scalping Konservatif
+    label: 'Day Trading · Scalping Konservatif · Retest FVG/OB M15',
     entryStyle: 'Konservatif', mode: 'LIMIT', kind: 'day', rr: [1.0, 1.5, 2.0],
   },
   'Intraday': {
@@ -298,7 +292,6 @@ function bollingerAt(candles, idx, period = BB_PERIOD, mult = BB_MULT) {
   return { mid, upper: mid + mult * sd, lower: mid - mult * sd };
 }
 
-// FIX 1: Mengubah output default struktur menjadi istilah SMC/ICT
 function analyzePureSMCStructure(candles) {
   if (!candles || candles.length < 15) return { dir: 1, src: 'Default' };
   const { highs, lows } = findPivots(candles, SCALP_PIVOT);
@@ -490,7 +483,6 @@ function slBounds(kind, ctx, atrVal) {
 }
 
 // ── AI REASONING FUNCTION ──
-// FIX 2: Prompt super ketat SMC/ICT, melarang retail indicators & melarang kata "Order flow"
 async function getAIReasoning(signalData) {
   if (!OPENAI_API_KEY) return null;
 
@@ -504,6 +496,10 @@ Tugasmu: Memberikan narasi alasan entry (reasoning) yang presisi tinggi berdasar
 3. JIKA DATA MENTAH (Raw) menyebutkan "Price action" atau "Order flow", KAMU WAJIB menerjemahkannya menjadi istilah SMC/ICT yang valid (contoh: "Harga melakukan Liquidity Sweep lalu mitigasi FVG M1").
 4. JIKA TIDAK ADA SETUP YANG JELAS, jelaskan bahwa market sedang ranging/equilibrium.
 
+=== KONTEKS GAYA TRADING ===
+- **Scalping**: Entry Market (NOW) di harga live. Fokus pada FVG/Sweep di M1.
+- **Day Trading (Scalping Konservatif)**: Fokus pada RETEST FVG atau Order Block (OB) BARU yang fresh (belum tersentuh) di M15 akibat BOS/Displacement. Gunakan Limit Order.
+
 === DATA TEKNIKAL ===
 - Pair: ${signalData.symbol} | Sinyal: ${signalData.dir === 1 ? 'BUY' : 'SELL'} (${signalData.style})
 - Order: ${signalData.orderType} | Entry: ${signalData.entry} | SL: ${signalData.sl}
@@ -512,7 +508,8 @@ Tugasmu: Memberikan narasi alasan entry (reasoning) yang presisi tinggi berdasar
 - Data Struktur (Raw): ${signalData.rawReason}
 
 === TUGAS ANDA ===
-Buat 1 paragraf ringkas (maksimal 400 karakter) yang menjelaskan MENGAPA entry ini diambil berdasarkan data di atas. Gunakan bahasa Indonesia profesional, tegas, dan murni istilah SMC/ICT (contoh: "Harga menyapu Asian Low (Liquidity Sweep) di 99.80, lalu terjadi CHoCH Bullish di M5. Entry Market Execution pada mitigasi FVG M1.").
+Buat 1 paragraf ringkas (maksimal 400 karakter) yang menjelaskan MENGAPA entry ini diambil berdasarkan data di atas. Gunakan bahasa Indonesia profesional, tegas, dan murni istilah SMC/ICT. 
+Jika Day Trading, sebutkan bahwa ini adalah setup "Scalping Konservatif" yang menunggu retest FVG/OB baru.
 Jangan mengarang berita fundamental. Fokus HANYA pada price action dan struktur market.
 `;
 
@@ -703,35 +700,48 @@ async function buildScalpPlan({ m1, m5, price, rrList, ctx }) {
     lines.push(`Hati-hati, ada ${oppName} M5 ${f(opp.bottom)} - ${f(opp.top)} (${distTxt}), berpotensi menahan ${dir === 1 ? 'BUY' : 'SELL'}`);
   }
 
-  // FIX 3: Jangan cari zona fallback yang jauh. Jika tidak ada zona, pakai harga live.
   const refZone = zone; 
   
   return await finalizePlan({
     dir, entry: price, orderType: 'NOW', baseSL, kind: 'scalp', atrVal, ctx, rrList,
     confidence, setup, zoneNote: `Scalp · ${setup}`,
-    zoneRange: refZone ? { min: refZone.bottom, max: refZone.top } : { min: price, max: price }, // Fix sinkronisasi harga live
+    zoneRange: refZone ? { min: refZone.bottom, max: refZone.top } : { min: price, max: price },
     head: `Scalping ${dir === 1 ? 'BUY' : 'SELL'} NOW pada ${ctx.symbol}`,
     lines,
   });
 }
 
-// ═══════════════ DAY TRADING & INTRADAY (DUA ARAH) ═══════════════
+// ═══════════════ DAY TRADING (SCALPING KONSERVATIF) ═══════════════
 
 function evalSide(dir, o) {
   const { price, bias, parentPick, parentName, refineC, refineName, refineL, atrVal } = o;
+  
+  // Cari zona utama (M15)
   const parent = parentPick(dir);
+  
+  // Cari zona refine (M5) di dalam parent
   const refined = parent ? refineZone(refineC, parent, dir, price, refineL) : null;
-  const z = refined || pickZone(refineC, dir, price, refineL);
+  
+  // Prioritaskan zona yang punya FVG dan FRESH
+  let z = refined;
+  if (!z) {
+      const fvgZones = findSDZones(refineC, dir, price, { freshOnly: true, dispAtr: 0.8 })
+          .filter(x => x.fvg);
+      z = fvgZones[0] || pickZone(refineC, dir, price, refineL);
+  }
+  
   const side = dir === 1 ? 'Demand' : 'Supply';
   let area, areaName, refineNote, score = 0;
 
   if (z) {
     area = z;
-    areaName = `Zona ${side}/OB ${refineName}${z.fvg ? ' + FVG' : ''}`;
+    const zoneType = z.fvg ? 'FVG' : 'OB';
+    areaName = `Zona ${side}/${zoneType} ${refineName}`;
     refineNote = refined ? `Refine ${refineName} di dalam area ${parentName}` : `Zona ${refineName} terdekat`;
   } else if (parent) {
     area = parent;
-    areaName = `Zona ${side}/OB ${parentName}${parent.fvg ? ' + FVG' : ''}`;
+    const zoneType = parent.fvg ? 'FVG' : 'OB';
+    areaName = `Zona ${side}/${zoneType} ${parentName}`;
     refineNote = `Refine ${refineName} belum ada, memakai area ${parentName}`;
   } else {
     area = swingArea(refineC, dir, 20);
@@ -740,14 +750,21 @@ function evalSide(dir, o) {
     return { dir, area, areaName, refineNote, score: -1 };
   }
 
+  // SCORING: Semakin dekat harga, semakin tinggi skor
   score += Math.max(0, 3 - (area.dist || 0) / atrVal);
+  
+  // Bonus besar jika FVG (sesuai request)
+  if (area.fvg) score += 3;
+  
+  // Bonus jika searah bias
   if (dir === bias.dir) score += 2;
-  if (refined) score += 2;
-  score += Math.min(1.5, (area.strength || 0) / 2);
-  if (area.fvg) score += 1.5;
-  if (area.fresh) score += 1;
+  
+  // Bonus jika zona sangat fresh (belum tersentuh)
+  if (area.fresh) score += 2;
+  
   const trig = findRefineTrigger(refineC, dir);
-  if (trig) score += trig.strong ? 2.5 : 1.5;
+  if (trig) score += trig.strong ? 1.5 : 1;
+  
   return { dir, area, areaName, refineNote, score };
 }
 
@@ -766,7 +783,6 @@ async function buildTwoWayPlan(o) {
   });
 }
 
-// FIX 4: Day Trading Zona M5 Retest
 async function buildDayPlan({ m5, m15, price, rrList, ctx }) {
   const bos = findLastBOS(m15, DAY_PIVOT);
   const init = analyzePureSMCStructure(m15);
@@ -775,13 +791,23 @@ async function buildDayPlan({ m5, m15, price, rrList, ctx }) {
     ? `Bias M15: BOS ${bos.dir === 1 ? 'bullish' : 'bearish'} di ${ctx.f(bos.level)}`
     : `Bias M15: struktur ${init.src}`;
     
+  const parentPick = d => {
+      const zones15 = findSDZones(m15, d, price, { freshOnly: true, dispAtr: 0.8 });
+      if (zones15.length > 0) return zones15[0];
+      return pickZone(m15, d, price, 96);
+  };
+
   return await buildTwoWayPlan({
-    title: 'Day Trading', kind: 'day', price, ctx, rrList, bias, biasNote,
-    parentName: 'M5 (Retest Area)',
-    parentPick: d => pickZone(m5, d, price, 120), // Paksa zona acuan langsung ke M5
-    refineC: m5, refineName: 'M5', refineL: 120, atrVal: atrOf(m5, ctx.pip),
+    title: 'Day Trading (Scalping Konservatif)', 
+    kind: 'day', 
+    price, ctx, rrList, bias, biasNote,
+    parentName: 'M15',
+    parentPick: parentPick,
+    refineC: m5, refineName: 'M5', refineL: 120, atrVal: atrOf(m15, ctx.pip),
   });
 }
+
+// ═══════════════════════════ INTRADAY & SWING ═══════════════════════════
 
 async function buildIntradayPlan({ m15, price, rrList, ctx }) {
   const h1 = aggregateCandles(m15, 60);
@@ -798,8 +824,6 @@ async function buildIntradayPlan({ m15, price, rrList, ctx }) {
     refineC: m15, refineName: 'M15', refineL: 96, atrVal: atrOf(h1, ctx.pip),
   });
 }
-
-// ═══════════════════════════ SWING ═══════════════════════════
 
 async function buildSwingPlan({ m15, price, rrList, ctx }) {
   const h4 = aggregateCandles(m15, 240);
