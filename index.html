@@ -461,15 +461,16 @@
                     </div>
                 </div>
 
-                <!-- NEWS CARD BARU -->
+                <!-- NEWS CARD -->
                 <div id="newsCard" class="hidden bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
                     <div class="flex justify-between items-center border-b border-panelborder pb-2">
                         <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1">
-                            <i class="fa-solid fa-newspaper text-yellow-400"></i> ECONOMIC NEWS
+                            <i class="fa-solid fa-newspaper text-yellow-400"></i> NEWS
                         </span>
                         <div class="flex items-center gap-1">
                             <button id="tabRecentNews" onclick="switchNewsTab('recent')" class="text-[8px] font-bold px-2 py-0.5 rounded bg-accentblue/30 text-accentblue">Recent</button>
                             <button id="tabUpcomingNews" onclick="switchNewsTab('upcoming')" class="text-[8px] font-bold px-2 py-0.5 rounded bg-gray-500/20 text-gray-400">Upcoming</button>
+                            <button id="tabIssuesNews" onclick="switchNewsTab('issues')" class="text-[8px] font-bold px-2 py-0.5 rounded bg-gray-500/20 text-gray-400">📰 Issues</button>
                         </div>
                     </div>
                     <div id="newsList" class="space-y-1.5 max-h-[250px] overflow-y-auto pr-1">
@@ -1696,6 +1697,7 @@
 
     // ================= NEWS & ECONOMIC CALENDAR =================
     let newsData = [];
+    let issuesData = [];
     let currentNewsTab = 'recent';
 
     function newsToggle() {
@@ -1704,24 +1706,28 @@
         const hiddenNow = card.classList.toggle('hidden');
         btn.classList.toggle('bg-yellow-500/40', !hiddenNow);
         
-        if (!hiddenNow && newsData.length === 0) {
-            fetchNews();
+        if (!hiddenNow && newsData.length === 0 && issuesData.length === 0) {
+            fetchNewsData(currentNewsTab);
         }
     }
 
-    async function fetchNews() {
+    async function fetchNewsData(tab) {
         const box = document.getElementById('newsList');
-        box.innerHTML = '<p class="text-[10px] text-gray-500 text-center py-3">Memuat berita...</p>';
+        box.innerHTML = '<p class="text-[10px] text-gray-500 text-center py-3">Memuat data...</p>';
+        
+        let type = (tab === 'issues') ? 'issues' : 'calendar';
         
         try {
-            const res = await fetch('/api/news');
-            const data = await res.json();
+            const res = await fetch(`/api/news?type=${type}`);
+            const json = await res.json();
             
-            if (!data.ok) {
-                throw new Error(data.error || 'Gagal memuat berita.');
+            if (!json.ok) throw new Error(json.error || 'Gagal memuat data.');
+            
+            if (type === 'calendar') {
+                newsData = json.data || [];
+            } else {
+                issuesData = json.data || [];
             }
-            
-            newsData = data.events || [];
             renderNews();
         } catch (e) {
             box.innerHTML = `<p class="text-[10px] text-red-400 text-center py-3">${e.message}</p>`;
@@ -1730,19 +1736,45 @@
 
     function switchNewsTab(tab) {
         currentNewsTab = tab;
-        document.getElementById('tabRecentNews').className = tab === 'recent' 
-            ? 'text-[8px] font-bold px-2 py-0.5 rounded bg-accentblue/30 text-accentblue' 
-            : 'text-[8px] font-bold px-2 py-0.5 rounded bg-gray-500/20 text-gray-400';
-        document.getElementById('tabUpcomingNews').className = tab === 'upcoming' 
-            ? 'text-[8px] font-bold px-2 py-0.5 rounded bg-accentblue/30 text-accentblue' 
-            : 'text-[8px] font-bold px-2 py-0.5 rounded bg-gray-500/20 text-gray-400';
-        renderNews();
+        
+        // Reset class semua tab
+        document.getElementById('tabRecentNews').className = tab === 'recent' ? 'text-[8px] font-bold px-2 py-0.5 rounded bg-accentblue/30 text-accentblue' : 'text-[8px] font-bold px-2 py-0.5 rounded bg-gray-500/20 text-gray-400';
+        document.getElementById('tabUpcomingNews').className = tab === 'upcoming' ? 'text-[8px] font-bold px-2 py-0.5 rounded bg-accentblue/30 text-accentblue' : 'text-[8px] font-bold px-2 py-0.5 rounded bg-gray-500/20 text-gray-400';
+        document.getElementById('tabIssuesNews').className = tab === 'issues' ? 'text-[8px] font-bold px-2 py-0.5 rounded bg-accentblue/30 text-accentblue' : 'text-[8px] font-bold px-2 py-0.5 rounded bg-gray-500/20 text-gray-400';
+
+        // Fetch data jika belum ada
+        if (tab === 'issues' && issuesData.length === 0) {
+            fetchNewsData('issues');
+        } else {
+            renderNews();
+        }
     }
 
     function renderNews() {
         const box = document.getElementById('newsList');
-        const now = new Date();
         
+        if (currentNewsTab === 'issues') {
+            // Tampilan Berita Global
+            if (issuesData.length === 0) {
+                box.innerHTML = `<p class="text-[10px] text-gray-500 text-center py-3">Belum ada berita.</p>`;
+                return;
+            }
+            box.innerHTML = issuesData.map(a => {
+                const dateStr = new Date(a.publishedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+                return `
+                <a href="${a.url}" target="_blank" class="block bg-darkbg border border-panelborder p-2 rounded-lg hover:border-accentblue transition group">
+                    <p class="text-[9px] font-bold text-gray-200 group-hover:text-accentblue leading-tight">${a.title}</p>
+                    <div class="flex justify-between items-center text-[7px] text-gray-500 font-mono mt-1">
+                        <span>${a.source}</span>
+                        <span>${dateStr}</span>
+                    </div>
+                </a>`;
+            }).join('');
+            return;
+        }
+
+        // Tampilan Kalender Ekonomi (Recent/Upcoming)
+        const now = new Date();
         const filtered = newsData.filter(e => {
             const eventDate = new Date(e.date);
             return currentNewsTab === 'recent' ? eventDate <= now : eventDate > now;
@@ -1760,17 +1792,21 @@
             
             let impactColor = 'text-gray-400 border-gray-500/40 bg-gray-500/10';
             let impactLabel = 'LOW';
-            if (e.impact === 'High') {
-                impactColor = 'text-red-400 border-red-500/40 bg-red-500/10';
-                impactLabel = 'HIGH';
-            } else if (e.impact === 'Medium') {
-                impactColor = 'text-yellow-400 border-yellow-500/40 bg-yellow-500/10';
-                impactLabel = 'MED';
+            if (e.impact === 'High') { impactColor = 'text-red-400 border-red-500/40 bg-red-500/10'; impactLabel = 'HIGH'; }
+            else if (e.impact === 'Medium') { impactColor = 'text-yellow-400 border-yellow-500/40 bg-yellow-500/10'; impactLabel = 'MED'; }
+
+            let statusHtml = '';
+            if (e.actual !== null) {
+                const isGood = Number(e.actual) >= Number(e.estimate);
+                const color = isGood ? 'text-emerald-400' : 'text-red-400';
+                statusHtml = `<span class="${color} font-bold">Act: ${e.actual}</span>`;
+            } else if (e.estimate !== null) {
+                statusHtml = `<span class="text-yellow-400 font-bold">Est: ${e.estimate}</span>`;
+            } else {
+                statusHtml = `<span class="text-gray-600">--</span>`;
             }
 
-            const statusHtml = e.actual !== null 
-                ? `<span class="text-emerald-400 font-bold">Act: ${e.actual}</span>` 
-                : `<span class="text-gray-500">Est: ${e.estimate ?? '--'}</span>`;
+            const prevHtml = e.previous !== null ? `<span class="text-gray-500">Prev: ${e.previous}</span>` : `<span class="text-gray-600">Prev: --</span>`;
 
             return `
             <div class="bg-darkbg border border-panelborder p-2 rounded-lg space-y-1">
@@ -1783,7 +1819,7 @@
                 </div>
                 <p class="text-[9px] font-bold text-gray-200 leading-tight">${e.event}</p>
                 <div class="flex justify-between items-center text-[8px] font-mono">
-                    <span class="text-gray-500">Prev: ${e.previous ?? '--'}</span>
+                    ${prevHtml}
                     ${statusHtml}
                 </div>
             </div>`;
@@ -2568,7 +2604,7 @@
         // Auto-refresh berita jika tab News sedang terbuka
         setInterval(() => {
             if (!document.getElementById('newsCard').classList.contains('hidden')) {
-                fetchNews();
+                fetchNewsData(currentNewsTab);
             }
         }, 300000); // 5 menit
     };
