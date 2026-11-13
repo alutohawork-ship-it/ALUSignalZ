@@ -1,6 +1,6 @@
 // api/news.js
-const KV_NEWS_KEY = 'fmp_economic_calendar_v2';
-const KV_ISSUES_KEY = 'global_news_issues_v2';
+const KV_NEWS_KEY = 'fmp_economic_calendar_v3';
+const KV_ISSUES_KEY = 'global_news_issues_v3';
 
 async function kv(command) {
   if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) return null;
@@ -29,22 +29,21 @@ export default async function handler(req, res) {
       if (!response.ok) throw new Error(`ShowMyTrades API Error: HTTP ${response.status}`);
       
       const data = await response.json();
-      
-      // Jika API tidak mengembalikan array events, jadikan array kosong
       const rawEvents = data.events || [];
+      
       const events = rawEvents.map(e => {
         const clean = (val) => (val === '' || val === undefined) ? null : val;
         return {
           date: new Date(e.ts * 1000).toISOString(),
           country: e.currency || '',
           currency: e.currency || '',
-          event: e.title || '',
+          event: e.event || e.title || '', // PERBAIKAN: Gunakan e.event
           impact: e.impact || 'Low',
           actual: clean(e.actual),
           estimate: clean(e.forecast),
           previous: clean(e.previous)
         };
-      });
+      }).filter(e => e.event !== ''); // Buang data yang tidak punya judul
 
       if (process.env.KV_REST_API_URL) await kv(['SET', KV_NEWS_KEY, JSON.stringify(events), 'EX', 3600]);
       return res.status(200).json({ ok: true, data: events, source: 'api' });
@@ -56,9 +55,7 @@ export default async function handler(req, res) {
       const API_KEY = process.env.GNEWS_API_KEY;
       if (!API_KEY) throw new Error('GNEWS_API_KEY belum dikonfigurasi di Vercel.');
 
-      // Ubah lang=en agar berita geopolitik global lebih banyak
       const url = `https://gnews.io/api/v4/top-headlines?category=world&lang=en&max=10&apikey=${API_KEY}`;
-      
       const response = await fetch(url);
       
       if (!response.ok) {
@@ -67,7 +64,6 @@ export default async function handler(req, res) {
       }
       
       const data = await response.json();
-      
       if (!data.articles || data.articles.length === 0) {
           throw new Error('API GNews tidak menemukan berita. Coba lagi nanti atau cek kuota.');
       }
@@ -95,7 +91,6 @@ export default async function handler(req, res) {
     if (fallbackCache) {
       return res.status(200).json({ ok: true, data: JSON.parse(fallbackCache), source: 'cache-fallback' });
     }
-    // Tampilkan pesan error asli ke frontend agar kita tahu apa yang salah
     return res.status(500).json({ ok: false, error: error.message });
   }
 }
