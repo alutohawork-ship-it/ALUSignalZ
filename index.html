@@ -761,13 +761,37 @@
 
     // ================= KONFIG MARKET =================
     const WS_URL = 'wss://ws.xbtfx.com/v1/ws';
-    const MF_URL = 'wss://api-stream.myfundedperpetuals.com/v1/market-data'; // Fallback URL
     let XBTFX_TOKEN = '';
     const HISTORY_MS = 10 * 60 * 1000;
     const STALE_MS = 30000;
     const STORE_KEY = 'aluSignalZ_history_v3';
     const OFFSET_KEY = 'aluSignalZ_offsets_v1';
     const DEBUG = localStorage.getItem('alu_debug') === '1';
+
+    // Batas harga realistis untuk memfilter Bad Tick dari Server
+    const PRICE_LIMITS = {
+        XAGUSD: { min: 10, max: 100 },
+        XAGEUR: { min: 10, max: 100 },
+        XAUUSD: { min: 1000, max: 5000 },
+        XAUUSDX: { min: 1000, max: 5000 },
+        EURUSD: { min: 0.5, max: 2.0 },
+        GBPUSD: { min: 0.5, max: 2.5 },
+        USDJPY: { min: 80, max: 200 },
+        AUDUSD: { min: 0.5, max: 1.5 },
+        USDCAD: { min: 0.5, max: 2.0 },
+        USDCHF: { min: 0.5, max: 2.0 },
+        NZDUSD: { min: 0.3, max: 1.5 },
+        BTCUSD: { min: 1000, max: 200000 },
+        ETHUSD: { min: 100, max: 20000 },
+        SOLUSD: { min: 1, max: 5000 },
+        XRPUSD: { min: 0.01, max: 100 },
+        DOGEUSD: { min: 0.0001, max: 10 },
+        US30: { min: 10000, max: 100000 },
+        NAS100: { min: 5000, max: 50000 },
+        SPX500: { min: 1000, max: 20000 },
+        GER40: { min: 5000, max: 50000 },
+        JPN225: { min: 10000, max: 100000 },
+    };
 
     const MARKETS = {
         DXY:        { provider: 'xbtfx', coins: ['DXY', 'USDX'], decimals: 2, pip: 0.01 },
@@ -859,20 +883,16 @@
     const KEYS_SOCKET_2 = SUB_KEYS.slice(HALF_INDEX);
 
     // ================= STATE =================
-    let ws1 = null, ws2 = null, wsMf = null;
-    let reconnectTimer1 = null, reconnectTimer2 = null, mfReconnectTimer = null;
+    let ws1 = null, ws2 = null;
+    let reconnectTimer1 = null, reconnectTimer2 = null;
     let pingTimer1 = null, pingTimer2 = null;
-    let streamReady1 = false, streamReady2 = false, mfReady = false;
+    let streamReady1 = false, streamReady2 = false;
     let authFailed = false;
     let connectId = 0;
     let trades = [], activeId = null;
     const prices = {}, history = {}, rawPrices = {}, marketCandles = {};
     const symbolOf = {}, providerOf = {};
     const dirty = new Set();
-    
-    // --- FIX: Tambahkan seq dan nextId ---
-    let seq = 10;
-    const nextId = () => seq++;
     
     const HIGHLIGHT_KEYS = ['XAUUSD', 'BTCUSD', 'EURUSD', 'US30'];
 
@@ -922,7 +942,7 @@
     }
 
     // ================= TICKER & UI =================
-    const PROV_COLOR = { hyperliquid: 'text-yellow-400', veranta: 'text-blue-400', ostium: 'text-orange-400', binance: 'text-emerald-400', xbtfx: 'text-emerald-400', myfunded: 'text-purple-400' };
+    const PROV_COLOR = { hyperliquid: 'text-yellow-400', veranta: 'text-blue-400', ostium: 'text-orange-400', binance: 'text-emerald-400', xbtfx: 'text-emerald-400' };
     function buildTicker() {
         const opts = [...document.querySelectorAll('#marketSelect option')];
         document.getElementById('tickerListContainer').innerHTML = opts.map(o => {
@@ -1031,8 +1051,7 @@
         const s1ok = sockState[1] === 'ok';
         const s2ok = sockState[2] === 'ok';
         let txt;
-        if (s1ok && s2ok && mfReady) txt = 'CONNECTED (TRIO)';
-        else if (s1ok && s2ok) txt = 'CONNECTED (DUAL)';
+        if (s1ok && s2ok) txt = 'CONNECTED (DUAL)';
         else if (s1ok && s2.fallback) txt = 'CONNECTED (S1 + FALLBACK)';
         else if (s1ok) txt = 'CONNECTED (S1 ONLY)';
         else txt = 'CONNECTING';
@@ -1070,11 +1089,18 @@
         if (!(p0 > 0)) return;
         
         for (const key of keysOf(msg.symbol)) {
-            // === SANITY CHECK: Filter Bad Tick ===
+            // 1. Sanity Check: Batas Harga Realistis (Filter Bad Tick)
+            const limits = PRICE_LIMITS[key];
+            if (limits && (p0 < limits.min || p0 > limits.max)) {
+                if (DEBUG) console.warn(`Rejected extreme price for ${key}: ${p0}`);
+                continue; 
+            }
+
+            // 2. Sanity Check: Lonjakan > 15% dalam sekejap
             const lastPrice = prices[key]?.price;
             if (lastPrice && Math.abs(p0 - lastPrice) / lastPrice > 0.15) {
                 if (DEBUG) console.warn(`Rejected bad tick for ${key}: ${p0} (last: ${lastPrice})`);
-                continue; // Abaikan harga yang meloncat lebih dari 15%
+                continue; 
             }
 
             symbolOf[key] = msg.symbol;
@@ -1083,27 +1109,6 @@
             rawPrices[key] = p0;
             markSrc(key, 'LIVE', 'text-emerald-400');
             updatePrice(key, p0 + getOffset(key), msg);
-        }
-    }
-
-    function handleMfQuote(msg) {
-        if (msg.op === 'events' && Array.isArray(msg.events)) {
-            for (const ev of msg.events) {
-                if (!ev || !ev.symbol) continue;
-                const p = pickPrice(ev.price, ev.bid, ev.mid, ev.ask);
-                if (!(p > 0)) continue;
-                
-                const keys = keysOf(ev.symbol);
-                for (const key of keys) {
-                    // Hanya update jika XBTFX tidak tersedia atau datanya basi (> 5 detik)
-                    const last = prices[key];
-                    if (!last || Date.now() - last.recv > 5000) {
-                        rawPrices[key] = p;
-                        updatePrice(key, p + getOffset(key), ev);
-                        markSrc(key, 'MF', 'text-purple-400');
-                    }
-                }
-            }
         }
     }
 
@@ -1118,7 +1123,7 @@
 
     function watchdog() {
         const now = Date.now();
-        const anyReady = streamReady1 || streamReady2 || mfReady;
+        const anyReady = streamReady1 || streamReady2;
         for (const key of SUB_KEYS) {
             if (!symbolOf[key]) {
                 const m = MARKETS[key];
@@ -1161,34 +1166,6 @@
         if (r.ok && r.data.token) return { token: r.data.token };
         if (r.status === 401) return { fatal: true, msg: r.data.msg };
         return { error: r.data.msg || 'Gagal mengambil token' };
-    }
-
-    function connectMf() {
-        clearTimeout(mfReconnectTimer);
-        if (wsMf) { const old = wsMf; wsMf = null; old.onclose = null; old.close(); }
-        mfReady = false;
-        refreshWsBadge();
-
-        const sock = new WebSocket(MF_URL);
-        wsMf = sock;
-        
-        sock.onopen = () => {
-            mfReady = true;
-            refreshWsBadge();
-            // Subscribe to all keys
-            const syms = SUB_KEYS.map(k => MARKETS[k].coins[0]);
-            sendJSON(sock, { op: 'sub', id: nextId(), channel: 'ticks', payload: { symbols: syms } });
-        };
-        
-        sock.onmessage = e => {
-            try { const msg = JSON.parse(e.data); handleMfQuote(msg); } catch { }
-        };
-        
-        sock.onclose = () => {
-            mfReady = false;
-            refreshWsBadge();
-            mfReconnectTimer = setTimeout(connectMf, 5000);
-        };
     }
 
     async function connect() {
@@ -1294,7 +1271,7 @@
     function updatePrice(key, price, ev) {
         const prev = prices[key]?.price;
         const dir = prev == null ? 0 : price > prev ? 1 : price < prev ? -1 : (prices[key].dir ?? 0);
-        prices[key] = { price, dir, recv: Date.now(), kind: ev.kind, provider: ev.provider || 'xbtfx' };
+        prices[key] = { price, dir, recv: Date.now(), kind: ev.kind, provider: 'xbtfx' };
 
         processTickToCandle(key, price, 1);
         processTickToCandle(key, price, 5);
@@ -2412,6 +2389,8 @@
             const key = selectedKey();
             symbol = symbolOf[key] || MARKETS[key]?.coins[0];
         }
+        
+        // 1. Coba ambil dari API Backend
         try {
             const r = await api('/api/candles', {
                 method: 'POST',
@@ -2431,11 +2410,14 @@
             }
         } catch (e) {}
 
+        // 2. Fallback ke data marketCandles (hasil agregasi tick WebSocket)
         const tfMinutes = { '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 }[interval] || 5;
         const key = selectedKey();
         const tfKey = `${tfMinutes}m`;
         let candles = (marketCandles[key]?.[tfKey] || []).map(c => ({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close }));
-        if (candles.length < 5) {
+        
+        // 3. Jika masih kosong, fallback ke rawTicks (history tick detik ini)
+        if (candles.length === 0) {
             const rawTicks = history[key] || [];
             if (rawTicks.length > 0) {
                 const intervalMs = tfMinutes * 60 * 1000;
@@ -2781,7 +2763,6 @@
         renderBias(selectedKey());
         requestAnimationFrame(uiFrame);
         connect();
-        connectMf(); // Start fallback connection
         
         // Sesi Update
         updateSessionCard();
