@@ -41,6 +41,10 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
 .validation-progress-fill{height:100%;width:0%;background:linear-gradient(90deg,#f59e0b,#fbbf24);transition:width .3s ease}
 .log-item{animation:slideLeft .3s ease-out}
 @keyframes slideLeft{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:translateX(0)}}
+
+/* Styling tombol TF SMC */
+.smc-tf-btn { transition: all 0.2s; }
+.smc-tf-btn.active { background-color: #2962ff; color: white; border-color: #2962ff; }
 </style>
 </head>
 <body class="bg-darkbg text-gray-200 font-sans min-h-screen flex flex-col justify-between p-2 sm:p-4">
@@ -282,6 +286,15 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
 
           <!-- Panel SMC terpisah (Ukuran diperbesar) -->
           <div id="smcBox" class="hidden w-full rounded-lg overflow-hidden border border-panelborder bg-darkbg p-1 space-y-1">
+            <!-- TOMBOL TIMEFRAME SMC -->
+            <div class="flex justify-center gap-1 mb-1 mt-0.5">
+              <button onclick="setSmcTf('1m')" class="smc-tf-btn text-[9px] font-bold px-2 py-0.5 rounded border border-panelborder text-gray-400" data-tf="1m">1m</button>
+              <button onclick="setSmcTf('5m')" class="smc-tf-btn text-[9px] font-bold px-2 py-0.5 rounded border border-panelborder text-gray-400" data-tf="5m">5m</button>
+              <button onclick="setSmcTf('15m')" class="smc-tf-btn text-[9px] font-bold px-2 py-0.5 rounded border border-panelborder text-gray-400" data-tf="15m">15m</button>
+              <button onclick="setSmcTf('1h')" class="smc-tf-btn text-[9px] font-bold px-2 py-0.5 rounded border border-panelborder text-gray-400" data-tf="1h">1H</button>
+              <button onclick="setSmcTf('4h')" class="smc-tf-btn text-[9px] font-bold px-2 py-0.5 rounded border border-panelborder text-gray-400" data-tf="4h">4H</button>
+            </div>
+
             <div class="relative w-full h-[320px] sm:h-[400px] lg:h-[480px]">
               <canvas id="smcCanvas" class="absolute inset-0 w-full h-full"></canvas>
             </div>
@@ -290,6 +303,10 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
               <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(168,85,247,.6)"></i> FVG ▼</span>
               <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(16,185,129,.6)"></i> Demand</span>
               <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(239,68,68,.6)"></i> Supply</span>
+              <!-- Breaker Block Legend -->
+              <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(34,211,238,.6)"></i> BB ▲</span>
+              <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(244,114,182,.6)"></i> BB ▼</span>
+              
               <span class="text-amber-400">┄ BSL/SSL · EQH/EQL</span>
               <span class="text-yellow-300">SW sweep</span>
               <span class="text-sky-300">BOS / CHoCH</span>
@@ -430,7 +447,7 @@ const CAL_SINCE_KEY = 'aluGold_calendar_since';
 const LIVE_KEY = 'aluLive_v1';
 const K = { type: 'alu_session_type', email: 'alu_user_email', admin: 'alu_admin_code' };
 const JSON_H = { 'Content-Type': 'application/json' };
-const HISTORY_MS = 600000, STALE_MS = 30000, CHART_GUT = 85, CH_PAD = 4; // CHART_GUT diperkecil dari 110 ke 85
+const HISTORY_MS = 600000, STALE_MS = 30000, CHART_GUT = 85, CH_PAD = 4;
 const TFS = [1, 5, 15, 30, 60, 240, 1440];
 const HL_TF = [[1, 'M1'], [5, 'M5'], [15, 'M15'], [60, 'H1'], [240, 'H4'], [1440, 'D1']];
 const TF_MIN = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 };
@@ -540,6 +557,7 @@ const toMs = v => {
 /* ================= STATE ================= */
 let lang = 'id', market = 'XAUUSD', ws = null, connId = 0, reconT = null, pingT = null, authFailed = false, streamStarted = false;
 let trades = [], activeId = null, tvOn = false, showSMC = false;
+let smcTfOverride = null; // State untuk menyimpan pilihan TF SMC
 let calView = { y: new Date().getFullYear(), m: new Date().getMonth() };
 const prices = {}, hist = {}, candles = {}, workingSym = {}, aliasIdx = {}, subAt = {};
 const SER = {}, CSYM = {}, dispCache = {};
@@ -1399,6 +1417,21 @@ function toggleSMC() {
   renderSmcInfo();
 }
 
+// Fungsi untuk mengubah Timeframe SMC secara manual
+function setSmcTf(tf) {
+  smcTfOverride = tf;
+  document.querySelectorAll('.smc-tf-btn').forEach(btn => {
+    if (btn.dataset.tf === tf) {
+      btn.classList.add('active'); // menggunakan class custom CSS
+    } else {
+      btn.classList.remove('active');
+    }
+  });
+  // Paksa tarik data jika belum ada
+  fetchSeries(market, tf, false);
+  renderSmcInfo();
+}
+
 function invalidZone(rows, from, dir, bottom, top) {
   for (let j = from; j < rows.length; j++) {
     if (dir > 0 && rows[j].l < bottom) return true;
@@ -1503,7 +1536,9 @@ function cisdOf(rows) {
 }
 
 function detectSMC(rows) {
-  const fvgs = [], obs = [];
+  const fvgs = [], obs = [], breakers = [];
+  
+  // Deteksi FVG & OB
   for (let i = 1; i < rows.length - 1; i++) {
     const a = rows[i - 1], b = rows[i], c = rows[i + 1];
     if (a.h < c.l && !invalidZone(rows, i + 2, 1, a.h, c.l)) fvgs.push({ dir: 1, bottom: a.h, top: c.l, t: b.t });
@@ -1511,11 +1546,32 @@ function detectSMC(rows) {
     if (b.c < b.o && c.c > b.h && !invalidZone(rows, i + 2, 1, b.c, b.o)) obs.push({ dir: 1, bottom: b.c, top: b.o, t: b.t });
     if (b.c > b.o && c.c < b.l && !invalidZone(rows, i + 2, -1, b.o, b.c)) obs.push({ dir: -1, bottom: b.o, top: b.c, t: b.t });
   }
+
+  // Deteksi Breaker Block
+  for (const ob of obs) {
+    const startIndex = rows.findIndex(r => r.t === ob.t);
+    if (startIndex === -1) continue;
+
+    // Cek apakah OB dilanggar oleh candle setelahnya
+    for (let j = startIndex + 1; j < rows.length; j++) {
+      const c = rows[j];
+      if (ob.dir === -1 && c.c > ob.top) {
+        breakers.push({ dir: 1, bottom: ob.bottom, top: ob.top, t: c.t }); // Bearish OB jd Bullish Breaker
+        break;
+      }
+      if (ob.dir === 1 && c.c < ob.bottom) {
+        breakers.push({ dir: -1, bottom: ob.bottom, top: ob.top, t: c.t }); // Bullish OB jd Bearish Breaker
+        break;
+      }
+    }
+  }
+
   const sw = swings(rows);
   const st = structure(rows, sw);
   return {
     fvgs: fvgs.slice(-4),
     obs: obs.slice(-4),
+    breakers: breakers.slice(-4),
     liq: liquidity(rows, sw),
     ev: st.ev,
     cisd: cisdOf(rows)
@@ -1528,7 +1584,7 @@ function getSmc(k, iv) {
   const rows = displayRows(k, iv);
   const res = rows.length >= 20
     ? { ...detectSMC(rows), status: 'ok' }
-    : { status: 'loading', fvgs: [], obs: [], liq: { pools: [], sweeps: [] }, ev: [], cisd: [] };
+    : { status: 'loading', fvgs: [], obs: [], breakers: [], liq: { pools: [], sweeps: [] }, ev: [], cisd: [] };
   res.n = rows.length;
   res.err = (!s.rows.length && !s.ext.length) ? (s.err || s.extErr || '') : '';
   s.smc = res;
@@ -1540,12 +1596,19 @@ function renderSmcInfo() {
   const t = activeTrade();
   const k = t ? t.key : market;
   const style = t ? t.style : $('tradingStyleSelect').value;
-  const iv = SMC_TF_MAP[style] || '5m';
+  const iv = smcTfOverride || SMC_TF_MAP[style] || '5m'; // Gunakan override jika ada
+  
+  // Highlight tombol yg aktif
+  document.querySelectorAll('.smc-tf-btn').forEach(btn => {
+    if (btn.dataset.tf === iv) btn.classList.add('active');
+    else btn.classList.remove('active');
+  });
+
   const s = getSmc(k, iv);
   const head = `${k} ${iv} · ${srcOf(k, iv)} · ${s.n || 0} candle`;
   if (!showSMC) return setTxt('smcInfo', head + ' · SMC off (tekan SMC untuk panel)');
   if (s.status !== 'ok') return setTxt('smcInfo', head + (s.err ? ' · ' + s.err : ' · memuat candle (min 20)...'));
-  setTxt('smcInfo', `${head} · ${s.fvgs.length} FVG · ${s.obs.length} Supply/Demand · ${s.liq.pools.length} BSL/SSL · ${s.ev.length} BOS/CHoCH · ${s.cisd.length} CISD · ${s.liq.sweeps.length} SW`);
+  setTxt('smcInfo', `${head} · ${s.fvgs.length} FVG · ${s.obs.length} S/D · ${s.breakers.length} BB · ${s.liq.pools.length} BSL/SSL · ${s.ev.length} BOS/CHoCH · ${s.cisd.length} CISD · ${s.liq.sweeps.length} SW`);
 }
 
 function sessionBoxes(rows, now) {
@@ -1598,7 +1661,7 @@ function layoutX(rows, plotL, plotR, tfMs) {
 }
 function srcLabel(k, iv) { return `${k} · ${iv} · WIB · ${srcOf(k, iv)}`; }
 
-/* ================= CHART UTAMA (LINE CHART - BY TICK/SMOOTH) ================= */
+/* ================= CHART UTAMA (CANDLESTICK + ZOOM ON ENTRY) ================= */
 function drawChart() {
   const d = fitCv(cv, cx);
   if (!d) return;
@@ -1606,7 +1669,7 @@ function drawChart() {
   const t = activeTrade();
   const k = market;
   
-  // MENGGUNAKAN 1M AGAR GARIS LEBIH RAPAT (TICK-LIKE)
+  // Menggunakan 1m untuk pergerakan candlestick yang lebih dinamis (tick-like)
   const iv = '1m'; 
   const tfMs = TF_MIN[iv] * 60000;
   const rows = displayRows(k, iv);
@@ -1643,16 +1706,49 @@ function drawChart() {
   ].filter(l => Number.isFinite(l.v)) : [];
 
   let lo = Infinity, hi = -Infinity;
-  const grow = v => { if (Number.isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; } };
-  vis.forEach(c => { grow(c.h); grow(c.l); });
-  if (live != null) grow(live);
-  L.forEach(l => grow(l.v));
-  if (t && t.zone) { grow(t.zone.min); grow(t.zone.max); }
+  
+  // Cek apakah trade sudah berjalan atau menyentuh entry
+  const isRunning = t && (t.status === 'RUNNING' || (t.hits && Object.keys(t.hits).length > 0));
+  const hitEntry = t && live != null && (t.dir > 0 ? live <= t.entry : live >= t.entry);
+  const isZoomed = t && (isRunning || hitEntry);
+
+  if (isZoomed) {
+    // Logika Auto Zoom: Fokus ke range SL sampai TP
+    const levels = [t.sl, t.entry, t.tp1, t.tp2, t.tp3, live].filter(v => v != null && Number.isFinite(v));
+    lo = Math.min(...levels);
+    hi = Math.max(...levels);
+  } else {
+    // Tampilan normal (fit candle)
+    vis.forEach(c => { 
+      if (c.h < lo) lo = c.h; 
+      if (c.h > hi) hi = c.h; 
+      if (c.l < lo) lo = c.l; 
+      if (c.l > hi) hi = c.l; 
+    });
+    if (live != null) { 
+      if (live < lo) lo = live; 
+      if (live > hi) hi = live; 
+    }
+    if (t) {
+      L.forEach(l => { 
+        if (l.v < lo) lo = l.v; 
+        if (l.v > hi) hi = l.v; 
+      });
+      if (t.zone) { 
+        if (t.zone.min < lo) lo = t.zone.min; 
+        if (t.zone.max > hi) hi = t.zone.max; 
+      }
+    }
+  }
+
   if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
   if (!(hi - lo > 0)) { const dd = Math.abs(hi) * 0.001 || 1; lo -= dd; hi += dd; }
-  const pad = (hi - lo) * 0.12;
+  
+  // Beri sedikit ruang (padding) agar candle/garis tidak menempel di ujung atas/bawah
+  const pad = (hi - lo) * (isZoomed ? 0.05 : 0.12); 
   lo -= pad;
   hi += pad;
+  
   const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * plotH;
 
   cx.lineWidth = 1;
@@ -1675,31 +1771,29 @@ function drawChart() {
     cx.restore();
   }
 
-  // Line Chart (Blue #2962ff)
-  if (vis.length > 0) {
-    cx.save();
-    cx.lineWidth = 2;
-    cx.strokeStyle = '#2962ff';
-    cx.beginPath();
-    vis.forEach((c, i) => {
-      const x = xOfT(c.t);
-      const y = yOf(c.c);
-      if (i === 0) cx.moveTo(x, y);
-      else cx.lineTo(x, y);
-    });
-    cx.stroke();
+  // --- GAMBAR CANDLESTICK (Menggantikan Line Chart) ---
+  const bodyW = Math.max(1.5, slot * 0.62);
+  cx.lineWidth = 1;
+  for (const c of vis) {
+    const x = xOfT(c.t);
+    if (x < plotL || x > plotR) continue;
 
-    cx.lineTo(xOfT(vis[vis.length - 1].t), plotB);
-    cx.lineTo(xOfT(vis[0].t), plotB);
-    cx.closePath();
-    const grad = cx.createLinearGradient(0, plotT, 0, plotB);
-    grad.addColorStop(0, 'rgba(41,98,255,.35)');
-    grad.addColorStop(1, 'rgba(41,98,255,0)');
-    cx.fillStyle = grad;
-    cx.fill();
-    cx.restore();
+    const up = c.c >= c.o;
+    const col = up ? '#34d399' : '#f87171';
+    const yH = yOf(c.h), yL = yOf(c.l), yO = yOf(c.o), yC = yOf(c.c);
+    
+    // Sumbu (Wick)
+    cx.strokeStyle = col;
+    cx.beginPath(); cx.moveTo(x, yH); cx.lineTo(x, yL); cx.stroke();
+    
+    // Body
+    cx.fillStyle = col;
+    const bY = Math.min(yO, yC);
+    const bH = Math.max(1, Math.abs(yC - yO));
+    cx.fillRect(x - bodyW / 2, bY, bodyW, bH);
   }
 
+  // Gambar Garis Level (Entry, SL, TP)
   if (t) {
     const x0 = clampX(xOfT(t.createdAt));
     L.forEach(l => {
@@ -1714,6 +1808,7 @@ function drawChart() {
     });
   }
 
+  // Garis Harga Live & Animasi titik
   if (live != null) {
     const y = yOf(live);
     const lc = liveDir < 0 ? '#f87171' : '#34d399';
@@ -1734,6 +1829,7 @@ function drawChart() {
     }
   }
 
+  // Label Waktu
   if (vis.length) {
     const step = Math.max(1, Math.round(vis.length / 5));
     cx.font = '8px ui-monospace, monospace';
@@ -1747,6 +1843,7 @@ function drawChart() {
     }
   }
 
+  // Tag Label di Kanan (Entry, SL, TP, Live)
   const tags = L.map(l => ({ text: (l.hit ? '✓ ' : '') + l.label + ' ' + fmt(l.v), c: l.c, bg: l.bg, y: yOf(l.v) }));
   if (live != null) {
     tags.push({
@@ -1757,6 +1854,7 @@ function drawChart() {
     });
   }
   tags.sort((a, b) => a.y - b.y);
+  
   const GAP = 16, capT = plotT + 6, capB = plotB - 6;
   tags.forEach(g => { g.y = Math.max(capT, Math.min(capB, g.y)); });
   for (let i = 1; i < tags.length; i++) if (tags[i].y < tags[i - 1].y + GAP) tags[i].y = tags[i - 1].y + GAP;
@@ -1765,7 +1863,6 @@ function drawChart() {
     for (let i = tags.length - 2; i >= 0; i--) if (tags[i].y > tags[i + 1].y - GAP) tags[i].y = tags[i + 1].y - GAP;
   }
   
-  // Area kanan (Tag Labels) diperkecil menggunakan CHART_GUT yang baru
   cx.font = 'bold 8px ui-monospace, monospace'; 
   cx.textAlign = 'left';
   cx.textBaseline = 'middle';
@@ -1787,7 +1884,10 @@ function drawSMC() {
   const k = market;
   const t = activeTrade();
   const style = t ? t.style : $('tradingStyleSelect').value;
-  const iv = SMC_TF_MAP[style] || '5m';
+  
+  // Gunakan Override TF jika ada
+  const iv = smcTfOverride || SMC_TF_MAP[style] || '5m'; 
+  
   const tfMs = TF_MIN[iv] * 60000;
   const rows = displayRows(k, iv);
   const live = prices[k] ? prices[k].price : null;
@@ -1819,6 +1919,7 @@ function drawSMC() {
 
   const fvgs = s.fvgs.filter(z => inBand(z.bottom, z.top));
   const obs = s.obs.filter(z => inBand(z.bottom, z.top));
+  const breakers = s.breakers.filter(z => inBand(z.bottom, z.top)); // Filter BB
   const pools = s.liq.pools.filter(p => near(p.p));
   const sweeps = s.liq.sweeps.filter(p => near(p.p));
   const ev = s.ev.filter(e => near(e.p) && e.toT >= t0);
@@ -1829,7 +1930,7 @@ function drawSMC() {
   const grow = v => { if (Number.isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; } };
   vis.forEach(c => { grow(c.h); grow(c.l); });
   if (live != null) grow(live);
-  fvgs.concat(obs).forEach(z => { grow(z.bottom); grow(z.top); });
+  fvgs.concat(obs).concat(breakers).forEach(z => { grow(z.bottom); grow(z.top); });
   pools.forEach(p => grow(p.p));
   sess.forEach(se => { grow(se.hi); grow(se.lo); });
   if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
@@ -1897,6 +1998,8 @@ function drawSMC() {
   };
   fvgs.forEach(z => zone(z, z.dir > 0 ? 'FVG ▲' : 'FVG ▼', z.dir > 0 ? '59,130,246' : '168,85,247'));
   obs.forEach(z => zone(z, z.dir > 0 ? 'Demand' : 'Supply', z.dir > 0 ? '16,185,129' : '239,68,68'));
+  // Render Breaker Block dengan warna khusus (Cyan/Pink)
+  breakers.forEach(z => zone(z, z.dir > 0 ? 'BB ▲' : 'BB ▼', z.dir > 0 ? '34,211,238' : '244,114,182'));
 
   // BSL / SSL / EQH / EQL
   pools.forEach(p => {
