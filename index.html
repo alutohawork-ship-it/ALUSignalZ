@@ -32,7 +32,7 @@
       })();
     </script>
 
-    <title>Alu Signal Z - XAUUSD Terminal</title>
+    <title>Alu Signal Z</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://s3.tradingview.com/tv.js"></script>
     <script>
@@ -86,12 +86,6 @@
         .validation-progress { width: 100%; height: 3px; background: rgba(245, 158, 11, 0.15); border-radius: 2px; overflow: hidden; margin-top: 14px; }
         .validation-progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #f59e0b, #fbbf24); transition: width 0.3s ease; }
 
-        /* ══ ORDER FLOW TRAFFIC ══ */
-        .traffic-glow-green { box-shadow: 0 0 15px rgba(16,185,129,0.15); border-color: rgba(16,185,129,0.4); }
-        .traffic-glow-red { box-shadow: 0 0 15px rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.4); }
-        .feed-item { animation: slideDown 0.3s ease-out; }
-        @keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
-        
         .log-item { animation: slideLeft 0.3s ease-out; }
         @keyframes slideLeft { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }
     </style>
@@ -105,7 +99,7 @@
                 <div class="bg-yellow-500 w-12 h-12 rounded-xl flex items-center justify-center text-white mx-auto text-xl shadow-lg shadow-yellow-500/30">
                     <i class="fa-solid fa-coins"></i>
                 </div>
-                <h1 class="text-xl font-extrabold text-white pt-2 tracking-tight">Alu Gold Terminal</h1>
+                <h1 class="text-xl font-extrabold text-white pt-2 tracking-tight">Welcome, Alu Signal Z</h1>
                 <p id="loginSubText" class="text-[11px] text-gray-400">Silakan masukkan email terdaftar atau kode admin</p>
             </div>
             <form id="authForm" onsubmit="event.preventDefault(); handleUniversalLogin(event)" class="space-y-4 pt-2">
@@ -178,7 +172,7 @@
                     <i class="fa-solid fa-coins text-xs"></i>
                 </div>
                 <div class="min-w-0">
-                    <h1 class="font-bold text-xs text-white">Alu <span class="text-yellow-500">Gold Terminal</span></h1>
+                    <h1 class="font-bold text-xs text-white">Alu <span class="text-yellow-500">Signal Z</span></h1>
                     <p id="txtSubHeader" class="text-[8px] text-gray-400 truncate">SMC x ICT x Alchemist (Khusus XAUUSD)</p>
                 </div>
             </div>
@@ -344,64 +338,18 @@
             <!-- KOLOM KANAN -->
             <div class="flex flex-col gap-2 min-w-0">
                 
-                <!-- ══ LIVE ORDER FEED & MARKET TRAFFIC (VOLUME) ══ -->
-                <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-3">
-                    <div class="flex justify-between items-center border-b border-panelborder pb-2">
-                        <span id="lblRealData" class="text-[10px] font-bold text-white flex items-center gap-1.5"><i class="fa-solid fa-bolt text-yellow-400"></i> Real-Data XAUUSD</span>
-                        <span id="badgeActive" class="bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-2 py-0.5 rounded text-[8px] font-mono animate-pulse">● Aktif</span>
-                    </div>
-
-                    <div id="orderFeedList" class="space-y-1.5 max-h-[160px] overflow-y-auto no-scrollbar flex flex-col">
-                        <div id="lblWaitOrder" class="text-[9px] text-gray-500 text-center py-2">Menunggu order flow...</div>
-                    </div>
-
-                    <div class="bg-darkbg border border-panelborder rounded-lg p-2.5 space-y-2">
-                        <div class="flex justify-between items-center">
-                            <span id="lblMarketTraffic" class="text-[9px] font-bold text-gray-300"><i class="fa-solid fa-water text-blue-400 mr-1"></i> MARKET TRAFFIC</span>
-                            <span id="trafficDirectionBadge" class="text-[8px] font-bold px-2 py-0.5 rounded border bg-red-500/20 text-red-400 border-red-500/40">TRAFIK TURUN</span>
-                        </div>
-                        
-                        <div class="flex gap-2">
-                            <div id="trafficBuy" class="flex-1 bg-darkbg/60 border border-emerald-500/30 rounded p-1.5 text-center traffic-glow-green">
-                                <p id="lblTrafficUp" class="text-[8px] text-emerald-400 font-bold">TRAFIK NAIK</p>
-                                <p id="trafficBuyPct" class="text-[12px] font-extrabold text-emerald-400 font-mono">42%</p>
-                            </div>
-                            <div id="trafficSell" class="flex-1 bg-darkbg/60 border border-red-500/30 rounded p-1.5 text-center traffic-glow-red">
-                                <p id="lblTrafficDown" class="text-[8px] text-red-400 font-bold">TRAFIK TURUN</p>
-                                <p id="trafficSellPct" class="text-[12px] font-extrabold text-red-400 font-mono">58%</p>
-                            </div>
-                        </div>
-
-                        <div class="w-full bg-gray-700 rounded-full h-1.5 overflow-hidden flex">
-                            <div id="barBuy" class="bg-emerald-400 h-full transition-all duration-500" style="width: 42%"></div>
-                            <div id="barSell" class="bg-red-400 h-full transition-all duration-500" style="width: 58%"></div>
-                        </div>
-
-                        <div class="grid grid-cols-2 gap-2 text-[8px] font-mono pt-1">
-                            <div>
-                                <p id="lblBuyerVol" class="text-gray-500">DORONGAN BUYER</p>
-                                <p id="buyerVolume" class="text-emerald-400 font-bold">42% (16,760 Vol)</p>
-                            </div>
-                            <div class="text-right">
-                                <p id="lblSellerVol" class="text-gray-500">TEKANAN SELLER</p>
-                                <p id="sellerVolume" class="text-red-400 font-bold">58% (35,887 Vol)</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ══ LOG AKTIVITAS USER ══ -->
+                <!-- ══ LOG AKTIVITAS USER (REAL) ══ -->
                 <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
                     <div class="flex justify-between items-center border-b border-panelborder pb-2">
                         <span id="lblActivityLog" class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-list-ul text-accentblue"></i> LOG AKTIVITAS USER</span>
-                        <span id="badgeLiveLog" class="text-[8px] text-emerald-400 font-mono animate-pulse">● Live</span>
+                        <span id="badgeLiveLog" class="text-[8px] text-emerald-400 font-mono">● Sistem</span>
                     </div>
                     <div id="activityLogList" class="space-y-1 mt-1 max-h-[160px] overflow-y-auto pr-1 text-[9px] font-mono flex flex-col">
                         <!-- Log items will appear here -->
                     </div>
                 </div>
 
-                <!-- ══ KALENDER PNL (KEMBALI) ══ -->
+                <!-- ══ KALENDER PNL ══ -->
                 <div id="calCard" class="hidden bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
                     <div class="flex justify-between items-center gap-2">
                         <div class="flex items-center gap-1">
@@ -540,7 +488,7 @@
                 localStorage.setItem(SESSION_TYPE_KEY, 'admin_reg'); localStorage.setItem(SESSION_ADMIN_KEY, val); return openRegisterDashboard();
             }
             localStorage.setItem(SESSION_TYPE_KEY, 'terminal'); localStorage.setItem(SESSION_EMAIL_KEY, r.data.email); openTerminalApp();
-            addActivityLog(`User ${r.data.email} berhasil login.`, 'system');
+            addActivityLog(`Login berhasil: ${r.data.email}`, 'system');
         } catch (err) { say(`Error: ${err.message}`, 'text-red-400'); }
     }
 
@@ -636,14 +584,6 @@
             infoIntra: "Konsep Day Trade (H1/M15), menunggu retest zona yang lebih lebar.",
             infoSwing: "Positioning di H4, menahan posisi lebih lama.",
             valTitle: "Validasi Analisa Structure",
-            realData: "Real-Data XAUUSD",
-            active: "● Aktif",
-            waitOrder: "Menunggu order flow...",
-            mktTraffic: "MARKET TRAFFIC",
-            trafficUp: "TRAFIK NAIK",
-            trafficDown: "TRAFIK TURUN",
-            buyerVol: "DORONGAN BUYER",
-            sellerVol: "TEKANAN SELLER",
             actLog: "LOG AKTIVITAS USER",
             sumWin: "WIN",
             sumLose: "LOSE",
@@ -703,14 +643,6 @@
             infoIntra: "Day Trade concept (H1/M15), waiting for retest of wider zones.",
             infoSwing: "Positioning on H4, holding positions longer.",
             valTitle: "Validating Market Structure",
-            realData: "Real-Data XAUUSD",
-            active: "● Active",
-            waitOrder: "Waiting for order flow...",
-            mktTraffic: "MARKET TRAFFIC",
-            trafficUp: "TRAFFIC UP",
-            trafficDown: "TRAFFIC DOWN",
-            buyerVol: "BUYER PRESSURE",
-            sellerVol: "SELLER PRESSURE",
             actLog: "USER ACTIVITY LOG",
             sumWin: "WIN",
             sumLose: "LOSE",
@@ -778,16 +710,8 @@
         document.getElementById('infoIntra').textContent = d.infoIntra;
         document.getElementById('infoSwing').textContent = d.infoSwing;
 
-        // Validation & Traffic
+        // Validation
         document.getElementById('lblValTitle').textContent = d.valTitle;
-        document.getElementById('lblRealData').innerHTML = `<i class="fa-solid fa-bolt text-yellow-400"></i> ${d.realData}`;
-        document.getElementById('badgeActive').textContent = d.active;
-        document.getElementById('lblWaitOrder').textContent = d.waitOrder;
-        document.getElementById('lblMarketTraffic').innerHTML = `<i class="fa-solid fa-water text-blue-400 mr-1"></i> ${d.mktTraffic}`;
-        document.getElementById('lblTrafficUp').textContent = d.trafficUp;
-        document.getElementById('lblTrafficDown').textContent = d.trafficDown;
-        document.getElementById('lblBuyerVol').textContent = d.buyerVol;
-        document.getElementById('lblSellerVol').textContent = d.sellerVol;
         
         // Logs & History
         document.getElementById('lblActivityLog').innerHTML = `<i class="fa-solid fa-list-ul text-accentblue"></i> ${d.actLog}`;
@@ -834,7 +758,7 @@
         refreshActiveUI(); 
         const a = getActive(); 
         if (a) renderSignalCard(a);
-        renderCalendar(); // Pastikan kalender render ulang saat bahasa berubah
+        renderCalendar(); 
     }
 
     function toggleStyleInfo() { document.getElementById('styleInfoBox').classList.toggle('hidden'); }
@@ -940,7 +864,7 @@
             const lastPrice = prices[key]?.price;
             if (lastPrice && Math.abs(p0 - lastPrice) / lastPrice > 0.15) { continue; }
             symbolOf[key] = msg.symbol; workingSym[key] = msg.symbol; rawPrices[key] = p0; markSrc(key, 'LIVE', 'text-emerald-400');
-            updatePrice(key, p0, msg); // Removed offset
+            updatePrice(key, p0, msg);
         }
     }
 
@@ -996,7 +920,7 @@
         sock1.onclose = () => { sockState[1] = 'closed'; refreshWsBadge(); if (ws1 === sock1 && !authFailed) reconnectTimer1 = setTimeout(connect, 4000); };
     }
 
-    // ================= AGREGATOR TICK & ORDER FLOW =================
+    // ================= AGREGATOR TICK =================
     function processTickToCandle(symbol, price, timeframeMinutes = 1) {
         if (!price || price <= 0) return;
         const tfKey = `${timeframeMinutes}m`; const bucket = (marketCandles[symbol] ??= {}); const arr = (bucket[tfKey] ??= []);
@@ -1014,77 +938,7 @@
         pushHistory(key, price); dirty.add(key); processTick(key, price);
     }
 
-    // ══ ORDER FLOW TRAFFIC ══
-    let trafficState = { buyPct: 42, sellPct: 58, buyVol: 16760, sellVol: 35887 };
-    
-    function startTrafficSimulation() {
-        setInterval(() => {
-            const p = prices['XAUUSD']; if (!p) return;
-            const isBuying = p.dir > 0;
-            const timeStr = new Date().toLocaleTimeString(currentLang === 'id' ? 'id-ID' : 'en-US', { hour12: false });
-            const volumeSize = (Math.random() * 2000 + 100).toFixed(1);
-            
-            // Order Feed
-            const feedList = document.getElementById('orderFeedList');
-            if (feedList.innerHTML.includes('Menunggu') || feedList.innerHTML.includes('Waiting')) feedList.innerHTML = '';
-            
-            const div = document.createElement('div');
-            div.className = `feed-item flex justify-between items-center bg-darkbg border ${isBuying ? 'border-emerald-500/40' : 'border-red-500/40'} rounded px-2 py-1.5`;
-            div.innerHTML = `
-                <div class="flex items-center gap-2">
-                    <div class="w-5 h-5 rounded ${isBuying ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'} flex items-center justify-center text-[10px]">
-                        <i class="fa-solid ${isBuying ? 'fa-arrow-up' : 'fa-arrow-down'}"></i>
-                    </div>
-                    <div>
-                        <p class="${isBuying ? 'text-emerald-400' : 'text-red-400'} font-bold text-[9px]">${isBuying ? 'BUYER' : 'SELLER'}</p>
-                        <p class="text-gray-500 text-[7px] font-mono">${timeStr}</p>
-                    </div>
-                </div>
-                <div class="text-right">
-                    <p class="text-white font-bold text-[10px] font-mono">${fmt('XAUUSD', p.price)}</p>
-                    <p class="${isBuying ? 'text-emerald-400' : 'text-red-400'} font-bold text-[8px] font-mono">${isBuying ? '+' : '-'}${Number(volumeSize).toLocaleString('en-US')} VOL</p>
-                </div>
-            `;
-            feedList.insertBefore(div, feedList.firstChild);
-            if (feedList.children.length > 8) feedList.removeChild(feedList.lastChild);
-
-            // Traffic Data
-            let shift = isBuying ? (Math.random() * 3) : -(Math.random() * 3);
-            trafficState.buyPct = Math.max(10, Math.min(90, trafficState.buyPct + shift));
-            trafficState.sellPct = 100 - trafficState.buyPct;
-            
-            trafficState.buyVol += (isBuying ? Math.random() * 500 : -Math.random() * 200);
-            trafficState.sellVol += (!isBuying ? Math.random() * 500 : -Math.random() * 200);
-
-            const tBuy = document.getElementById('trafficBuy');
-            const tSell = document.getElementById('trafficSell');
-            const bBar = document.getElementById('barBuy');
-            const sBar = document.getElementById('barSell');
-            const dirBadge = document.getElementById('trafficDirectionBadge');
-            const d = DICT[currentLang];
-
-            document.getElementById('trafficBuyPct').textContent = `${trafficState.buyPct.toFixed(0)}%`;
-            document.getElementById('trafficSellPct').textContent = `${trafficState.sellPct.toFixed(0)}%`;
-            
-            document.getElementById('buyerVolume').textContent = `${trafficState.buyPct.toFixed(0)}% (${Math.abs(trafficState.buyVol).toLocaleString('en-US', {maximumFractionDigits:0})} Vol)`;
-            document.getElementById('sellerVolume').textContent = `${trafficState.sellPct.toFixed(0)}% (${Math.abs(trafficState.sellVol).toLocaleString('en-US', {maximumFractionDigits:0})} Vol)`;
-
-            bBar.style.width = `${trafficState.buyPct}%`;
-            sBar.style.width = `${trafficState.sellPct}%`;
-
-            if (trafficState.buyPct > trafficState.sellPct) {
-                tBuy.classList.add('traffic-glow-green'); tSell.classList.remove('traffic-glow-red');
-                dirBadge.textContent = `${d.trafficUp} (BUY)`; 
-                dirBadge.className = 'text-[8px] font-bold px-2 py-0.5 rounded border bg-emerald-500/20 text-emerald-400 border-emerald-500/40';
-            } else {
-                tSell.classList.add('traffic-glow-red'); tBuy.classList.remove('traffic-glow-green');
-                dirBadge.textContent = `${d.trafficDown} (SELL)`; 
-                dirBadge.className = 'text-[8px] font-bold px-2 py-0.5 rounded border bg-red-500/20 text-red-400 border-red-500/40';
-            }
-        }, 1500);
-    }
-
-    // ══ LOG AKTIVITAS USER ══
+    // ══ LOG AKTIVITAS USER (REAL) ══
     function addActivityLog(msg, type = 'info') {
         const box = document.getElementById('activityLogList'); if (!box) return;
         const time = new Date().toLocaleTimeString(currentLang === 'id' ? 'id-ID' : 'en-US', { hour12: false });
@@ -1092,6 +946,7 @@
         if (type === 'buy') color = 'text-emerald-400';
         if (type === 'sell') color = 'text-red-400';
         if (type === 'system') color = 'text-yellow-400';
+        if (type === 'error') color = 'text-red-500';
         
         const div = document.createElement('div');
         div.className = 'log-item flex gap-1 leading-tight items-start';
@@ -1099,26 +954,6 @@
         box.appendChild(div);
         box.scrollTop = box.scrollHeight;
         if (box.children.length > 30) box.removeChild(box.firstChild);
-    }
-
-    function simulateGlobalLogs() {
-        setInterval(() => {
-            const users = ['Budi', 'Andi', 'Siti', 'Rina', 'Joko', 'Agus', 'Dewi', 'Hendra', 'Siska'];
-            const actionsID = ['membuka posisi BUY', 'membuka posisi SELL', 'mendapatkan sinyal', 'menutup posisi (TP)', 'login ke sistem'];
-            const actionsEN = ['opened a BUY position', 'opened a SELL position', 'got a signal', 'closed position (TP)', 'logged in'];
-            
-            const u = users[Math.floor(Math.random() * users.length)];
-            const idx = Math.floor(Math.random() * actionsID.length);
-            const aID = actionsID[idx];
-            const aEN = actionsEN[idx];
-            
-            const type = aID.includes('BUY') ? 'buy' : aID.includes('SELL') ? 'sell' : aID.includes('login') ? 'system' : 'info';
-            const msg = currentLang === 'id' ? `${u} ${aID}` : `${u} ${aEN}`;
-            
-            if (document.getElementById('activityLogList')) {
-                addActivityLog(msg, type);
-            }
-        }, 7000);
     }
 
     // ================= TRADE & HISTORY =================
@@ -1163,7 +998,11 @@
         const d = t.dir;
         if (t.status === 'PENDING') {
             const stopFill = t.fill === 'STOP'; const filled = stopFill ? (d > 0 ? price >= t.entry : price <= t.entry) : (d > 0 ? price <= t.entry : price >= t.entry);
-            if (filled) { t.status = 'RUNNING'; t.filledAt = Date.now(); addActivityLog(`Trade #${t.no} XAUUSD terisi (${t.signal})`, t.signal === 'BUY' ? 'buy' : 'sell'); return true; }
+            if (filled) { 
+                t.status = 'RUNNING'; t.filledAt = Date.now(); 
+                addActivityLog(`Trade #${t.no} XAUUSD terisi (${t.signal})`, t.signal === 'BUY' ? 'buy' : 'sell'); 
+                return true; 
+            }
             if (PENDING_SL_CANCEL) { const slHit = d > 0 ? price <= t.sl : price >= t.sl; if (slHit) { cancelTrade(t, 'SL tersentuh sebelum entry'); return true; } }
             return false;
         }
@@ -1484,12 +1323,25 @@
         const el = Date.now() - st; if (el < minDur) await new Promise(r => setTimeout(r, minDur - el)); p.style.width = '100%';
     }
 
+    function checkMarketOpen() {
+        const now = new Date();
+        const day = now.getUTCDay(); // 0 = Minggu, 6 = Sabtu
+        if (day === 0 || day === 6) {
+            addActivityLog(currentLang === 'id' ? 'Market sedang tutup (Weekend).' : 'Market is closed (Weekend).', 'error');
+            return false;
+        }
+        return true;
+    }
+
     async function generateAISignal() {
+        if (!checkMarketOpen()) return alert('Market sedang tutup (Weekend).');
+        
         const symbolKey = 'XAUUSD'; const tradingStyle = document.getElementById('tradingStyleSelect').value; const live = prices[symbolKey];
         if (!live || !isLive(symbolKey)) return alert(`XAUUSD TIDAK TERSAMBUNG ke stream. Tunggu harga masuk.`);
         const email = localStorage.getItem(SESSION_EMAIL_KEY); if (!email) return alert('Sesi tidak ditemukan. Login ulang.');
         const btn = document.getElementById('signalBtn'); btn.disabled = true; btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> ${DICT[currentLang].valTitle}...`;
         
+        addActivityLog(currentLang === 'id' ? 'Meminta analisa sinyal...' : 'Requesting signal analysis...', 'system');
         showValidationOverlay(); const anim = runValidationAnimation(3500); let resData = null; let err = null;
         
         try {
@@ -1527,8 +1379,12 @@
         if (trades.length) viewTrade(trades[trades.length - 1].id); renderBias('XAUUSD'); requestAnimationFrame(uiFrame); connect();
         updateSessionCard(); setInterval(updateSessionCard, 1000); setInterval(() => { watchdog(); expirePending(); }, 1000); setInterval(() => refreshBias('XAUUSD'), 60000);
         
-        startTrafficSimulation();
-        simulateGlobalLogs(); // Mulai simulasi log user global
+        // Cek Market Open untuk log awal
+        if (!checkMarketOpen()) {
+            addActivityLog(currentLang === 'id' ? 'Sistem siap. Menunggu market buka.' : 'System ready. Waiting for market open.', 'system');
+        } else {
+            addActivityLog(currentLang === 'id' ? 'Sistem siap.' : 'System ready.', 'system');
+        }
         
         // Translate awal
         document.getElementById('langBtn').textContent = `${currentLang.toUpperCase()} 🌐`;
