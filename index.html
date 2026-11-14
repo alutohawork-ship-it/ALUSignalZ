@@ -588,7 +588,6 @@
             btnLogin: "MASUK SISTEM",
             lblLogout: "LOGOUT",
             lblBias: "BIAS MULTI-TIMEFRAME",
-            lblSession: "MARKET SESSIONS",
             lblEntryZone: "ENTRY ZONE",
             reasoningLang: "id",
             // Calendar
@@ -647,7 +646,6 @@
             btnLogin: "LOG IN",
             lblLogout: "LOGOUT",
             lblBias: "MULTI-TIMEFRAME BIAS",
-            lblSession: "MARKET SESSIONS",
             lblEntryZone: "ENTRY ZONE",
             reasoningLang: "en",
             // Calendar
@@ -725,7 +723,6 @@
         // Topbar
         document.getElementById('btnLogout').textContent = d.lblLogout;
         document.getElementById('lblBias').innerHTML = `<i class="fa-solid fa-compass text-accentblue"></i> ${d.lblBias}`;
-        document.getElementById('lblSession').innerHTML = `<i class="fa-solid fa-clock text-accentblue"></i> ${d.lblSession}`;
         document.getElementById('lblEntryZone').textContent = d.lblEntryZone;
 
         // Admin Panel
@@ -1033,7 +1030,7 @@
         box.innerHTML = trades.slice().reverse().map(t => {
             const f = tradeFlow(t); const s = statusOf(t); const hits = hitList(t).map(k => `✓${k.toUpperCase()}`).join(' ');
             const active = t.id === activeId ? 'ring-1 ring-accentblue' : '';
-            const styleName = DICT[currentLang]['optStyle' + (t.style === 'Scalping' ? 'Scalp' : t.style === 'Day Trading' ? 'Day' : t.style === 'Intraday' ? 'Intra' : 'Swing')];
+            const styleName = DICT[currentLang]['opt' + (t.style === 'Scalping' ? 'Scalp' : t.style === 'Day Trading' ? 'Day' : t.style === 'Intraday' ? 'Intra' : 'Swing')];
             return `
             <div onclick="viewTrade('${t.id}')" class="bg-darkbg hover:bg-panelborder/60 border border-panelborder px-2 py-1.5 rounded cursor-pointer space-y-0.5 ${active}">
               <div class="flex justify-between items-center gap-2 text-[9px] font-bold">
@@ -1068,7 +1065,7 @@
         const sig = t.signal || ''; const badge = document.getElementById('signalBadgeBtn');
         if (badge) { badge.className = `${sig === 'BUY' ? 'bg-sky-500' : 'bg-red-500'} text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg flex items-center gap-1`; badge.innerHTML = `<i class="fa-solid ${sig === 'BUY' ? 'fa-caret-up' : 'fa-caret-down'}"></i> ${sig}`; }
         const modeTxt = t.mode === 'LIMIT' ? 'Entry zona' : 'Entry market';
-        const styleName = DICT[currentLang]['optStyle' + (t.style === 'Scalping' ? 'Scalp' : t.style === 'Day Trading' ? 'Day' : t.style === 'Intraday' ? 'Intra' : 'Swing')];
+        const styleName = DICT[currentLang]['opt' + (t.style === 'Scalping' ? 'Scalp' : t.style === 'Day Trading' ? 'Day' : t.style === 'Intraday' ? 'Intra' : 'Swing')];
         set('cardStyleSub', `${styleName} · ${modeTxt} / ${new Date(t.createdAt).toLocaleTimeString(currentLang === 'id' ? 'id-ID' : 'en-US', { hour12: false })}`);
         document.getElementById('standbyView')?.classList.add('hidden'); document.getElementById('activeSignalCard')?.classList.remove('hidden');
         const pipEl = (id, price) => { const e = document.getElementById(id); if (e) e.textContent = price != null ? fmtPips(pipsOf(t, price)) : '--'; };
@@ -1279,33 +1276,6 @@
         }
     }
 
-    // ================= SESI =================
-    const SESSIONS = [
-        { name: 'Asia Session', startUTC: 0, endUTC: 9, color: 'text-yellow-400', border: 'border-yellow-500/50' },
-        { name: 'London Kill Zone', startUTC: 7, endUTC: 10, color: 'text-red-400', border: 'border-red-500/50' },
-        { name: 'London Session', startUTC: 8, endUTC: 17, color: 'text-blue-400', border: 'border-blue-500/50' },
-        { name: 'NY Kill Zone', startUTC: 12, endUTC: 15, color: 'text-red-400', border: 'border-red-500/50' },
-        { name: 'NY Session', startUTC: 13, endUTC: 22, color: 'text-emerald-400', border: 'border-emerald-500/50' }
-    ];
-    function formatDuration(ms) { if (ms < 0) return "00.00.00"; const t = Math.floor(ms / 1000); return `${Math.floor(t / 3600).toString().padStart(2, '0')}.${Math.floor((t % 3600) / 60).toString().padStart(2, '0')}.${(t % 60).toString().padStart(2, '0')}`; }
-    function updateSessionCard() {
-        const now = new Date(); const currentUTCSeconds = now.getUTCHours() * 3600 + now.getUTCMinutes() * 60 + now.getUTCSeconds();
-        let activeName = 'No Session', activeColor = 'text-gray-400', activeBorder = 'border-gray-500/40', html = '';
-        const sorted = [...SESSIONS].sort((a, b) => a.startUTC - b.startUTC);
-        sorted.forEach(s => {
-            const startSec = s.startUTC * 3600; const endSec = s.endUTC * 3600; let isActive = currentUTCSeconds >= startSec && currentUTCSeconds < endSec; if (endSec < startSec) isActive = currentUTCSeconds >= startSec || currentUTCSeconds < endSec;
-            const d1 = new Date(); d1.setUTCHours(s.startUTC, 0, 0, 0); const d2 = new Date(); d2.setUTCHours(s.endUTC, 0, 0, 0);
-            const opt = { hour: '2-digit', minute: '2-digit', hour12: true }; const ls = d1.toLocaleTimeString('en-US', opt).toLowerCase().replace(' ', ''); const le = d2.toLocaleTimeString('en-US', opt).toLowerCase().replace(' ', '');
-            let status = '';
-            if (isActive) { activeName = s.name; activeColor = s.color; activeBorder = s.border; let rem = endSec - currentUTCSeconds; if (rem < 0) rem += 86400; status = `<span class="text-emerald-400 font-bold animate-pulse">Remaining >${formatDuration(rem * 1000)}/close</span>`; }
-            else if (currentUTCSeconds < startSec) { status = `<span class="text-gray-500">Open in ${formatDuration((startSec - currentUTCSeconds) * 1000)}</span>`; }
-            else status = `<span class="text-gray-600">Closed</span>`;
-            html += `<div class="flex justify-between items-center bg-darkbg border ${isActive ? s.border : 'border-panelborder'} px-2 py-1.5 rounded transition-all"><div class="flex flex-col"><span class="${s.color} font-bold text-[9px]">${s.name}</span><span class="text-gray-400 text-[8px]">${ls} - ${le}</span></div><div class="text-[8px] text-right font-mono">${status}</div></div>`;
-        });
-        const b = document.getElementById('currentSessionBadge'); b.textContent = activeName; b.className = `text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-darkbg ${activeColor} ${activeBorder}`;
-        document.getElementById('sessionList').innerHTML = html;
-    }
-
     // ================= BIAS =================
     const BIAS_TF = [{ label: 'M5', interval: '5m' }, { label: 'M15', interval: '15m' }, { label: 'M30', interval: '30m' }, { label: 'H1', interval: '1h' }, { label: 'H4', interval: '4h' }, { label: 'Daily', interval: '1d' }];
     const BIAS_STYLE = { BULLISH: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40', BEARISH: 'bg-red-500/20 text-red-400 border-red-500/40', NETRAL: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40', 'WAIT': 'bg-gray-500/20 text-gray-400 border-gray-500/40' };
@@ -1336,99 +1306,4 @@
     // ================= AI SIGNAL =================
     const STYLE_TF = { 'Scalping': { htf: '15m', mtf: '5m', ltf: '1m' }, 'Day Trading': { htf: '1h', mtf: '30m', ltf: '5m' }, 'Intraday': { htf: '4h', mtf: '1h', ltf: '15m' }, 'Swing': { htf: '1d', mtf: '4h', ltf: '1h' } };
     function calculateEMA(c, p) { if (!c || c.length === 0) return []; const k = 2 / (p + 1); let e = []; let prev = c[0].c; for (let i = 0; i < c.length; i++) { if (i === 0) e.push(prev); else { const cur = (c[i].c * k) + (prev * (1 - k)); e.push(cur); prev = cur; } } return e; }
-    function calculateBollingerBands(c, p = 20, m = 2) { if (!c || c.length < p) return { upper: 0, middle: 0, lower: 0 }; const s = c.slice(-p); const cl = s.map(x => x.c); const mid = cl.reduce((a, b) => a + b, 0) / p; const v = cl.reduce((a, b) => a + Math.pow(b - mid, 2), 0) / p; const sd = Math.sqrt(v); return { middle: Number(mid.toFixed(5)), upper: Number((mid + (m * sd)).toFixed(5)), lower: Number((mid - (m * sd)).toFixed(5)) }; }
-    function getEmaPeriodsForStyle(s) { switch (s) { case 'Scalping': return [5, 9]; case 'Day Trading': return [14, 20]; case 'Intraday': return [20, 50, 100]; case 'Swing': return [20, 200]; default: return [5, 9]; } }
-    const CANDLE_CACHE = {};
-    async function loadCandles(key, interval) {
-        const ck = `${key}|${interval}`; const hit = CANDLE_CACHE[ck]; if (hit && Date.now() - hit.at < 180000) return hit.rows;
-        let rows = [];
-        try { const r = await api('/api/candles', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ value: localStorage.getItem(SESSION_EMAIL_KEY) || '', symbol: 'XAUUSD', interval, limit: 100 }) }); if (r.ok && r.data?.candles?.length > 0) rows = r.data.candles.map(c => ({ t: Number(c.openTime || c.t), o: Number(c.open || c.o), h: Number(c.high || c.h), l: Number(c.low || c.l), c: Number(c.close || c.c) })); } catch {}
-        if (rows.length < 5) { const tfMin = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 }[interval] || 1; const tfK = `${tfMin}m`; rows = (marketCandles[key]?.[tfK] || []).map(c => ({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close })); if (rows.length < 5) { const tk = history[key] || []; if (tk.length > 0) { const ms = tfMin * 60 * 1000; const grp = {}; for (const t of tk) { const b = Math.floor(t.t / ms) * ms; if (!grp[b]) grp[b] = { t: b, o: t.p, h: t.p, l: t.p, c: t.p }; else { grp[b].h = Math.max(grp[b].h, t.p); grp[b].l = Math.min(grp[b].l, t.p); grp[b].c = t.p; } } rows = Object.values(grp).sort((a, b) => a.t - b.t); } } }
-        if (rows.length > 0) CANDLE_CACHE[ck] = { at: Date.now(), rows }; return rows;
-    }
-    const shiftCandles = (rows, off) => rows.map(c => ({ t: c.t, o: c.o + off, h: c.h + off, l: c.l + off, c: c.c + off }));
-
-    // ══ VALIDATION ══
-    const VALIDATION_STEPS = {
-        id: ['Menganalisa struktur pasar...', 'Mencari zona supply & demand fresh...', 'Memeriksa bias M15 & H1...', 'Cek FVG & displacement...', 'Validasi rejection candle...', 'Menghitung entry, SL, TP...'],
-        en: ['Analyzing market structure...', 'Finding fresh supply & demand zones...', 'Checking M15 & H1 bias...', 'Checking FVG & displacement...', 'Validating rejection candles...', 'Calculating entry, SL, TP...']
-    };
-    function showValidationOverlay() { const o = document.getElementById('validationOverlay'); const s = document.getElementById('validationSteps'); const p = document.getElementById('validationProgress'); if (!o) return; s.innerHTML = ''; p.style.width = '0%'; o.classList.remove('hidden'); void o.offsetWidth; o.classList.add('active'); }
-    function hideValidationOverlay() { const o = document.getElementById('validationOverlay'); if (!o) return; o.classList.remove('active'); setTimeout(() => o.classList.add('hidden'), 320); }
-    async function runValidationAnimation(minDur = 3500) {
-        const steps = VALIDATION_STEPS[currentLang];
-        const st = Date.now(); const s = document.getElementById('validationSteps'); const p = document.getElementById('validationProgress'); const tot = steps.length; const per = Math.max(400, minDur / tot);
-        for (let i = 0; i < tot; i++) { const el = document.createElement('div'); el.className = 'validation-step active'; el.innerHTML = `<span class="validation-step-icon">●</span><span>${steps[i]}</span>`; s.appendChild(el); p.style.width = `${((i + 1) / tot) * 85}%`; await new Promise(r => setTimeout(r, per)); el.classList.remove('active'); el.classList.add('done'); el.querySelector('.validation-step-icon').textContent = '✓'; }
-        const el = Date.now() - st; if (el < minDur) await new Promise(r => setTimeout(r, minDur - el)); p.style.width = '100%';
-    }
-
-    function checkMarketOpen() {
-        const now = new Date();
-        const day = now.getUTCDay(); // 0 = Minggu, 6 = Sabtu
-        if (day === 0 || day === 6) {
-            addActivityLog(currentLang === 'id' ? 'Market sedang tutup (Weekend).' : 'Market is closed (Weekend).', 'error');
-            return false;
-        }
-        return true;
-    }
-
-    async function generateAISignal() {
-        if (!checkMarketOpen()) return alert('Market sedang tutup (Weekend).');
-        
-        const symbolKey = 'XAUUSD'; const tradingStyle = document.getElementById('tradingStyleSelect').value; const live = prices[symbolKey];
-        if (!live || !isLive(symbolKey)) return alert(`XAUUSD TIDAK TERSAMBUNG ke stream. Tunggu harga masuk.`);
-        const email = localStorage.getItem(SESSION_EMAIL_KEY); if (!email) return alert('Sesi tidak ditemukan. Login ulang.');
-        const btn = document.getElementById('signalBtn'); btn.disabled = true; btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> ${DICT[currentLang].valTitle}...`;
-        
-        addActivityLog(currentLang === 'id' ? 'Meminta analisa sinyal...' : 'Requesting signal analysis...', 'system');
-        showValidationOverlay(); const anim = runValidationAnimation(3500); let resData = null; let err = null;
-        
-        try {
-            const tf = STYLE_TF[tradingStyle]; if (!tf) throw new Error('Style invalid');
-            const [h, m, l] = await Promise.all([loadCandles(symbolKey, tf.htf), loadCandles(symbolKey, tf.mtf), tf.ltf ? loadCandles(symbolKey, tf.ltf).catch(() => []) : Promise.resolve([])]);
-            
-            const ema = {}; getEmaPeriodsForStyle(tradingStyle).forEach(p => { const r = calculateEMA(l, p); ema[`EMA_${p}`] = r.length ? Number(r[r.length - 1].toFixed(5)) : 0; });
-            const bb = calculateBollingerBands(m.length > 0 ? m : l);
-            
-            const res = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, marketId: `xbtfx|${symbolKey}`, tradingStyle, currentPrice: live.price, lang: currentLang, emaFilter: ema, bbFilter: bb, candles: { htf: h.slice(-200), mtf: m.slice(-200), ltf: l.slice(-200) } }) });
-            const txt = await res.text(); try { resData = JSON.parse(txt); } catch { throw new Error(`Server tidak kirim JSON (HTTP ${res.status})`); }
-            if (!res.ok) throw new Error(resData.error || `HTTP ${res.status}`);
-        } catch (e) { err = e.message; }
-        
-        await anim; hideValidationOverlay(); await new Promise(r => setTimeout(r, 350));
-        
-        const resetBtn = () => { btn.disabled = false; btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnGenText">${DICT[currentLang].genBtn}</span>`; };
-        
-        if (err) { resetBtn(); return alert('Gagal: ' + err); }
-        if (!resData?.signal) { resetBtn(); return alert('Belum ada setup valid.\n\n' + (resData?.reason || '')); }
-        
-        const num = v => v !== null && v !== undefined && Number.isFinite(Number(v)); const s = resData.signal;
-        if (!['BUY', 'SELL'].includes(s.signal) || ![s.entry, s.sl, s.tp1].every(num)) { resetBtn(); return alert('Sinyal belum lengkap.'); }
-        
-        const t = { id: Date.now().toString(36), key: symbolKey, style: tradingStyle, signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1, mode: s.mode, status: s.status, fill: s.fill || null, entry: s.entry, bufferEnd: s.bufferEnd, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, zone: s.zone, expiresAt: s.expireMs ? Date.now() + s.expireMs : null, confidence: s.confidence, risk: s.risk, setup: s.setup, setupLabel: s.setupLabel, zoneLabel: s.zoneLabel, zoneNote: s.zoneNote, createdAt: Date.now(), hits: {}, card: { reason: s.reason }, no: nextNo() };
-        
-        trades.push(t); activeId = t.id; saveTrades(); renderSignalCard(t); renderHistory(); refreshActiveUI(); resetBtn();
-        
-        addActivityLog(`Signal ${s.signal} XAUUSD berhasil dibuat.`, s.signal === 'BUY' ? 'buy' : 'sell');
-    }
-
-    // ================= BOOT =================
-    window.onload = () => {
-        checkSession(); buildTicker(); buildHighlightTickers(); trades = loadTrades(); saveTrades(); renderHistory();
-        if (trades.length) viewTrade(trades[trades.length - 1].id); renderBias('XAUUSD'); requestAnimationFrame(uiFrame); connect();
-        updateSessionCard(); setInterval(updateSessionCard, 1000); setInterval(() => { watchdog(); expirePending(); }, 1000); setInterval(() => refreshBias('XAUUSD'), 60000);
-        
-        // Cek Market Open untuk log awal
-        if (!checkMarketOpen()) {
-            addActivityLog(currentLang === 'id' ? 'Sistem siap. Menunggu market buka.' : 'System ready. Waiting for market open.', 'system');
-        } else {
-            addActivityLog(currentLang === 'id' ? 'Sistem siap.' : 'System ready.', 'system');
-        }
-        
-        // Translate awal
-        document.getElementById('langBtn').textContent = `${currentLang.toUpperCase()} 🌐`;
-        updateTexts();
-    };
-    </script>
-</body>
-</html>
+    function calculateBollingerBands(c, p = 20, m = 2) { if (!c || c.length < p) return { upper: 0, middle: 0, lower: 0 }; const s = c.slice(-p); const cl = s.map(x => x.c); const mid = cl.reduce((a, b) => a + b, 0) / p; const v = cl.reduce((a, b) => a + Math.pow(b - mid, 2), 0) / p; const sd = Math.sqrt(v); return { middle: N
