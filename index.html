@@ -194,14 +194,14 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
         </div>
       </div>
 
-      <!-- KARTU SIGNAL -->
+      <!-- KARTU SIGNAL + CHART -->
       <div class="bg-cardbg rounded-xl border border-panelborder p-3 shadow-md space-y-3 relative">
         <div class="flex items-center justify-between border-b border-panelborder pb-2">
           <span id="cardTitle" class="text-xs font-bold text-white">XAUUSD</span>
           <span id="cardPriceTop" class="text-xs font-mono font-bold text-yellow-400">--.--</span>
         </div>
 
-        <div id="standbyView" class="py-5 text-center text-xs text-gray-400" data-i18n="standby1"></div>
+        <div id="standbyView" class="py-3 text-center text-xs text-gray-400" data-i18n="standby1"></div>
 
         <div id="activeCard" class="hidden space-y-3">
           <div class="bg-darkbg/80 border border-panelborder rounded-xl p-3 text-center space-y-1">
@@ -241,30 +241,31 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
             </div>
           </div>
 
-          <div class="bg-darkbg/80 border border-panelborder rounded-xl p-2.5 space-y-2">
-            <div class="flex flex-wrap justify-between items-start gap-1">
-              <div class="flex items-center gap-2">
-                <p data-i18n="lblMap" class="text-[9px] font-bold text-gray-400 tracking-wider"></p>
-                <div class="flex items-center gap-1">
-                  <button id="btnSmcToggle" onclick="toggleSMC()" class="text-[10px] text-gray-500 hover:text-accentblue flex items-center gap-1 bg-darkbg border border-panelborder px-1.5 py-0.5 rounded transition"><i class="fa-solid fa-layer-group"></i> <span class="font-mono font-bold text-[8px]">SMC</span></button>
-                  <button id="btnTvToggle" onclick="toggleTV()" class="text-[10px] text-gray-500 hover:text-accentblue flex items-center gap-1 bg-darkbg border border-panelborder px-1.5 py-0.5 rounded transition"><i class="fa-solid fa-chart-candlestick"></i> <span id="btnTvText" class="font-mono font-bold text-[8px]">TV</span></button>
-                </div>
-              </div>
-              <span id="tradeStatus" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40 whitespace-nowrap">RUNNING</span>
-            </div>
-            <p id="tradePnl" class="text-[10px] font-mono font-bold text-gray-400">--</p>
-            <p id="tradeLive" class="text-[8px] font-mono text-gray-400"></p>
-            <p id="smcInfo" class="text-[8px] font-mono text-gray-400"></p>
-            <div class="relative w-full h-[200px] sm:h-[280px] lg:h-[300px]">
-              <canvas id="priceChart" class="absolute inset-0 w-full h-full"></canvas>
-            </div>
-            <div id="tvBox" class="hidden w-full h-[300px] mt-2 rounded-lg overflow-hidden border border-panelborder bg-darkbg"><div id="tvWidget" class="w-full h-full"></div></div>
-          </div>
-
           <div class="bg-darkbg border border-panelborder rounded-lg p-2.5 text-[10px] text-gray-300 leading-relaxed">
             <p data-i18n="lblReason" class="font-bold text-gray-400 mb-1"></p>
             <span id="cardReason">---</span>
           </div>
+        </div>
+
+        <!-- CHART (selalu tampil) -->
+        <div id="chartPanel" class="bg-darkbg/80 border border-panelborder rounded-xl p-2.5 space-y-2">
+          <div class="flex flex-wrap justify-between items-start gap-1">
+            <div class="flex items-center gap-2">
+              <p data-i18n="lblMap" class="text-[9px] font-bold text-gray-400 tracking-wider"></p>
+              <div class="flex items-center gap-1">
+                <button id="btnSmcToggle" onclick="toggleSMC()" class="text-[10px] text-gray-500 hover:text-accentblue flex items-center gap-1 bg-darkbg border border-panelborder px-1.5 py-0.5 rounded transition"><i class="fa-solid fa-layer-group"></i> <span class="font-mono font-bold text-[8px]">SMC</span></button>
+                <button id="btnTvToggle" onclick="toggleTV()" class="text-[10px] text-gray-500 hover:text-accentblue flex items-center gap-1 bg-darkbg border border-panelborder px-1.5 py-0.5 rounded transition"><i class="fa-solid fa-chart-candlestick"></i> <span id="btnTvText" class="font-mono font-bold text-[8px]">TV</span></button>
+              </div>
+            </div>
+            <span id="tradeStatus" class="hidden text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40 whitespace-nowrap">RUNNING</span>
+          </div>
+          <p id="tradePnl" class="text-[10px] font-mono font-bold text-gray-400"></p>
+          <p id="tradeLive" class="text-[8px] font-mono text-gray-400"></p>
+          <p id="smcInfo" class="text-[8px] font-mono text-gray-400"></p>
+          <div class="relative w-full h-[240px] sm:h-[300px] lg:h-[340px]">
+            <canvas id="priceChart" class="absolute inset-0 w-full h-full"></canvas>
+          </div>
+          <div id="tvBox" class="hidden w-full h-[300px] mt-2 rounded-lg overflow-hidden border border-panelborder bg-darkbg"><div id="tvWidget" class="w-full h-full"></div></div>
         </div>
 
         <div id="validationOverlay" class="validation-overlay hidden">
@@ -389,9 +390,10 @@ const WS_URL = 'wss://ws.xbtfx.com/v1/ws';
 const STORE_KEY = 'aluGold_history_v1';
 const CAL_KEY = 'aluGold_calendar_v1';
 const CAL_SINCE_KEY = 'aluGold_calendar_since';
+const LIVE_KEY = 'aluLive_v1';
 const K = { type: 'alu_session_type', email: 'alu_user_email', admin: 'alu_admin_code' };
 const JSON_H = { 'Content-Type': 'application/json' };
-const HISTORY_MS = 600000, STALE_MS = 30000, CHART_GUT = 110;
+const HISTORY_MS = 600000, STALE_MS = 30000, CHART_GUT = 110, CH_PAD = 4;
 const TFS = [1, 5, 15, 30, 60, 240, 1440];
 const HL_TF = [[1, 'M1'], [5, 'M5'], [15, 'M15'], [60, 'H1'], [240, 'H4'], [1440, 'D1']];
 const TF_MIN = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 };
@@ -406,6 +408,12 @@ const BIAS_TF = [{ label: 'M5', iv: '5m' }, { label: 'M15', iv: '15m' }, { label
 const CANDLE_TTL = { '1m': 30000, '5m': 60000, '15m': 120000, '30m': 180000, '1h': 300000, '4h': 600000, '1d': 900000 };
 const PRIO_IV = ['5m', '15m', '1m', '30m', '1h', '4h', '1d'];
 const CANDLE_LIMIT = 200;
+const BIN_SYM = { BTCUSD: 'BTCUSDT', XAUUSD: 'PAXGUSDT' };
+const BIN_HOSTS = ['https://api.binance.com', 'https://data-api.binance.vision'];
+const SESS = [
+  { name: 'Asia', h1: 0, h2: 8, col: '45,212,191' },
+  { name: 'New York', h1: 13, h2: 21, col: '56,189,248' }
+];
 const PILL = {
   green: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40',
   yellow: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40',
@@ -427,12 +435,12 @@ const I18N = {
     infoScalp: 'Buy Now / Sell Now sesuai arah pasar. Jika ada di area pantulan, fokus ambil pantulan (tanpa limit order).',
     infoDay: 'Fokus menunggu Limit Order di zona pantulan / FVG.', infoIntra: 'Konsep Day Trade (H1/M15), menunggu retest zona yang lebih lebar.', infoSwing: 'Positioning di H4, menahan posisi lebih lama.',
     btnGen: 'Analisa Signal', lblBias: 'BIAS MULTI-TIMEFRAME', lblStream: 'LIVE MARKET STREAM',
-    standby1: 'Pastikan harga live bergerak, lalu tekan Analisa Signal.', entryZone: 'ENTRY ZONE', lblMap: 'LIVE MAP CHART', lblReason: 'ANALYSIS REASON (CONFLUENCE SCORE):',
+    standby1: 'Chart di bawah sudah aktif. Tekan Analisa Signal untuk membuat sinyal.', entryZone: 'ENTRY ZONE', lblMap: 'LIVE MAP CHART', lblReason: 'ANALYSIS REASON (CONFLUENCE SCORE):',
     valTitle: 'Validasi Analisa Structure', steps: ['Menganalisa struktur pasar...', 'Mencari zona supply & demand fresh...', 'Memeriksa bias M15 & H1...', 'Cek FVG & displacement...', 'Validasi rejection candle...', 'Menghitung entry, SL, TP...'],
     lblLog: 'LOG AKTIVITAS USER', lblHistory: 'TRADING HISTORY', histToday: 'Hari ini', histAll: 'Semua',
     winLbl: 'WIN', loseLbl: 'LOSE', totalLbl: 'TOTAL PNL (WIN − LOSE)', ratioLbl: 'WIN RATIO',
     calMonthLbl: 'PNL BULAN INI', calWinLbl: 'TOTAL WIN', calLoseLbl: 'TOTAL LOSE', calNetLbl: 'NET', calWRLbl: 'WIN RATIO', calResetBtn: 'RESET KALENDER',
-    noHistory: 'Belum ada history.', running: 'berjalan', waitEntry: 'WAITING ENTRY', waitTick: 'Menunggu data live tick...',
+    noHistory: 'Belum ada history.', running: 'berjalan', waitEntry: 'WAITING ENTRY', waitTick: 'Menunggu data candle / live tick...',
     batal: 'BATAL', dibatal: 'dibatalkan', weekend: 'Market sedang tutup (Weekend).', signalWait: 'Belum ada setup valid.'
   },
   en: {
@@ -442,12 +450,12 @@ const I18N = {
     infoScalp: 'Buy Now / Sell Now following market direction. If in a bounce zone, focus on the bounce (no limit orders).',
     infoDay: 'Wait for Limit Orders at retracement zones / FVG.', infoIntra: 'Day Trade concept (H1/M15), waiting for retest of wider zones.', infoSwing: 'Positioning on H4, holding positions longer.',
     btnGen: 'Analyze Signal', lblBias: 'MULTI-TIMEFRAME BIAS', lblStream: 'LIVE MARKET STREAM',
-    standby1: 'Make sure live price is moving, then press Analyze Signal.', entryZone: 'ENTRY ZONE', lblMap: 'LIVE MAP CHART', lblReason: 'ANALYSIS REASON (CONFLUENCE SCORE):',
+    standby1: 'The chart below is active. Press Analyze Signal to create a signal.', entryZone: 'ENTRY ZONE', lblMap: 'LIVE MAP CHART', lblReason: 'ANALYSIS REASON (CONFLUENCE SCORE):',
     valTitle: 'Validating Market Structure', steps: ['Analyzing market structure...', 'Finding fresh supply & demand zones...', 'Checking M15 & H1 bias...', 'Checking FVG & displacement...', 'Validating rejection candles...', 'Calculating entry, SL, TP...'],
     lblLog: 'USER ACTIVITY LOG', lblHistory: 'TRADING HISTORY', histToday: 'Today', histAll: 'All',
     winLbl: 'WIN', loseLbl: 'LOSE', totalLbl: 'TOTAL PNL (WIN − LOSE)', ratioLbl: 'WIN RATIO',
     calMonthLbl: 'MONTHLY PNL', calWinLbl: 'TOTAL WIN', calLoseLbl: 'TOTAL LOSE', calNetLbl: 'NET', calWRLbl: 'WIN RATIO', calResetBtn: 'RESET CALENDAR',
-    noHistory: 'No trading history yet.', running: 'running', waitEntry: 'WAITING ENTRY', waitTick: 'Waiting for live tick data...',
+    noHistory: 'No trading history yet.', running: 'running', waitEntry: 'WAITING ENTRY', waitTick: 'Waiting for candle / live tick data...',
     batal: 'CANCELLED', dibatal: 'cancelled', weekend: 'Market is closed (Weekend).', signalWait: 'No valid setup yet.'
   }
 };
@@ -486,7 +494,7 @@ let lang = 'id', market = 'XAUUSD', ws = null, connId = 0, reconT = null, pingT 
 let trades = [], activeId = null, tvOn = false, showSMC = true;
 let calView = { y: new Date().getFullYear(), m: new Date().getMonth() };
 const prices = {}, hist = {}, candles = {}, workingSym = {}, aliasIdx = {}, subAt = {};
-const SER = {}, CSYM = {};
+const SER = {}, CSYM = {}, dispCache = {};
 let pumping = false;
 const cv = $('priceChart');
 const cx = cv.getContext('2d');
@@ -696,7 +704,7 @@ function watchdog() {
   }
 }
 
-/* ================= TICK & CANDLE LIVE (LOKAL) ================= */
+/* ================= TICK & CANDLE LIVE (LOKAL, DISIMPAN) ================= */
 function addTick(k, p) {
   const now = Date.now();
   const h = (hist[k] = hist[k] || []);
@@ -720,13 +728,30 @@ function addTick(k, p) {
   }
   checkTrades(k, p);
 }
+function loadLive() {
+  try {
+    const o = JSON.parse(localStorage.getItem(LIVE_KEY) || '{}');
+    for (const k of KEYS) if (o[k]) candles[k] = o[k];
+  } catch (e) {}
+}
+function saveLive() {
+  try {
+    const o = {};
+    for (const k of KEYS) {
+      o[k] = {};
+      for (const tf of TFS) o[k][tf] = ((candles[k] && candles[k][tf]) || []).slice(-200);
+    }
+    localStorage.setItem(LIVE_KEY, JSON.stringify(o));
+  } catch (e) {}
+}
 
-/* ================= SERI CANDLE (SERVER + LIVE) ================= */
-// Satu entri per pair + timeframe. Data historis diambil dari server,
-// lalu digabung dengan candle live dari stream.
+/* ================= SERI CANDLE (SERVER → BINANCE → LIVE) ================= */
 const ser = (k, iv) => {
   const ck = k + '|' + iv;
-  return SER[ck] || (SER[ck] = { rows: [], at: 0, ver: 0, err: '', errLog: '', p: null, retryAt: 0, smc: null, smcVer: -1, smcAt: 0 });
+  return SER[ck] || (SER[ck] = {
+    rows: [], ext: [], extSym: '', extErr: '', extErrLog: '', xp: null, xAt: 0,
+    at: 0, ver: 0, err: '', errLog: '', p: null, retryAt: 0, smc: null, smcAt: 0
+  });
 };
 
 function parseCandles(r) {
@@ -740,7 +765,7 @@ function parseCandles(r) {
     .sort((a, b) => a.t - b.t);
 }
 
-// Ambil data historis dari server. Jika sudah berjalan, kembalikan promise yang sama.
+// Ambil candle dari server. Jika gagal, otomatis coba Binance.
 function fetchSeries(k, iv, force) {
   const s = ser(k, iv);
   if (s.p) return s.p;
@@ -757,25 +782,65 @@ function fetchSeries(k, iv, force) {
     for (const sym of syms) {
       const r = await post('/api/candles', { value: email, symbol: sym, interval: iv, limit: CANDLE_LIMIT });
       const rows = parseCandles(r);
-      if (rows.length) { got = rows; CSYM[k] = sym; break; }
-      why = r.network ? 'koneksi gagal' : `HTTP ${r.status || 0}, data kosong (${sym})`;
+      if (rows.length >= 10) { got = rows; CSYM[k] = sym; break; }
+      why = r.network ? 'koneksi gagal' : `HTTP ${r.status || 0}, ${rows.length} candle (${sym})`;
     }
     if (got) {
-      s.rows = got; s.at = Date.now(); s.ver++; s.err = ''; s.retryAt = 0;
-      s.errLog = '';
+      s.rows = got; s.at = Date.now(); s.ver++; s.err = ''; s.errLog = ''; s.retryAt = 0;
     } else {
-      s.err = why || 'data kosong';
+      s.err = 'server: ' + (why || 'data kosong');
       s.retryAt = Date.now() + 30000;
-      if (s.err !== s.errLog) { s.errLog = s.err; log(`Candle ${k} ${iv}: ${s.err}`, 'error'); }
+      if (s.err !== s.errLog) { s.errLog = s.err; log(`Candle ${k} ${iv} — ${s.err}`, 'error'); }
+      await fetchExt(k, iv);
     }
   })().finally(() => { s.p = null; });
   return s.p;
 }
 
-// Gabungkan data server dengan candle live: bucket yang sama digabung, bucket baru ditambahkan
-function seriesRows(k, iv) {
+// Candle publik dari Binance (BTCUSDT; XAUUSD memakai PAXGUSDT sebagai proxy)
+function fetchExt(k, iv) {
+  const s = ser(k, iv), now = Date.now();
+  if (s.xp) return s.xp;
+  const sym = BIN_SYM[k];
+  if (!sym || (s.xAt && now - s.xAt < 60000)) return Promise.resolve();
+  s.xAt = now;
+  s.xp = (async () => {
+    let why = '';
+    for (const host of BIN_HOSTS) {
+      try {
+        const res = await fetch(`${host}/api/v3/klines?symbol=${sym}&interval=${iv}&limit=${CANDLE_LIMIT}`);
+        const arr = await res.json();
+        if (Array.isArray(arr) && arr.length) {
+          s.ext = arr.map(x => ({ t: +x[0], o: +x[1], h: +x[2], l: +x[3], c: +x[4] }))
+            .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite));
+          s.extSym = sym; s.extErr = '';
+          return;
+        }
+        why = `HTTP ${res.status}`;
+      } catch (e) { why = 'tidak bisa diakses'; }
+    }
+    s.extErr = `Binance ${sym}: ${why || 'tidak ada data'}`;
+    if (s.extErr !== s.extErrLog) { s.extErrLog = s.extErr; log(`Candle ${k} ${iv} — ${s.extErr}`, 'error'); }
+  })().finally(() => { s.xp = null; });
+  return s.xp;
+}
+
+// Sumber candle dasar: server (jika ≥10 candle) atau Binance
+function baseRows(k, iv) {
   const s = ser(k, iv);
-  const out = s.rows.map(r => ({ ...r }));
+  const useSrv = s.rows.length >= 10 || !s.ext.length;
+  return useSrv ? s.rows : s.ext;
+}
+function srcOf(k, iv) {
+  const s = ser(k, iv);
+  const useSrv = s.rows.length >= 10 || !s.ext.length;
+  if (!s.rows.length && !s.ext.length) return 'lokal (live)';
+  return useSrv ? 'server' : 'Binance ' + s.extSym;
+}
+
+// Gabungkan sumber dasar dengan candle live lokal (candle yang sedang berjalan ikut terupdate)
+function seriesRows(k, iv) {
+  const out = baseRows(k, iv).map(r => ({ ...r }));
   const local = (candles[k] && candles[k][TF_MIN[iv]]) || [];
   for (const c of local) {
     const last = out[out.length - 1];
@@ -788,6 +853,13 @@ function seriesRows(k, iv) {
     }
   }
   return out;
+}
+function displayRows(k, iv) {
+  const ck = k + '|' + iv, now = Date.now(), c = dispCache[ck];
+  if (c && now - c.at < 250) return c.rows;
+  const rows = seriesRows(k, iv);
+  dispCache[ck] = { at: now, rows };
+  return rows;
 }
 
 // Pompa latar belakang: satu request per giliran, pair aktif diprioritaskan
@@ -1010,7 +1082,8 @@ function refreshCard() {
   setTxt('cardPriceTop', priceTxt);
   $('standbyView').classList.toggle('hidden', !!t);
   $('activeCard').classList.toggle('hidden', !t);
-  if (!t) return;
+  $('tradeStatus').classList.toggle('hidden', !t);
+  if (!t) { setTxt('tradePnl', ''); setTxt('tradeLive', ''); return; }
 
   const sig = $('sigBadge');
   sig.textContent = t.signal;
@@ -1197,76 +1270,67 @@ function detectSMC(rows) {
   const fvgs = [], obs = [];
   for (let i = 1; i < rows.length - 1; i++) {
     const a = rows[i - 1], b = rows[i], c = rows[i + 1];
-    if (a.h < c.l) {
-      const bottom = a.h, top = c.l;
-      if (!invalidZone(rows, i + 2, 1, bottom, top)) fvgs.push({ dir: 1, bottom, top });
-    }
-    if (a.l > c.h) {
-      const bottom = c.h, top = a.l;
-      if (!invalidZone(rows, i + 2, -1, bottom, top)) fvgs.push({ dir: -1, bottom, top });
-    }
-    if (b.c < b.o && c.c > b.h) {
-      const top = b.o, bottom = b.c;
-      if (!invalidZone(rows, i + 2, 1, bottom, top)) obs.push({ dir: 1, bottom, top });
-    }
-    if (b.c > b.o && c.c < b.l) {
-      const top = b.c, bottom = b.o;
-      if (!invalidZone(rows, i + 2, -1, bottom, top)) obs.push({ dir: -1, bottom, top });
-    }
+    if (a.h < c.l && !invalidZone(rows, i + 2, 1, a.h, c.l)) fvgs.push({ dir: 1, bottom: a.h, top: c.l, t: b.t });
+    if (a.l > c.h && !invalidZone(rows, i + 2, -1, c.h, a.l)) fvgs.push({ dir: -1, bottom: c.h, top: a.l, t: b.t });
+    if (b.c < b.o && c.c > b.h && !invalidZone(rows, i + 2, 1, b.c, b.o)) obs.push({ dir: 1, bottom: b.c, top: b.o, t: b.t });
+    if (b.c > b.o && c.c < b.l && !invalidZone(rows, i + 2, -1, b.o, b.c)) obs.push({ dir: -1, bottom: b.o, top: b.c, t: b.t });
   }
   const win = rows.slice(-30);
+  let hiC = win[0], loC = win[0];
+  for (const c of win) { if (c.h > hiC.h) hiC = c; if (c.l < loC.l) loC = c; }
   const liq = [
-    { type: 'high', value: Math.max(...win.map(x => x.h)) },
-    { type: 'low', value: Math.min(...win.map(x => x.l)) }
+    { type: 'high', value: hiC.h, t: hiC.t },
+    { type: 'low', value: loC.l, t: loC.t }
   ];
   return { fvgs: fvgs.slice(-3), obs: obs.slice(-3), liq };
 }
 
-// Hasil SMC dihitung ulang paling sering tiap 1 detik, atau saat data server berubah
 function getSmc(k, iv) {
   const s = ser(k, iv), now = Date.now();
-  if (s.smc && s.smcVer === s.ver && now - s.smcAt < 1000) return s.smc;
-  const rows = seriesRows(k, iv);
-  const src = s.rows.length ? 'server' : 'lokal';
+  if (s.smc && now - s.smcAt < 1000) return s.smc;
+  const rows = displayRows(k, iv);
   const res = rows.length >= 10
     ? { ...detectSMC(rows), status: 'ok' }
     : { status: 'loading', fvgs: [], obs: [], liq: [] };
   res.n = rows.length;
-  res.src = src;
-  res.err = s.err;
-  s.smc = res; s.smcVer = s.ver; s.smcAt = now;
+  res.err = (!s.rows.length && !s.ext.length) ? (s.err || s.extErr || '') : '';
+  s.smc = res;
+  s.smcAt = now;
   return res;
 }
 
 function renderSmcInfo() {
   const t = activeTrade();
-  if (!showSMC) return setTxt('smcInfo', 'SMC: nonaktif');
-  if (!t) return setTxt('smcInfo', '');
-  const iv = (STYLE_CFG[t.style] || STYLE_CFG.Scalping).mtf;
-  const s = getSmc(t.key, iv);
-  if (s.status === 'ok') return setTxt('smcInfo', `SMC ${iv} (${s.src}, ${s.n} candle): ${s.fvgs.length} FVG · ${s.obs.length} OB · BSL/SSL`);
-  const why = s.err ? `gagal ambil candle: ${s.err}` : `memuat candle (${s.n}/10)`;
-  setTxt('smcInfo', `SMC ${iv}: ${why}`);
+  const k = t ? t.key : market;
+  const style = t ? t.style : $('tradingStyleSelect').value;
+  const iv = (STYLE_CFG[style] || STYLE_CFG.Scalping).mtf;
+  const s = getSmc(k, iv);
+  const head = `${k} ${iv} · sumber ${srcOf(k, iv)} · ${s.n || 0} candle`;
+  if (!showSMC) return setTxt('smcInfo', head + ' · SMC nonaktif');
+  if (s.status !== 'ok') return setTxt('smcInfo', head + (s.err ? ' · ' + s.err : ' · memuat...'));
+  setTxt('smcInfo', `${head} · ${s.fvgs.length} FVG · ${s.obs.length} OB · BSL/SSL`);
 }
 
-function drawZone(top, bottom, yOf, plotL, plotR, label, rgb) {
-  const y1 = yOf(top), y2 = yOf(bottom);
-  const y = Math.min(y1, y2), h = Math.abs(y2 - y1);
-  cx.save();
-  cx.fillStyle = `rgba(${rgb},.16)`;
-  cx.fillRect(plotL, y, plotR - plotL, h);
-  cx.strokeStyle = `rgba(${rgb},.55)`;
-  cx.lineWidth = 1;
-  cx.strokeRect(plotL, y, plotR - plotL, h);
-  cx.font = 'bold 8px ui-monospace, monospace';
-  cx.fillStyle = `rgba(${rgb},.95)`;
-  cx.textAlign = 'left';
-  cx.textBaseline = 'top';
-  cx.fillText(label, plotL + 4, y + 2);
-  cx.restore();
+// Box sesi (Asia & New York) dari candle: high/low sesi dalam UTC
+function sessionBoxes(rows, now) {
+  const out = [];
+  if (!rows.length) return out;
+  const d = new Date(now);
+  const day0 = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  for (const s of SESS) {
+    let a = day0 + s.h1 * 3600000, b = day0 + s.h2 * 3600000;
+    if (now < a) { a -= 86400000; b -= 86400000; }
+    const inS = rows.filter(c => c.t >= a && c.t < b);
+    if (!inS.length) continue;
+    out.push({
+      name: s.name, col: s.col, a, b: Math.min(b, now),
+      hi: Math.max(...inS.map(c => c.h)), lo: Math.min(...inS.map(c => c.l))
+    });
+  }
+  return out;
 }
 
-/* ================= CHART ================= */
+/* ================= CHART (GAYA CANDLESTICK) ================= */
 function rr(x, y, w, h, r) {
   cx.beginPath();
   cx.moveTo(x + r, y);
@@ -1276,6 +1340,7 @@ function rr(x, y, w, h, r) {
   cx.arcTo(x, y, x + w, y, r);
   cx.closePath();
 }
+
 function drawChart() {
   const r = cv.getBoundingClientRect();
   if (!r.width || !r.height) return;
@@ -1284,14 +1349,28 @@ function drawChart() {
   if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
   cx.setTransform(dpr, 0, 0, dpr, 0, 0);
   cx.clearRect(0, 0, r.width, r.height);
-  const t = activeTrade();
-  if (!t) return;
   const CW = r.width, CH = r.height;
 
-  const ticks = (hist[t.key] || []).slice();
-  const live = prices[t.key] ? prices[t.key].price : null;
-  if (live != null && (!ticks.length || ticks[ticks.length - 1].p !== live)) ticks.push({ t: Date.now(), p: live });
-  if (!ticks.length) {
+  const t = activeTrade();
+  const k = market;
+  const style = t ? t.style : $('tradingStyleSelect').value;
+  const iv = (STYLE_CFG[style] || STYLE_CFG.Scalping).mtf;
+  const tfMs = TF_MIN[iv] * 60000;
+  const rows = displayRows(k, iv);
+  const live = prices[k] ? prices[k].price : null;
+  const liveDir = prices[k] ? prices[k].dir : 0;
+
+  const plotL = 6, plotT = 20, plotB = CH - 14, plotR = CW - CHART_GUT;
+  const plotW = plotR - plotL, plotH = plotB - plotT;
+
+  // Label kecil di pojok: pair, timeframe, sumber data
+  cx.font = '8px ui-monospace, monospace';
+  cx.textAlign = 'left';
+  cx.textBaseline = 'top';
+  cx.fillStyle = 'rgba(148,163,184,.9)';
+  cx.fillText(`${k} · ${iv} · WIB · ${srcOf(k, iv)}`, plotL + 2, 3);
+
+  if (!rows.length && live == null) {
     cx.font = 'bold 11px ui-monospace, monospace';
     cx.fillStyle = '#94a3b8';
     cx.textAlign = 'center';
@@ -1301,123 +1380,229 @@ function drawChart() {
     return;
   }
 
-  const L = [
+  // Jumlah candle yang tampil menyesuaikan lebar layar (±5px per candle)
+  const nWant = Math.max(12, Math.floor(plotW / 5) - CH_PAD);
+  const N = Math.min(rows.length, nWant);
+  const vis = N ? rows.slice(rows.length - N) : [];
+  const slot = plotW / (Math.max(N, 12) + CH_PAD);
+  const t0 = vis.length ? vis[0].t : Date.now() - tfMs * 12;
+  const xOfT = tm => plotL + ((tm - t0) / tfMs + 0.5) * slot;
+  const clampX = x => Math.max(plotL, Math.min(plotR, x));
+
+  // Level trade
+  const L = t ? [
     { label: 'ENTRY', v: t.entry, c: '#93c5fd', bg: 'rgba(147,197,253,.14)', dash: [] },
     { label: 'SL', v: t.sl, c: '#f87171', bg: 'rgba(248,113,113,.14)', dash: [4, 4], hit: t.result === 'SL' },
     { label: 'TP1', v: t.tp1, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp1 },
     { label: 'TP2', v: t.tp2, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp2 },
     { label: 'TP3', v: t.tp3, c: '#38bdf8', bg: 'rgba(56,189,248,.14)', dash: [4, 4], hit: !!t.hits.tp3 }
-  ].filter(l => Number.isFinite(l.v));
+  ].filter(l => Number.isFinite(l.v)) : [];
 
-  // SMC: zona dekat harga live (±2%) saja
-  let zones = { fvgs: [], obs: [], liq: [] };
+  // Zona SMC dekat harga (±2%) saja
+  const zones = { fvgs: [], obs: [], liq: [] };
   if (showSMC) {
-    const iv = (STYLE_CFG[t.style] || STYLE_CFG.Scalping).mtf;
-    const s = getSmc(t.key, iv);
+    const s = getSmc(k, iv);
     if (s.status === 'ok') {
-      const ref = live != null ? live : t.entry;
-      const inBand = (lo2, hi2) => hi2 >= ref * 0.98 && lo2 <= ref * 1.02;
+      const ref = live != null ? live : (vis.length ? vis[vis.length - 1].c : 0);
+      const inBand = (a, b) => b >= ref * 0.98 && a <= ref * 1.02;
       zones.fvgs = s.fvgs.filter(z => inBand(z.bottom, z.top));
       zones.obs = s.obs.filter(z => inBand(z.bottom, z.top));
-      zones.liq = s.liq.filter(l => inBand(l.value, l.value));
+      zones.liq = s.liq.filter(l => Math.abs(l.value - ref) / ref < 0.02);
     }
   }
 
+  // Box sesi Asia & New York
+  const sess = sessionBoxes(rows, Date.now()).filter(se => se.b > t0);
+
+  // Skala harga
   let lo = Infinity, hi = -Infinity;
-  const grow = v => { if (v < lo) lo = v; if (v > hi) hi = v; };
-  ticks.forEach(x => grow(x.p));
+  const grow = v => { if (Number.isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; } };
+  vis.forEach(c => { grow(c.h); grow(c.l); });
+  if (live != null) grow(live);
   L.forEach(l => grow(l.v));
-  if (t.zone) { grow(t.zone.min); grow(t.zone.max); }
+  if (t && t.zone) { grow(t.zone.min); grow(t.zone.max); }
   zones.fvgs.concat(zones.obs).forEach(z => { grow(z.bottom); grow(z.top); });
   zones.liq.forEach(l => grow(l.value));
+  sess.forEach(se => { grow(se.hi); grow(se.lo); });
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
   if (!(hi - lo > 0)) { const d = Math.abs(hi) * 0.001 || 1; lo -= d; hi += d; }
-  const pad = (hi - lo) * 0.15;
+  const pad = (hi - lo) * 0.12;
   lo -= pad;
   hi += pad;
+  const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * plotH;
 
-  const plotL = 6, plotT = 20, plotB = CH - 8, plotR = CW - CHART_GUT;
-  const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * (plotB - plotT);
+  // Grid horizontal
+  cx.lineWidth = 1;
+  cx.strokeStyle = 'rgba(148,163,184,.08)';
+  for (let i = 1; i < 4; i++) {
+    const y = plotT + plotH * i / 4;
+    cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
+  }
 
-  if (showSMC) {
-    zones.fvgs.forEach(z => drawZone(z.top, z.bottom, yOf, plotL, plotR, z.dir > 0 ? 'FVG ▲' : 'FVG ▼', z.dir > 0 ? '59,130,246' : '168,85,247'));
-    zones.obs.forEach(z => drawZone(z.top, z.bottom, yOf, plotL, plotR, z.dir > 0 ? 'OB ▲' : 'OB ▼', z.dir > 0 ? '16,185,129' : '239,68,68'));
-    zones.liq.forEach(l => {
-      const y = yOf(l.value);
+  // Box sesi
+  sess.forEach(se => {
+    const x0 = clampX(xOfT(se.a)), x1 = clampX(xOfT(se.b));
+    if (x1 <= x0) return;
+    const yh = yOf(se.hi), yl = yOf(se.lo);
+    cx.save();
+    cx.fillStyle = `rgba(${se.col},.08)`;
+    cx.fillRect(x0, Math.min(yh, yl), x1 - x0, Math.abs(yl - yh));
+    cx.strokeStyle = `rgba(${se.col},.9)`;
+    cx.lineWidth = 1;
+    cx.beginPath();
+    cx.moveTo(x0, yh); cx.lineTo(x1, yh);
+    cx.moveTo(x0, yl); cx.lineTo(x1, yl);
+    cx.stroke();
+    cx.setLineDash([2, 3]);
+    cx.strokeStyle = 'rgba(250,204,21,.75)';
+    cx.beginPath();
+    cx.moveTo(x1, yh); cx.lineTo(plotR, yh);
+    cx.moveTo(x1, yl); cx.lineTo(plotR, yl);
+    cx.stroke();
+    cx.setLineDash([]);
+    cx.font = 'bold 8px ui-monospace, monospace';
+    cx.fillStyle = `rgba(${se.col},1)`;
+    cx.textAlign = 'left';
+    cx.textBaseline = 'top';
+    cx.fillText(se.name, x0 + 3, Math.min(yh, yl) + 2);
+    cx.restore();
+  });
+
+  // Zona FVG & OB (mulai dari candle pembentuknya sampai kanan)
+  const zoneBox = (top, bottom, zt, label, rgb) => {
+    const x0 = clampX(xOfT(zt));
+    if (plotR - x0 < 2) return;
+    const y1 = yOf(top), y2 = yOf(bottom);
+    const y = Math.min(y1, y2), h = Math.abs(y2 - y1);
+    cx.save();
+    cx.fillStyle = `rgba(${rgb},.16)`;
+    cx.fillRect(x0, y, plotR - x0, h);
+    cx.strokeStyle = `rgba(${rgb},.55)`;
+    cx.lineWidth = 1;
+    cx.strokeRect(x0, y, plotR - x0, h);
+    cx.font = 'bold 8px ui-monospace, monospace';
+    cx.fillStyle = `rgba(${rgb},.95)`;
+    cx.textAlign = 'left';
+    cx.textBaseline = 'top';
+    cx.fillText(label, x0 + 3, y + 2);
+    cx.restore();
+  };
+  zones.fvgs.forEach(z => zoneBox(z.top, z.bottom, z.t, z.dir > 0 ? 'FVG ▲' : 'FVG ▼', z.dir > 0 ? '59,130,246' : '168,85,247'));
+  zones.obs.forEach(z => zoneBox(z.top, z.bottom, z.t, z.dir > 0 ? 'OB ▲' : 'OB ▼', z.dir > 0 ? '16,185,129' : '239,68,68'));
+
+  // Likuiditas BSL / SSL
+  zones.liq.forEach(lq => {
+    const y = yOf(lq.value), x0 = clampX(xOfT(lq.t));
+    cx.save();
+    cx.strokeStyle = 'rgba(245,158,11,.8)';
+    cx.lineWidth = 1;
+    cx.setLineDash([3, 3]);
+    cx.beginPath(); cx.moveTo(x0, y); cx.lineTo(plotR, y); cx.stroke();
+    cx.setLineDash([]);
+    cx.font = 'bold 8px ui-monospace, monospace';
+    cx.fillStyle = 'rgba(245,158,11,.95)';
+    cx.textAlign = 'right';
+    cx.textBaseline = lq.type === 'high' ? 'bottom' : 'top';
+    cx.fillText(lq.type === 'high' ? 'BSL' : 'SSL', plotR - 4, y + (lq.type === 'high' ? -2 : 2));
+    cx.restore();
+  });
+
+  // Zona entry limit dari trade
+  if (t && t.zone && t.mode === 'LIMIT') {
+    const x0 = clampX(xOfT(t.createdAt));
+    const y1 = yOf(t.zone.max), y2 = yOf(t.zone.min);
+    cx.save();
+    cx.fillStyle = 'rgba(41,98,255,.16)';
+    cx.fillRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
+    cx.strokeStyle = 'rgba(41,98,255,.5)';
+    cx.lineWidth = 1;
+    cx.setLineDash([2, 2]);
+    cx.strokeRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
+    cx.setLineDash([]);
+    cx.restore();
+  }
+
+  // Candlestick
+  const bodyW = Math.max(1.5, slot * 0.62);
+  cx.lineWidth = 1;
+  for (const c of vis) {
+    const x = xOfT(c.t);
+    const up = c.c >= c.o;
+    const col = up ? '#34d399' : '#f87171';
+    const yH = yOf(c.h), yL = yOf(c.l), yO = yOf(c.o), yC = yOf(c.c);
+    cx.strokeStyle = col;
+    cx.fillStyle = col;
+    cx.beginPath(); cx.moveTo(x, yH); cx.lineTo(x, yL); cx.stroke();
+    cx.fillRect(x - bodyW / 2, Math.min(yO, yC), bodyW, Math.max(1, Math.abs(yC - yO)));
+  }
+
+  // Garis level trade (dari waktu entry sampai kanan)
+  if (t) {
+    const x0 = clampX(xOfT(t.createdAt));
+    L.forEach(l => {
+      const y = yOf(l.v);
       cx.save();
-      cx.strokeStyle = 'rgba(245,158,11,.75)';
-      cx.lineWidth = 1;
-      cx.setLineDash([3, 3]);
-      cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
-      cx.setLineDash([]);
-      cx.font = 'bold 8px ui-monospace, monospace';
-      cx.fillStyle = 'rgba(245,158,11,.95)';
-      cx.textAlign = 'right';
-      cx.textBaseline = l.type === 'high' ? 'bottom' : 'top';
-      cx.fillText(l.type === 'high' ? 'BSL' : 'SSL', plotR - 4, y + (l.type === 'high' ? -2 : 2));
+      cx.strokeStyle = l.c;
+      cx.globalAlpha = l.label === 'ENTRY' ? .95 : .8;
+      cx.lineWidth = l.label === 'ENTRY' ? 1.4 : 1;
+      cx.setLineDash(l.dash);
+      cx.beginPath(); cx.moveTo(x0, y); cx.lineTo(plotR, y); cx.stroke();
       cx.restore();
     });
   }
 
-  if (t.zone && t.mode === 'LIMIT') {
-    const y1 = yOf(t.zone.max), y2 = yOf(t.zone.min);
-    cx.fillStyle = 'rgba(41,98,255,.15)';
-    cx.fillRect(plotL, Math.min(y1, y2), plotR - plotL, Math.abs(y2 - y1));
-    cx.strokeStyle = 'rgba(41,98,255,.4)';
-    cx.lineWidth = 1;
-    cx.setLineDash([2, 2]);
-    cx.strokeRect(plotL, Math.min(y1, y2), plotR - plotL, Math.abs(y2 - y1));
-    cx.setLineDash([]);
-  }
-
-  cx.lineWidth = 1;
-  cx.strokeStyle = 'rgba(148,163,184,.08)';
-  for (let i = 1; i < 4; i++) {
-    const y = plotT + (plotB - plotT) * i / 4;
-    cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
-  }
-
-  for (const l of L) {
-    const y = yOf(l.v);
+  // Harga live (garis putus-putus + titik)
+  if (live != null) {
+    const y = yOf(live);
+    const lc = liveDir < 0 ? '#f87171' : '#34d399';
     cx.save();
-    cx.strokeStyle = l.c;
-    cx.globalAlpha = l.label === 'ENTRY' ? .95 : .75;
-    cx.lineWidth = l.label === 'ENTRY' ? 1.4 : 1;
-    cx.setLineDash(l.dash);
+    cx.strokeStyle = lc;
+    cx.globalAlpha = .6;
+    cx.lineWidth = 1;
+    cx.setLineDash([1, 3]);
     cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
     cx.restore();
+    if (vis.length) {
+      const hx = xOfT(vis[vis.length - 1].t);
+      const pr = 3 + Math.sin(Date.now() / 150) * 1.5;
+      cx.save();
+      cx.beginPath(); cx.arc(hx, y, pr + 2.5, 0, Math.PI * 2); cx.fillStyle = 'rgba(41,98,255,.35)'; cx.fill();
+      cx.beginPath(); cx.arc(hx, y, 3, 0, Math.PI * 2); cx.fillStyle = '#fff'; cx.shadowColor = '#2962ff'; cx.shadowBlur = 8; cx.fill();
+      cx.restore();
+    }
   }
 
-  const step = ticks.length > 1 ? (plotR - plotL) / (ticks.length - 1) : 0;
-  const X = i => plotL + i * step;
-  cx.save();
-  cx.lineWidth = 2;
-  cx.strokeStyle = '#2962ff';
-  cx.beginPath();
-  ticks.forEach((tk, i) => { if (i === 0) cx.moveTo(X(i), yOf(tk.p)); else cx.lineTo(X(i), yOf(tk.p)); });
-  cx.stroke();
-  cx.lineTo(X(ticks.length - 1), plotB);
-  cx.lineTo(plotL, plotB);
-  cx.closePath();
-  const grad = cx.createLinearGradient(0, plotT, 0, plotB);
-  grad.addColorStop(0, 'rgba(41,98,255,.35)');
-  grad.addColorStop(1, 'rgba(41,98,255,0)');
-  cx.fillStyle = grad;
-  cx.fill();
-  cx.restore();
+  // Label waktu (WIB) di bawah
+  if (vis.length) {
+    const step = Math.max(1, Math.round(vis.length / 5));
+    cx.font = '8px ui-monospace, monospace';
+    cx.fillStyle = 'rgba(148,163,184,.85)';
+    cx.textAlign = 'center';
+    cx.textBaseline = 'bottom';
+    for (let i = 0; i < vis.length; i += step) {
+      const c = vis[i];
+      const hm = new Date(c.t + 7 * 3600000).toISOString().slice(11, 16);
+      cx.fillText(hm, xOfT(c.t), CH - 1);
+    }
+  }
 
-  const hx = X(ticks.length - 1), hy = yOf(ticks[ticks.length - 1].p);
-  const pr = 3 + Math.sin(Date.now() / 150) * 1.5;
-  cx.save();
-  cx.beginPath(); cx.arc(hx, hy, pr + 3, 0, Math.PI * 2); cx.fillStyle = 'rgba(41,98,255,.4)'; cx.fill();
-  cx.beginPath(); cx.arc(hx, hy, 3.5, 0, Math.PI * 2);
-  cx.fillStyle = '#fff'; cx.shadowColor = '#2962ff'; cx.shadowBlur = 8; cx.fill();
-  cx.restore();
-
-  const tags = L.map(l => ({ text: (l.hit ? '✓ ' : '') + l.label + ' ' + fmt(l.v), c: l.c, bg: l.bg, y: yOf(l.v) })).sort((a, b) => a.y - b.y);
-  for (let i = 1; i < tags.length; i++) if (tags[i].y < tags[i - 1].y + 16) tags[i].y = tags[i - 1].y + 16;
-  for (let i = tags.length - 1; i >= 0; i--) {
-    const cap = i === tags.length - 1 ? plotB - 8 : tags[i + 1].y - 16;
-    if (tags[i].y > cap) tags[i].y = cap;
+  // Tag harga di kolom kanan (level trade + harga live)
+  const tags = L.map(l => ({ text: (l.hit ? '✓ ' : '') + l.label + ' ' + fmt(l.v), c: l.c, bg: l.bg, y: yOf(l.v) }));
+  if (live != null) {
+    tags.push({
+      text: fmt(live),
+      c: liveDir < 0 ? '#fca5a5' : '#86efac',
+      bg: liveDir < 0 ? 'rgba(239,68,68,.25)' : 'rgba(16,185,129,.25)',
+      y: yOf(live)
+    });
+  }
+  tags.sort((a, b) => a.y - b.y);
+  const GAP = 16, capT = plotT + 6, capB = plotB - 6;
+  tags.forEach(g => { g.y = Math.max(capT, Math.min(capB, g.y)); });
+  for (let i = 1; i < tags.length; i++) if (tags[i].y < tags[i - 1].y + GAP) tags[i].y = tags[i - 1].y + GAP;
+  if (tags.length && tags[tags.length - 1].y > capB) {
+    tags[tags.length - 1].y = capB;
+    for (let i = tags.length - 2; i >= 0; i--) if (tags[i].y > tags[i + 1].y - GAP) tags[i].y = tags[i + 1].y - GAP;
   }
   cx.font = 'bold 9px ui-monospace, monospace';
   cx.textAlign = 'left';
@@ -1531,12 +1716,12 @@ async function generateSignal() {
   let data = null, err = null;
 
   try {
-    // Data biasanya sudah ada dari pemuatan otomatis; ambil ulang hanya jika sudah kedaluwarsa
     await Promise.all([cfg.htf, cfg.mtf, cfg.ltf].map(iv => fetchSeries(k, iv, false)));
     const h = seriesRows(k, cfg.htf), m = seriesRows(k, cfg.mtf), l = seriesRows(k, cfg.ltf);
     if (m.length < 10) {
-      const e = ser(k, cfg.mtf).err;
-      throw new Error(`candle ${cfg.mtf} belum lengkap (${m.length}/10)${e ? ': ' + e : '. Coba lagi beberapa detik.'}`);
+      const sr = ser(k, cfg.mtf);
+      const why = sr.err || sr.extErr;
+      throw new Error(`candle ${cfg.mtf} belum lengkap (${m.length}/10)${why ? ': ' + why : '. Coba lagi beberapa detik.'}`);
     }
     const ema = {};
     cfg.ema.forEach(p => { const r = calcEMA(l, p); ema['EMA_' + p] = r.length ? Number(r[r.length - 1].toFixed(5)) : 0; });
@@ -1584,6 +1769,7 @@ async function generateSignal() {
 
 /* ================= BOOT ================= */
 $('authForm').addEventListener('submit', handleLogin);
+loadLive();
 trades = loadTrades();
 applyLang();
 paintSmcBtn();
@@ -1594,6 +1780,8 @@ setInterval(() => { watchdog(); expirePending(); }, 1000);
 setInterval(() => { renderTickers(); renderHighlights(); renderHistory(); refreshCard(); renderSmcInfo(); }, 500);
 setInterval(pump, 1200);
 setInterval(renderBias, 5000);
+setInterval(saveLive, 15000);
+window.addEventListener('beforeunload', saveLive);
 pump();
 log(lang === 'id' ? 'Sistem siap.' : 'System ready.', 'system');
 </script>
