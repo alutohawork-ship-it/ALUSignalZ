@@ -2005,4 +2005,66 @@ async function generateSignal() {
     }
     const ema = {};
     cfg.ema.forEach(p => { const r = calcEMA(l, p); ema['EMA_' + p] = r.length ? Number(r[r.length - 1].toFixed(5)) : 0; });
-    const bb = calcBB(m.length
+    const bb = calcBB(m.length ? m : l);
+    const res = await fetch('/api/generate', {
+      method: 'POST',
+      headers: JSON_H,
+      body: JSON.stringify({
+        email, marketId: 'xbtfx|' + k, tradingStyle: style, currentPrice: live.price, lang,
+        emaFilter: ema, bbFilter: bb,
+        candles: { htf: h.slice(-200), mtf: m.slice(-200), ltf: l.slice(-200) }
+      })
+    });
+    const txt = await res.text();
+    try { data = JSON.parse(txt); } catch (e) { throw new Error('Server tidak kirim JSON (HTTP ' + res.status + ')'); }
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+  } catch (e) { err = e.message; }
+
+  await anim;
+  hideOverlay();
+  await sleep(350);
+  btn.disabled = false;
+  bt.textContent = T('btnGen');
+
+  if (err) return alert('Gagal: ' + err);
+  const s = data && data.signal;
+  if (!s) return alert(T('signalWait') + '\n\n' + ((data && data.reason) || ''));
+  const valid = ['BUY', 'SELL'].includes(s.signal) && [s.entry, s.sl, s.tp1].every(v => v != null && Number.isFinite(Number(v)));
+  if (!valid) return alert('Sinyal belum lengkap.');
+
+  const t = {
+    id: Date.now().toString(36), key: k, style, signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
+    mode: s.mode, status: s.status || 'RUNNING', fill: s.fill || null,
+    entry: s.entry, bufferEnd: s.bufferEnd, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
+    zone: s.zone, expiresAt: s.expireMs ? Date.now() + s.expireMs : null,
+    confidence: s.confidence, risk: s.risk, setup: s.setup, zoneLabel: s.zoneLabel, zoneNote: s.zoneNote,
+    createdAt: Date.now(), hits: {}, card: { reason: s.reason }, no: nextNo()
+  };
+  trades.push(t);
+  activeId = t.id;
+  saveTrades();
+  renderAll();
+  log(`Signal ${s.signal} ${k} berhasil dibuat.`, s.signal === 'BUY' ? 'buy' : 'sell');
+}
+
+/* ================= BOOT ================= */
+$('authForm').addEventListener('submit', handleLogin);
+loadLive();
+trades = loadTrades();
+applyLang();
+paintSmcBtn();
+$('smcBox').classList.toggle('hidden', !showSMC);
+calSync();
+checkSession();
+requestAnimationFrame(frame);
+setInterval(() => { watchdog(); expirePending(); }, 1000);
+setInterval(() => { renderTickers(); renderHighlights(); renderHistory(); refreshCard(); renderSmcInfo(); }, 500);
+setInterval(pump, 1200);
+setInterval(renderBias, 5000);
+setInterval(saveLive, 15000);
+window.addEventListener('beforeunload', saveLive);
+pump();
+log(lang === 'id' ? 'Sistem siap.' : 'System ready.', 'system');
+</script>
+</body>
+</html>
