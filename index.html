@@ -557,7 +557,7 @@ const toMs = v => {
 /* ================= STATE ================= */
 let lang = 'id', market = 'XAUUSD', ws = null, connId = 0, reconT = null, pingT = null, authFailed = false, streamStarted = false;
 let trades = [], activeId = null, tvOn = false, showSMC = false;
-let smcTfOverride = null; // State untuk menyimpan pilihan TF SMC
+let smcTfOverride = null; 
 let calView = { y: new Date().getFullYear(), m: new Date().getMonth() };
 const prices = {}, hist = {}, candles = {}, workingSym = {}, aliasIdx = {}, subAt = {};
 const SER = {}, CSYM = {}, dispCache = {};
@@ -729,37 +729,52 @@ function syncMarket() {
 }
 function pickMarket(k) { $('marketSelect').value = k; syncMarket(); }
 
-/* ================= STREAM ================= */
+/* ================= STREAM (XBTFX WEBSOCKET) ================= */
 async function connect() {
   clearTimeout(reconT);
   clearInterval(pingT);
   if (ws) { const o = ws; ws = null; o.onclose = null; o.close(); }
   const my = ++connId;
   authFailed = false;
-  wsBadge('TOKEN...', 'yellow');
+  wsBadge('XBTFX TOKEN...', 'yellow');
   const email = localStorage.getItem(K.email);
   if (!email) { wsBadge('LOGIN DULU', 'gray'); reconT = setTimeout(connect, 2000); return; }
+  
+  // Coba ambil token dari backend
   const r = await post('/api/stream-token', { value: email });
   if (my !== connId) return;
+  
+  // Jika backend gagal, coba koneksi langsung tanpa token (mode publik)
   if (!(r.ok && r.data && r.data.token)) {
     if (r.status === 401) { authFailed = true; wsBadge('SESI INVALID', 'red'); return; }
-    wsBadge('TOKEN GAGAL', 'red');
-    reconT = setTimeout(connect, 5000);
+    log('[WS] Gagal dapat token backend, mencoba koneksi publik XBTFX...', 'system');
+    openSocket(null); // Panggil tanpa token
     return;
   }
   openSocket(r.data.token);
 }
 
 function openSocket(token) {
-  wsBadge('CONNECTING...', 'yellow');
+  wsBadge('XBTFX CONNECTING...', 'yellow');
   const sock = new WebSocket(WS_URL);
   ws = sock;
-  sock.onopen = () => send(sock, { action: 'auth', token });
+  
+  sock.onopen = () => {
+    if (token) {
+      send(sock, { action: 'auth', token });
+    } else {
+      // Jika tanpa token, langsung subscribe quotes
+      wsBadge('XBTFX PUB', 'green');
+      KEYS.forEach(k => { subAt[k] = Date.now(); });
+      send(sock, { action: 'subscribe', channel: 'quotes', symbols: KEYS.map(symOf) });
+    }
+  };
+
   sock.onmessage = e => {
     let m;
     try { m = JSON.parse(e.data); } catch (err) { return; }
     if (m.action === 'auth_ok') {
-      wsBadge('CONNECTED', 'green');
+      wsBadge('XBTFX LIVE', 'green');
       KEYS.forEach(k => { subAt[k] = Date.now(); });
       send(sock, { action: 'subscribe', channel: 'quotes', symbols: KEYS.map(symOf) });
       clearInterval(pingT);
@@ -768,6 +783,7 @@ function openSocket(token) {
     }
     if (m.channel === 'quote') onQuote(m);
   };
+  
   sock.onclose = () => {
     wsBadge('CLOSED', 'red');
     if (ws === sock && !authFailed) reconT = setTimeout(connect, 4000);
@@ -797,7 +813,7 @@ function watchdog() {
       aliasIdx[k] = idx + 1;
       subAt[k] = now;
       send(ws, { action: 'subscribe', channel: 'quotes', symbols: [symOf(k)] });
-      log(k + ': mencoba simbol ' + symOf(k), 'system');
+      log('[WS] XBTFX mencoba simbol ' + symOf(k), 'system');
     }
   }
 }
@@ -885,7 +901,7 @@ function fetchSeries(k, iv, force) {
     if (got) {
       s.rows = got; s.at = Date.now(); s.ver++; s.err = ''; s.errLog = ''; s.retryAt = 0;
     } else {
-      s.err = 'server: ' + (why || 'data kosong');
+      s.err = 'XBTFX REST: ' + (why || 'data kosong');
       s.retryAt = Date.now() + 30000;
       await fetchExt(k, iv);
     }
@@ -909,14 +925,14 @@ function fetchExt(k, iv) {
           s.ext = arr.map(x => ({ t: +x[0], o: +x[1], h: +x[2], l: +x[3], c: +x[4] }))
             .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite));
           s.extSym = sym; s.extErr = ''; s.extErrLog = '';
-          if (!s.extOk) { s.extOk = true; log(`${k} ${iv}: server kosong, pakai Binance ${sym}`, 'system'); }
+          if (!s.extOk) { s.extOk = true; log(`[REST] XBTFX ${k} ${iv} kosong, fallback Binance`, 'system'); }
           return;
         }
         why = `HTTP ${res.status}`;
       } catch (e) { why = 'tidak bisa diakses'; }
     }
     s.extErr = `Binance ${sym}: ${why || 'tidak ada data'}`;
-    if (s.extErr !== s.extErrLog) { s.extErrLog = s.extErr; log(`Candle ${k} ${iv} — ${s.err} | ${s.extErr}`, 'error'); }
+    if (s.extErr !== s.extErrLog) { s.extErrLog = s.extErr; log(`[REST] Candle ${k} ${iv} — XBTFX gagal | ${s.extErr}`, 'error'); }
   })().finally(() => { s.xp = null; });
   return s.xp;
 }
@@ -929,8 +945,8 @@ function baseRows(k, iv) {
 function srcOf(k, iv) {
   const s = ser(k, iv);
   const useSrv = s.rows.length >= 10 || !s.ext.length;
-  if (!s.rows.length && !s.ext.length) return 'lokal (live)';
-  return useSrv ? 'server' : 'Binance ' + s.extSym;
+  if (!s.rows.length && !s.ext.length) return 'lokal (XBTFX WS)';
+  return useSrv ? 'server XBTFX' : 'Binance ' + s.extSym;
 }
 
 function seriesRows(k, iv) {
@@ -1417,17 +1433,15 @@ function toggleSMC() {
   renderSmcInfo();
 }
 
-// Fungsi untuk mengubah Timeframe SMC secara manual
 function setSmcTf(tf) {
   smcTfOverride = tf;
   document.querySelectorAll('.smc-tf-btn').forEach(btn => {
     if (btn.dataset.tf === tf) {
-      btn.classList.add('active'); // menggunakan class custom CSS
+      btn.classList.add('active');
     } else {
       btn.classList.remove('active');
     }
   });
-  // Paksa tarik data jika belum ada
   fetchSeries(market, tf, false);
   renderSmcInfo();
 }
@@ -1538,7 +1552,6 @@ function cisdOf(rows) {
 function detectSMC(rows) {
   const fvgs = [], obs = [], breakers = [];
   
-  // Deteksi FVG & OB
   for (let i = 1; i < rows.length - 1; i++) {
     const a = rows[i - 1], b = rows[i], c = rows[i + 1];
     if (a.h < c.l && !invalidZone(rows, i + 2, 1, a.h, c.l)) fvgs.push({ dir: 1, bottom: a.h, top: c.l, t: b.t });
@@ -1552,15 +1565,14 @@ function detectSMC(rows) {
     const startIndex = rows.findIndex(r => r.t === ob.t);
     if (startIndex === -1) continue;
 
-    // Cek apakah OB dilanggar oleh candle setelahnya
     for (let j = startIndex + 1; j < rows.length; j++) {
       const c = rows[j];
       if (ob.dir === -1 && c.c > ob.top) {
-        breakers.push({ dir: 1, bottom: ob.bottom, top: ob.top, t: c.t }); // Bearish OB jd Bullish Breaker
+        breakers.push({ dir: 1, bottom: ob.bottom, top: ob.top, t: c.t });
         break;
       }
       if (ob.dir === 1 && c.c < ob.bottom) {
-        breakers.push({ dir: -1, bottom: ob.bottom, top: ob.top, t: c.t }); // Bullish OB jd Bearish Breaker
+        breakers.push({ dir: -1, bottom: ob.bottom, top: ob.top, t: c.t });
         break;
       }
     }
@@ -1596,9 +1608,8 @@ function renderSmcInfo() {
   const t = activeTrade();
   const k = t ? t.key : market;
   const style = t ? t.style : $('tradingStyleSelect').value;
-  const iv = smcTfOverride || SMC_TF_MAP[style] || '5m'; // Gunakan override jika ada
+  const iv = smcTfOverride || SMC_TF_MAP[style] || '5m'; 
   
-  // Highlight tombol yg aktif
   document.querySelectorAll('.smc-tf-btn').forEach(btn => {
     if (btn.dataset.tf === iv) btn.classList.add('active');
     else btn.classList.remove('active');
@@ -1669,7 +1680,6 @@ function drawChart() {
   const t = activeTrade();
   const k = market;
   
-  // Menggunakan 1m untuk pergerakan candlestick yang lebih dinamis (tick-like)
   const iv = '1m'; 
   const tfMs = TF_MIN[iv] * 60000;
   const rows = displayRows(k, iv);
@@ -1707,18 +1717,15 @@ function drawChart() {
 
   let lo = Infinity, hi = -Infinity;
   
-  // Cek apakah trade sudah berjalan atau menyentuh entry
   const isRunning = t && (t.status === 'RUNNING' || (t.hits && Object.keys(t.hits).length > 0));
   const hitEntry = t && live != null && (t.dir > 0 ? live <= t.entry : live >= t.entry);
   const isZoomed = t && (isRunning || hitEntry);
 
   if (isZoomed) {
-    // Logika Auto Zoom: Fokus ke range SL sampai TP
     const levels = [t.sl, t.entry, t.tp1, t.tp2, t.tp3, live].filter(v => v != null && Number.isFinite(v));
     lo = Math.min(...levels);
     hi = Math.max(...levels);
   } else {
-    // Tampilan normal (fit candle)
     vis.forEach(c => { 
       if (c.h < lo) lo = c.h; 
       if (c.h > hi) hi = c.h; 
@@ -1744,7 +1751,6 @@ function drawChart() {
   if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
   if (!(hi - lo > 0)) { const dd = Math.abs(hi) * 0.001 || 1; lo -= dd; hi += dd; }
   
-  // Beri sedikit ruang (padding) agar candle/garis tidak menempel di ujung atas/bawah
   const pad = (hi - lo) * (isZoomed ? 0.05 : 0.12); 
   lo -= pad;
   hi += pad;
@@ -1771,7 +1777,6 @@ function drawChart() {
     cx.restore();
   }
 
-  // --- GAMBAR CANDLESTICK (Menggantikan Line Chart) ---
   const bodyW = Math.max(1.5, slot * 0.62);
   cx.lineWidth = 1;
   for (const c of vis) {
@@ -1782,18 +1787,15 @@ function drawChart() {
     const col = up ? '#34d399' : '#f87171';
     const yH = yOf(c.h), yL = yOf(c.l), yO = yOf(c.o), yC = yOf(c.c);
     
-    // Sumbu (Wick)
     cx.strokeStyle = col;
     cx.beginPath(); cx.moveTo(x, yH); cx.lineTo(x, yL); cx.stroke();
     
-    // Body
     cx.fillStyle = col;
     const bY = Math.min(yO, yC);
     const bH = Math.max(1, Math.abs(yC - yO));
     cx.fillRect(x - bodyW / 2, bY, bodyW, bH);
   }
 
-  // Gambar Garis Level (Entry, SL, TP)
   if (t) {
     const x0 = clampX(xOfT(t.createdAt));
     L.forEach(l => {
@@ -1808,7 +1810,6 @@ function drawChart() {
     });
   }
 
-  // Garis Harga Live & Animasi titik
   if (live != null) {
     const y = yOf(live);
     const lc = liveDir < 0 ? '#f87171' : '#34d399';
@@ -1829,7 +1830,6 @@ function drawChart() {
     }
   }
 
-  // Label Waktu
   if (vis.length) {
     const step = Math.max(1, Math.round(vis.length / 5));
     cx.font = '8px ui-monospace, monospace';
@@ -1843,7 +1843,6 @@ function drawChart() {
     }
   }
 
-  // Tag Label di Kanan (Entry, SL, TP, Live)
   const tags = L.map(l => ({ text: (l.hit ? '✓ ' : '') + l.label + ' ' + fmt(l.v), c: l.c, bg: l.bg, y: yOf(l.v) }));
   if (live != null) {
     tags.push({
@@ -1885,7 +1884,6 @@ function drawSMC() {
   const t = activeTrade();
   const style = t ? t.style : $('tradingStyleSelect').value;
   
-  // Gunakan Override TF jika ada
   const iv = smcTfOverride || SMC_TF_MAP[style] || '5m'; 
   
   const tfMs = TF_MIN[iv] * 60000;
@@ -1919,7 +1917,7 @@ function drawSMC() {
 
   const fvgs = s.fvgs.filter(z => inBand(z.bottom, z.top));
   const obs = s.obs.filter(z => inBand(z.bottom, z.top));
-  const breakers = s.breakers.filter(z => inBand(z.bottom, z.top)); // Filter BB
+  const breakers = s.breakers.filter(z => inBand(z.bottom, z.top)); 
   const pools = s.liq.pools.filter(p => near(p.p));
   const sweeps = s.liq.sweeps.filter(p => near(p.p));
   const ev = s.ev.filter(e => near(e.p) && e.toT >= t0);
@@ -1998,7 +1996,6 @@ function drawSMC() {
   };
   fvgs.forEach(z => zone(z, z.dir > 0 ? 'FVG ▲' : 'FVG ▼', z.dir > 0 ? '59,130,246' : '168,85,247'));
   obs.forEach(z => zone(z, z.dir > 0 ? 'Demand' : 'Supply', z.dir > 0 ? '16,185,129' : '239,68,68'));
-  // Render Breaker Block dengan warna khusus (Cyan/Pink)
   breakers.forEach(z => zone(z, z.dir > 0 ? 'BB ▲' : 'BB ▼', z.dir > 0 ? '34,211,238' : '244,114,182'));
 
   // BSL / SSL / EQH / EQL
