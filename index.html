@@ -263,7 +263,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
           <p id="tradeLive" class="text-[8px] font-mono text-gray-400"></p>
           <p id="smcInfo" class="text-[8px] font-mono text-gray-400 break-words"></p>
 
-          <!-- Chart utama: candle + level trade (tidak diubah oleh SMC) -->
+          <!-- Chart utama: LINE CHART (DIPERBARUI) -->
           <div class="relative w-full h-[200px] sm:h-[260px] lg:h-[300px]">
             <canvas id="priceChart" class="absolute inset-0 w-full h-full"></canvas>
           </div>
@@ -1267,7 +1267,7 @@ function calReset() {
   renderCalendar();
 }
 
-/* ================= SMC: DETEKSI (FVG, OB/SND, BOS/CHoCH, CISD, BSL/SSL, SW) ================= */
+/* ================= SMC: DETEKSI ================= */
 function paintSmcBtn() {
   const b = $('btnSmcToggle');
   b.classList.toggle('bg-accentblue', showSMC);
@@ -1282,7 +1282,6 @@ function toggleSMC() {
   renderSmcInfo();
 }
 
-// Zona yang sudah ditembus harga dianggap tidak valid (mitigated)
 function invalidZone(rows, from, dir, bottom, top) {
   for (let j = from; j < rows.length; j++) {
     if (dir > 0 && rows[j].l < bottom) return true;
@@ -1291,7 +1290,6 @@ function invalidZone(rows, from, dir, bottom, top) {
   return false;
 }
 
-// Swing high/low dengan konfirmasi SWING_L candle di kiri dan kanan
 function swings(rows) {
   const sh = [], sl = [];
   for (let i = SWING_L; i < rows.length - SWING_L; i++) {
@@ -1306,7 +1304,6 @@ function swings(rows) {
   return { sh, sl };
 }
 
-// BOS (lanjut tren) dan CHoCH (balik tren) dari close yang menembus swing terakhir
 function structure(rows, sw) {
   const ev = [];
   let trend = 0, lastH = null, lastL = null;
@@ -1330,7 +1327,6 @@ function structure(rows, sw) {
   return { ev: ev.slice(-6), trend };
 }
 
-// Likuiditas: pool BSL/SSL (swing belum tersentuh), EQH/EQL, dan sweep (wick tembus lalu close kembali)
 function liquidity(rows, sw) {
   const pools = [], sweeps = [];
   const last = rows[rows.length - 1];
@@ -1357,7 +1353,6 @@ function liquidity(rows, sw) {
   return { pools: pools.slice(-6), sweeps: sweeps.slice(-4) };
 }
 
-// CISD (pendekatan): displacement yang menutup melewati open candle lawan arah, setelah ada sweep
 function cisdOf(rows) {
   const out = [];
   let lastK = -1;
@@ -1436,7 +1431,6 @@ function renderSmcInfo() {
   setTxt('smcInfo', `${head} · ${s.fvgs.length} FVG · ${s.obs.length} OB/SND · ${s.liq.pools.length} BSL/SSL · ${s.ev.length} BOS/CHoCH · ${s.cisd.length} CISD · ${s.liq.sweeps.length} SW`);
 }
 
-// Box sesi Asia & New York (UTC → dihitung dari candle)
 function sessionBoxes(rows, now) {
   const out = [];
   if (!rows.length) return out;
@@ -1475,7 +1469,6 @@ function rr(c, x, y, w, h, r) {
   c.arcTo(x, y, x + w, y, r);
   c.closePath();
 }
-// Posisi candle di sumbu X (dipakai chart utama dan panel SMC)
 function layoutX(rows, plotL, plotR, tfMs) {
   const plotW = plotR - plotL;
   const nWant = Math.max(12, Math.floor(plotW / 5) - CH_PAD);
@@ -1488,7 +1481,7 @@ function layoutX(rows, plotL, plotR, tfMs) {
 }
 function srcLabel(k, iv) { return `${k} · ${iv} · WIB · ${srcOf(k, iv)}`; }
 
-/* ================= CHART UTAMA (TIDAK DICAMPUR SMC) ================= */
+/* ================= CHART UTAMA (LINE CHART) ================= */
 function drawChart() {
   const d = fitCv(cv, cx);
   if (!d) return;
@@ -1564,17 +1557,30 @@ function drawChart() {
     cx.restore();
   }
 
-  const bodyW = Math.max(1.5, slot * 0.62);
-  cx.lineWidth = 1;
-  for (const c of vis) {
-    const x = xOfT(c.t);
-    const up = c.c >= c.o;
-    const col = up ? '#34d399' : '#f87171';
-    const yH = yOf(c.h), yL = yOf(c.l), yO = yOf(c.o), yC = yOf(c.c);
-    cx.strokeStyle = col;
-    cx.fillStyle = col;
-    cx.beginPath(); cx.moveTo(x, yH); cx.lineTo(x, yL); cx.stroke();
-    cx.fillRect(x - bodyW / 2, Math.min(yO, yC), bodyW, Math.max(1, Math.abs(yC - yO)));
+  // --- DRAW LINE CHART (Ganti Candlestick) ---
+  if (vis.length > 0) {
+    cx.save();
+    cx.lineWidth = 2;
+    cx.strokeStyle = '#2962ff';
+    cx.beginPath();
+    vis.forEach((c, i) => {
+      const x = xOfT(c.t);
+      const y = yOf(c.c);
+      if (i === 0) cx.moveTo(x, y);
+      else cx.lineTo(x, y);
+    });
+    cx.stroke();
+
+    // Gradient fill under the line
+    cx.lineTo(xOfT(vis[vis.length - 1].t), plotB);
+    cx.lineTo(xOfT(vis[0].t), plotB);
+    cx.closePath();
+    const grad = cx.createLinearGradient(0, plotT, 0, plotB);
+    grad.addColorStop(0, 'rgba(41,98,255,.35)');
+    grad.addColorStop(1, 'rgba(41,98,255,0)');
+    cx.fillStyle = grad;
+    cx.fill();
+    cx.restore();
   }
 
   if (t) {
@@ -1654,7 +1660,7 @@ function drawChart() {
   }
 }
 
-/* ================= PANEL SMC (TERPISAH, MIRIP INDIKATOR) ================= */
+/* ================= PANEL SMC (TETAP CANDLESTICK) ================= */
 function drawSMC() {
   const d = fitCv(scv, sx);
   if (!d) return;
