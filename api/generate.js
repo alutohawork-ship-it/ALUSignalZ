@@ -1,7 +1,7 @@
 // api/generate.js
-// v54 (Day Trading: Scalping Konservatif - Fresh FVG/OB Retest)
-//  - Scalping: Market Execution (NOW), FVG M1-M5.
-//  - Day Trading: Konsep Scalping Konservatif. Menunggu retest FVG/OB baru (fresh) di M15 akibat BOS. Limit Order.
+// v55 (True 2-Way Scalping: Tiered Zones, FVG & NOW)
+//  - Scalping: Market Execution (NOW), FVG M1-M5, 2-Arah (Trend + Counter-Trend Scoring).
+//  - Day Trading: Menunggu retest FVG/OB baru M15 akibat BOS. Limit Order. Fixed Risk 50 pip (XAUUSD).
 //  - Intraday: Area S/D H1 + Refine M15. 2 arah.
 //  - Swing: Area S/D H4 + Refine H1.
 //  - Integrasi AI GutsAI (Qwen 3.8 Max) untuk narasi reasoning SMC/ICT.
@@ -15,7 +15,7 @@ const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
 // ── AI CONFIG ──
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const AI_MODEL = process.env.AI_MODEL || 'qwen-3.8-max'; // Default Qwen 3.8 Max, override via env AI_MODEL
+const AI_MODEL = process.env.AI_MODEL || 'qwen-3.8-max'; // Default Qwen 3.8 Max
 
 const API_KEYS = [
   process.env.TICKERLAYER_API_KEY,
@@ -40,7 +40,6 @@ const GOLD_SYMBOLS = ['XAUUSD', 'XAUUSDX'];
 const isGold = symbol => GOLD_SYMBOLS.includes(symbol);
 
 // ── PROFIL PER PAIR ──
-// Setiap pair dihitung dari ATR, pip, dan strukturnya sendiri. Profil kelas hanya mengatur default.
 const MAX_SRC_DEVIATION = 0.05; // candle sumber harus dekat harga live (5%), kalau tidak dibuang
 
 const pairClassOf = symbol => {
@@ -65,18 +64,14 @@ const PAIR_CLASS_PROFILE = {
   crypto:    { label: 'Kripto',    structTf: 'M5', zoneTf: 'M5', zoneDisp: 1.0, nearAtr: 0.8, slMul: 1.3, bufAtr: 0.3,  range: [0.00001, 5000000] },
 };
 
-// Override khusus per pair. Isi hanya jika satu pair perlu angka sendiri.
-const PAIR_OVERRIDE = {
-  // BTCUSD: { slMul: 1.4 },
-  // EURUSD: { nearAtr: 0.5 },
-};
+const PAIR_OVERRIDE = {};
 
 const pairProfile = symbol => {
   const cls = pairClassOf(symbol);
   return { cls, ...PAIR_CLASS_PROFILE[cls], ...(PAIR_OVERRIDE[symbol] || {}) };
 };
 
-// Ukuran 1 pip per instrumen. Di luar daftar ini: 10^-(desimal-1), misalnya EURUSD 0.0001, USDJPY 0.01.
+// Ukuran 1 pip per instrumen. 
 const PIP_OVERRIDE = {
   XAUUSD: 0.1, XAUUSDX: 0.1, DXY: 0.01, ETHUSD: 0.1,
   US30: 1, NAS100: 1, SPX500: 1, GER40: 1, UK100: 1, JPN225: 1, FRA40: 1, AUS200: 1, BTCUSD: 1,
@@ -90,7 +85,6 @@ const STYLES = {
     entryStyle: 'Agresif', entryStyleEn: 'Aggressive', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
   'Day Trading': {
-    // Ubah label dan RR untuk Scalping Konservatif
     label: 'Day Trading · Scalping Konservatif · Retest FVG/OB M15',
     labelEn: 'Day Trading · Conservative Scalping · M15 FVG/OB retest',
     entryStyle: 'Konservatif', entryStyleEn: 'Conservative', mode: 'LIMIT', kind: 'day', rr: [1.0, 1.5, 2.0],
@@ -120,8 +114,8 @@ const DAY_OB_LOOKBACK = 12;
 // ── Bollinger ──
 const BB_PERIOD = 20;
 const BB_MULT = 2;
-const BAND_TOL_PIPS = 10;   // toleransi limit terhadap band (dipakai untuk pair dengan pip)
-const BAND_TOL_ATR = 0.2;   // toleransi limit terhadap band (pair tanpa batas pip, dalam kelipatan ATR)
+const BAND_TOL_PIPS = 10;   
+const BAND_TOL_ATR = 0.2;   
 
 // ── Zona Supply/Demand (default) ──
 const ZONE_ATR_PERIOD = 14;
@@ -131,16 +125,13 @@ const ZONE_REQUIRE_FVG = false;
 const ZONE_FRESH_ONLY = true;
 
 // ── Scalping ──
-const SCALP_ZONE_LOOKBACK_M5 = 60;      // area M5 harus terbentuk dalam 60 candle M5 terakhir
-const SCALP_ZONE_DISP_ATR = 0.8;        // displacement scalping M5: body minimal 0.8 × ATR
-const SCALP_ZONE_FRESH_ONLY = true;     // true = area yang sudah pernah tersentuh dibuang
-const SCALP_ZONE_NEEDS_CONFIRM = false; // true = tunggu reaksi (pullback selesai lalu tembus) dulu
-const SCALP_ZONE_REQUIRE_BIAS = false;  // true = demand hanya jika bias M5 bullish, supply jika bearish
-const SCALP_NEAR_ZONE_PIPS = 15;        // area berlawanan dalam 15 pip → peringatan
-const SCALP_CHASE_MAX_PIPS = 15;        // dipakai hanya jika SCALP_ZONE_NEEDS_CONFIRM = true
+const SCALP_ZONE_LOOKBACK_M5 = 60;      
+const SCALP_ZONE_DISP_ATR = 0.8;        
+const SCALP_ZONE_FRESH_ONLY = true;     
+const SCALP_CHASE_MAX_PIPS = 15;        
 const scalpZoneOpts = { dispAtr: SCALP_ZONE_DISP_ATR, freshOnly: SCALP_ZONE_FRESH_ONLY };
 
-// ═══ ADDED: REACTION RANGE + FVG CONTINUITY + FIXED RISK (Day Trading XAUUSD) ═══
+// ── REACTION RANGE + FVG CONTINUITY + FIXED RISK ──
 const REACTION_ATR = { scalp: 1.5, day: 1.5, intraday: 1.5, swing: 2.0 };
 const REACTION_MIN_PIP = 5;
 const NOW_MAX_ATR = { scalp: 0.4, day: 0.6, intraday: 0.8 };
@@ -153,7 +144,7 @@ function reactionRangeFor(kind, atrVal, ctx) {
   return Math.max((REACTION_ATR[kind] || 1.5) * atrVal, REACTION_MIN_PIP * ctx.pip);
 }
 
-// Fixed 50 pip hanya untuk XAUUSD di Day Trading; pair lain → null (fallback struktur)
+// Fixed 50 pip hanya untuk XAUUSD di Day Trading
 function fixedRiskFor(kind, ctx) {
   if (kind === 'day' && ctx.gold) return FIXED_RISK_XAU_DAY_PIPS * ctx.pip;
   return null;
@@ -228,17 +219,14 @@ function evaluateFVG(candles, price, dir, atrVal, lookback = 40) {
   if (Math.abs(distToFVG) < 1.0 * atrVal) return { useFVG: true, entry, sl, fvg, retraceMandatory: true, reason: 'near-breakout' };
   return { useFVG: false, reason: 'breakout-far', fvg };
 }
-// ═══ END ADDED ═══
 
 // ── SL: XAUUSD dalam pip, pair lain dalam kelipatan ATR ──
 const GOLD_SL_PIPS = { scalp: [25, 30], day: [50, 120], intraday: [80, 200], swing: [150, 300] };
 const SL_BUFFER_PIPS = { scalp: 3, day: 5, intraday: 10, swing: 15 };
 const ATR_SL_MULT = { scalp: [0.5, 2.5], day: [1, 3], intraday: [1, 3], swing: [0.5, 2] };
-const SL_BUFFER_ATR = 0.2;
 
 const orderLabel = (dir, orderType) => `${dir === 1 ? 'BUY' : 'SELL'} ${orderType === 'LIMIT' ? 'LIMIT' : 'NOW'}`;
 const isoDate = d => d.toISOString().slice(0, 10);
-const wibDate = () => new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const lastClosePrice = arr => (arr && arr.length ? arr[arr.length - 1].c : 0);
 
@@ -265,7 +253,6 @@ async function kvSetJSON(key, value, ttl) {
   try { await kv(['SET', key, JSON.stringify(value), 'EX', ttl]); } catch (e) {}
 }
 
-// Kembalikan kunci pesan (noEmail, notRegistered, expired), bukan teks, supaya bisa diterjemahkan.
 async function checkAccess(email) {
   if (!email) return { ok: false, key: 'noEmail' };
   try {
@@ -279,8 +266,7 @@ async function checkAccess(email) {
   return { ok: true };
 }
 
-// ═══════════════════════════ BAHASA (id / en) ═══════════════════════════
-// Bahasa dikirim frontend lewat field "lang". Default: id.
+// ═══════════════════════════ BAHASA ═══════════════════════════
 const pickLang = (body, query) => {
   const raw = String(body?.lang ?? body?.language ?? body?.locale ?? query?.lang ?? '').toLowerCase();
   return raw.startsWith('en') ? 'en' : 'id';
@@ -343,7 +329,6 @@ const TX = {
     noSource: 'tidak ada sumber',
     noSetup: 'Tidak ada setup yang valid saat ini.',
     notProcessed: 'Belum diproses',
-    // Konteks zona untuk reasoning AI (scalping)
     zoneFresh: (side, tf, lo, hi, inside) => `Zona ${side} ${tf} VALID & FRESH ${inside ? '(harga di dalam)' : '(harga dekat)'}: ${lo} - ${hi}`,
     zoneStale: (side, tf, lo, hi) => `Zona ${side} ${tf} TIDAK FRESH (sudah pernah disentuh): ${lo} - ${hi}`,
     zoneNone: 'Tidak ada zona S/D fresh yang dekat dengan harga',
@@ -352,24 +337,19 @@ const TX = {
 A. Jika ada zona VALID & FRESH (harga di dalam atau dekat zona):
    - Zona SUPPLY → fokus setup SELL. Zona DEMAND → fokus setup BUY.
    - Tulis catatan "zona valid" beserta tipe zona, rentang harga, dan arah fokus.
-   - Arah sinyal pada DATA sudah ditetapkan sistem. Tugasmu menjelaskan, bukan membalik arah.
-B. Jika zona TIDAK FRESH (sudah pernah disentuh/memantul) atau tidak ada zona:
-   - Jangan jadikan zona itu dasar fokus. Jelaskan arah dari struktur (BOS/CHoCH) dan sebut bahwa zona tidak fresh.
-C. Jangan jadikan BUY dari zona SUPPLY atau SELL dari zona DEMAND sebagai setup utama, kecuali zona sudah tidak fresh dan struktur sudah berbalik (BOS/CHoCH).
+B. Jika zona TIDAK FRESH atau tidak ada zona, DAN tidak ada FVG:
+   - Jelaskan arah dari momentum struktur (BOS/CHoCH).
+C. Jangan jadikan BUY dari zona SUPPLY atau SELL dari zona DEMAND sebagai setup utama, kecuali zona sudah tidak fresh dan struktur sudah berbalik.
 `,
     aiPrompt: (d) => `
 Anda adalah "Alu Signal Z", trader SMC/ICT. Tulis 1 paragraf (maks 400 karakter, bahasa Indonesia, tegas) yang menjelaskan MENGAPA entry ini diambil. Gunakan HANYA data di bawah.
-
 === ATURAN ===
-1. Pair yang dibahas hanya ${d.symbol} (${d.classLabel}). Jangan menyebut pair lain, emas, atau XAUUSD kecuali pair ini memang XAUUSD.
-2. Timeframe yang boleh disebut: struktur ${d.structTf}, zona ${d.zoneTf}, dan TF lain hanya jika tertulis di DATA.
-3. Gunakan istilah: Order Block, FVG, BOS, CHoCH, Liquidity Sweep, Premium/Discount, Inducement, Displacement, Supply/Demand. Jangan pakai RSI, MACD, MA, atau S/R klasik.
-4. Bollinger Band hanya disebut jika tertulis di DATA, dan sebut apa adanya.
-5. Jika tidak ada setup yang jelas, tulis bahwa market sedang ranging/equilibrium.
-6. Jangan mengarang berita fundamental.
-
+1. Pair hanya ${d.symbol} (${d.classLabel}). Jangan sebut pair lain.
+2. TF: struktur ${d.structTf}, zona ${d.zoneTf}.
+3. Istilah: Order Block, FVG, BOS, CHoCH, Liquidity Sweep, Displacement. Jangan pakai RSI/MACD.
+4. Jika tidak ada setup jelas, tulis market ranging.
 === DATA ===
-- Pair: ${d.symbol} | Kelas: ${d.classLabel} | Desimal: ${d.dec}
+- Pair: ${d.symbol} | Kelas: ${d.classLabel}
 - Sinyal: ${d.sideW} | Gaya: ${d.kind} | Order: ${d.orderType}
 - Entry: ${d.entry} | SL: ${d.sl} (${d.riskPips} pip)
 - TP: ${d.tps}
@@ -388,7 +368,7 @@ Anda adalah "Alu Signal Z", trader SMC/ICT. Tulis 1 paragraf (maks 400 karakter,
     inZone: (side, tf, lo, hi) => `Price inside ${side} ${tf} ${lo} - ${hi}`,
     limitEdge: (side, tf, px, pips) => `Limit at ${side} edge ${tf} (${px}), ${pips} pips from price`,
     aligned: (tf, src) => `${tf} direction ${src} aligned`,
-    opposed: (tf, src) => `Caution: ${tf} direction ${src} is opposing, reaction not yet confirmed`,
+    opposed: (tf, src) => `Caution: ${tf} direction ${src} is opposing`,
     outside: (zoneTf, tf, src) => `Outside S/D ${zoneTf} zone, following ${tf} structure (${src}) → Market Execution`,
     nearM5: 'Nearest M5 zones:',
     noM5Zone: n => `No valid M5 S/D zone in the last ${n} candles`,
@@ -417,7 +397,7 @@ Anda adalah "Alu Signal Z", trader SMC/ICT. Tulis 1 paragraf (maks 400 karakter,
     brokenNote: (a, ref) => `Price passed ${a}, entering NOW with SL from the last ${ref} structure`,
     inAreaSetup: (a, c) => `${a} · ${c}`,
     inAreaConfirm: (a, setup, ref) => `Price in ${a}, confirmed by ${setup} (${ref})`,
-    inAreaNoConfirm: (a, ref) => `Price in ${a}, no BB confirmation on ${ref} yet, be careful`,
+    inAreaNoConfirm: (a, ref) => `Price in ${a}, no BB confirmation on ${ref} yet`,
     limitSetup: a => `${a} · Limit`,
     limitNote: (a, px, pips) => `Limit at ${a} edge (${px}), ${pips} pips from price`,
     farLimit: 'Limit distance is large, may take a while to fill',
@@ -435,7 +415,6 @@ Anda adalah "Alu Signal Z", trader SMC/ICT. Tulis 1 paragraf (maks 400 karakter,
     noSource: 'no source',
     noSetup: 'No valid setup right now.',
     notProcessed: 'Not processed yet',
-    // Zone context for AI reasoning (scalping)
     zoneFresh: (side, tf, lo, hi, inside) => `${side.toUpperCase()} zone ${tf} VALID & FRESH ${inside ? '(price inside)' : '(price near)'}: ${lo} - ${hi}`,
     zoneStale: (side, tf, lo, hi) => `${side.toUpperCase()} zone ${tf} NOT FRESH (already tested): ${lo} - ${hi}`,
     zoneNone: 'No fresh S/D zone near price',
@@ -443,25 +422,17 @@ Anda adalah "Alu Signal Z", trader SMC/ICT. Tulis 1 paragraf (maks 400 karakter,
 === AGGRESSIVE SCALPING WORKFLOW (MUST FOLLOW) ===
 A. If a VALID & FRESH zone exists (price inside or near the zone):
    - SUPPLY zone → focus SELL setup. DEMAND zone → focus BUY setup.
-   - Write a "valid zone" note with the zone type, price range, and focus direction.
-   - The signal direction in DATA is set by the system. Your job is to explain it, not to reverse it.
-B. If the zone is NOT FRESH (already tested/bounced) or there is no zone:
-   - Do not use that zone as the basis for focus. Explain the direction from structure (BOS/CHoCH) and state that the zone is not fresh.
-C. Do not treat a BUY from a SUPPLY zone or a SELL from a DEMAND zone as the main setup, unless the zone is no longer fresh and structure has flipped (BOS/CHoCH).
+B. If the zone is NOT FRESH or there is no zone, AND no FVG:
+   - Explain the direction from momentum structure (BOS/CHoCH).
 `,
     aiPrompt: (d) => `
 You are "Alu Signal Z", an SMC/ICT trader. Write ONE paragraph in English (max 400 characters) explaining WHY this entry was taken. Use ONLY the data below.
-
 === RULES ===
-1. The only pair discussed is ${d.symbol} (${d.classLabel}). Do not mention other pairs, gold, or XAUUSD unless this pair is XAUUSD.
-2. Timeframes you may mention: structure ${d.structTf}, zone ${d.zoneTf}, and other TFs only if written in the DATA.
-3. Use terms: Order Block, FVG, BOS, CHoCH, Liquidity Sweep, Premium/Discount, Inducement, Displacement, Supply/Demand. Do not use RSI, MACD, MA, or classic S/R.
-4. Mention Bollinger Bands only if they appear in the DATA, and describe them as written.
-5. If there is no clear setup, state that the market is ranging/at equilibrium.
-6. Do not invent fundamental news.
-
+1. The only pair discussed is ${d.symbol} (${d.classLabel}).
+2. Timeframes: structure ${d.structTf}, zone ${d.zoneTf}.
+3. Use terms: Order Block, FVG, BOS, CHoCH, Liquidity Sweep, Displacement.
 === DATA ===
-- Pair: ${d.symbol} | Class: ${d.classLabel} | Decimals: ${d.dec}
+- Pair: ${d.symbol} | Class: ${d.classLabel}
 - Signal: ${d.sideW} | Style: ${d.kind} | Order: ${d.orderType}
 - Entry: ${d.entry} | SL: ${d.sl} (${d.riskPips} pips)
 - TP: ${d.tps}
@@ -475,7 +446,6 @@ You are "Alu Signal Z", an SMC/ICT trader. Write ONE paragraph in English (max 4
 
 const tx = ctx => TX[ctx.lang] || TX.id;
 
-// Nama struktur untuk ditampilkan. Nilai asli (Indonesia) tetap dipakai untuk logika.
 const SRC_EN = {
   'BOS Bullish': 'BOS Bullish',
   'BOS Bearish': 'BOS Bearish',
@@ -487,11 +457,8 @@ const SRC_EN = {
 };
 const srcName = (src, lang) => (lang === 'en' ? (SRC_EN[src] || src) : src);
 
-const orderLabelLang = null; // placeholder dihapus di bawah
-
 // ═══════════════════════════ FEED CANDLE ═══════════════════════════
 
-// Nama simbol yang dicoba ke TickerLayer, urut prioritas. Crypto dicoba sebagai USDT lalu USD.
 function tlCandidates(symbol) {
   const s = symbol.toUpperCase().trim();
   if (CRYPTO_LIST.includes(s)) {
@@ -527,7 +494,6 @@ async function tlFetch(url, initialApiKey) {
   return { response: await fetch(url, { method: 'GET', headers: { 'x-api-key': keys[0], 'Content-Type': 'application/json' } }), keyIndex: 0 };
 }
 
-// Hanya 1m, 5m, dan 15m yang diambil dari TickerLayer. H1 dan H4 dibentuk dari M15.
 const TL_SPAN = {
   '1m':  { mult: 1,  span: 'minute', minutes: 1 },
   '5m':  { mult: 5,  span: 'minute', minutes: 5 },
@@ -536,7 +502,6 @@ const TL_SPAN = {
 const CACHE_TTL = { '1m': 120, '5m': 300, '15m': 600 };
 const CACHE_BARS = { '1m': 300, '5m': 300, '15m': 600 };
 
-// Timestamp bisa berupa milidetik, detik, atau teks tanggal. Semuanya diubah ke milidetik.
 function toEpochMs(v) {
   if (typeof v === 'string' && v.trim() !== '' && Number.isNaN(Number(v))) return Date.parse(v) || 0;
   const n = Number(v);
@@ -544,7 +509,6 @@ function toEpochMs(v) {
   return n < 1e11 ? n * 1000 : n;
 }
 
-// Ambil candle dari TickerLayer untuk satu kandidat simbol. Tidak pernah melempar error.
 async function fetchTickerLayerRows(cand, interval, apiKey, need) {
   const info = { cand: `${cand.asset}/${cand.symbol}`, status: null, rows: [], error: null };
   const tf = TL_SPAN[interval];
@@ -596,7 +560,6 @@ function mergeLiveBar(candles, price, tfMin) {
   return candles;
 }
 
-// Bangun candle berjangka tfMin menit dari candle yang lebih kecil (M1→M5, M15→H1, M15→H4)
 function aggregateCandles(candles, tfMin) {
   const ms = tfMin * 60000;
   const map = new Map();
@@ -613,10 +576,7 @@ function aggregateCandles(candles, tfMin) {
   return [...map.values()].sort((a, b) => a.t - b.t);
 }
 
-// Versi cache candle. Naikkan jika sumber data berubah, supaya cache lama yang mungkin salah tidak dipakai lagi.
 const CANDLE_CACHE_VER = 'v2';
-
-// Candle dianggap valid jika close terakhirnya dekat harga live (toleransi MAX_SRC_DEVIATION).
 const matchesRef = (arr, ref) =>
   arr.length > 0 && ref > 0 && Math.abs(arr[arr.length - 1].c - ref) / ref <= MAX_SRC_DEVIATION;
 
@@ -700,19 +660,6 @@ function analyzePureSMCStructure(candles) {
   if (h2.p > h1.p && l2.p > l1.p) return { dir: 1, src: 'Struktur HH + HL' };
   if (h2.p < h1.p && l2.p < l1.p) return { dir: -1, src: 'Struktur LH + LL' };
   return { dir: lastC >= candles[candles.length - 2].c ? 1 : -1, src: 'Mitigasi FVG / Inducement' };
-}
-
-function structureBias(candles, L) {
-  const { highs, lows } = findPivots(candles, L);
-  if (highs.length < 2 || lows.length < 2) return { dir: 0, src: 'struktur belum terbentuk' };
-  const [h1, h2] = highs.slice(-2);
-  const [l1, l2] = lows.slice(-2);
-  const c = candles[candles.length - 1].c;
-  if (c > h2.p) return { dir: 1, src: 'BOS bullish' };
-  if (c < l2.p) return { dir: -1, src: 'BOS bearish' };
-  if (h2.p > h1.p && l2.p > l1.p) return { dir: 1, src: 'HH + HL' };
-  if (h2.p < h1.p && l2.p < l1.p) return { dir: -1, src: 'LH + LL' };
-  return { dir: 0, src: 'belum jelas' };
 }
 
 function findLastBOS(candles, L) {
@@ -800,12 +747,6 @@ function swingArea(candles, dir, L) {
   return { top: lvl, bottom: lvl, sl: lvl, idx: -1, dispIdx: -1, dist: 0 };
 }
 
-function pickM15Area(m15, bos, price) {
-  const zones = findSDZones(m15, bos.dir, price)
-    .filter(z => z.dispIdx >= bos.idx - DAY_OB_LOOKBACK && z.dispIdx <= bos.idx);
-  return zones[0] || null;
-}
-
 function recentExtreme(candles, dir, bars) {
   const s = candles.slice(-(bars + 1));
   return dir === 1 ? Math.min(...s.map(c => c.l)) : Math.max(...s.map(c => c.h));
@@ -829,22 +770,6 @@ function areaNote(m5c, price, ctx) {
   return parts.length
     ? `${t.nearM5} ${parts.join(', ')}`
     : t.noM5Zone(SCALP_ZONE_LOOKBACK_M5);
-}
-
-function m1Reaction(struct, dir, price, ctx) {
-  const { f, pip } = ctx;
-  const { highs, lows } = findPivots(struct, SCALP_PIVOT);
-  if (!highs.length || !lows.length) return { ok: false, why: 'struktur belum terbentuk' };
-  const lastH = highs[highs.length - 1];
-  const lastL = lows[lows.length - 1];
-  let breakLevel = null;
-  if (dir === 1 && lastL.i > lastH.i) breakLevel = lastH.p;
-  else if (dir === -1 && lastH.i > lastL.i) breakLevel = lastL.p;
-  if (breakLevel == null) return { ok: false, why: 'pullback belum selesai' };
-  const beyond = ((price - breakLevel) * dir) / pip;
-  if (beyond <= 0) return { ok: false, why: `menunggu menembus ${f(breakLevel)}` };
-  if (beyond > SCALP_CHASE_MAX_PIPS) return { ok: false, why: `harga ${beyond.toFixed(0)} pip melewati ${f(breakLevel)}, tidak dikejar` };
-  return { ok: true, breakLevel };
 }
 
 function findRefineTrigger(candles, dir) {
@@ -882,7 +807,6 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
   const t = TX[lang] || TX.id;
   const p = v => Number(v).toFixed(dec);
 
-  // Scalping agresif: tambahkan alur zona (fokus sesuai zona valid, zona tidak fresh diabaikan).
   const prompt = t.aiPrompt({
     symbol,
     classLabel: t.classLabel[prof.cls] || prof.label,
@@ -915,7 +839,7 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
           { role: 'user', content: prompt }
         ],
         max_tokens: 200,
-        temperature: 0.1, // Suhu rendah agar AI sangat patuh pada aturan SMC
+        temperature: 0.1, 
       })
     });
 
@@ -931,7 +855,7 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
   }
 }
 
-// ═══ MODIFIED: finalizePlan — Day Trading XAUUSD fixed 50 pip, pair lain struktur ═══
+// ═══ MODIFIED: finalizePlan ═══
 async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, rrList, confidence, setup, zoneNote, zoneRange, head, lines, zoneLine }) {
   const { f, pip, gold, prof } = ctx;
   const t = tx(ctx);
@@ -939,13 +863,11 @@ async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, 
   let risk, slNote = '';
   const fixedRisk = fixedRiskFor(kind, ctx);
   if (fixedRisk) {
-    // XAUUSD Day Trading: SL fixed 50 pip
     risk = fixedRisk;
     slNote = ctx.lang === 'en'
       ? `SL fixed ${FIXED_RISK_XAU_DAY_PIPS} pips (XAUUSD day trade)`
       : `SL fixed ${FIXED_RISK_XAU_DAY_PIPS} pip (Day Trading XAUUSD)`;
   } else {
-    // Pair lain (dan style lain): SL struktur ATR-based per pair
     const b = slBounds(kind, ctx, atrVal);
     const buf = gold ? SL_BUFFER_PIPS[kind] * pip : prof.bufAtr * atrVal;
     let raw = Math.abs(entry - baseSL) + buf;
@@ -965,7 +887,6 @@ async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, 
   ].filter(Boolean);
   const manualReason = parts.map(s => s.replace(/\.?$/, '.')).join(' • ');
 
-  // Panggil AI
   const aiReason = await getAIReasoning({
     ctx, dir, kind, orderType, entry, sl, tps, setup,
     rawReason: manualReason, riskPips: risk / pip, zoneLine,
@@ -1044,7 +965,7 @@ async function buildAreaPlan({ title, area, dir, price, refineC, refineName, kin
 
 // ═══════════════════════════ SCALPING ═══════════════════════════
 
-// ═══ MODIFIED: buildScalpPlan — Reaction Range + FVG Continuity + Decision Matrix ═══
+// ═══ MODIFIED: buildScalpPlan — TRUE 2-WAY SCALPING (Trend + Counter-Trend Bounce) ═══
 async function buildScalpPlan({ m1, m5, price, rrList, ctx }) {
   const { f, pip, prof } = ctx;
   const t = tx(ctx);
@@ -1059,99 +980,119 @@ async function buildScalpPlan({ m1, m5, price, rrList, ctx }) {
 
   const demand = findSDZones(m5c, 1, price, zOpts).filter(recent)[0] || null;
   const supply = findSDZones(m5c, -1, price, zOpts).filter(recent)[0] || null;
-  const pos = classifyPriceZone(price, demand, supply, reactionDist);
-  const rejection = detectRejection(struct, price, demand, supply, atrVal, NOW_MAX_ATR.scalp);
   const init = analyzePureSMCStructure(struct);
-  const srcTxt = srcName(init.src, ctx.lang);
 
-  const lines = [];
-  let dir, orderType, entry, baseSL, zoneRange, confidence, setup, zoneLine;
-
-  if (pos.inSupply) {
-    dir = -1;
-    zoneRange = { min: supply.bottom, max: supply.top };
-    zoneLine = t.zoneFresh('supply', prof.zoneTf, f(supply.bottom), f(supply.top), true);
-    lines.push(t.inZone('supply', prof.zoneTf, f(supply.bottom), f(supply.top)));
-    if (rejection.sellOk) {
-      orderType = 'NOW'; entry = price; baseSL = supply.sl;
-      confidence = 'HIGH'; setup = 'Supply Rejection NOW';
-    } else {
-      orderType = 'LIMIT'; entry = supply.bottom; baseSL = supply.sl;
-      confidence = 'MEDIUM'; setup = 'Supply LIMIT (tunggu rejection)';
-    }
-  } else if (pos.inDemand) {
-    dir = 1;
-    zoneRange = { min: demand.bottom, max: demand.top };
-    zoneLine = t.zoneFresh('demand', prof.zoneTf, f(demand.bottom), f(demand.top), true);
-    lines.push(t.inZone('demand', prof.zoneTf, f(demand.bottom), f(demand.top)));
-    if (rejection.buyOk) {
-      orderType = 'NOW'; entry = price; baseSL = demand.sl;
-      confidence = 'HIGH'; setup = 'Demand Bounce NOW';
-    } else {
-      orderType = 'LIMIT'; entry = demand.top; baseSL = demand.sl;
-      confidence = 'MEDIUM'; setup = 'Demand LIMIT (tunggu rejection)';
-    }
-  } else if (pos.nearSupply || pos.nearDemand) {
-    const useSupply = pos.nearSupply && (!pos.nearDemand || pos.distToSupply <= pos.distToDemand);
-    if (useSupply) {
-      dir = -1;
-      zoneRange = { min: supply.bottom, max: supply.top };
-      zoneLine = t.zoneFresh('supply', prof.zoneTf, f(supply.bottom), f(supply.top), false);
-      lines.push(t.dist((pos.distToSupply / pip).toFixed(0), true) + ` → ${prof.zoneTf} supply`);
-      if (rejection.sellOk && pos.distToSupply <= NOW_MAX_ATR.scalp * atrVal) {
-        orderType = 'NOW'; entry = price; baseSL = supply.sl;
-        confidence = 'HIGH'; setup = 'Approaching Supply NOW';
-      } else {
-        orderType = 'LIMIT'; entry = supply.bottom; baseSL = supply.sl;
-        confidence = 'HIGH'; setup = 'Approaching Supply LIMIT';
-      }
-    } else {
-      dir = 1;
-      zoneRange = { min: demand.bottom, max: demand.top };
-      zoneLine = t.zoneFresh('demand', prof.zoneTf, f(demand.bottom), f(demand.top), false);
-      lines.push(t.dist((pos.distToDemand / pip).toFixed(0), false) + ` → ${prof.zoneTf} demand`);
-      if (rejection.buyOk && pos.distToDemand <= NOW_MAX_ATR.scalp * atrVal) {
-        orderType = 'NOW'; entry = price; baseSL = demand.sl;
-        confidence = 'HIGH'; setup = 'Approaching Demand NOW';
-      } else {
-        orderType = 'LIMIT'; entry = demand.top; baseSL = demand.sl;
-        confidence = 'HIGH'; setup = 'Approaching Demand LIMIT';
-      }
-    }
-  } else {
-    dir = init.dir;
+  // ── FUNGSI SCORING PER ARAH (BUY / SELL) ──
+  const evaluateSide = (dir) => {
+    const isBuy = dir === 1;
+    const pos = classifyPriceZone(price, demand, supply, reactionDist);
+    const rejection = detectRejection(struct, price, demand, supply, atrVal, NOW_MAX_ATR.scalp);
     const fvgEval = evaluateFVG(m5c, price, dir, atrVal, FVG_LOOKBACK_BY_STYLE.scalp);
-    lines.push(t.outside(prof.zoneTf, tfName, srcTxt));
-    if (fvgEval.useFVG && fvgEval.retraceMandatory) {
-      orderType = 'LIMIT'; entry = fvgEval.entry; baseSL = fvgEval.sl;
-      zoneRange = { min: fvgEval.fvg.lo, max: fvgEval.fvg.hi };
-      confidence = 'HIGH';
-      setup = `FVG ${dir === 1 ? 'Bull' : 'Bear'} Retrace`;
-      zoneLine = `FVG ${f(fvgEval.fvg.lo)}-${f(fvgEval.fvg.hi)}`;
-    } else if (fvgEval.useFVG) {
-      orderType = 'LIMIT'; entry = fvgEval.entry; baseSL = fvgEval.sl;
-      zoneRange = { min: fvgEval.fvg.lo, max: fvgEval.fvg.hi };
-      confidence = 'HIGH';
-      setup = `FVG ${dir === 1 ? 'Bull' : 'Bear'} Interior`;
-      zoneLine = `Harga di FVG ${f(fvgEval.fvg.lo)}-${f(fvgEval.fvg.hi)}`;
+    
+    let score = 0;
+    let area = null, areaName = '', zoneLine = '', orderType = 'NOW', entry = price, baseSL = price;
+    let zoneRange = null, confidence = 'MEDIUM', setup = '', lines = [];
+    
+    // 1. Struktur (Trend Following)
+    if (init.dir === dir) score += 3; 
+    else score -= 3;                  
+    
+    const inZone = isBuy ? pos.inDemand : pos.inSupply;
+    const nearZone = isBuy ? pos.nearDemand : pos.nearSupply;
+    const dist = isBuy ? pos.distToDemand : pos.distToSupply;
+    const zone = isBuy ? demand : supply;
+    const rejOk = isBuy ? rejection.buyOk : rejection.sellOk;
+    const sideName = isBuy ? 'demand' : 'supply';
+    const sideNameCap = isBuy ? 'Demand' : 'Supply';
+    
+    // TIER 1: ZONA S/D (PRIORITAS UTAMA)
+    if (inZone) {
+      score += 5;
+      area = zone;
+      areaName = sideNameCap;
+      zoneRange = { min: zone.bottom, max: zone.top };
+      zoneLine = t.zoneFresh(sideName, prof.zoneTf, f(zone.bottom), f(zone.top), true);
+      lines.push(t.inZone(sideName, prof.zoneTf, f(zone.bottom), f(zone.top)));
+      
+      if (rejOk) {
+        score += 2;
+        orderType = 'NOW'; entry = price; baseSL = zone.sl;
+        confidence = 'HIGH'; setup = isBuy ? 'Demand Bounce NOW' : 'Supply Rejection NOW';
+      } else {
+        orderType = 'LIMIT'; entry = isBuy ? zone.top : zone.bottom; baseSL = zone.sl;
+        confidence = 'MEDIUM'; setup = isBuy ? 'Demand LIMIT' : 'Supply LIMIT';
+      }
+    } else if (nearZone) {
+      score += 4;
+      area = zone;
+      areaName = sideNameCap;
+      zoneRange = { min: zone.bottom, max: zone.top };
+      zoneLine = t.zoneFresh(sideName, prof.zoneTf, f(zone.bottom), f(zone.top), false);
+      lines.push(t.dist((dist / pip).toFixed(0), !isBuy) + ` → ${prof.zoneTf} ${sideName}`);
+      
+      if (rejOk && dist <= NOW_MAX_ATR.scalp * atrVal) {
+        score += 1;
+        orderType = 'NOW'; entry = price; baseSL = zone.sl;
+        confidence = 'HIGH'; setup = isBuy ? 'Approaching Demand NOW' : 'Approaching Supply NOW';
+      } else {
+        orderType = 'LIMIT'; entry = isBuy ? zone.top : zone.bottom; baseSL = zone.sl;
+        confidence = 'HIGH'; setup = isBuy ? 'Approaching Demand LIMIT' : 'Approaching Supply LIMIT';
+      }
     } else {
-      orderType = 'NOW'; entry = price;
-      baseSL = recentExtreme(struct, dir, 10);
-      zoneRange = { min: price, max: price };
-      confidence = 'MEDIUM';
-      setup = `Market ${srcTxt}`;
-      lines.push(fvgEval.reason === 'breakout-far'
-        ? 'Breakout jauh dari FVG → retrace TIDAK wajib, NOW'
-        : areaNote(m5c, price, ctx));
+      // TIER 2: FVG (Jika jauh dari zona, cari retrace FVG)
+      if (fvgEval.useFVG) {
+        score += 2;
+        area = { top: fvgEval.fvg.hi, bottom: fvgEval.fvg.lo, sl: fvgEval.sl };
+        areaName = `FVG ${isBuy ? 'Bull' : 'Bear'}`;
+        zoneRange = { min: fvgEval.fvg.lo, max: fvgEval.fvg.hi };
+        zoneLine = `FVG ${f(fvgEval.fvg.lo)}-${f(fvgEval.fvg.hi)}`;
+        orderType = 'LIMIT'; entry = fvgEval.entry; baseSL = fvgEval.sl;
+        confidence = 'HIGH';
+        setup = fvgEval.retraceMandatory ? `FVG Retrace (WAJIB)` : `FVG Interior`;
+        lines.push(`FVG ${f(fvgEval.fvg.lo)}-${f(fvgEval.fvg.hi)}`);
+      } 
+      // TIER 3: MOMENTUM NOW (Jika tidak ada Zona & FVG, tapi Tren sangat kuat)
+      else {
+        if (init.dir === dir) {
+          // Harga lanjut jalan (Continuation)
+          score += 2; 
+          orderType = 'NOW'; entry = price;
+          baseSL = recentExtreme(struct, dir, 10);
+          zoneRange = { min: price, max: price };
+          confidence = 'MEDIUM';
+          setup = `Market NOW (Trend Continuation)`;
+          lines.push(`Tidak ada zona/FVG, ikuti momentum ${srcName(init.src, ctx.lang)}`);
+        } else {
+          // Jika melawan tren dan tidak ada zona/FVG -> TOLAK MENTAH-MENTAH
+          score -= 99; 
+        }
+      }
     }
+    
+    // Cek zona lawan yang terlalu dekat (Reaction Range)
+    const oppZone = isBuy ? supply : demand;
+    if (oppZone && (isBuy ? (oppZone.bottom - price) : (price - oppZone.top)) <= reactionDist) {
+      score -= 2; 
+      lines.push(t.opposing(isBuy ? 'supply' : 'demand', prof.zoneTf, f(oppZone.bottom), f(oppZone.top), 'dekat', isBuy ? 'BUY' : 'SELL'));
+    }
+
+    return { dir, score, entry, orderType, baseSL, zoneRange, confidence, setup, zoneLine, lines, areaName };
+  };
+
+  const buySetup = evaluateSide(1);
+  const sellSetup = evaluateSide(-1);
+  const best = buySetup.score >= sellSetup.score ? buySetup : sellSetup;
+
+  if (best.score < 0) {
+    return { plan: null, reason: 'Tidak ada setup valid. Harga di tengah, tren tidak jelas, dan tidak ada FVG/Zona.' };
   }
 
   return await finalizePlan({
-    dir, entry, orderType, baseSL, kind: 'scalp', atrVal, ctx, rrList,
-    confidence, setup, zoneNote: setup, zoneRange, zoneLine,
-    head: t.headLine(t.title.scalp, dir === 1 ? 'BUY' : 'SELL',
-      orderType === 'LIMIT' ? 'LIMIT' : 'NOW', ctx.symbol),
-    lines,
+    ...best,
+    kind: 'scalp', atrVal, ctx, rrList,
+    zoneNote: best.setup,
+    head: t.headLine(t.title.scalp, best.dir === 1 ? 'BUY' : 'SELL',
+      best.orderType === 'LIMIT' ? 'LIMIT' : 'NOW', ctx.symbol),
   });
 }
 // ═══ END MODIFIED ═══
@@ -1162,17 +1103,12 @@ function evalSide(dir, o) {
   const { price, bias, parentPick, parentName, refineC, refineName, refineL, atrVal } = o;
   const t = tx(o.ctx);
 
-  // Cari zona utama (M15)
   const parent = parentPick(dir);
-
-  // Cari zona refine (M5) di dalam parent
   const refined = parent ? refineZone(refineC, parent, dir, price, refineL) : null;
 
-  // Prioritaskan zona yang punya FVG dan FRESH
   let z = refined;
   if (!z) {
-      const fvgZones = findSDZones(refineC, dir, price, { freshOnly: true, dispAtr: 0.8 })
-          .filter(x => x.fvg);
+      const fvgZones = findSDZones(refineC, dir, price, { freshOnly: true, dispAtr: 0.8 }).filter(x => x.fvg);
       z = fvgZones[0] || pickZone(refineC, dir, price, refineL);
   }
 
@@ -1196,16 +1132,9 @@ function evalSide(dir, o) {
     return { dir, area, areaName, refineNote, score: -1 };
   }
 
-  // SCORING: Semakin dekat harga, semakin tinggi skor
   score += Math.max(0, 3 - (area.dist || 0) / atrVal);
-
-  // Bonus besar jika FVG (sesuai request)
   if (area.fvg) score += 3;
-
-  // Bonus jika searah bias
   if (dir === bias.dir) score += 2;
-
-  // Bonus jika zona sangat fresh (belum tersentuh)
   if (area.fresh) score += 2;
 
   const trig = findRefineTrigger(refineC, dir);
@@ -1230,7 +1159,6 @@ async function buildTwoWayPlan(o) {
   });
 }
 
-// ═══ MODIFIED: buildDayPlan — Reaction Range M15 + Fixed 50 pip XAUUSD + NOW ═══
 async function buildDayPlan({ m5, m15, price, rrList, ctx }) {
   const t = tx(ctx);
   const { f, pip } = ctx;
@@ -1325,11 +1253,9 @@ async function buildDayPlan({ m5, m15, price, rrList, ctx }) {
     lines,
   });
 }
-// ═══ END MODIFIED ═══
 
 // ═══════════════════════════ INTRADAY & SWING ═══════════════════════════
 
-// ═══ MODIFIED: buildIntradayPlan — Reaction Range H1 + NOW ═══
 async function buildIntradayPlan({ m15, price, rrList, ctx }) {
   const t = tx(ctx);
   const { f, pip } = ctx;
@@ -1425,7 +1351,6 @@ async function buildIntradayPlan({ m15, price, rrList, ctx }) {
     lines,
   });
 }
-// ═══ END MODIFIED ═══
 
 async function buildSwingPlan({ m15, price, rrList, ctx }) {
   const t = tx(ctx);
@@ -1503,13 +1428,9 @@ function toSignal(result, style, ctx) {
 }
 
 // ═══════════════════════════ RESOLVE PAIR DARI REQUEST ═══════════════════════════
-// Pair dicari dari beberapa nama field dan format (EUR/USD, xbtfx|EURUSD, FX:EURUSD).
-// Tidak ada default XAUUSD: kalau pair tidak terbaca, request ditolak.
 
-// Cek pakai hasOwnProperty, bukan truthy, karena JPN225 punya desimal 0.
 const isKnownSymbol = s => Object.prototype.hasOwnProperty.call(DECIMALS, s);
 
-// "EUR/USD", "xbtfx|EURUSD", "FX:EURUSD", "eur_usd" → "EURUSD"
 const normalizeSymbol = raw => String(raw ?? '')
   .split(/[|:]/).pop()
   .toUpperCase()
@@ -1518,7 +1439,6 @@ const normalizeSymbol = raw => String(raw ?? '')
 
 const SYMBOL_KEYS = ['symbol', 'pair', 'instrument', 'asset', 'target', 'pairName', 'ticker', 'market', 'code', 'sym'];
 
-// Cari string yang cocok dengan daftar pair, maksimal 2 level. Array (misalnya candles) dilewati.
 function findPairString(obj, depth = 0) {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj) || depth > 2) return null;
   for (const v of Object.values(obj)) {
@@ -1552,17 +1472,14 @@ function resolveSymbol(body, query) {
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  // Body bisa datang sebagai string jika frontend tidak mengirim Content-Type JSON.
   let body = req.body || {};
   if (typeof body === 'string') {
     try { body = JSON.parse(body); } catch { body = {}; }
   }
 
-  // Bahasa output (reasoning dan pesan error) mengikuti field "lang" dari frontend.
   const lang = pickLang(body, req.query);
   const t = TX[lang];
 
-  // Pair wajib ada di request. Tidak ada default XAUUSD.
   const symbol = resolveSymbol(body, req.query);
   if (!symbol) {
     const keys = Object.keys(body).join(', ') || t.emptyBody;
@@ -1585,7 +1502,6 @@ export default async function handler(req, res) {
 
   let apiKey = API_KEYS[0] || process.env.TICKERLAYER_API_KEY || '';
 
-  // Mode Standar (Signal Generation)
   let m1 = cleanCandles(body.candles?.m1);
   let m5 = cleanCandles(body.candles?.m5);
   let m15 = cleanCandles(body.candles?.m15);
@@ -1594,7 +1510,6 @@ export default async function handler(req, res) {
   if (!(price > 0)) price = lastClosePrice(m5) || lastClosePrice(m15) || lastClosePrice(m1);
   if (!(price > 0)) return res.status(400).json({ error: t.noPrice });
 
-  // Harga harus masuk rentang wajar pair ini. Ini menangkap kasus EURUSD dibaca sebagai XAUUSD.
   const [lo, hi] = prof.range;
   if (price < lo || price > hi) {
     return res.status(400).json({ error: t.range(price, symbol, lo, hi) });
@@ -1604,7 +1519,6 @@ export default async function handler(req, res) {
   const needM5 = style === 'Scalping' || style === 'Day Trading' ? NEED.m5 : 0;
   const needM15 = NEED.m15;
 
-  // Candle frontend dipakai hanya jika cukup dan cocok dengan harga live. Selain itu ambil dari server.
   const pick = async (arr, tf, need) => {
     const frontOk = arr.length >= Math.min(need, 60) && matchesRef(arr, price);
     if (frontOk && arr.length >= need) return { candles: arr, source: 'frontend', tried: [] };
@@ -1622,7 +1536,6 @@ export default async function handler(req, res) {
   if (r5) m5 = r5.candles;
   m15 = r15.candles;
 
-  // Data harus cocok dengan harga live. Kalau tidak, gagal dengan detail, bukan sinyal yang salah.
   const failed = [['m1', r1], ['m5', r5], ['m15', r15]].filter(([, r]) => r && r.candles.length === 0);
   if (failed.length) {
     const detail = failed.map(([k, r]) => `${k}: ${describeTried(r.tried, price, lang)}`).join(' | ');
