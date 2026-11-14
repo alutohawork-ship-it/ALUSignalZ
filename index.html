@@ -275,14 +275,14 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
           <p id="tradeLive" class="text-[8px] font-mono text-gray-400"></p>
           <p id="smcInfo" class="text-[8px] font-mono text-gray-400 break-words"></p>
 
-          <!-- Chart utama: LINE CHART -->
-          <div class="relative w-full h-[200px] sm:h-[260px] lg:h-[300px]">
+          <!-- Chart utama: LINE CHART (Diperbesar sedikit tingginya) -->
+          <div class="relative w-full h-[220px] sm:h-[280px] lg:h-[320px]">
             <canvas id="priceChart" class="absolute inset-0 w-full h-full"></canvas>
           </div>
 
-          <!-- Panel SMC terpisah (toggle dengan tombol SMC) -->
+          <!-- Panel SMC terpisah (Ukuran diperbesar) -->
           <div id="smcBox" class="hidden w-full rounded-lg overflow-hidden border border-panelborder bg-darkbg p-1 space-y-1">
-            <div class="relative w-full h-[240px] sm:h-[300px] lg:h-[320px]">
+            <div class="relative w-full h-[320px] sm:h-[400px] lg:h-[480px]">
               <canvas id="smcCanvas" class="absolute inset-0 w-full h-full"></canvas>
             </div>
             <div class="flex flex-wrap gap-x-2.5 gap-y-0.5 text-[7px] font-mono text-gray-400 px-1 pb-0.5">
@@ -430,7 +430,7 @@ const CAL_SINCE_KEY = 'aluGold_calendar_since';
 const LIVE_KEY = 'aluLive_v1';
 const K = { type: 'alu_session_type', email: 'alu_user_email', admin: 'alu_admin_code' };
 const JSON_H = { 'Content-Type': 'application/json' };
-const HISTORY_MS = 600000, STALE_MS = 30000, CHART_GUT = 110, CH_PAD = 4;
+const HISTORY_MS = 600000, STALE_MS = 30000, CHART_GUT = 85, CH_PAD = 4; // CHART_GUT diperkecil dari 110 ke 85
 const TFS = [1, 5, 15, 30, 60, 240, 1440];
 const HL_TF = [[1, 'M1'], [5, 'M5'], [15, 'M15'], [60, 'H1'], [240, 'H4'], [1440, 'D1']];
 const TF_MIN = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 };
@@ -449,7 +449,7 @@ const SMC_TF_MAP = {
 };
 const BIAS_TF = [{ label: 'M5', iv: '5m' }, { label: 'M15', iv: '15m' }, { label: 'M30', iv: '30m' }, { label: 'H1', iv: '1h' }, { label: 'H4', iv: '4h' }, { label: 'Daily', iv: '1d' }];
 const CANDLE_TTL = { '1m': 30000, '5m': 60000, '15m': 120000, '30m': 180000, '1h': 300000, '4h': 600000, '1d': 900000 };
-const PRIO_IV = ['1m', '5m', '15m', '30m', '1h', '4h', '1d']; // Prioritaskan M1 & M5 karena SMC butuh ini
+const PRIO_IV = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
 const CANDLE_LIMIT = 200;
 const SWING_L = 2;
 const BIN_SYM = { BTCUSD: 'BTCUSDT', XAUUSD: 'PAXGUSDT' };
@@ -1540,7 +1540,7 @@ function renderSmcInfo() {
   const t = activeTrade();
   const k = t ? t.key : market;
   const style = t ? t.style : $('tradingStyleSelect').value;
-  const iv = SMC_TF_MAP[style] || '5m'; // Use mapped TF
+  const iv = SMC_TF_MAP[style] || '5m';
   const s = getSmc(k, iv);
   const head = `${k} ${iv} · ${srcOf(k, iv)} · ${s.n || 0} candle`;
   if (!showSMC) return setTxt('smcInfo', head + ' · SMC off (tekan SMC untuk panel)');
@@ -1598,15 +1598,16 @@ function layoutX(rows, plotL, plotR, tfMs) {
 }
 function srcLabel(k, iv) { return `${k} · ${iv} · WIB · ${srcOf(k, iv)}`; }
 
-/* ================= CHART UTAMA (LINE CHART) ================= */
+/* ================= CHART UTAMA (LINE CHART - BY TICK/SMOOTH) ================= */
 function drawChart() {
   const d = fitCv(cv, cx);
   if (!d) return;
   const CW = d.w, CH = d.h;
   const t = activeTrade();
   const k = market;
-  const style = t ? t.style : $('tradingStyleSelect').value;
-  const iv = (STYLE_CFG[style] || STYLE_CFG.Scalping).mtf;
+  
+  // MENGGUNAKAN 1M AGAR GARIS LEBIH RAPAT (TICK-LIKE)
+  const iv = '1m'; 
   const tfMs = TF_MIN[iv] * 60000;
   const rows = displayRows(k, iv);
   const live = prices[k] ? prices[k].price : null;
@@ -1763,16 +1764,18 @@ function drawChart() {
     tags[tags.length - 1].y = capB;
     for (let i = tags.length - 2; i >= 0; i--) if (tags[i].y > tags[i + 1].y - GAP) tags[i].y = tags[i + 1].y - GAP;
   }
-  cx.font = 'bold 9px ui-monospace, monospace';
+  
+  // Area kanan (Tag Labels) diperkecil menggunakan CHART_GUT yang baru
+  cx.font = 'bold 8px ui-monospace, monospace'; 
   cx.textAlign = 'left';
   cx.textBaseline = 'middle';
   for (const g of tags) {
-    const x = plotR + 6, w = CHART_GUT - 10, h = 15, y = g.y - h / 2;
+    const x = plotR + 6, w = CHART_GUT - 12, h = 15, y = g.y - h / 2;
     rr(cx, x, y, w, h, 3);
     cx.fillStyle = g.bg; cx.fill();
     cx.strokeStyle = g.c; cx.lineWidth = .8; cx.stroke();
     cx.fillStyle = g.c;
-    cx.fillText(g.text, x + 5, g.y + .5);
+    cx.fillText(g.text, x + 4, g.y + .5);
   }
 }
 
@@ -1784,7 +1787,7 @@ function drawSMC() {
   const k = market;
   const t = activeTrade();
   const style = t ? t.style : $('tradingStyleSelect').value;
-  const iv = SMC_TF_MAP[style] || '5m'; // Use mapped TF
+  const iv = SMC_TF_MAP[style] || '5m';
   const tfMs = TF_MIN[iv] * 60000;
   const rows = displayRows(k, iv);
   const live = prices[k] ? prices[k].price : null;
@@ -1989,14 +1992,14 @@ function drawSMC() {
     sx.beginPath(); sx.arc(hx, y, 3, 0, Math.PI * 2); sx.fillStyle = '#fff'; sx.fill();
     sx.restore();
     sx.save();
-    sx.font = 'bold 9px ui-monospace, monospace';
+    sx.font = 'bold 8px ui-monospace, monospace';
     sx.textAlign = 'left';
     sx.textBaseline = 'middle';
-    rr(sx, plotR + 6, y - 7.5, CHART_GUT - 10, 15, 3);
+    rr(sx, plotR + 6, y - 7.5, CHART_GUT - 12, 15, 3);
     sx.fillStyle = 'rgba(41,98,255,.25)'; sx.fill();
     sx.strokeStyle = '#2962ff'; sx.lineWidth = .8; sx.stroke();
     sx.fillStyle = '#93c5fd';
-    sx.fillText(fmt(live), plotR + 11, y + .5);
+    sx.fillText(fmt(live), plotR + 10, y + .5);
     sx.restore();
   }
 
