@@ -221,23 +221,22 @@
                     </button>
                 </div>
 
-                <!-- BIAS -->
+                <!-- BIAS & LIVE STREAM (Digabung) -->
                 <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
-                    <div class="flex justify-between items-center">
+                    <div class="flex justify-between items-center border-b border-panelborder pb-1">
                         <span id="lblBias" class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-compass text-accentblue"></i> BIAS MULTI-TIMEFRAME</span>
                         <button onclick="refreshBias(selectedKey(), true)" id="btnBiasRefresh" class="text-[9px] text-accentblue hover:underline"><i class="fa-solid fa-rotate"></i> Refresh</button>
                     </div>
                     <div id="biasGrid" class="grid grid-cols-3 sm:grid-cols-6 gap-1.5"></div>
-                    <p id="biasInfo" class="text-[8px] font-mono text-gray-500">memuat...</p>
-                </div>
+                    <p id="biasInfo" class="text-[8px] font-mono text-gray-500 mb-2">memuat...</p>
 
-                <!-- SESI MARKET -->
-                <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
-                    <div class="flex justify-between items-center border-b border-panelborder pb-2">
-                        <span id="lblSession" class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-clock text-accentblue"></i> MARKET SESSIONS</span>
-                        <span id="currentSessionBadge" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-gray-500/20 text-gray-400 border-gray-500/40">--</span>
+                    <div class="border-t border-panelborder/50 pt-2">
+                        <div class="flex justify-between items-center pb-1">
+                            <span id="lblLiveStream" class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-tower-broadcast text-accentblue"></i> LIVE MARKET STREAM</span>
+                            <span id="livePulse" class="text-[8px] text-emerald-400 font-mono animate-pulse">● Dual Socket Stream</span>
+                        </div>
+                        <div id="tickerListContainer" class="grid grid-cols-1 gap-1 max-h-[120px] overflow-y-auto pr-1"></div>
                     </div>
-                    <div id="sessionList" class="space-y-1.5 text-[9px] font-mono"></div>
                 </div>
 
                 <!-- KARTU SIGNAL -->
@@ -295,7 +294,9 @@
                             <div class="flex flex-wrap justify-between items-start gap-1">
                                 <div class="flex items-center gap-2">
                                     <p id="lblPriceMap" class="text-[9px] font-bold text-gray-400 tracking-wider">LIVE MAP CHART</p>
-                                    <button onclick="toggleTradingView()" id="btnTvToggle" class="text-[10px] text-gray-500 hover:text-accentblue transition flex items-center gap-1 bg-darkbg border border-panelborder px-1.5 py-0.5 rounded"><i class="fa-solid fa-chart-candlestick"></i> <span class="font-mono font-bold text-[8px]">TV</span></button>
+                                    <button onclick="toggleTradingView()" id="btnTvToggle" class="text-[10px] text-gray-500 hover:text-accentblue transition flex items-center gap-1 bg-darkbg border border-panelborder px-1.5 py-0.5 rounded">
+                                        <i class="fa-solid fa-chart-candlestick"></i> <span id="btnTvText" class="font-mono font-bold text-[8px]">TV</span>
+                                    </button>
                                 </div>
                                 <span id="tradeStatus" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40 whitespace-nowrap">RUNNING</span>
                             </div>
@@ -338,6 +339,13 @@
             <!-- KOLOM KANAN -->
             <div class="flex flex-col gap-2 min-w-0">
                 
+                <!-- ══ MULTI-TF HIGHLIGHT TICKER ══ -->
+                <div class="w-full pb-1">
+                    <div id="highlightTickerList" class="flex gap-2">
+                        <!-- Diisi oleh JS -->
+                    </div>
+                </div>
+
                 <!-- ══ LOG AKTIVITAS USER (REAL) ══ -->
                 <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
                     <div class="flex justify-between items-center border-b border-panelborder pb-2">
@@ -430,20 +438,6 @@
                     <div id="historyList" class="space-y-1 max-h-[320px] lg:max-h-[calc(100vh-260px)] overflow-y-auto pr-1">
                         <p id="lblNoHistory" class="text-center text-[10px] text-gray-500 py-3">Belum ada history.</p>
                     </div>
-                </div>
-
-                <!-- HIGHLIGHT TICKER -->
-                <div class="w-full overflow-x-auto pb-1 no-scrollbar">
-                    <div id="highlightTickerList" class="flex gap-2"></div>
-                </div>
-
-                <!-- LIVE MARKET STREAM -->
-                <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md">
-                    <div class="flex justify-between items-center pb-1.5 mb-1.5 border-b border-panelborder">
-                        <span id="lblLiveStream" class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-tower-broadcast text-accentblue"></i> LIVE MARKET STREAM</span>
-                        <span id="livePulse" class="text-[8px] text-emerald-400 font-mono animate-pulse">● Dual Socket Stream</span>
-                    </div>
-                    <div id="tickerListContainer" class="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-[360px] overflow-y-auto pr-1"></div>
                 </div>
             </div>
         </main>
@@ -1210,23 +1204,54 @@
         drawChart();
     }
 
-    function buildHighlightTickers() { document.getElementById('highlightTickerList').innerHTML = `<div class="bg-cardbg border border-panelborder rounded-xl p-2 flex-shrink-0 w-[130px] flex flex-col justify-between"><div class="flex justify-between items-center mb-1"><span class="text-[10px] font-bold text-white">XAUUSD</span><span id="hl-dir-XAUUSD" class="text-[10px] font-mono font-bold"></span></div><div class="flex items-end justify-between"><div><p id="hl-price-XAUUSD" class="text-[11px] font-mono font-bold text-gray-200">--.--</p><p id="hl-pct-XAUUSD" class="text-[8px] font-mono font-bold">0.00%</p></div><canvas id="hl-chart-XAUUSD" width="45" height="25" class="mb-1"></canvas></div></div>`; }
+    function buildHighlightTickers() { 
+        document.getElementById('highlightTickerList').innerHTML = `
+            <div class="bg-cardbg border border-panelborder rounded-xl p-2.5 shadow-md w-full flex flex-col justify-between">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-[10px] font-bold text-white">XAUUSD</span>
+                    <span id="hl-current-price" class="text-[11px] font-mono font-bold text-yellow-400">--.--</span>
+                </div>
+                <div class="grid grid-cols-6 gap-1 text-center">
+                    <div class="bg-darkbg/50 rounded p-1"><p class="text-[7px] text-gray-500 font-bold">M1</p><p id="hl-pct-1m" class="text-[9px] font-mono font-bold text-gray-400">0%</p></div>
+                    <div class="bg-darkbg/50 rounded p-1"><p class="text-[7px] text-gray-500 font-bold">M5</p><p id="hl-pct-5m" class="text-[9px] font-mono font-bold text-gray-400">0%</p></div>
+                    <div class="bg-darkbg/50 rounded p-1"><p class="text-[7px] text-gray-500 font-bold">M15</p><p id="hl-pct-15m" class="text-[9px] font-mono font-bold text-gray-400">0%</p></div>
+                    <div class="bg-darkbg/50 rounded p-1"><p class="text-[7px] text-gray-500 font-bold">H1</p><p id="hl-pct-60m" class="text-[9px] font-mono font-bold text-gray-400">0%</p></div>
+                    <div class="bg-darkbg/50 rounded p-1"><p class="text-[7px] text-gray-500 font-bold">H4</p><p id="hl-pct-240m" class="text-[9px] font-mono font-bold text-gray-400">0%</p></div>
+                    <div class="bg-darkbg/50 rounded p-1"><p class="text-[7px] text-gray-500 font-bold">D1</p><p id="hl-pct-1440m" class="text-[9px] font-mono font-bold text-gray-400">0%</p></div>
+                </div>
+            </div>
+        `; 
+    }
+
     function updateHighlightTickers() {
         const key = 'XAUUSD'; const p = prices[key]; if (!p) return;
-        const priceEl = document.getElementById(`hl-price-${key}`); if (priceEl) priceEl.textContent = fmt(key, p.price);
-        const hist = history[key] || []; let pct = 0; if (hist.length > 1) { const first = hist[0].p; const last = hist[hist.length - 1].p; pct = ((last - first) / first) * 100; }
-        const pctEl = document.getElementById(`hl-pct-${key}`); const dirEl = document.getElementById(`hl-dir-${key}`);
-        if (pctEl) { pctEl.textContent = `${pct > 0 ? '+' : ''}${pct.toFixed(3)}%`; pctEl.className = `text-[8px] font-mono font-bold ${pct > 0 ? 'text-emerald-400' : pct < 0 ? 'text-red-400' : 'text-gray-400'}`; }
-        if (dirEl) { dirEl.textContent = pct > 0 ? '▲' : pct < 0 ? '▼' : '-'; dirEl.className = `text-[10px] ${pct > 0 ? 'text-emerald-400' : pct < 0 ? 'text-red-400' : 'text-gray-500'}`; }
-        drawSparkline(`hl-chart-${key}`, hist);
-    }
-    function drawSparkline(canvasId, data) {
-        const canvas = document.getElementById(canvasId); if (!canvas || data.length < 2) return;
-        const ctx = canvas.getContext('2d'); const w = canvas.width; const h = canvas.height; ctx.clearRect(0, 0, w, h);
-        let min = Infinity, max = -Infinity; data.forEach(d => { if(d.p < min) min = d.p; if(d.p > max) max = d.p; }); if (max === min) max += 1;
-        ctx.beginPath(); ctx.strokeStyle = data[data.length-1].p >= data[0].p ? '#10b981' : '#ef4444'; ctx.lineWidth = 1.5;
-        data.forEach((d, i) => { const x = (i / (data.length - 1)) * w; const y = h - ((d.p - min) / (max - min)) * h; if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
-        ctx.stroke();
+        
+        const priceEl = document.getElementById('hl-current-price'); 
+        if (priceEl) priceEl.textContent = fmt(key, p.price);
+
+        const tfs = [
+            { key: '1m', tf: '1m' },
+            { key: '5m', tf: '5m' },
+            { key: '15m', tf: '15m' },
+            { key: '60m', tf: '60m' },
+            { key: '240m', tf: '240m' },
+            { key: '1440m', tf: '1440m' }
+        ];
+
+        tfs.forEach(({ key: tf, tf: id }) => {
+            const el = document.getElementById(`hl-pct-${id}`);
+            if (!el) return;
+            
+            let pct = 0;
+            const candles = marketCandles[key]?.[tf];
+            if (candles && candles.length > 0) {
+                const openPrice = candles[candles.length - 1].open; 
+                pct = ((p.price - openPrice) / openPrice) * 100;
+            }
+            
+            el.textContent = `${pct > 0 ? '+' : ''}${pct.toFixed(2)}%`;
+            el.className = `text-[9px] font-mono font-bold ${pct > 0 ? 'text-emerald-400' : pct < 0 ? 'text-red-400' : 'text-gray-400'}`;
+        });
     }
 
     // ================= TRADINGVIEW =================
@@ -1235,9 +1260,23 @@
         new TradingView.widget({ autosize: true, symbol: "OANDA:XAUUSD", interval: "5", timezone: "Asia/Jakarta", theme: "dark", style: "1", locale: "id", hide_side_toolbar: true, allow_symbol_change: false, container_id: "tradingview_widget", backgroundColor: "#151924", gridColor: "rgba(35, 41, 54, 0.5)" });
     }
     function toggleTradingView() {
-        const tvContainer = document.getElementById('tradingviewWidgetContainer'); const btn = document.getElementById('btnTvToggle');
-        if (tvContainer.classList.contains('hidden')) { tvContainer.classList.remove('hidden'); btn.classList.add('text-accentblue', 'border-accentblue'); btn.classList.remove('text-gray-500'); initTradingViewWidget(); }
-        else { tvContainer.classList.add('hidden'); btn.classList.remove('text-accentblue', 'border-accentblue'); btn.classList.add('text-gray-500'); document.getElementById('tradingview_widget').innerHTML = ''; }
+        const tvContainer = document.getElementById('tradingviewWidgetContainer'); 
+        const btn = document.getElementById('btnTvToggle');
+        const btnText = document.getElementById('btnTvText');
+        
+        if (tvContainer.classList.contains('hidden')) { 
+            tvContainer.classList.remove('hidden'); 
+            btn.classList.add('bg-accentblue', 'text-white', 'border-accentblue'); 
+            btn.classList.remove('text-gray-500'); 
+            btnText.textContent = 'CLOSE';
+            initTradingViewWidget(); 
+        } else { 
+            tvContainer.classList.add('hidden'); 
+            btn.classList.remove('bg-accentblue', 'text-white', 'border-accentblue'); 
+            btn.classList.add('text-gray-500'); 
+            btnText.textContent = 'TV';
+            document.getElementById('tradingview_widget').innerHTML = ''; 
+        }
     }
 
     // ================= SESI =================
