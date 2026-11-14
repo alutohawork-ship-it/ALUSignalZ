@@ -245,7 +245,10 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
             <div class="flex flex-wrap justify-between items-start gap-1">
               <div class="flex items-center gap-2">
                 <p data-i18n="lblMap" class="text-[9px] font-bold text-gray-400 tracking-wider"></p>
-                <button id="btnTvToggle" onclick="toggleTV()" class="text-[10px] text-gray-500 hover:text-accentblue flex items-center gap-1 bg-darkbg border border-panelborder px-1.5 py-0.5 rounded"><i class="fa-solid fa-chart-candlestick"></i> <span id="btnTvText" class="font-mono font-bold text-[8px]">TV</span></button>
+                <div class="flex items-center gap-1">
+                  <button id="btnSmcToggle" onclick="toggleSMC()" class="text-[10px] text-gray-500 hover:text-accentblue flex items-center gap-1 bg-darkbg border border-panelborder px-1.5 py-0.5 rounded transition"><i class="fa-solid fa-layer-group"></i> <span class="font-mono font-bold text-[8px]">SMC</span></button>
+                  <button id="btnTvToggle" onclick="toggleTV()" class="text-[10px] text-gray-500 hover:text-accentblue flex items-center gap-1 bg-darkbg border border-panelborder px-1.5 py-0.5 rounded transition"><i class="fa-solid fa-chart-candlestick"></i> <span id="btnTvText" class="font-mono font-bold text-[8px]">TV</span></button>
+                </div>
               </div>
               <span id="tradeStatus" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40 whitespace-nowrap">RUNNING</span>
             </div>
@@ -470,7 +473,7 @@ const activeTrade = () => trades.find(t => t.id === activeId && t.key === market
 
 /* ================= STATE ================= */
 let lang = 'id', market = 'XAUUSD', ws = null, connId = 0, reconT = null, pingT = null, authFailed = false, streamStarted = false;
-let trades = [], activeId = null, biasBusy = false, tvOn = false;
+let trades = [], activeId = null, biasBusy = false, tvOn = false, showSMC = true;
 let calView = { y: new Date().getFullYear(), m: new Date().getMonth() };
 const prices = {}, hist = {}, candles = {}, workingSym = {}, aliasIdx = {}, subAt = {}, biasCache = {}, CANDLE_CACHE = {};
 const cv = $('priceChart');
@@ -1081,7 +1084,52 @@ function calReset() {
   renderCalendar();
 }
 
-/* ================= CHART ================= */
+/* ================= CHART & SMC ================= */
+function toggleSMC() {
+  showSMC = !showSMC;
+  const btn = $('btnSmcToggle');
+  if (showSMC) {
+    btn.classList.add('bg-accentblue', 'text-white', 'border-accentblue');
+    btn.classList.remove('text-gray-500');
+  } else {
+    btn.classList.remove('bg-accentblue', 'text-white', 'border-accentblue');
+    btn.classList.add('text-gray-500');
+  }
+}
+
+function detectZones(candles) {
+  if (!candles || candles.length < 10) return { fvgs: [], obs: [], liq: [] };
+  const fvgs = [], obs = [], liq = [];
+  
+  for (let i = 2; i < candles.length - 1; i++) {
+    const prev = candles[i-1], curr = candles[i], next = candles[i+1];
+    
+    // FVG
+    if (prev.h < next.l) fvgs.push({ type: 'bull', top: next.l, bottom: prev.h, idx: i });
+    if (prev.l > next.h) fvgs.push({ type: 'bear', top: prev.l, bottom: next.h, idx: i });
+    
+    // OB
+    if (curr.c < curr.o && next.c > curr.o && (next.c - next.o) > (curr.o - curr.c) * 1.5) {
+        obs.push({ type: 'bull', top: curr.o, bottom: curr.l, idx: i });
+    }
+    if (curr.c > curr.o && next.c < curr.o && (curr.c - curr.o) > (next.o - next.c) * 1.5) {
+        obs.push({ type: 'bear', top: curr.h, bottom: curr.o, idx: i });
+    }
+  }
+  
+  let maxH = -Infinity, minL = Infinity;
+  for (let i = candles.length - 30; i < candles.length; i++) {
+      if (i >= 0) {
+          if (candles[i].h > maxH) maxH = candles[i].h;
+          if (candles[i].l < minL) minL = candles[i].l;
+      }
+  }
+  if (maxH > -Infinity) liq.push({ type: 'high', value: maxH });
+  if (minL < Infinity) liq.push({ type: 'low', value: minL });
+
+  return { fvgs: fvgs.slice(-3), obs: obs.slice(-3), liq: liq };
+}
+
 function rr(x, y, w, h, r) {
   cx.beginPath();
   cx.moveTo(x + r, y);
@@ -1124,11 +1172,29 @@ function drawChart() {
     { label: 'TP3', v: t.tp3, c: '#38bdf8', bg: 'rgba(56,189,248,.14)', dash: [4, 4], hit: !!t.hits.tp3 }
   ].filter(l => Number.isFinite(l.v));
 
+  // SMC DATA
+  let smcData = { fvgs: [], obs: [], liq: [] };
+  if (showSMC) {
+      const style = $('tradingStyleSelect').value;
+      const tf = STYLE_CFG[style]?.mtf || '15m';
+      const tfMin = TF_MIN[tf] || 15;
+      const cds = (candles[t.key] && candles[t.key][tfMin]) || [];
+      smcData = detectZones(cds);
+  }
+
   let lo = Infinity, hi = -Infinity;
   const grow = v => { if (v < lo) lo = v; if (v > hi) hi = v; };
   ticks.forEach(x => grow(x.p));
   L.forEach(l => grow(l.v));
   if (t.zone) { grow(t.zone.min); grow(t.zone.max); }
+  
+  // Grow Y axis for SMC
+  if (showSMC) {
+      smcData.fvgs.forEach(z => { grow(z.bottom); grow(z.top); });
+      smcData.obs.forEach(z => { grow(z.bottom); grow(z.top); });
+      smcData.liq.forEach(z => { grow(z.value); });
+  }
+
   if (!(hi - lo > 0)) { const d = Math.abs(hi) * 0.001 || 1; lo -= d; hi += d; }
   const pad = (hi - lo) * 0.15;
   lo -= pad;
@@ -1136,6 +1202,34 @@ function drawChart() {
 
   const plotL = 6, plotT = 20, plotB = CH - 8, plotR = CW - CHART_GUT;
   const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * (plotB - plotT);
+
+  // --- DRAW SMC ZONES ---
+  if (showSMC) {
+      smcData.fvgs.forEach(z => {
+          const y1 = yOf(z.top), y2 = yOf(z.bottom);
+          cx.fillStyle = z.type === 'bull' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(168, 85, 247, 0.15)';
+          cx.fillRect(plotL, Math.min(y1,y2), plotR - plotL, Math.abs(y2-y1));
+          cx.strokeStyle = z.type === 'bull' ? 'rgba(59, 130, 246, 0.4)' : 'rgba(168, 85, 247, 0.4)';
+          cx.lineWidth = 1; cx.setLineDash([]); cx.strokeRect(plotL, Math.min(y1,y2), plotR - plotL, Math.abs(y2-y1));
+      });
+
+      smcData.obs.forEach(z => {
+          const y1 = yOf(z.top), y2 = yOf(z.bottom);
+          cx.fillStyle = z.type === 'bull' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)';
+          cx.fillRect(plotL, Math.min(y1,y2), plotR - plotL, Math.abs(y2-y1));
+          cx.strokeStyle = z.type === 'bull' ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)';
+          cx.lineWidth = 1; cx.setLineDash([]); cx.strokeRect(plotL, Math.min(y1,y2), plotR - plotL, Math.abs(y2-y1));
+      });
+
+      smcData.liq.forEach(l => {
+          const y = yOf(l.value);
+          cx.strokeStyle = 'rgba(245, 158, 11, 0.6)'; cx.lineWidth = 1; cx.setLineDash([4, 4]);
+          cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
+          cx.fillStyle = 'rgba(245, 158, 11, 0.8)'; cx.font = 'bold 8px monospace'; cx.textAlign = 'left';
+          cx.fillText(l.type === 'high' ? 'BSL' : 'SSL', plotL + 5, y - 3);
+      });
+      cx.setLineDash([]);
+  }
 
   if (t.zone && t.mode === 'LIMIT') {
     const y1 = yOf(t.zone.max), y2 = yOf(t.zone.min);
@@ -1218,6 +1312,8 @@ function toggleTV() {
   $('tvBox').classList.toggle('hidden', !tvOn);
   $('btnTvToggle').classList.toggle('bg-accentblue', tvOn);
   $('btnTvToggle').classList.toggle('text-white', tvOn);
+  $('btnTvToggle').classList.toggle('border-accentblue', tvOn);
+  $('btnTvToggle').classList.toggle('text-gray-500', !tvOn);
   setTxt('btnTvText', tvOn ? 'CLOSE' : 'TV');
   $('tvWidget').innerHTML = '';
   if (tvOn && window.TradingView) {
