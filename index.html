@@ -254,6 +254,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
             </div>
             <p id="tradePnl" class="text-[10px] font-mono font-bold text-gray-400">--</p>
             <p id="tradeLive" class="text-[8px] font-mono text-gray-400"></p>
+            <p id="smcInfo" class="text-[8px] font-mono text-gray-400"></p>
             <div class="relative w-full h-[200px] sm:h-[280px] lg:h-[300px]">
               <canvas id="priceChart" class="absolute inset-0 w-full h-full"></canvas>
             </div>
@@ -476,6 +477,7 @@ let lang = 'id', market = 'XAUUSD', ws = null, connId = 0, reconT = null, pingT 
 let trades = [], activeId = null, biasBusy = false, tvOn = false, showSMC = true;
 let calView = { y: new Date().getFullYear(), m: new Date().getMonth() };
 const prices = {}, hist = {}, candles = {}, workingSym = {}, aliasIdx = {}, subAt = {}, biasCache = {}, CANDLE_CACHE = {};
+const smcCache = {}, smcPending = {}, smcTry = {};
 const cv = $('priceChart');
 const cx = cv.getContext('2d');
 
@@ -1084,52 +1086,114 @@ function calReset() {
   renderCalendar();
 }
 
-/* ================= CHART & SMC ================= */
-function toggleSMC() {
-  showSMC = !showSMC;
-  const btn = $('btnSmcToggle');
-  if (showSMC) {
-    btn.classList.add('bg-accentblue', 'text-white', 'border-accentblue');
-    btn.classList.remove('text-gray-500');
-  } else {
-    btn.classList.remove('bg-accentblue', 'text-white', 'border-accentblue');
-    btn.classList.add('text-gray-500');
-  }
+/* ================= SMC (FVG, OB, LIKUIDITAS) ================= */
+function paintSmcBtn() {
+  const b = $('btnSmcToggle');
+  b.classList.toggle('bg-accentblue', showSMC);
+  b.classList.toggle('text-white', showSMC);
+  b.classList.toggle('border-accentblue', showSMC);
+  b.classList.toggle('text-gray-500', !showSMC);
+}
+function toggleSMC() { showSMC = !showSMC; paintSmcBtn(); }
+
+// Ambil candle historis untuk SMC (dedup + retry tiap 10 detik jika gagal)
+function ensureCandles(k, iv) {
+  const ck = k + '|' + iv;
+  const hit = CANDLE_CACHE[ck];
+  if (hit && Date.now() - hit.at < 60000) return;
+  if (smcPending[ck] || (smcTry[ck] && Date.now() - smcTry[ck] < 10000)) return;
+  smcPending[ck] = true;
+  smcTry[ck] = Date.now();
+  loadCandles(k, iv, true).finally(() => { smcPending[ck] = false; });
 }
 
-function detectZones(candles) {
-  if (!candles || candles.length < 10) return { fvgs: [], obs: [], liq: [] };
-  const fvgs = [], obs = [], liq = [];
-  
-  for (let i = 2; i < candles.length - 1; i++) {
-    const prev = candles[i-1], curr = candles[i], next = candles[i+1];
-    
-    // FVG
-    if (prev.h < next.l) fvgs.push({ type: 'bull', top: next.l, bottom: prev.h, idx: i });
-    if (prev.l > next.h) fvgs.push({ type: 'bear', top: prev.l, bottom: next.h, idx: i });
-    
-    // OB
-    if (curr.c < curr.o && next.c > curr.o && (next.c - next.o) > (curr.o - curr.c) * 1.5) {
-        obs.push({ type: 'bull', top: curr.o, bottom: curr.l, idx: i });
-    }
-    if (curr.c > curr.o && next.c < curr.o && (curr.c - curr.o) > (next.o - next.c) * 1.5) {
-        obs.push({ type: 'bear', top: curr.h, bottom: curr.o, idx: i });
-    }
+// Zona yang sudah ditembus harga dianggap tidak valid
+function invalidZone(rows, from, dir, bottom, top) {
+  for (let j = from; j < rows.length; j++) {
+    if (dir > 0 && rows[j].l < bottom) return true;
+    if (dir < 0 && rows[j].h > top) return true;
   }
-  
-  let maxH = -Infinity, minL = Infinity;
-  for (let i = candles.length - 30; i < candles.length; i++) {
-      if (i >= 0) {
-          if (candles[i].h > maxH) maxH = candles[i].h;
-          if (candles[i].l < minL) minL = candles[i].l;
-      }
-  }
-  if (maxH > -Infinity) liq.push({ type: 'high', value: maxH });
-  if (minL < Infinity) liq.push({ type: 'low', value: minL });
-
-  return { fvgs: fvgs.slice(-3), obs: obs.slice(-3), liq: liq };
+  return false;
 }
 
+function detectSMC(rows) {
+  const n = rows.length;
+  const out = { status: n >= 10 ? 'ok' : 'loading', n, fvgs: [], obs: [], liq: [] };
+  if (n < 10) return out;
+  const fvgs = [], obs = [];
+  for (let i = 1; i < n - 1; i++) {
+    const a = rows[i - 1], b = rows[i], c = rows[i + 1];
+    // Fair Value Gap bullish & bearish
+    if (a.h < c.l) {
+      const bottom = a.h, top = c.l;
+      if (!invalidZone(rows, i + 2, 1, bottom, top)) fvgs.push({ dir: 1, bottom, top });
+    }
+    if (a.l > c.h) {
+      const bottom = c.h, top = a.l;
+      if (!invalidZone(rows, i + 2, -1, bottom, top)) fvgs.push({ dir: -1, bottom, top });
+    }
+    // Order Block: candle lawan arah sebelum impuls
+    if (b.c < b.o && c.c > b.h) {
+      const top = b.o, bottom = b.c;
+      if (!invalidZone(rows, i + 2, 1, bottom, top)) obs.push({ dir: 1, bottom, top });
+    }
+    if (b.c > b.o && c.c < b.l) {
+      const top = b.c, bottom = b.o;
+      if (!invalidZone(rows, i + 2, -1, bottom, top)) obs.push({ dir: -1, bottom, top });
+    }
+  }
+  const win = rows.slice(-30);
+  out.liq.push({ type: 'high', value: Math.max(...win.map(x => x.h)) });
+  out.liq.push({ type: 'low', value: Math.min(...win.map(x => x.l)) });
+  out.fvgs = fvgs.slice(-3);
+  out.obs = obs.slice(-3);
+  return out;
+}
+
+// Hasil SMC di-cache per snapshot candle (dibandingkan dengan referensi objek)
+function getSmc(k, iv) {
+  const ck = k + '|' + iv;
+  const hit = CANDLE_CACHE[ck];
+  if (!hit) {
+    ensureCandles(k, iv);
+    return { status: 'loading', n: 0, fvgs: [], obs: [], liq: [] };
+  }
+  const cached = smcCache[ck];
+  if (cached && cached.src === hit) return cached.res;
+  const res = detectSMC(hit.rows);
+  smcCache[ck] = { src: hit, res };
+  if (res.status !== 'ok') ensureCandles(k, iv);
+  return res;
+}
+
+function renderSmcInfo() {
+  const t = activeTrade();
+  if (!showSMC) return setTxt('smcInfo', 'SMC: nonaktif');
+  if (!t) return setTxt('smcInfo', '');
+  const iv = (STYLE_CFG[t.style] || STYLE_CFG.Scalping).mtf;
+  const s = getSmc(t.key, iv);
+  if (s.status !== 'ok') return setTxt('smcInfo', `SMC ${iv}: menunggu data candle (${s.n}/10)`);
+  setTxt('smcInfo', `SMC ${iv}: ${s.fvgs.length} FVG · ${s.obs.length} OB · likuiditas BSL/SSL terdeteksi`);
+}
+
+function drawZone(top, bottom, yOf, plotL, plotR, label, rgb) {
+  const y1 = yOf(top), y2 = yOf(bottom);
+  const y = Math.min(y1, y2), h = Math.abs(y2 - y1);
+  cx.save();
+  cx.fillStyle = `rgba(${rgb},.16)`;
+  cx.fillRect(plotL, y, plotR - plotL, h);
+  cx.strokeStyle = `rgba(${rgb},.55)`;
+  cx.lineWidth = 1;
+  cx.strokeRect(plotL, y, plotR - plotL, h);
+  cx.font = 'bold 8px ui-monospace, monospace';
+  cx.fillStyle = `rgba(${rgb},.95)`;
+  cx.textAlign = 'left';
+  cx.textBaseline = 'top';
+  cx.fillText(label, plotL + 4, y + 2);
+  cx.restore();
+}
+
+/* ================= CHART ================= */
 function rr(x, y, w, h, r) {
   cx.beginPath();
   cx.moveTo(x + r, y);
@@ -1172,14 +1236,18 @@ function drawChart() {
     { label: 'TP3', v: t.tp3, c: '#38bdf8', bg: 'rgba(56,189,248,.14)', dash: [4, 4], hit: !!t.hits.tp3 }
   ].filter(l => Number.isFinite(l.v));
 
-  // SMC DATA - FIX: Mengambil dari CANDLE_CACHE (historis) bukan candles (live tick)
-  let smcData = { fvgs: [], obs: [], liq: [] };
+  // SMC: diambil dari timeframe gaya trade, hanya zona dekat harga live (±2%)
+  let zones = { fvgs: [], obs: [], liq: [] };
   if (showSMC) {
-      const style = $('tradingStyleSelect').value;
-      const tf = STYLE_CFG[style]?.mtf || '15m';
-      const ck = t.key + '|' + tf;
-      const histRows = CANDLE_CACHE[ck] ? CANDLE_CACHE[ck].rows : [];
-      smcData = detectZones(histRows);
+    const iv = (STYLE_CFG[t.style] || STYLE_CFG.Scalping).mtf;
+    const s = getSmc(t.key, iv);
+    if (s.status === 'ok') {
+      const ref = live != null ? live : t.entry;
+      const inBand = (lo2, hi2) => hi2 >= ref * 0.98 && lo2 <= ref * 1.02;
+      zones.fvgs = s.fvgs.filter(z => inBand(z.bottom, z.top));
+      zones.obs = s.obs.filter(z => inBand(z.bottom, z.top));
+      zones.liq = s.liq.filter(l => inBand(l.value, l.value));
+    }
   }
 
   let lo = Infinity, hi = -Infinity;
@@ -1187,14 +1255,8 @@ function drawChart() {
   ticks.forEach(x => grow(x.p));
   L.forEach(l => grow(l.v));
   if (t.zone) { grow(t.zone.min); grow(t.zone.max); }
-  
-  // Grow Y axis for SMC
-  if (showSMC) {
-      smcData.fvgs.forEach(z => { grow(z.bottom); grow(z.top); });
-      smcData.obs.forEach(z => { grow(z.bottom); grow(z.top); });
-      smcData.liq.forEach(z => { grow(z.value); });
-  }
-
+  zones.fvgs.concat(zones.obs).forEach(z => { grow(z.bottom); grow(z.top); });
+  zones.liq.forEach(l => grow(l.value));
   if (!(hi - lo > 0)) { const d = Math.abs(hi) * 0.001 || 1; lo -= d; hi += d; }
   const pad = (hi - lo) * 0.15;
   lo -= pad;
@@ -1203,32 +1265,25 @@ function drawChart() {
   const plotL = 6, plotT = 20, plotB = CH - 8, plotR = CW - CHART_GUT;
   const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * (plotB - plotT);
 
-  // --- DRAW SMC ZONES ---
+  // Zona SMC di belakang garis harga
   if (showSMC) {
-      smcData.fvgs.forEach(z => {
-          const y1 = yOf(z.top), y2 = yOf(z.bottom);
-          cx.fillStyle = z.type === 'bull' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(168, 85, 247, 0.15)';
-          cx.fillRect(plotL, Math.min(y1,y2), plotR - plotL, Math.abs(y2-y1));
-          cx.strokeStyle = z.type === 'bull' ? 'rgba(59, 130, 246, 0.4)' : 'rgba(168, 85, 247, 0.4)';
-          cx.lineWidth = 1; cx.setLineDash([]); cx.strokeRect(plotL, Math.min(y1,y2), plotR - plotL, Math.abs(y2-y1));
-      });
-
-      smcData.obs.forEach(z => {
-          const y1 = yOf(z.top), y2 = yOf(z.bottom);
-          cx.fillStyle = z.type === 'bull' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)';
-          cx.fillRect(plotL, Math.min(y1,y2), plotR - plotL, Math.abs(y2-y1));
-          cx.strokeStyle = z.type === 'bull' ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)';
-          cx.lineWidth = 1; cx.setLineDash([]); cx.strokeRect(plotL, Math.min(y1,y2), plotR - plotL, Math.abs(y2-y1));
-      });
-
-      smcData.liq.forEach(l => {
-          const y = yOf(l.value);
-          cx.strokeStyle = 'rgba(245, 158, 11, 0.6)'; cx.lineWidth = 1; cx.setLineDash([4, 4]);
-          cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
-          cx.fillStyle = 'rgba(245, 158, 11, 0.8)'; cx.font = 'bold 8px monospace'; cx.textAlign = 'left';
-          cx.fillText(l.type === 'high' ? 'BSL' : 'SSL', plotL + 5, y - 3);
-      });
+    zones.fvgs.forEach(z => drawZone(z.top, z.bottom, yOf, plotL, plotR, z.dir > 0 ? 'FVG ▲' : 'FVG ▼', z.dir > 0 ? '59,130,246' : '168,85,247'));
+    zones.obs.forEach(z => drawZone(z.top, z.bottom, yOf, plotL, plotR, z.dir > 0 ? 'OB ▲' : 'OB ▼', z.dir > 0 ? '16,185,129' : '239,68,68'));
+    zones.liq.forEach(l => {
+      const y = yOf(l.value);
+      cx.save();
+      cx.strokeStyle = 'rgba(245,158,11,.75)';
+      cx.lineWidth = 1;
+      cx.setLineDash([3, 3]);
+      cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
       cx.setLineDash([]);
+      cx.font = 'bold 8px ui-monospace, monospace';
+      cx.fillStyle = 'rgba(245,158,11,.95)';
+      cx.textAlign = 'right';
+      cx.textBaseline = l.type === 'high' ? 'bottom' : 'top';
+      cx.fillText(l.type === 'high' ? 'BSL' : 'SSL', plotR - 4, y + (l.type === 'high' ? -2 : 2));
+      cx.restore();
+    });
   }
 
   if (t.zone && t.mode === 'LIMIT') {
@@ -1398,7 +1453,8 @@ async function loadCandles(k, iv, force) {
     const local = (candles[k] && candles[k][TF_MIN[iv]]) || [];
     rows = local.map(c => ({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close }));
   }
-  if (rows.length) CANDLE_CACHE[ck] = { at: Date.now(), rows };
+  // Hanya cache jika data cukup, supaya SMC bisa retry saat data belum lengkap
+  if (rows.length >= 10) CANDLE_CACHE[ck] = { at: Date.now(), rows };
   return rows;
 }
 
@@ -1471,11 +1527,12 @@ async function generateSignal() {
 $('authForm').addEventListener('submit', handleLogin);
 trades = loadTrades();
 applyLang();
+paintSmcBtn();
 calSync();
 checkSession();
 requestAnimationFrame(frame);
 setInterval(() => { watchdog(); expirePending(); }, 1000);
-setInterval(() => { renderTickers(); renderHighlights(); renderHistory(); refreshCard(); }, 500);
+setInterval(() => { renderTickers(); renderHighlights(); renderHistory(); refreshCard(); renderSmcInfo(); }, 500);
 setInterval(() => refreshBias(false), 60000);
 refreshBias(false);
 log(lang === 'id' ? 'Sistem siap.' : 'System ready.', 'system');
