@@ -1172,14 +1172,14 @@ function drawChart() {
     { label: 'TP3', v: t.tp3, c: '#38bdf8', bg: 'rgba(56,189,248,.14)', dash: [4, 4], hit: !!t.hits.tp3 }
   ].filter(l => Number.isFinite(l.v));
 
-  // SMC DATA
+  // SMC DATA - FIX: Mengambil dari CANDLE_CACHE (historis) bukan candles (live tick)
   let smcData = { fvgs: [], obs: [], liq: [] };
   if (showSMC) {
       const style = $('tradingStyleSelect').value;
       const tf = STYLE_CFG[style]?.mtf || '15m';
-      const tfMin = TF_MIN[tf] || 15;
-      const cds = (candles[t.key] && candles[t.key][tfMin]) || [];
-      smcData = detectZones(cds);
+      const ck = t.key + '|' + tf;
+      const histRows = CANDLE_CACHE[ck] ? CANDLE_CACHE[ck].rows : [];
+      smcData = detectZones(histRows);
   }
 
   let lo = Infinity, hi = -Infinity;
