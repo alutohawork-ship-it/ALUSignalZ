@@ -403,6 +403,9 @@ const STYLE_CFG = {
   'Swing': { htf: '1d', mtf: '4h', ltf: '1h', ema: [20, 200], opt: 'optSwing' }
 };
 const BIAS_TF = [{ label: 'M5', iv: '5m' }, { label: 'M15', iv: '15m' }, { label: 'M30', iv: '30m' }, { label: 'H1', iv: '1h' }, { label: 'H4', iv: '4h' }, { label: 'Daily', iv: '1d' }];
+const CANDLE_TTL = { '1m': 30000, '5m': 60000, '15m': 120000, '30m': 180000, '1h': 300000, '4h': 600000, '1d': 900000 };
+const PRIO_IV = ['5m', '15m', '1m', '30m', '1h', '4h', '1d'];
+const CANDLE_LIMIT = 200;
 const PILL = {
   green: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40',
   yellow: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40',
@@ -471,13 +474,20 @@ const T = k => I18N[lang][k];
 const optOf = s => T((STYLE_CFG[s] || STYLE_CFG.Scalping).opt);
 const symOf = k => workingSym[k] || MARKETS[k].aliases[aliasIdx[k] || 0];
 const activeTrade = () => trades.find(t => t.id === activeId && t.key === market) || null;
+const toMs = v => {
+  const n = Number(v);
+  if (Number.isFinite(n) && n > 0) return n < 1e11 ? n * 1000 : n;
+  const d = Date.parse(v);
+  return Number.isFinite(d) ? d : NaN;
+};
 
 /* ================= STATE ================= */
 let lang = 'id', market = 'XAUUSD', ws = null, connId = 0, reconT = null, pingT = null, authFailed = false, streamStarted = false;
-let trades = [], activeId = null, biasBusy = false, tvOn = false, showSMC = true;
+let trades = [], activeId = null, tvOn = false, showSMC = true;
 let calView = { y: new Date().getFullYear(), m: new Date().getMonth() };
-const prices = {}, hist = {}, candles = {}, workingSym = {}, aliasIdx = {}, subAt = {}, biasCache = {}, CANDLE_CACHE = {};
-const smcCache = {}, smcPending = {}, smcTry = {};
+const prices = {}, hist = {}, candles = {}, workingSym = {}, aliasIdx = {}, subAt = {};
+const SER = {}, CSYM = {};
+let pumping = false;
 const cv = $('priceChart');
 const cx = cv.getContext('2d');
 
@@ -549,6 +559,7 @@ function showApp() {
   $('mainApp').classList.remove('hidden');
   $('mainApp').classList.add('flex');
   if (!streamStarted) { streamStarted = true; connect(); }
+  pump();
 }
 function showAdmin() {
   $('authScreen').classList.add('hidden');
@@ -607,7 +618,7 @@ function wsBadge(text, color) {
 function syncMarket() {
   market = $('marketSelect').value;
   setTxt('selectedPairBadge', market);
-  refreshBias(false);
+  pump();
   renderAll();
 }
 function pickMarket(k) { $('marketSelect').value = k; syncMarket(); }
@@ -685,7 +696,7 @@ function watchdog() {
   }
 }
 
-/* ================= TICK & CANDLE LOKAL ================= */
+/* ================= TICK & CANDLE LIVE (LOKAL) ================= */
 function addTick(k, p) {
   const now = Date.now();
   const h = (hist[k] = hist[k] || []);
@@ -708,6 +719,95 @@ function addTick(k, p) {
     }
   }
   checkTrades(k, p);
+}
+
+/* ================= SERI CANDLE (SERVER + LIVE) ================= */
+// Satu entri per pair + timeframe. Data historis diambil dari server,
+// lalu digabung dengan candle live dari stream.
+const ser = (k, iv) => {
+  const ck = k + '|' + iv;
+  return SER[ck] || (SER[ck] = { rows: [], at: 0, ver: 0, err: '', errLog: '', p: null, retryAt: 0, smc: null, smcVer: -1, smcAt: 0 });
+};
+
+function parseCandles(r) {
+  if (!(r.ok && r.data && Array.isArray(r.data.candles))) return [];
+  return r.data.candles
+    .map(c => ({
+      t: toMs(c.openTime ?? c.time ?? c.t),
+      o: Number(c.open ?? c.o), h: Number(c.high ?? c.h), l: Number(c.low ?? c.l), c: Number(c.close ?? c.c)
+    }))
+    .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite))
+    .sort((a, b) => a.t - b.t);
+}
+
+// Ambil data historis dari server. Jika sudah berjalan, kembalikan promise yang sama.
+function fetchSeries(k, iv, force) {
+  const s = ser(k, iv);
+  if (s.p) return s.p;
+  const now = Date.now();
+  const ttl = CANDLE_TTL[iv] * (k === market ? 1 : 3);
+  if (!force && s.at && now - s.at < ttl) return Promise.resolve();
+  if (!force && now < s.retryAt) return Promise.resolve();
+  const email = localStorage.getItem(K.email);
+  if (!email) return Promise.resolve();
+
+  s.p = (async () => {
+    const syms = CSYM[k] ? [CSYM[k]] : MARKETS[k].aliases.slice(0, 2);
+    let got = null, why = '';
+    for (const sym of syms) {
+      const r = await post('/api/candles', { value: email, symbol: sym, interval: iv, limit: CANDLE_LIMIT });
+      const rows = parseCandles(r);
+      if (rows.length) { got = rows; CSYM[k] = sym; break; }
+      why = r.network ? 'koneksi gagal' : `HTTP ${r.status || 0}, data kosong (${sym})`;
+    }
+    if (got) {
+      s.rows = got; s.at = Date.now(); s.ver++; s.err = ''; s.retryAt = 0;
+      s.errLog = '';
+    } else {
+      s.err = why || 'data kosong';
+      s.retryAt = Date.now() + 30000;
+      if (s.err !== s.errLog) { s.errLog = s.err; log(`Candle ${k} ${iv}: ${s.err}`, 'error'); }
+    }
+  })().finally(() => { s.p = null; });
+  return s.p;
+}
+
+// Gabungkan data server dengan candle live: bucket yang sama digabung, bucket baru ditambahkan
+function seriesRows(k, iv) {
+  const s = ser(k, iv);
+  const out = s.rows.map(r => ({ ...r }));
+  const local = (candles[k] && candles[k][TF_MIN[iv]]) || [];
+  for (const c of local) {
+    const last = out[out.length - 1];
+    if (last && c.time === last.t) {
+      last.h = Math.max(last.h, c.high);
+      last.l = Math.min(last.l, c.low);
+      last.c = c.close;
+    } else if (!last || c.time > last.t) {
+      out.push({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close });
+    }
+  }
+  return out;
+}
+
+// Pompa latar belakang: satu request per giliran, pair aktif diprioritaskan
+function pump() {
+  if (pumping || !localStorage.getItem(K.email)) return;
+  const now = Date.now();
+  const order = [market, ...KEYS.filter(k => k !== market)];
+  let pick = null;
+  for (const k of order) {
+    for (const iv of PRIO_IV) {
+      const s = ser(k, iv);
+      if (s.p || now < s.retryAt) continue;
+      const ttl = CANDLE_TTL[iv] * (k === market ? 1 : 3);
+      if (!s.at || now - s.at >= ttl) { pick = { k, iv }; break; }
+    }
+    if (pick) break;
+  }
+  if (!pick) return;
+  pumping = true;
+  fetchSeries(pick.k, pick.iv, false).finally(() => { pumping = false; });
 }
 
 /* ================= TRADE ================= */
@@ -831,7 +931,7 @@ function viewTrade(id) {
 }
 
 /* ================= RENDER ================= */
-function renderAll() { renderTickers(); renderHighlights(); renderBias(); renderHistory(); refreshCard(); renderCalendar(); }
+function renderAll() { renderTickers(); renderHighlights(); renderBias(); renderHistory(); refreshCard(); renderCalendar(); renderSmcInfo(); }
 
 function renderTickers() {
   $('tickerList').innerHTML = KEYS.map(k => {
@@ -954,23 +1054,11 @@ function refreshCard() {
 
 /* ================= BIAS ================= */
 async function refreshBias(force) {
-  const k = market;
-  if (!localStorage.getItem(K.email)) return renderBias();
-  const cache = biasCache[k];
-  if (!force && cache && Date.now() - cache.at < 60000) return renderBias();
-  if (biasBusy) return;
-  biasBusy = true;
-  try {
-    const rows = {};
-    for (const tf of BIAS_TF) rows[tf.label] = calcBias(await loadCandles(k, tf.iv, force));
-    biasCache[k] = { at: Date.now(), rows };
-  } finally { biasBusy = false; }
+  await Promise.all(BIAS_TF.map(tf => fetchSeries(market, tf.iv, !!force)));
   renderBias();
 }
 function renderBias() {
-  const cache = biasCache[market];
-  const rows = cache ? cache.rows : {};
-  const list = BIAS_TF.map(tf => rows[tf.label] || { bias: 'WAIT', score: 0 });
+  const list = BIAS_TF.map(tf => calcBias(seriesRows(market, tf.iv)));
   $('biasGrid').innerHTML = BIAS_TF.map((tf, i) => {
     const b = list[i];
     const sc = b.bias !== 'WAIT' ? `skor ${b.score > 0 ? '+' : ''}${b.score}` : '';
@@ -980,7 +1068,7 @@ function renderBias() {
       <p class="text-[7px] text-gray-500 font-mono">${sc}</p></div>`;
   }).join('');
   const cnt = v => list.filter(b => b.bias === v).length;
-  setTxt('biasInfo', `${cnt('BULLISH')} Bullish · ${cnt('BEARISH')} Bearish · ${cnt('NETRAL')} Netral · ${cnt('WAIT')} Loading · update ${new Date(cache ? cache.at : Date.now()).toLocaleTimeString('id-ID', { hour12: false })}`);
+  setTxt('biasInfo', `${cnt('BULLISH')} Bullish · ${cnt('BEARISH')} Bearish · ${cnt('NETRAL')} Netral · ${cnt('WAIT')} Loading · update ${new Date().toLocaleTimeString('id-ID', { hour12: false })}`);
 }
 
 /* ================= KALENDER PNL ================= */
@@ -1096,17 +1184,6 @@ function paintSmcBtn() {
 }
 function toggleSMC() { showSMC = !showSMC; paintSmcBtn(); }
 
-// Ambil candle historis untuk SMC (dedup + retry tiap 10 detik jika gagal)
-function ensureCandles(k, iv) {
-  const ck = k + '|' + iv;
-  const hit = CANDLE_CACHE[ck];
-  if (hit && Date.now() - hit.at < 60000) return;
-  if (smcPending[ck] || (smcTry[ck] && Date.now() - smcTry[ck] < 10000)) return;
-  smcPending[ck] = true;
-  smcTry[ck] = Date.now();
-  loadCandles(k, iv, true).finally(() => { smcPending[ck] = false; });
-}
-
 // Zona yang sudah ditembus harga dianggap tidak valid
 function invalidZone(rows, from, dir, bottom, top) {
   for (let j = from; j < rows.length; j++) {
@@ -1117,13 +1194,9 @@ function invalidZone(rows, from, dir, bottom, top) {
 }
 
 function detectSMC(rows) {
-  const n = rows.length;
-  const out = { status: n >= 10 ? 'ok' : 'loading', n, fvgs: [], obs: [], liq: [] };
-  if (n < 10) return out;
   const fvgs = [], obs = [];
-  for (let i = 1; i < n - 1; i++) {
+  for (let i = 1; i < rows.length - 1; i++) {
     const a = rows[i - 1], b = rows[i], c = rows[i + 1];
-    // Fair Value Gap bullish & bearish
     if (a.h < c.l) {
       const bottom = a.h, top = c.l;
       if (!invalidZone(rows, i + 2, 1, bottom, top)) fvgs.push({ dir: 1, bottom, top });
@@ -1132,7 +1205,6 @@ function detectSMC(rows) {
       const bottom = c.h, top = a.l;
       if (!invalidZone(rows, i + 2, -1, bottom, top)) fvgs.push({ dir: -1, bottom, top });
     }
-    // Order Block: candle lawan arah sebelum impuls
     if (b.c < b.o && c.c > b.h) {
       const top = b.o, bottom = b.c;
       if (!invalidZone(rows, i + 2, 1, bottom, top)) obs.push({ dir: 1, bottom, top });
@@ -1143,26 +1215,26 @@ function detectSMC(rows) {
     }
   }
   const win = rows.slice(-30);
-  out.liq.push({ type: 'high', value: Math.max(...win.map(x => x.h)) });
-  out.liq.push({ type: 'low', value: Math.min(...win.map(x => x.l)) });
-  out.fvgs = fvgs.slice(-3);
-  out.obs = obs.slice(-3);
-  return out;
+  const liq = [
+    { type: 'high', value: Math.max(...win.map(x => x.h)) },
+    { type: 'low', value: Math.min(...win.map(x => x.l)) }
+  ];
+  return { fvgs: fvgs.slice(-3), obs: obs.slice(-3), liq };
 }
 
-// Hasil SMC di-cache per snapshot candle (dibandingkan dengan referensi objek)
+// Hasil SMC dihitung ulang paling sering tiap 1 detik, atau saat data server berubah
 function getSmc(k, iv) {
-  const ck = k + '|' + iv;
-  const hit = CANDLE_CACHE[ck];
-  if (!hit) {
-    ensureCandles(k, iv);
-    return { status: 'loading', n: 0, fvgs: [], obs: [], liq: [] };
-  }
-  const cached = smcCache[ck];
-  if (cached && cached.src === hit) return cached.res;
-  const res = detectSMC(hit.rows);
-  smcCache[ck] = { src: hit, res };
-  if (res.status !== 'ok') ensureCandles(k, iv);
+  const s = ser(k, iv), now = Date.now();
+  if (s.smc && s.smcVer === s.ver && now - s.smcAt < 1000) return s.smc;
+  const rows = seriesRows(k, iv);
+  const src = s.rows.length ? 'server' : 'lokal';
+  const res = rows.length >= 10
+    ? { ...detectSMC(rows), status: 'ok' }
+    : { status: 'loading', fvgs: [], obs: [], liq: [] };
+  res.n = rows.length;
+  res.src = src;
+  res.err = s.err;
+  s.smc = res; s.smcVer = s.ver; s.smcAt = now;
   return res;
 }
 
@@ -1172,8 +1244,9 @@ function renderSmcInfo() {
   if (!t) return setTxt('smcInfo', '');
   const iv = (STYLE_CFG[t.style] || STYLE_CFG.Scalping).mtf;
   const s = getSmc(t.key, iv);
-  if (s.status !== 'ok') return setTxt('smcInfo', `SMC ${iv}: menunggu data candle (${s.n}/10)`);
-  setTxt('smcInfo', `SMC ${iv}: ${s.fvgs.length} FVG · ${s.obs.length} OB · likuiditas BSL/SSL terdeteksi`);
+  if (s.status === 'ok') return setTxt('smcInfo', `SMC ${iv} (${s.src}, ${s.n} candle): ${s.fvgs.length} FVG · ${s.obs.length} OB · BSL/SSL`);
+  const why = s.err ? `gagal ambil candle: ${s.err}` : `memuat candle (${s.n}/10)`;
+  setTxt('smcInfo', `SMC ${iv}: ${why}`);
 }
 
 function drawZone(top, bottom, yOf, plotL, plotR, label, rgb) {
@@ -1236,7 +1309,7 @@ function drawChart() {
     { label: 'TP3', v: t.tp3, c: '#38bdf8', bg: 'rgba(56,189,248,.14)', dash: [4, 4], hit: !!t.hits.tp3 }
   ].filter(l => Number.isFinite(l.v));
 
-  // SMC: diambil dari timeframe gaya trade, hanya zona dekat harga live (±2%)
+  // SMC: zona dekat harga live (±2%) saja
   let zones = { fvgs: [], obs: [], liq: [] };
   if (showSMC) {
     const iv = (STYLE_CFG[t.style] || STYLE_CFG.Scalping).mtf;
@@ -1265,7 +1338,6 @@ function drawChart() {
   const plotL = 6, plotT = 20, plotB = CH - 8, plotR = CW - CHART_GUT;
   const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * (plotB - plotT);
 
-  // Zona SMC di belakang garis harga
   if (showSMC) {
     zones.fvgs.forEach(z => drawZone(z.top, z.bottom, yOf, plotL, plotR, z.dir > 0 ? 'FVG ▲' : 'FVG ▼', z.dir > 0 ? '59,130,246' : '168,85,247'));
     zones.obs.forEach(z => drawZone(z.top, z.bottom, yOf, plotL, plotR, z.dir > 0 ? 'OB ▲' : 'OB ▼', z.dir > 0 ? '16,185,129' : '239,68,68'));
@@ -1413,7 +1485,7 @@ async function runSteps(ms) {
   bar.style.width = '100%';
 }
 
-/* ================= INDIKATOR & CANDLE ================= */
+/* ================= INDIKATOR ================= */
 function calcEMA(c, p) {
   if (!c || !c.length) return [];
   const k = 2 / (p + 1), out = [];
@@ -1430,32 +1502,13 @@ function calcBB(c, p = 20, m = 2) {
   return { middle: +mid.toFixed(5), upper: +(mid + m * sd).toFixed(5), lower: +(mid - m * sd).toFixed(5) };
 }
 function calcBias(c) {
-  if (!c || !c.length) return { bias: 'WAIT', score: 0 };
+  if (!c || c.length < 10) return { bias: 'WAIT', score: 0 };
   const closes = c.map(x => x.c);
   const period = Math.min(20, Math.max(2, Math.floor(closes.length / 2)));
   const e = calcEMA(c, period);
   const i = closes.length - 1;
   const score = (closes[i] >= e[i] ? 1 : -1) + (closes[i] >= closes[0] ? 1 : -1);
   return { bias: score > 0 ? 'BULLISH' : score < 0 ? 'BEARISH' : 'NETRAL', score };
-}
-async function loadCandles(k, iv, force) {
-  const ck = k + '|' + iv, hit = CANDLE_CACHE[ck];
-  if (!force && hit && Date.now() - hit.at < 180000) return hit.rows;
-  let rows = [];
-  const r = await post('/api/candles', { value: localStorage.getItem(K.email) || '', symbol: k, interval: iv, limit: 100 });
-  if (r.ok && r.data && Array.isArray(r.data.candles)) {
-    rows = r.data.candles
-      .map(c => ({ t: Number(c.openTime || c.t), o: Number(c.open || c.o), h: Number(c.high || c.h), l: Number(c.low || c.l), c: Number(c.close || c.c) }))
-      .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite))
-      .sort((a, b) => a.t - b.t);
-  }
-  if (rows.length < 5) {
-    const local = (candles[k] && candles[k][TF_MIN[iv]]) || [];
-    rows = local.map(c => ({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close }));
-  }
-  // Hanya cache jika data cukup, supaya SMC bisa retry saat data belum lengkap
-  if (rows.length >= 10) CANDLE_CACHE[ck] = { at: Date.now(), rows };
-  return rows;
 }
 
 /* ================= GENERATE SINYAL ================= */
@@ -1478,7 +1531,13 @@ async function generateSignal() {
   let data = null, err = null;
 
   try {
-    const [h, m, l] = await Promise.all([loadCandles(k, cfg.htf, false), loadCandles(k, cfg.mtf, false), loadCandles(k, cfg.ltf, false)]);
+    // Data biasanya sudah ada dari pemuatan otomatis; ambil ulang hanya jika sudah kedaluwarsa
+    await Promise.all([cfg.htf, cfg.mtf, cfg.ltf].map(iv => fetchSeries(k, iv, false)));
+    const h = seriesRows(k, cfg.htf), m = seriesRows(k, cfg.mtf), l = seriesRows(k, cfg.ltf);
+    if (m.length < 10) {
+      const e = ser(k, cfg.mtf).err;
+      throw new Error(`candle ${cfg.mtf} belum lengkap (${m.length}/10)${e ? ': ' + e : '. Coba lagi beberapa detik.'}`);
+    }
     const ema = {};
     cfg.ema.forEach(p => { const r = calcEMA(l, p); ema['EMA_' + p] = r.length ? Number(r[r.length - 1].toFixed(5)) : 0; });
     const bb = calcBB(m.length ? m : l);
@@ -1533,8 +1592,9 @@ checkSession();
 requestAnimationFrame(frame);
 setInterval(() => { watchdog(); expirePending(); }, 1000);
 setInterval(() => { renderTickers(); renderHighlights(); renderHistory(); refreshCard(); renderSmcInfo(); }, 500);
-setInterval(() => refreshBias(false), 60000);
-refreshBias(false);
+setInterval(pump, 1200);
+setInterval(renderBias, 5000);
+pump();
 log(lang === 'id' ? 'Sistem siap.' : 'System ready.', 'system');
 </script>
 </body>
