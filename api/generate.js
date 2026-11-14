@@ -4,7 +4,7 @@
 //  - Day Trading: Konsep Scalping Konservatif. Menunggu retest FVG/OB baru (fresh) di M15 akibat BOS. Limit Order.
 //  - Intraday: Area S/D H1 + Refine M15. 2 arah.
 //  - Swing: Area S/D H4 + Refine H1.
-//  - Integrasi AI GutsAI (DeepSeek) untuk narasi reasoning SMC/ICT.
+//  - Integrasi AI GutsAI (Qwen 3.8 Max) untuk narasi reasoning SMC/ICT.
 //  - Bahasa output (id / en) mengikuti field "lang" dari frontend.
 
 export const config = { api: { bodyParser: { sizeLimit: '6mb' } } };
@@ -15,7 +15,7 @@ const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
 // ── AI CONFIG ──
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const AI_MODEL = 'deepseek-v4.1-flash-uncensored'; // <-- SUDAH DIGANTI KE UNCENSORED
+const AI_MODEL = process.env.AI_MODEL || 'qwen-3.8-max'; // Default Qwen 3.8 Max, override via env AI_MODEL
 
 const API_KEYS = [
   process.env.TICKERLAYER_API_KEY,
@@ -139,6 +139,96 @@ const SCALP_ZONE_REQUIRE_BIAS = false;  // true = demand hanya jika bias M5 bull
 const SCALP_NEAR_ZONE_PIPS = 15;        // area berlawanan dalam 15 pip → peringatan
 const SCALP_CHASE_MAX_PIPS = 15;        // dipakai hanya jika SCALP_ZONE_NEEDS_CONFIRM = true
 const scalpZoneOpts = { dispAtr: SCALP_ZONE_DISP_ATR, freshOnly: SCALP_ZONE_FRESH_ONLY };
+
+// ═══ ADDED: REACTION RANGE + FVG CONTINUITY + FIXED RISK (Day Trading XAUUSD) ═══
+const REACTION_ATR = { scalp: 1.5, day: 1.5, intraday: 1.5, swing: 2.0 };
+const REACTION_MIN_PIP = 5;
+const NOW_MAX_ATR = { scalp: 0.4, day: 0.6, intraday: 0.8 };
+const FVG_LOOKBACK_BY_STYLE = { scalp: 40, day: 40, intraday: 40 };
+const FVG_MIN_SIZE_ATR = 0.15;
+const SCALP_ZONE_MIN_AGE_BARS = 8;
+const FIXED_RISK_XAU_DAY_PIPS = 50;
+
+function reactionRangeFor(kind, atrVal, ctx) {
+  return Math.max((REACTION_ATR[kind] || 1.5) * atrVal, REACTION_MIN_PIP * ctx.pip);
+}
+
+// Fixed 50 pip hanya untuk XAUUSD di Day Trading; pair lain → null (fallback struktur)
+function fixedRiskFor(kind, ctx) {
+  if (kind === 'day' && ctx.gold) return FIXED_RISK_XAU_DAY_PIPS * ctx.pip;
+  return null;
+}
+
+function classifyPriceZone(price, demand, supply, reactionDist) {
+  const inDemand = !!demand && price >= demand.bottom && price <= demand.top;
+  const inSupply = !!supply && price >= supply.bottom && price <= supply.top;
+  const distToSupply = supply ? Math.max(0, supply.bottom - price) : Infinity;
+  const distToDemand = demand ? Math.max(0, price - demand.top) : Infinity;
+  return {
+    inDemand, inSupply,
+    nearSupply: !!supply && !inSupply && distToSupply > 0 && distToSupply <= reactionDist,
+    nearDemand: !!demand && !inDemand && distToDemand > 0 && distToDemand <= reactionDist,
+    distToSupply, distToDemand,
+  };
+}
+
+function detectRejection(refineC, price, demand, supply, atrVal, nowMaxAtr) {
+  if (!refineC || refineC.length < 5) return { buyOk: false, sellOk: false };
+  const last5 = refineC.slice(-5);
+  const last = last5[last5.length - 1];
+  const bearCount = last5.filter(c => c.c < c.o).length;
+  const bullCount = last5.filter(c => c.c > c.o).length;
+  let sellWick = false, buyWick = false;
+  if (supply) {
+    const touched = last5.some(c => c.h >= supply.bottom);
+    sellWick = touched && last.c < last.o && last.c < supply.bottom;
+  }
+  if (demand) {
+    const touched = last5.some(c => c.l <= demand.top);
+    buyWick = touched && last.c > last.o && last.c > demand.top;
+  }
+  const nearMax = nowMaxAtr * atrVal;
+  const sellOk = sellWick || (bearCount >= 3 && supply && (supply.bottom - price) <= nearMax);
+  const buyOk  = buyWick  || (bullCount >= 3 && demand && (price - demand.top)  <= nearMax);
+  return { buyOk, sellOk };
+}
+
+function findRecentFVGs(candles, lookback) {
+  const n = candles.length;
+  const fvgs = [];
+  const start = Math.max(1, n - lookback);
+  for (let i = start; i < n - 1; i++) {
+    const prev = candles[i - 1], next = candles[i + 1];
+    if (prev.h < next.l) fvgs.push({ dir: 1,  lo: prev.h, hi: next.l, idx: i });
+    if (prev.l > next.h) fvgs.push({ dir: -1, lo: next.h, hi: prev.l, idx: i });
+  }
+  return fvgs.filter(f => {
+    for (let i = f.idx + 2; i < n; i++) {
+      if (candles[i].l <= f.hi && candles[i].h >= f.lo) return false;
+    }
+    return true;
+  });
+}
+
+function evaluateFVG(candles, price, dir, atrVal, lookback = 40) {
+  const fvgs = findRecentFVGs(candles, lookback)
+    .filter(f => f.dir === dir && (f.hi - f.lo) >= FVG_MIN_SIZE_ATR * atrVal);
+  if (!fvgs.length) return { useFVG: false, reason: 'no-fvg' };
+  const candidates = dir === 1
+    ? fvgs.filter(f => f.hi <= price + 0.2 * atrVal).sort((a, b) => b.hi - a.hi)
+    : fvgs.filter(f => f.lo >= price - 0.2 * atrVal).sort((a, b) => a.lo - b.lo);
+  if (!candidates.length) return { useFVG: false, reason: 'fvg-opposite-side' };
+  const fvg = candidates[0];
+  const inFVG = price >= fvg.lo && price <= fvg.hi;
+  const distToFVG = dir === 1 ? (price - fvg.hi) : (fvg.lo - price);
+  const entry = dir === 1 ? fvg.hi : fvg.lo;
+  const sl = dir === 1 ? fvg.lo - 0.25 * atrVal : fvg.hi + 0.25 * atrVal;
+  if (inFVG) return { useFVG: true, entry, sl, fvg, retraceMandatory: false, reason: 'inside-fvg' };
+  if (distToFVG > 0) return { useFVG: true, entry, sl, fvg, retraceMandatory: true, reason: 'retrace-needed' };
+  if (Math.abs(distToFVG) < 1.0 * atrVal) return { useFVG: true, entry, sl, fvg, retraceMandatory: true, reason: 'near-breakout' };
+  return { useFVG: false, reason: 'breakout-far', fvg };
+}
+// ═══ END ADDED ═══
 
 // ── SL: XAUUSD dalam pip, pair lain dalam kelipatan ATR ──
 const GOLD_SL_PIPS = { scalp: [25, 30], day: [50, 120], intraday: [80, 200], swing: [150, 300] };
@@ -841,19 +931,31 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
   }
 }
 
+// ═══ MODIFIED: finalizePlan — Day Trading XAUUSD fixed 50 pip, pair lain struktur ═══
 async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, rrList, confidence, setup, zoneNote, zoneRange, head, lines, zoneLine }) {
   const { f, pip, gold, prof } = ctx;
   const t = tx(ctx);
-  const b = slBounds(kind, ctx, atrVal);
-  const buf = gold ? SL_BUFFER_PIPS[kind] * pip : prof.bufAtr * atrVal;
-  let raw = Math.abs(entry - baseSL) + buf;
-  if ((dir === 1 && baseSL >= entry) || (dir === -1 && baseSL <= entry)) raw = b.min;
-  const risk = Math.min(Math.max(raw, b.min), b.max);
+
+  let risk, slNote = '';
+  const fixedRisk = fixedRiskFor(kind, ctx);
+  if (fixedRisk) {
+    // XAUUSD Day Trading: SL fixed 50 pip
+    risk = fixedRisk;
+    slNote = ctx.lang === 'en'
+      ? `SL fixed ${FIXED_RISK_XAU_DAY_PIPS} pips (XAUUSD day trade)`
+      : `SL fixed ${FIXED_RISK_XAU_DAY_PIPS} pip (Day Trading XAUUSD)`;
+  } else {
+    // Pair lain (dan style lain): SL struktur ATR-based per pair
+    const b = slBounds(kind, ctx, atrVal);
+    const buf = gold ? SL_BUFFER_PIPS[kind] * pip : prof.bufAtr * atrVal;
+    let raw = Math.abs(entry - baseSL) + buf;
+    if ((dir === 1 && baseSL >= entry) || (dir === -1 && baseSL <= entry)) raw = b.min;
+    risk = Math.min(Math.max(raw, b.min), b.max);
+    if (raw > b.max) slNote = t.slCapped((b.max / pip).toFixed(0), (raw / pip).toFixed(0));
+  }
+
   const sl = entry - dir * risk;
   const tps = rrList.map(x => entry + dir * x * risk);
-  const slNote = raw > b.max
-    ? t.slCapped((b.max / pip).toFixed(0), (raw / pip).toFixed(0))
-    : '';
   const parts = [
     head,
     ...lines,
@@ -886,6 +988,7 @@ async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, 
     meta: { confidence, riskLabel: 'MEDIUM', setup, reason: aiReason || manualReason },
   };
 }
+// ═══ END MODIFIED ═══
 
 async function buildAreaPlan({ title, area, dir, price, refineC, refineName, kind, atrVal, ctx, areaName, rrList, lines }) {
   const { f, pip, gold, symbol } = ctx;
@@ -941,6 +1044,7 @@ async function buildAreaPlan({ title, area, dir, price, refineC, refineName, kin
 
 // ═══════════════════════════ SCALPING ═══════════════════════════
 
+// ═══ MODIFIED: buildScalpPlan — Reaction Range + FVG Continuity + Decision Matrix ═══
 async function buildScalpPlan({ m1, m5, price, rrList, ctx }) {
   const { f, pip, prof } = ctx;
   const t = tx(ctx);
@@ -948,84 +1052,109 @@ async function buildScalpPlan({ m1, m5, price, rrList, ctx }) {
   const struct = tfName === 'M1' ? m1 : m5;
   const m5c = tfName === 'M1' ? aggregateCandles(m1, 5).slice(0, -1) : m5.slice(0, -1);
   const atrVal = atrOf(m5c, pip);
-  const nearDist = prof.nearAtr * atrVal; // jarak "dekat" dihitung dari volatilitas pair ini
+  const reactionDist = reactionRangeFor('scalp', atrVal, ctx);
   const zOpts = { dispAtr: prof.zoneDisp, freshOnly: SCALP_ZONE_FRESH_ONLY };
-  const recent = z => z.dispIdx >= m5c.length - SCALP_ZONE_LOOKBACK_M5;
+  const recent = z => z.dispIdx >= m5c.length - SCALP_ZONE_LOOKBACK_M5
+                   && z.dispIdx <= m5c.length - SCALP_ZONE_MIN_AGE_BARS;
 
-  // Zona terdekat di tiap sisi. dist = 0 berarti harga sudah di dalam zona.
   const demand = findSDZones(m5c, 1, price, zOpts).filter(recent)[0] || null;
   const supply = findSDZones(m5c, -1, price, zOpts).filter(recent)[0] || null;
-  const pick = [
-    demand && { z: demand, dir: 1 },
-    supply && { z: supply, dir: -1 },
-  ]
-    .filter(c => c && c.z.dist <= nearDist)
-    .sort((a, b) => a.z.dist - b.z.dist)[0] || null;
-
-  // Konteks zona untuk reasoning AI: zona fresh terdekat, atau zona tidak fresh yang masih memuat harga.
-  const staleHit = [1, -1]
-    .map(d => ({ d, z: findSDZones(m5c, d, price, { dispAtr: prof.zoneDisp, freshOnly: false }).filter(recent).filter(z => !z.fresh && z.dist === 0)[0] }))
-    .find(x => x.z) || null;
-  const zoneLine = pick
-    ? t.zoneFresh(pick.dir === 1 ? 'demand' : 'supply', prof.zoneTf, f(pick.z.bottom), f(pick.z.top), pick.z.dist === 0)
-    : staleHit
-      ? t.zoneStale(staleHit.d === 1 ? 'demand' : 'supply', prof.zoneTf, f(staleHit.z.bottom), f(staleHit.z.top))
-      : t.zoneNone;
-
+  const pos = classifyPriceZone(price, demand, supply, reactionDist);
+  const rejection = detectRejection(struct, price, demand, supply, atrVal, NOW_MAX_ATR.scalp);
   const init = analyzePureSMCStructure(struct);
-  const { highs, lows } = findPivots(struct, SCALP_PIVOT);
-  const lastH = highs.length ? highs[highs.length - 1] : null;
-  const lastL = lows.length ? lows[lows.length - 1] : null;
   const srcTxt = srcName(init.src, ctx.lang);
 
   const lines = [];
-  let dir, orderType, entry, baseSL, zoneRange, confidence, setup;
+  let dir, orderType, entry, baseSL, zoneRange, confidence, setup, zoneLine;
 
-  if (pick) {
-    const { z } = pick;
-    dir = pick.dir;
-    const side = dir === 1 ? 'demand' : 'supply';
-    const inside = z.dist === 0;
-    orderType = inside ? 'NOW' : 'LIMIT';
-    entry = inside ? price : (dir === 1 ? z.top : z.bottom);
-    baseSL = z.sl;
-    zoneRange = { min: z.bottom, max: z.top };
-    lines.push(inside
-      ? t.inZone(side, prof.zoneTf, f(z.bottom), f(z.top))
-      : t.limitEdge(side, prof.zoneTf, f(entry), (z.dist / pip).toFixed(0)));
-    lines.push(init.dir === dir
-      ? t.aligned(tfName, srcTxt)
-      : t.opposed(tfName, srcTxt));
-    confidence = init.dir === dir ? 'HIGH' : 'MEDIUM';
-    setup = t.zoneSetup(prof.zoneTf, side, orderType);
+  if (pos.inSupply) {
+    dir = -1;
+    zoneRange = { min: supply.bottom, max: supply.top };
+    zoneLine = t.zoneFresh('supply', prof.zoneTf, f(supply.bottom), f(supply.top), true);
+    lines.push(t.inZone('supply', prof.zoneTf, f(supply.bottom), f(supply.top)));
+    if (rejection.sellOk) {
+      orderType = 'NOW'; entry = price; baseSL = supply.sl;
+      confidence = 'HIGH'; setup = 'Supply Rejection NOW';
+    } else {
+      orderType = 'LIMIT'; entry = supply.bottom; baseSL = supply.sl;
+      confidence = 'MEDIUM'; setup = 'Supply LIMIT (tunggu rejection)';
+    }
+  } else if (pos.inDemand) {
+    dir = 1;
+    zoneRange = { min: demand.bottom, max: demand.top };
+    zoneLine = t.zoneFresh('demand', prof.zoneTf, f(demand.bottom), f(demand.top), true);
+    lines.push(t.inZone('demand', prof.zoneTf, f(demand.bottom), f(demand.top)));
+    if (rejection.buyOk) {
+      orderType = 'NOW'; entry = price; baseSL = demand.sl;
+      confidence = 'HIGH'; setup = 'Demand Bounce NOW';
+    } else {
+      orderType = 'LIMIT'; entry = demand.top; baseSL = demand.sl;
+      confidence = 'MEDIUM'; setup = 'Demand LIMIT (tunggu rejection)';
+    }
+  } else if (pos.nearSupply || pos.nearDemand) {
+    const useSupply = pos.nearSupply && (!pos.nearDemand || pos.distToSupply <= pos.distToDemand);
+    if (useSupply) {
+      dir = -1;
+      zoneRange = { min: supply.bottom, max: supply.top };
+      zoneLine = t.zoneFresh('supply', prof.zoneTf, f(supply.bottom), f(supply.top), false);
+      lines.push(t.dist((pos.distToSupply / pip).toFixed(0), true) + ` → ${prof.zoneTf} supply`);
+      if (rejection.sellOk && pos.distToSupply <= NOW_MAX_ATR.scalp * atrVal) {
+        orderType = 'NOW'; entry = price; baseSL = supply.sl;
+        confidence = 'HIGH'; setup = 'Approaching Supply NOW';
+      } else {
+        orderType = 'LIMIT'; entry = supply.bottom; baseSL = supply.sl;
+        confidence = 'HIGH'; setup = 'Approaching Supply LIMIT';
+      }
+    } else {
+      dir = 1;
+      zoneRange = { min: demand.bottom, max: demand.top };
+      zoneLine = t.zoneFresh('demand', prof.zoneTf, f(demand.bottom), f(demand.top), false);
+      lines.push(t.dist((pos.distToDemand / pip).toFixed(0), false) + ` → ${prof.zoneTf} demand`);
+      if (rejection.buyOk && pos.distToDemand <= NOW_MAX_ATR.scalp * atrVal) {
+        orderType = 'NOW'; entry = price; baseSL = demand.sl;
+        confidence = 'HIGH'; setup = 'Approaching Demand NOW';
+      } else {
+        orderType = 'LIMIT'; entry = demand.top; baseSL = demand.sl;
+        confidence = 'HIGH'; setup = 'Approaching Demand LIMIT';
+      }
+    }
   } else {
     dir = init.dir;
-    orderType = 'NOW';
-    entry = price;
-    const pivot = dir === 1 ? lastL : lastH;
-    const pivotOk = !!pivot && (dir === 1 ? pivot.p < price : pivot.p > price);
-    baseSL = pivotOk ? pivot.p : recentExtreme(struct, dir, 10);
-    zoneRange = { min: price, max: price };
+    const fvgEval = evaluateFVG(m5c, price, dir, atrVal, FVG_LOOKBACK_BY_STYLE.scalp);
     lines.push(t.outside(prof.zoneTf, tfName, srcTxt));
-    lines.push(areaNote(m5c, price, ctx));
-    confidence = /BOS|Struktur/.test(init.src) ? 'HIGH' : 'MEDIUM';
-    setup = t.marketExec(srcTxt);
-  }
-
-  const opp = findSDZones(m5c, -dir, price, zOpts).filter(recent)[0];
-  if (opp && opp.dist <= nearDist) {
-    const oppName = dir === 1 ? 'supply' : 'demand';
-    const distTxt = opp.dist === 0 ? t.insideAlready : t.dist((opp.dist / pip).toFixed(0), dir === 1);
-    lines.push(t.opposing(oppName, prof.zoneTf, f(opp.bottom), f(opp.top), distTxt, dir === 1 ? 'BUY' : 'SELL'));
+    if (fvgEval.useFVG && fvgEval.retraceMandatory) {
+      orderType = 'LIMIT'; entry = fvgEval.entry; baseSL = fvgEval.sl;
+      zoneRange = { min: fvgEval.fvg.lo, max: fvgEval.fvg.hi };
+      confidence = 'HIGH';
+      setup = `FVG ${dir === 1 ? 'Bull' : 'Bear'} Retrace`;
+      zoneLine = `FVG ${f(fvgEval.fvg.lo)}-${f(fvgEval.fvg.hi)}`;
+    } else if (fvgEval.useFVG) {
+      orderType = 'LIMIT'; entry = fvgEval.entry; baseSL = fvgEval.sl;
+      zoneRange = { min: fvgEval.fvg.lo, max: fvgEval.fvg.hi };
+      confidence = 'HIGH';
+      setup = `FVG ${dir === 1 ? 'Bull' : 'Bear'} Interior`;
+      zoneLine = `Harga di FVG ${f(fvgEval.fvg.lo)}-${f(fvgEval.fvg.hi)}`;
+    } else {
+      orderType = 'NOW'; entry = price;
+      baseSL = recentExtreme(struct, dir, 10);
+      zoneRange = { min: price, max: price };
+      confidence = 'MEDIUM';
+      setup = `Market ${srcTxt}`;
+      lines.push(fvgEval.reason === 'breakout-far'
+        ? 'Breakout jauh dari FVG → retrace TIDAK wajib, NOW'
+        : areaNote(m5c, price, ctx));
+    }
   }
 
   return await finalizePlan({
     dir, entry, orderType, baseSL, kind: 'scalp', atrVal, ctx, rrList,
-    confidence, setup, zoneNote: `Scalp · ${setup}`, zoneRange, zoneLine,
-    head: t.headLine(t.title.scalp, dir === 1 ? 'BUY' : 'SELL', orderType === 'LIMIT' ? 'LIMIT' : 'NOW', ctx.symbol),
+    confidence, setup, zoneNote: setup, zoneRange, zoneLine,
+    head: t.headLine(t.title.scalp, dir === 1 ? 'BUY' : 'SELL',
+      orderType === 'LIMIT' ? 'LIMIT' : 'NOW', ctx.symbol),
     lines,
   });
 }
+// ═══ END MODIFIED ═══
 
 // ═══════════════ DAY TRADING (SCALPING KONSERVATIF) ═══════════════
 
@@ -1101,49 +1230,202 @@ async function buildTwoWayPlan(o) {
   });
 }
 
+// ═══ MODIFIED: buildDayPlan — Reaction Range M15 + Fixed 50 pip XAUUSD + NOW ═══
 async function buildDayPlan({ m5, m15, price, rrList, ctx }) {
   const t = tx(ctx);
+  const { f, pip } = ctx;
+  const atrM15 = atrOf(m15, pip);
+  const reactionDist = reactionRangeFor('day', atrM15, ctx);
+  const zOpts = { dispAtr: 0.8, freshOnly: true };
+  const demand = findSDZones(m15, 1, price, zOpts)[0] || null;
+  const supply = findSDZones(m15, -1, price, zOpts)[0] || null;
+  const pos = classifyPriceZone(price, demand, supply, reactionDist);
+  const rejection = detectRejection(m5, price, demand, supply, atrM15, NOW_MAX_ATR.day);
   const bos = findLastBOS(m15, DAY_PIVOT);
   const init = analyzePureSMCStructure(m15);
   const bias = { dir: bos ? bos.dir : init.dir };
   const biasNote = bos
-    ? t.biasBOS('M15', bos.dir === 1, ctx.f(bos.level))
+    ? t.biasBOS('M15', bos.dir === 1, f(bos.level))
     : t.biasStruct('M15', srcName(init.src, ctx.lang));
 
-  const parentPick = d => {
-      const zones15 = findSDZones(m15, d, price, { freshOnly: true, dispAtr: 0.8 });
-      if (zones15.length > 0) return zones15[0];
-      return pickZone(m15, d, price, 96);
-  };
+  const lines = [biasNote];
+  let dir, orderType, entry, baseSL, zoneRange, confidence, setup, zoneLine;
 
-  return await buildTwoWayPlan({
-    title: t.title.day,
-    kind: 'day',
-    price, ctx, rrList, bias, biasNote,
-    parentName: 'M15',
-    parentPick: parentPick,
-    refineC: m5, refineName: 'M5', refineL: 120, atrVal: atrOf(m15, ctx.pip),
+  if (pos.inSupply) {
+    dir = -1;
+    zoneRange = { min: supply.bottom, max: supply.top };
+    zoneLine = t.zoneFresh('supply', 'M15', f(supply.bottom), f(supply.top), true);
+    lines.push(t.inZone('supply', 'M15', f(supply.bottom), f(supply.top)));
+    if (rejection.sellOk) {
+      orderType = 'NOW'; entry = price; baseSL = supply.sl;
+      confidence = 'HIGH'; setup = 'Supply Rejection NOW (Day)';
+    } else {
+      orderType = 'LIMIT'; entry = supply.bottom; baseSL = supply.sl;
+      confidence = 'MEDIUM'; setup = 'Supply LIMIT (Day)';
+    }
+  } else if (pos.inDemand) {
+    dir = 1;
+    zoneRange = { min: demand.bottom, max: demand.top };
+    zoneLine = t.zoneFresh('demand', 'M15', f(demand.bottom), f(demand.top), true);
+    lines.push(t.inZone('demand', 'M15', f(demand.bottom), f(demand.top)));
+    if (rejection.buyOk) {
+      orderType = 'NOW'; entry = price; baseSL = demand.sl;
+      confidence = 'HIGH'; setup = 'Demand Bounce NOW (Day)';
+    } else {
+      orderType = 'LIMIT'; entry = demand.top; baseSL = demand.sl;
+      confidence = 'MEDIUM'; setup = 'Demand LIMIT (Day)';
+    }
+  } else if (pos.nearSupply || pos.nearDemand) {
+    const useSupply = pos.nearSupply && (!pos.nearDemand || pos.distToSupply <= pos.distToDemand);
+    if (useSupply) {
+      dir = -1;
+      zoneRange = { min: supply.bottom, max: supply.top };
+      zoneLine = t.zoneFresh('supply', 'M15', f(supply.bottom), f(supply.top), false);
+      lines.push(t.dist((pos.distToSupply / pip).toFixed(0), true) + ' → M15 supply');
+      orderType = 'LIMIT'; entry = supply.bottom; baseSL = supply.sl;
+      confidence = 'HIGH'; setup = 'Approaching Supply LIMIT (Day)';
+    } else {
+      dir = 1;
+      zoneRange = { min: demand.bottom, max: demand.top };
+      zoneLine = t.zoneFresh('demand', 'M15', f(demand.bottom), f(demand.top), false);
+      lines.push(t.dist((pos.distToDemand / pip).toFixed(0), false) + ' → M15 demand');
+      orderType = 'LIMIT'; entry = demand.top; baseSL = demand.sl;
+      confidence = 'HIGH'; setup = 'Approaching Demand LIMIT (Day)';
+    }
+  } else {
+    dir = bias.dir;
+    const fvgEval = evaluateFVG(m15, price, dir, atrM15, FVG_LOOKBACK_BY_STYLE.day);
+    lines.push(t.outside('M15', 'M15', srcName(init.src, ctx.lang)));
+    if (fvgEval.useFVG && fvgEval.retraceMandatory) {
+      orderType = 'LIMIT'; entry = fvgEval.entry; baseSL = fvgEval.sl;
+      zoneRange = { min: fvgEval.fvg.lo, max: fvgEval.fvg.hi };
+      confidence = 'HIGH';
+      setup = `FVG ${dir === 1 ? 'Bull' : 'Bear'} Retrace M15 (WAJIB)`;
+      zoneLine = `FVG M15 ${f(fvgEval.fvg.lo)}-${f(fvgEval.fvg.hi)}`;
+    } else if (fvgEval.useFVG) {
+      orderType = 'LIMIT'; entry = fvgEval.entry; baseSL = fvgEval.sl;
+      zoneRange = { min: fvgEval.fvg.lo, max: fvgEval.fvg.hi };
+      confidence = 'HIGH';
+      setup = `FVG ${dir === 1 ? 'Bull' : 'Bear'} Interior M15`;
+      zoneLine = `Harga di FVG M15 ${f(fvgEval.fvg.lo)}-${f(fvgEval.fvg.hi)}`;
+    } else {
+      orderType = 'NOW'; entry = price;
+      baseSL = recentExtreme(m15, dir, 10);
+      zoneRange = { min: price, max: price };
+      confidence = 'MEDIUM';
+      setup = `Market ${srcName(init.src, ctx.lang)} (Day)`;
+    }
+  }
+
+  return await finalizePlan({
+    dir, entry, orderType, baseSL, kind: 'day', atrVal: atrM15, ctx, rrList,
+    confidence, setup, zoneNote: setup, zoneRange, zoneLine,
+    head: t.headLine(t.title.day, dir === 1 ? 'BUY' : 'SELL',
+      orderType === 'LIMIT' ? 'LIMIT' : 'NOW', ctx.symbol),
+    lines,
   });
 }
+// ═══ END MODIFIED ═══
 
 // ═══════════════════════════ INTRADAY & SWING ═══════════════════════════
 
+// ═══ MODIFIED: buildIntradayPlan — Reaction Range H1 + NOW ═══
 async function buildIntradayPlan({ m15, price, rrList, ctx }) {
   const t = tx(ctx);
+  const { f, pip } = ctx;
   const h1 = aggregateCandles(m15, 60);
+  const atrH1 = atrOf(h1, pip);
+  const reactionDist = reactionRangeFor('intraday', atrH1, ctx);
+  const zOpts = { dispAtr: 0.8, freshOnly: true };
+  const demand = findSDZones(h1, 1, price, zOpts)[0] || null;
+  const supply = findSDZones(h1, -1, price, zOpts)[0] || null;
+  const pos = classifyPriceZone(price, demand, supply, reactionDist);
+  const rejection = detectRejection(m15, price, demand, supply, atrH1, NOW_MAX_ATR.intraday);
   const bos = findLastBOS(h1, DAY_PIVOT);
   const init = analyzePureSMCStructure(h1);
   const bias = { dir: bos ? bos.dir : init.dir };
   const biasNote = bos
-    ? t.biasBOS('H1', bos.dir === 1, ctx.f(bos.level))
+    ? t.biasBOS('H1', bos.dir === 1, f(bos.level))
     : t.biasStruct('H1', srcName(init.src, ctx.lang));
-  return await buildTwoWayPlan({
-    title: t.title.intraday, kind: 'intraday', price, ctx, rrList, bias, biasNote,
-    parentName: 'H1',
-    parentPick: d => pickZone(h1, d, price, 72),
-    refineC: m15, refineName: 'M15', refineL: 96, atrVal: atrOf(h1, ctx.pip),
+
+  const lines = [biasNote];
+  let dir, orderType, entry, baseSL, zoneRange, confidence, setup, zoneLine;
+
+  if (pos.inSupply) {
+    dir = -1;
+    zoneRange = { min: supply.bottom, max: supply.top };
+    zoneLine = t.zoneFresh('supply', 'H1', f(supply.bottom), f(supply.top), true);
+    lines.push(t.inZone('supply', 'H1', f(supply.bottom), f(supply.top)));
+    if (rejection.sellOk) {
+      orderType = 'NOW'; entry = price; baseSL = supply.sl;
+      confidence = 'HIGH'; setup = 'Supply Rejection NOW (Intraday)';
+    } else {
+      orderType = 'LIMIT'; entry = supply.bottom; baseSL = supply.sl;
+      confidence = 'MEDIUM'; setup = 'Supply LIMIT (Intraday)';
+    }
+  } else if (pos.inDemand) {
+    dir = 1;
+    zoneRange = { min: demand.bottom, max: demand.top };
+    zoneLine = t.zoneFresh('demand', 'H1', f(demand.bottom), f(demand.top), true);
+    lines.push(t.inZone('demand', 'H1', f(demand.bottom), f(demand.top)));
+    if (rejection.buyOk) {
+      orderType = 'NOW'; entry = price; baseSL = demand.sl;
+      confidence = 'HIGH'; setup = 'Demand Bounce NOW (Intraday)';
+    } else {
+      orderType = 'LIMIT'; entry = demand.top; baseSL = demand.sl;
+      confidence = 'MEDIUM'; setup = 'Demand LIMIT (Intraday)';
+    }
+  } else if (pos.nearSupply || pos.nearDemand) {
+    const useSupply = pos.nearSupply && (!pos.nearDemand || pos.distToSupply <= pos.distToDemand);
+    if (useSupply) {
+      dir = -1;
+      zoneRange = { min: supply.bottom, max: supply.top };
+      zoneLine = t.zoneFresh('supply', 'H1', f(supply.bottom), f(supply.top), false);
+      lines.push(t.dist((pos.distToSupply / pip).toFixed(0), true) + ' → H1 supply');
+      orderType = 'LIMIT'; entry = supply.bottom; baseSL = supply.sl;
+      confidence = 'HIGH'; setup = 'Approaching Supply LIMIT (Intraday)';
+    } else {
+      dir = 1;
+      zoneRange = { min: demand.bottom, max: demand.top };
+      zoneLine = t.zoneFresh('demand', 'H1', f(demand.bottom), f(demand.top), false);
+      lines.push(t.dist((pos.distToDemand / pip).toFixed(0), false) + ' → H1 demand');
+      orderType = 'LIMIT'; entry = demand.top; baseSL = demand.sl;
+      confidence = 'HIGH'; setup = 'Approaching Demand LIMIT (Intraday)';
+    }
+  } else {
+    dir = bias.dir;
+    const fvgEval = evaluateFVG(h1, price, dir, atrH1, FVG_LOOKBACK_BY_STYLE.intraday);
+    lines.push(t.outside('H1', 'H1', srcName(init.src, ctx.lang)));
+    if (fvgEval.useFVG && fvgEval.retraceMandatory) {
+      orderType = 'LIMIT'; entry = fvgEval.entry; baseSL = fvgEval.sl;
+      zoneRange = { min: fvgEval.fvg.lo, max: fvgEval.fvg.hi };
+      confidence = 'HIGH';
+      setup = `FVG ${dir === 1 ? 'Bull' : 'Bear'} Retrace H1 (WAJIB)`;
+      zoneLine = `FVG H1 ${f(fvgEval.fvg.lo)}-${f(fvgEval.fvg.hi)}`;
+    } else if (fvgEval.useFVG) {
+      orderType = 'LIMIT'; entry = fvgEval.entry; baseSL = fvgEval.sl;
+      zoneRange = { min: fvgEval.fvg.lo, max: fvgEval.fvg.hi };
+      confidence = 'HIGH';
+      setup = `FVG ${dir === 1 ? 'Bull' : 'Bear'} Interior H1`;
+      zoneLine = `Harga di FVG H1 ${f(fvgEval.fvg.lo)}-${f(fvgEval.fvg.hi)}`;
+    } else {
+      orderType = 'NOW'; entry = price;
+      baseSL = recentExtreme(h1, dir, 10);
+      zoneRange = { min: price, max: price };
+      confidence = 'MEDIUM';
+      setup = `Market ${srcName(init.src, ctx.lang)} (Intraday)`;
+    }
+  }
+
+  return await finalizePlan({
+    dir, entry, orderType, baseSL, kind: 'intraday', atrVal: atrH1, ctx, rrList,
+    confidence, setup, zoneNote: setup, zoneRange, zoneLine,
+    head: t.headLine(t.title.intraday, dir === 1 ? 'BUY' : 'SELL',
+      orderType === 'LIMIT' ? 'LIMIT' : 'NOW', ctx.symbol),
+    lines,
   });
 }
+// ═══ END MODIFIED ═══
 
 async function buildSwingPlan({ m15, price, rrList, ctx }) {
   const t = tx(ctx);
