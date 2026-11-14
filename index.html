@@ -351,12 +351,10 @@
                         <span id="badgeActive" class="bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-2 py-0.5 rounded text-[8px] font-mono animate-pulse">● Aktif</span>
                     </div>
 
-                    <!-- Live Order Feed -->
                     <div id="orderFeedList" class="space-y-1.5 max-h-[160px] overflow-y-auto no-scrollbar flex flex-col">
                         <div id="lblWaitOrder" class="text-[9px] text-gray-500 text-center py-2">Menunggu order flow...</div>
                     </div>
 
-                    <!-- Market Traffic (Directional Flow) -->
                     <div class="bg-darkbg border border-panelborder rounded-lg p-2.5 space-y-2">
                         <div class="flex justify-between items-center">
                             <span id="lblMarketTraffic" class="text-[9px] font-bold text-gray-300"><i class="fa-solid fa-water text-blue-400 mr-1"></i> MARKET TRAFFIC</span>
@@ -403,11 +401,55 @@
                     </div>
                 </div>
 
+                <!-- ══ KALENDER PNL (KEMBALI) ══ -->
+                <div id="calCard" class="hidden bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
+                    <div class="flex justify-between items-center gap-2">
+                        <div class="flex items-center gap-1">
+                            <button onclick="calShift(-1)" class="text-[10px] px-2 py-0.5 rounded bg-darkbg border border-panelborder text-gray-300">◀</button>
+                            <span id="calTitle" class="text-[10px] font-bold text-white min-w-[110px] text-center">--</span>
+                            <button onclick="calShift(1)" class="text-[10px] px-2 py-0.5 rounded bg-darkbg border border-panelborder text-gray-300">▶</button>
+                        </div>
+                        <div class="text-right">
+                            <p id="lblCalMonthPnl" class="text-[7px] font-bold text-gray-500 tracking-wider">PNL BULAN INI</p>
+                            <p id="calMonthPnl" class="text-[11px] font-extrabold font-mono text-white">0 pip</p>
+                        </div>
+                    </div>
+                    <div id="calWeekdays" class="grid grid-cols-7 gap-0.5 text-center"></div>
+                    <div id="calGrid" class="grid grid-cols-7 gap-0.5"></div>
+                    <div class="grid grid-cols-2 gap-1.5 text-center">
+                        <div class="bg-darkbg/70 border border-emerald-500/30 rounded-lg p-1.5">
+                            <p id="lblCalWin" class="text-[8px] font-bold text-emerald-400">TOTAL WIN</p>
+                            <p id="calWin" class="text-[11px] font-extrabold text-emerald-400 font-mono">+0 pip</p>
+                            <p id="calWinCount" class="text-[7px] text-gray-500 font-mono">0 W</p>
+                        </div>
+                        <div class="bg-darkbg/70 border border-red-500/30 rounded-lg p-1.5">
+                            <p id="lblCalLose" class="text-[8px] font-bold text-red-400">TOTAL LOSE</p>
+                            <p id="calLose" class="text-[11px] font-extrabold text-red-400 font-mono">0 pip</p>
+                            <p id="calLoseCount" class="text-[7px] text-gray-500 font-mono">0 L</p>
+                        </div>
+                        <div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5">
+                            <p id="lblCalNet" class="text-[8px] font-bold text-gray-400">NET</p>
+                            <p id="calNet" class="text-[11px] font-extrabold text-white font-mono">0 pip</p>
+                            <p id="calOpen" class="text-[7px] text-gray-500 font-mono">0 berjalan</p>
+                        </div>
+                        <div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5">
+                            <p id="lblCalWR" class="text-[8px] font-bold text-gray-400">WIN RATIO</p>
+                            <p id="calWR" class="text-[11px] font-extrabold text-accentblue font-mono">0%</p>
+                            <p id="calWRSub" class="text-[7px] text-gray-500 font-mono">0W / 0L</p>
+                        </div>
+                    </div>
+                    <div class="flex justify-between items-center gap-2">
+                        <p id="calAllTime" class="text-[7px] text-gray-500 font-mono leading-snug">Semua waktu: 0 pip</p>
+                        <button onclick="calReset()" id="btnCalReset" class="text-[8px] font-bold px-2 py-1 rounded bg-red-500/20 text-red-400 border border-red-500/40 whitespace-nowrap">RESET KALENDER</button>
+                    </div>
+                </div>
+
                 <!-- HISTORY -->
                 <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
                     <div class="flex justify-between items-center">
                         <span id="lblTradingHistory" class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-clock-rotate-left text-accentblue"></i> TRADING HISTORY</span>
                         <div class="flex items-center gap-1.5">
+                            <button id="calToggle" onclick="calToggle()" class="text-[9px] font-bold px-2 py-0.5 rounded bg-accentblue/20 text-accentblue border border-accentblue/40">📅 PNL</button>
                             <select id="histFilter" onchange="renderHistory()" class="bg-darkbg border border-panelborder text-[9px] font-bold text-white px-1.5 py-0.5 rounded focus:outline-none">
                                 <option value="today" id="optHistToday">Hari ini</option>
                                 <option value="all" id="optHistAll">Semua</option>
@@ -615,7 +657,14 @@
             lblSession: "MARKET SESSIONS",
             lblEntryZone: "ENTRY ZONE",
             reasoningLang: "id",
-            // Admin translations
+            // Calendar
+            calMonthPnl: "PNL BULAN INI",
+            calWin: "TOTAL WIN",
+            calLose: "TOTAL LOSE",
+            calNet: "NET",
+            calWR: "WIN RATIO",
+            calReset: "RESET KALENDER",
+            // Admin
             admTitle: "Dashboard Pendaftaran Klien",
             admSub: "Akses Khusus Admin",
             admLogout: "KELUAR",
@@ -675,7 +724,14 @@
             lblSession: "MARKET SESSIONS",
             lblEntryZone: "ENTRY ZONE",
             reasoningLang: "en",
-            // Admin translations
+            // Calendar
+            calMonthPnl: "MONTHLY PNL",
+            calWin: "TOTAL WIN",
+            calLose: "TOTAL LOSE",
+            calNet: "NET",
+            calWR: "WIN RATIO",
+            calReset: "RESET CALENDAR",
+            // Admin
             admTitle: "Client Registration Dashboard",
             admSub: "Admin Only Access",
             admLogout: "LOG OUT",
@@ -739,6 +795,14 @@
         document.getElementById('lblSumLose').textContent = d.sumLose;
         document.getElementById('optHistToday').textContent = d.optToday;
         document.getElementById('optHistAll').textContent = d.optAll;
+
+        // Calendar
+        document.getElementById('lblCalMonthPnl').textContent = d.calMonthPnl;
+        document.getElementById('lblCalWin').textContent = d.calWin;
+        document.getElementById('lblCalLose').textContent = d.calLose;
+        document.getElementById('lblCalNet').textContent = d.calNet;
+        document.getElementById('lblCalWR').textContent = d.calWR;
+        document.getElementById('btnCalReset').textContent = d.calReset;
         
         // Topbar
         document.getElementById('btnLogout').textContent = d.lblLogout;
@@ -770,6 +834,7 @@
         refreshActiveUI(); 
         const a = getActive(); 
         if (a) renderSignalCard(a);
+        renderCalendar(); // Pastikan kalender render ulang saat bahasa berubah
     }
 
     function toggleStyleInfo() { document.getElementById('styleInfoBox').classList.toggle('hidden'); }
@@ -1050,11 +1115,10 @@
             const type = aID.includes('BUY') ? 'buy' : aID.includes('SELL') ? 'sell' : aID.includes('login') ? 'system' : 'info';
             const msg = currentLang === 'id' ? `${u} ${aID}` : `${u} ${aEN}`;
             
-            // Jangan tampilkan log simulasi jika sedang menggulir atau di halaman lain
             if (document.getElementById('activityLogList')) {
                 addActivityLog(msg, type);
             }
-        }, 7000); // Setiap 7 detik
+        }, 7000);
     }
 
     // ================= TRADE & HISTORY =================
@@ -1193,6 +1257,36 @@
         const pnlEl = document.getElementById('tradePnl'); if (pnlEl) { pnlEl.textContent = f.main; pnlEl.className = `text-[10px] font-mono font-bold ${pipColor(f.pips)}`; }
         const liveEl = document.getElementById('tradeLive'); if (liveEl) liveEl.textContent = f.sub;
     }
+
+    // ================= KALENDER PNL =================
+    const CAL_KEY = 'aluGold_calendar_v1'; const CAL_SINCE_KEY = 'aluGold_calendar_since';
+    const WEEKDAYS = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min']; const calNow = new Date(); let calView = { y: calNow.getFullYear(), m: calNow.getMonth() };
+    const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const calLoad = () => { try { return JSON.parse(localStorage.getItem(CAL_KEY)) || {}; } catch { return {}; } };
+    const calSave = obj => { try { localStorage.setItem(CAL_KEY, JSON.stringify(obj)); } catch {} };
+    const calSince = () => Number(localStorage.getItem(CAL_SINCE_KEY)) || 0;
+    function calEntryOf(t) { let res = 'OPEN', pips = 0; if (t.status === 'CLOSED') { if (t.result === 'CANCEL') { res = 'CANCEL'; } else { pips = Math.round((Number(t.pips) || 0) * 10) / 10; res = pips > 0 ? 'W' : pips < 0 ? 'L' : 'BE'; } } return { id: t.id, date: ymd(new Date(t.createdAt || Date.now())), key: t.key, style: t.style, signal: t.signal, res, pips }; }
+    function calSyncAll() { const since = calSince(); const cal = calLoad(); let changed = false; for (const t of trades) { if ((t.createdAt || 0) < since) continue; const e = calEntryOf(t); const old = cal[t.id]; if (!old || old.res !== e.res || old.pips !== e.pips || old.date !== e.date) { cal[t.id] = e; changed = true; } } if (changed) calSave(cal); renderCalendar(); }
+    function calStats(entries) { let win = 0, lose = 0, wc = 0, lc = 0; for (const e of entries) { if (e.res === 'W') { win += e.pips; wc++; } else if (e.res === 'L') { lose += e.pips; lc++; } } return { win, lose, wc, lc, net: win + lose, wr: wc + lc ? (wc / (wc + lc)) * 100 : 0 }; }
+    function renderCalendar() {
+        const grid = document.getElementById('calGrid'); if (!grid) return; const all = Object.values(calLoad()); const { y, m } = calView; const ym = `${y}-${String(m + 1).padStart(2, '0')}`; const monthEntries = all.filter(e => e.date && e.date.startsWith(ym));
+        const byDay = {}; for (const e of monthEntries) { const d = byDay[e.date] ??= { pips: 0, w: 0, l: 0, open: 0 }; if (e.res === 'W') { d.w++; d.pips += e.pips; } else if (e.res === 'L') { d.l++; d.pips += e.pips; } else if (e.res === 'BE') { d.pips += e.pips; } else if (e.res === 'OPEN') d.open++; }
+        document.getElementById('calTitle').textContent = new Date(y, m, 1).toLocaleDateString(currentLang === 'id' ? 'id-ID' : 'en-US', { month: 'long', year: 'numeric' }); document.getElementById('calWeekdays').innerHTML = WEEKDAYS.map(d => `<div class="text-[7px] text-gray-500 font-bold">${d}</div>`).join('');
+        const offset = (new Date(y, m, 1).getDay() + 6) % 7; const days = new Date(y, m + 1, 0).getDate(); const todayKey = ymd(new Date()); let html = '';
+        for (let i = 0; i < offset; i++) html += '<div></div>';
+        for (let d = 1; d <= days; d++) { const key = `${ym}-${String(d).padStart(2, '0')}`; const v = byDay[key]; let cls = 'border-panelborder bg-darkbg'; let body = '';
+            if (v && (v.w || v.l)) { const p = Math.round(v.pips * 10) / 10; cls = p > 0 ? 'border-emerald-500/40 bg-emerald-500/10' : p < 0 ? 'border-red-500/40 bg-red-500/10' : 'border-panelborder bg-darkbg'; body = `<p class="font-mono font-bold text-[9px] ${pipColor(p)}">${p > 0 ? '+' : ''}${p}</p><p class="font-mono text-[6px] text-gray-400">${v.w}W ${v.l}L</p>`; } else if (v && v.open) { body = `<p class="font-mono text-[7px] text-blue-400">${v.open} run</p>`; }
+            const ring = key === todayKey ? ' ring-1 ring-accentblue' : ''; html += `<div class="rounded border ${cls}${ring} min-h-[44px] p-0.5 text-center"><p class="text-[8px] text-gray-400 font-bold">${d}</p>${body}</div>`; }
+        grid.innerHTML = html;
+        const m1 = calStats(monthEntries); const allStats = calStats(all); const openMonth = monthEntries.filter(e => e.res === 'OPEN').length; const openAll = all.filter(e => e.res === 'OPEN').length;
+        const monthEl = document.getElementById('calMonthPnl'); monthEl.textContent = fmtPips(m1.net); monthEl.className = `text-[11px] font-extrabold font-mono ${pipColor(m1.net)}`;
+        const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+        set('calWin', fmtPips(m1.win)); set('calWinCount', `${m1.wc} W`); set('calLose', fmtPips(m1.lose)); set('calLoseCount', `${m1.lc} L`); set('calNet', fmtPips(m1.net)); set('calOpen', `${openMonth} berjalan`);
+        set('calWR', `${m1.wr.toFixed(1)}%`); set('calWRSub', `${m1.wc}W / ${m1.lc}L`); set('calAllTime', `Semua waktu: ${fmtPips(allStats.net)} · ${allStats.wc} W · ${allStats.lc} L · ${openAll} berjalan`);
+    }
+    function calShift(n) { let m = calView.m + n, y = calView.y; while (m < 0) { m += 12; y--; } while (m > 11) { m -= 12; y++; } calView = { y, m }; renderCalendar(); }
+    function calToggle() { const card = document.getElementById('calCard'); const btn = document.getElementById('calToggle'); const hiddenNow = card.classList.toggle('hidden'); btn.classList.toggle('bg-accentblue/40', !hiddenNow); if (!hiddenNow) renderCalendar(); }
+    function calReset() { if (!confirm('Reset kalender PNL?')) return; calSave({}); localStorage.setItem(CAL_SINCE_KEY, String(Date.now())); renderCalendar(); }
 
     // ================= LIVE MAP CHART =================
     const cv = document.getElementById('priceChart'); const ctx = cv ? cv.getContext('2d') : null; const CHART_GUT = 110;
