@@ -64,6 +64,108 @@
         /* Sembunyikan scrollbar untuk highlight ticker */
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* ══ VALIDATION OVERLAY ══ */
+        .validation-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(11, 14, 20, 0.88);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            border-radius: 0.75rem;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+        }
+        .validation-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .validation-overlay.hidden {
+            display: none;
+        }
+        .validation-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px 16px;
+            text-align: center;
+            width: 100%;
+            max-width: 300px;
+        }
+        .hourglass-spin {
+            width: 56px;
+            height: 56px;
+            animation: hourglassRotate 2s linear infinite;
+            filter: drop-shadow(0 0 12px rgba(245, 158, 11, 0.6));
+            margin-bottom: 14px;
+        }
+        @keyframes hourglassRotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .validation-title {
+            color: #fbbf24;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+        }
+        .validation-steps {
+            width: 100%;
+            min-height: 90px;
+            text-align: left;
+        }
+        .validation-step {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            font-size: 10.5px;
+            color: #94a3b8;
+            line-height: 1.5;
+            padding: 3px 0;
+            opacity: 0;
+            animation: vStepIn 0.35s ease forwards;
+        }
+        .validation-step.done { color: #cbd5e1; }
+        .validation-step-icon {
+            flex-shrink: 0;
+            width: 14px;
+            font-weight: 700;
+            text-align: center;
+        }
+        .validation-step.done .validation-step-icon { color: #10b981; }
+        .validation-step.active .validation-step-icon {
+            color: #fbbf24;
+            animation: vPulse 1s ease-in-out infinite;
+        }
+        @keyframes vStepIn {
+            from { opacity: 0; transform: translateX(-8px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes vPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.35; }
+        }
+        .validation-progress {
+            width: 100%;
+            height: 3px;
+            background: rgba(245, 158, 11, 0.15);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 14px;
+        }
+        .validation-progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #f59e0b, #fbbf24);
+            transition: width 0.3s ease;
+        }
     </style>
 </head>
 <body class="bg-darkbg text-gray-200 font-sans min-h-screen flex flex-col justify-between p-2 sm:p-4">
@@ -325,7 +427,7 @@
                 </div>
 
                 <!-- KARTU SIGNAL -->
-                <div class="bg-cardbg rounded-xl border border-panelborder p-3 shadow-md space-y-3">
+                <div class="bg-cardbg rounded-xl border border-panelborder p-3 shadow-md space-y-3 relative">
                     <div class="flex items-center justify-between border-b border-panelborder pb-2">
                         <span id="cardMarketTitle" class="text-xs font-bold text-white">SELECT PAIR SPOT</span>
                         <span id="cardLivePriceTop" class="text-xs font-mono font-bold text-accentblue">--.--</span>
@@ -414,6 +516,31 @@
                         <div class="bg-darkbg border border-panelborder rounded-lg p-2.5 text-[10px] text-gray-300 leading-relaxed">
                             <p id="lblAnalysisReason" class="font-bold text-gray-400 mb-1">ANALYSIS REASON (CONFLUENCE SCORE):</p>
                             <span id="cardReason">---</span>
+                        </div>
+                    </div>
+
+                    <!-- ══ VALIDATION OVERLAY ══ -->
+                    <div id="validationOverlay" class="validation-overlay hidden">
+                        <div class="validation-box">
+                            <svg class="hourglass-spin" viewBox="0 0 64 96">
+                                <defs>
+                                    <linearGradient id="sandGrad" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stop-color="#fbbf24"/>
+                                        <stop offset="100%" stop-color="#d97706"/>
+                                    </linearGradient>
+                                </defs>
+                                <rect x="4" y="2" width="56" height="6" rx="3" fill="#f59e0b"/>
+                                <path d="M 12 10 L 52 10 L 32 48 Z" fill="url(#sandGrad)" opacity="0.9"/>
+                                <path d="M 12 86 L 52 86 L 32 48 Z" fill="url(#sandGrad)" opacity="0.55"/>
+                                <path d="M 12 10 L 52 10 L 32 48 Z" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-linejoin="round"/>
+                                <path d="M 12 86 L 52 86 L 32 48 Z" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-linejoin="round"/>
+                                <rect x="4" y="88" width="56" height="6" rx="3" fill="#f59e0b"/>
+                            </svg>
+                            <div class="validation-title">Validasi Analisa Structure</div>
+                            <div class="validation-steps" id="validationSteps"></div>
+                            <div class="validation-progress">
+                                <div class="validation-progress-fill" id="validationProgress"></div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2618,6 +2745,63 @@
 
     const shiftCandles = (rows, off) => rows.map(c => ({ t: c.t, o: c.o + off, h: c.h + off, l: c.l + off, c: c.c + off }));
 
+    // ══ VALIDATION ANIMATION HELPERS ══
+    const VALIDATION_STEPS = [
+        'Menganalisa struktur pasar...',
+        'Mencari zona supply & demand fresh...',
+        'Memeriksa bias M15 & H1...',
+        'Cek FVG & displacement...',
+        'Validasi rejection candle...',
+        'Menghitung entry, SL, TP...',
+    ];
+
+    function showValidationOverlay() {
+        const overlay = document.getElementById('validationOverlay');
+        const stepsEl = document.getElementById('validationSteps');
+        const progressEl = document.getElementById('validationProgress');
+        if (!overlay) return;
+        stepsEl.innerHTML = '';
+        progressEl.style.width = '0%';
+        overlay.classList.remove('hidden');
+        void overlay.offsetWidth;
+        overlay.classList.add('active');
+    }
+
+    function hideValidationOverlay() {
+        const overlay = document.getElementById('validationOverlay');
+        if (!overlay) return;
+        overlay.classList.remove('active');
+        setTimeout(() => overlay.classList.add('hidden'), 320);
+    }
+
+    async function runValidationAnimation(minDuration = 3500) {
+        const start = Date.now();
+        const stepsEl = document.getElementById('validationSteps');
+        const progressEl = document.getElementById('validationProgress');
+        const total = VALIDATION_STEPS.length;
+        const perStep = Math.max(400, minDuration / total);
+
+        for (let i = 0; i < total; i++) {
+            const el = document.createElement('div');
+            el.className = 'validation-step active';
+            el.innerHTML = `<span class="validation-step-icon">●</span><span>${VALIDATION_STEPS[i]}</span>`;
+            stepsEl.appendChild(el);
+            progressEl.style.width = `${((i + 1) / total) * 85}%`;
+
+            await new Promise(r => setTimeout(r, perStep));
+
+            el.classList.remove('active');
+            el.classList.add('done');
+            el.querySelector('.validation-step-icon').textContent = '✓';
+        }
+
+        const elapsed = Date.now() - start;
+        if (elapsed < minDuration) {
+            await new Promise(r => setTimeout(r, minDuration - elapsed));
+        }
+        progressEl.style.width = '100%';
+    }
+
     async function generateAISignal() {
         const marketId = document.getElementById('marketSelect').value;
         const tradingStyle = document.getElementById('tradingStyleSelect').value;
@@ -2633,6 +2817,13 @@
         const btn = document.getElementById('signalBtn');
         btn.disabled = true;
         btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> Menganalisis SMC + EMA + Bollinger Bands...`;
+
+        // ── VALIDASI VISUAL ──
+        showValidationOverlay();
+        const animPromise = runValidationAnimation(3500);
+
+        let apiResult = null;
+        let apiError = null;
 
         try {
             const tf = STYLE_TF[tradingStyle];
@@ -2684,41 +2875,62 @@
                 const snippet = txt.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
                 data = { error: `Server tidak mengirim JSON (HTTP ${res.status}). ${snippet}` };
             }
+
             if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
 
-            if (!data.signal) return alert('Belum ada setup valid.\n\n' + (data.reason || ''));
-
-            const num = v => v !== null && v !== undefined && Number.isFinite(Number(v));
-            const s = data.signal;
-            if (!['BUY', 'SELL'].includes(s.signal) || ![s.entry, s.sl, s.tp1].every(num)) {
-                return alert('Sinyal dari server belum lengkap (entry/SL/TP kosong).\n\nIsi respons:\n' + txt.slice(0, 400));
-            }
-
-            const t = {
-                id: Date.now().toString(36), key: symbolKey, style: tradingStyle,
-                signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
-                mode: s.mode, status: s.status, fill: s.fill || null,
-                entry: s.entry, bufferEnd: s.bufferEnd, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
-                zone: s.zone,
-                expiresAt: s.expireMs ? Date.now() + s.expireMs : null,
-                confidence: s.confidence, risk: s.risk, setup: s.setup,
-                setupLabel: s.setupLabel, zoneLabel: s.zoneLabel, zoneNote: s.zoneNote,
-                createdAt: Date.now(), hits: {},
-                card: { reason: s.reason }, no: nextNo(),
-            };
-
-            trades.push(t);
-            activeId = t.id;
-            saveTrades();
-            renderSignalCard(t);
-            renderHistory();
-            refreshActiveUI();
+            apiResult = data;
         } catch (e) {
-            alert('Gagal generate sinyal: ' + e.message);
-        } finally {
+            apiError = e.message;
+        }
+
+        // Tunggu animasi validasi selesai (minimal 3.5 detik)
+        await animPromise;
+        hideValidationOverlay();
+        await new Promise(r => setTimeout(r, 350));
+
+        const resetBtn = () => {
             btn.disabled = false;
             btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnGenText">${DICT[currentLang].genBtn}</span>`;
+        };
+
+        if (apiError) {
+            resetBtn();
+            return alert('Gagal generate sinyal: ' + apiError);
         }
+
+        if (!apiResult || !apiResult.signal) {
+            resetBtn();
+            return alert('Belum ada setup valid.\n\n' + (apiResult?.reason || ''));
+        }
+
+        const num = v => v !== null && v !== undefined && Number.isFinite(Number(v));
+        const s = apiResult.signal;
+        if (!['BUY', 'SELL'].includes(s.signal) || ![s.entry, s.sl, s.tp1].every(num)) {
+            resetBtn();
+            return alert('Sinyal dari server belum lengkap (entry/SL/TP kosong).');
+        }
+
+        const t = {
+            id: Date.now().toString(36), key: symbolKey, style: tradingStyle,
+            signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
+            mode: s.mode, status: s.status, fill: s.fill || null,
+            entry: s.entry, bufferEnd: s.bufferEnd, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
+            zone: s.zone,
+            expiresAt: s.expireMs ? Date.now() + s.expireMs : null,
+            confidence: s.confidence, risk: s.risk, setup: s.setup,
+            setupLabel: s.setupLabel, zoneLabel: s.zoneLabel, zoneNote: s.zoneNote,
+            createdAt: Date.now(), hits: {},
+            card: { reason: s.reason }, no: nextNo(),
+        };
+
+        trades.push(t);
+        activeId = t.id;
+        saveTrades();
+        renderSignalCard(t);
+        renderHistory();
+        refreshActiveUI();
+
+        resetBtn();
     }
 
     // ================= REST POLLING FALLBACK (INDEX SYMBOLS) =================
