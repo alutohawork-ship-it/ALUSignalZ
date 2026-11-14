@@ -2024,14 +2024,19 @@
 
     function chartLevels(t) {
         const hits = t.hits || {};
-        return [
+        const lvls = [
             { label: 'ENTRY', value: t.entry, c: '#93c5fd', bg: 'rgba(147,197,253,0.14)', dash: [], hit: false },
-            { label: 'BUFFER', value: t.bufferEnd, c: '#fbbf24', bg: 'rgba(251,191,36,0.14)', dash: [3, 3], hit: false },
             { label: 'SL', value: t.sl, c: '#f87171', bg: 'rgba(248,113,113,0.14)', dash: [4, 4], hit: t.result === 'SL' },
             { label: 'TP1', value: t.tp1, c: '#34d399', bg: 'rgba(52,211,153,0.14)', dash: [4, 4], hit: !!hits.tp1 },
             { label: 'TP2', value: t.tp2, c: '#34d399', bg: 'rgba(52,211,153,0.14)', dash: [4, 4], hit: !!hits.tp2 },
             { label: 'TP3', value: t.tp3, c: '#38bdf8', bg: 'rgba(56,189,248,0.14)', dash: [4, 4], hit: !!hits.tp3 },
-        ].filter(l => l.value != null && Number.isFinite(l.value));
+        ];
+        
+        if (t.bufferEnd && t.bufferEnd !== t.entry) {
+            lvls.push({ label: 'BUFFER', value: t.bufferEnd, c: '#fbbf24', bg: 'rgba(251,191,36,0.14)', dash: [3, 3], hit: false });
+        }
+        
+        return lvls.filter(l => l.value != null && Number.isFinite(l.value));
     }
 
     function rrPath(x, y, w, h, r) {
@@ -2093,10 +2098,33 @@
             lo = Math.min(lo, l.value);
             hi = Math.max(hi, l.value);
         }
+        // Pastikan Zona (FVG) masuk dalam skala chart
+        if (t.zone) {
+            lo = Math.min(lo, t.zone.min);
+            hi = Math.max(hi, t.zone.max);
+        }
+        
         if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
         if (hi - lo <= 0) { const d = Math.abs(hi) * 0.001 || 1; lo -= d; hi += d; }
         const pad = (hi - lo) * 0.15; lo -= pad; hi += pad;
         const yOf = p => Math.max(plotT, Math.min(plotB, plotT + (1 - (p - lo) / (hi - lo)) * plotH));
+
+        // ── GAMBAR AREA ZONA (FVG / S&D) ──
+        if (t.zone && t.mode === 'LIMIT') {
+            const zoneY1 = yOf(t.zone.max);
+            const zoneY2 = yOf(t.zone.min);
+            const topY = Math.min(zoneY1, zoneY2);
+            const botY = Math.max(zoneY1, zoneY2);
+            
+            ctx.save();
+            ctx.fillStyle = 'rgba(41, 98, 255, 0.15)'; // Warna biru transparan
+            ctx.fillRect(plotL, topY, plotW, botY - topY);
+            ctx.strokeStyle = 'rgba(41, 98, 255, 0.4)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 2]);
+            ctx.strokeRect(plotL, topY, plotW, botY - topY);
+            ctx.restore();
+        }
 
         ctx.save();
         ctx.lineWidth = 1;
