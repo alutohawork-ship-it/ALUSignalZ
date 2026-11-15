@@ -1,5 +1,5 @@
 // api/generate.js
-// v73 (Enhanced Live Reasoning: Per-TF Structure, Execution Logic, Invalidation)
+// v75 (TradingView Symbol Parser + Micro-Cap Decimals + Full MTF)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
@@ -41,7 +41,7 @@ const pairClassOf = symbol => {
   if (isGold(symbol)) return 'gold';
   if (symbol === 'XAGUSD' || symbol === 'XAGEUR') return 'silver';
   if (['XPTUSD', 'XPDUSD'].includes(symbol)) return 'metal';
-  if (CRYPTO_LIST.includes(symbol) || symbol.endsWith('BTC')) return 'crypto';
+  if (CRYPTO_LIST.includes(symbol) || symbol.endsWith('BTC') || symbol.endsWith('USDT')) return 'crypto';
   if (['US30', 'NAS100', 'SPX500', 'GER40', 'UK100', 'JPN225', 'FRA40', 'AUS200'].includes(symbol)) return 'index';
   if (['BRENT', 'WTI', 'NATGAS', 'COPPER', 'COFFEE', 'SUGAR'].includes(symbol)) return 'commodity';
   if (symbol.includes('JPY')) return 'fx_jpy';
@@ -56,7 +56,7 @@ const PAIR_CLASS_PROFILE = {
   fx_jpy:    { label: 'Forex JPY', structTf: 'M5', zoneTf: 'M5', zoneDisp: 0.8, nearAtr: 0.6, slMul: 1.0, bufAtr: 0.2,  range: [0.01, 100000] },
   index:     { label: 'Indeks',    structTf: 'M5', zoneTf: 'M5', zoneDisp: 0.9, nearAtr: 0.6, slMul: 1.1, bufAtr: 0.25, range: [100, 500000] },
   commodity: { label: 'Komoditas', structTf: 'M5', zoneTf: 'M5', zoneDisp: 0.9, nearAtr: 0.7, slMul: 1.2, bufAtr: 0.25, range: [0.1, 100000] },
-  crypto:    { label: 'Kripto',    structTf: 'M5', zoneTf: 'M5', zoneDisp: 1.0, nearAtr: 0.8, slMul: 1.3, bufAtr: 0.3,  range: [0.00001, 5000000] },
+  crypto:    { label: 'Kripto',    structTf: 'M5', zoneTf: 'M5', zoneDisp: 1.0, nearAtr: 0.8, slMul: 1.3, bufAtr: 0.3,  range: [0.00000001, 5000000] },
 };
 
 const PAIR_OVERRIDE = {};
@@ -650,7 +650,11 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
   if (!OPENAI_API_KEY) return null;
   const { symbol, dec, prof, lang } = ctx;
   const t = TX[lang] || TX.id;
-  const p = v => Number(v).toFixed(dec);
+  const p = v => {
+    if (v === 0) return "0";
+    if (v < 0.001) return Number(v).toFixed(8);
+    return Number(v).toFixed(dec);
+  };
   
   const prompt = t.aiPrompt({
     symbol, classLabel: t.classLabel[prof.cls] || prof.label, sideW: dir === 1 ? 'BUY' : 'SELL',
@@ -678,24 +682,25 @@ Anda adalah trader profesional SMC/ICT. Anda menerima ${images.length} gambar ch
 Gaya Trading: ${style}.
 
 Instruksi Wajib (Sangat Penting):
-1. LIHAT SETIAP GAMBAR. Baca TIMEFRAME masing-masing gambar (misal: Gambar 1 = M3, Gambar 2 = M15, Gambar 3 = M30). Kumpulkan SEMUA timeframe yang ada ke dalam bentuk ARRAY (contoh: ["M3", "M15", "M30"]). JANGAN hanya mengambil satu.
-2. LIHAT POJOK GAMBAR. Baca NAMA PAIR/ASSET yang tertulis (contoh: XAUUSD). Jika tidak ada, tulis "UNKNOWN".
+1. LIHAT SETIAP GAMBAR. Baca TIMEFRAME masing-masing gambar (misal: Gambar 1 = 1h, Gambar 2 = 15m, Gambar 3 = 5m). Kumpulkan SEMUA timeframe ke dalam ARRAY (contoh: ["1h", "15m", "5m"]). JANGAN hanya mengambil satu.
+2. LIHAT POJOK KIRI ATAS GAMBAR. Ini adalah format TradingView. Baca NAMA PAIR/ASSET. Contoh: "PEPE / TetherUS" berarti "PEPEUSDT", "BTC / USDT" berarti "BTCUSDT". TULISKAN NAMA PAIR DALAM FORMAT GABUNG (contoh: PEPEUSDT). Jika tidak ada, tulis "UNKNOWN".
 3. Analisa struktur pasar pada MASING-MASING timeframe (Trend, Support, Resistance, FVG, Order Block).
 4. Cari CONFLUENCE (persetujuan) antar timeframe. Tentukan arah entry yang valid (BUY atau SELL) berdasarkan keseluruhan MTF.
-5. Tentukan level Entry, Stop Loss (SL), TP1, TP2, dan TP3 berdasarkan harga yang tertera.
-6. Tuliskan alasan (reason) maksimal 500 karakter (bahasa Indonesia). WAJIB jelaskan kondisi di masing-masing timeframe (contoh: "Pada M3 terjadi..., didukung oleh M15 yang...") lalu simpulkan alasannya.
+5. Tentukan level Entry, Stop Loss (SL), TP1, TP2, dan TP3 berdasarkan harga yang tertera. 
+   PERHATIAN: Untuk koin mikro (seperti PEPE, SHIB) yang harganya sangat kecil (contoh: 0.00000403), TULISKAN ANGKA DESIMAL LENGKAP SESUAI CHART. JANGAN DIBULATKAN MENJADI 0.
+6. Tuliskan alasan (reason) maksimal 500 karakter (bahasa Indonesia). WAJIB jelaskan kondisi di masing-masing timeframe (contoh: "Pada 5m terjadi..., didukung oleh 15m yang...") lalu simpulkan alasannya.
 
 KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI INI:
 {
-  "symbol": "XAUUSD",
-  "timeframes": ["M3", "M15", "M30"],
+  "symbol": "PEPEUSDT",
+  "timeframes": ["1h", "15m", "5m"],
   "signal": "BUY",
-  "entry": 3880.50,
-  "sl": 3875.00,
-  "tp1": 3885.00,
-  "tp2": 3890.00,
-  "tp3": 3895.00,
-  "reason": "Pada M3 harga menyapu likuiditas, didukung oleh struktur M15 yang bullish dan M30 yang mulai berbalik arah (BOS). Confluence ini mengindikasikan potensi pantulan naik yang kuat."
+  "entry": 0.00000403,
+  "sl": 0.00000380,
+  "tp1": 0.00000420,
+  "tp2": 0.00000450,
+  "tp3": 0.00000500,
+  "reason": "Pada 5m harga menyapu likuiditas, didukung oleh struktur 15m yang bullish dan 1h yang mulai berbalik arah (BOS). Confluence ini mengindikasikan potensi pantulan naik yang kuat."
 }
 `;
 
@@ -998,7 +1003,13 @@ async function buildSwingPlan({ m15, price, rrList, ctx }) {
 // ═══════════════════════════ OUTPUT ═══════════════════════════
 function toSignal(result, style, ctx) {
   const { dir, plan, meta } = result;
-  const r = v => Number(Number(v).toFixed(ctx.dec));
+  
+  const r = v => {
+    if (v === 0) return 0;
+    if (v < 0.001) return Number(v).toFixed(8);
+    return Number(Number(v).toFixed(ctx.dec));
+  };
+  
   const tps = plan.tps;
   const isLimit = plan.orderType === 'LIMIT';
   const en = ctx.lang === 'en';
@@ -1032,7 +1043,15 @@ function toSignal(result, style, ctx) {
 
 // ── REQUEST RESOLVER ──
 const isKnownSymbol = s => Object.prototype.hasOwnProperty.call(DECIMALS, s);
-const normalizeSymbol = raw => String(raw ?? '').split(/[|:]/).pop().toUpperCase().replace(/[\s\/_\-]/g, '').trim();
+
+const normalizeSymbol = raw => {
+  let s = String(raw ?? '').toUpperCase().trim();
+  s = s.replace(/TETHERUS/g, 'USDT').replace(/TETHER/g, 'USDT');
+  s = s.split(/[|:]/).pop();
+  s = s.replace(/[\s\/_\-]/g, '').trim();
+  return s;
+};
+
 const SYMBOL_KEYS = ['symbol', 'pair', 'instrument', 'asset', 'target', 'pairName', 'ticker', 'market', 'code', 'sym'];
 function findPairString(obj, depth = 0) {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj) || depth > 2) return null;
@@ -1086,25 +1105,38 @@ export default async function handler(req, res) {
     const tps = [p.tp1, p.tp2, p.tp3].filter(v => v != null).map(Number);
     
     let symbol = resolveSymbol(body, req.query) || (p.symbol && p.symbol !== 'UNKNOWN' ? normalizeSymbol(p.symbol) : null);
+    if (!symbol) symbol = 'UNKNOWN_PAIR';
     
     let dec = 2, pip = 0.01, gold = false, prof = PAIR_CLASS_PROFILE.fx;
     
-    if (symbol && isKnownSymbol(symbol)) {
+    if (isKnownSymbol(symbol)) {
       dec = DECIMALS[symbol] || 2;
       pip = pipSizeOf(symbol, dec);
       gold = isGold(symbol);
       prof = pairProfile(symbol);
     } else {
-       if (entry > 50000) { symbol = 'BTCUSD'; dec = 2; pip = 1; } 
-       else if (entry > 1000) { symbol = 'XAUUSD'; dec = 2; pip = 0.1; gold = true; }
-       else if (entry > 10) { symbol = 'US30'; dec = 2; pip = 1; }
-       else { symbol = 'EURUSD'; dec = 5; pip = 0.0001; }
-       gold = isGold(symbol);
-       prof = pairProfile(symbol);
+       // DYNAMIC DECIMAL DETECTION UNTUK KOIN MIKRO / PAIR TIDAK DIKENAL
+       if (entry > 1000) { dec = 2; pip = 0.1; }
+       else if (entry > 100) { dec = 2; pip = 0.01; }
+       else if (entry > 1) { dec = 4; pip = 0.0001; }
+       else if (entry > 0.01) { dec = 5; pip = 0.00001; }
+       else if (entry > 0.0001) { dec = 6; pip = 0.000001; }
+       else if (entry > 0.00001) { dec = 7; pip = 0.0000001; }
+       else { dec = 8; pip = 0.00000001; }
+       
+       if (symbol.includes('XAU')) { gold = true; dec = 2; pip = 0.1; }
+       prof = pairProfile(symbol.includes('XAU') ? 'gold' : (symbol.includes('BTC') ? 'crypto' : 'fx'));
     }
 
     const ctx = { symbol, dec, pip, gold, prof, lang };
-    const f = v => Number(Number(v).toFixed(dec));
+    
+    // Gunakan fungsi formatter dinamis untuk entry/sl/tp
+    const f = v => {
+      if (v === 0) return 0;
+      if (v < 0.001) return Number(v).toFixed(8);
+      return Number(Number(v).toFixed(dec));
+    };
+    
     const riskPips = Math.abs(entry - sl) / pip;
     
     let kindStr = 'scalp';
@@ -1112,7 +1144,6 @@ export default async function handler(req, res) {
     if (style === 'Intraday') kindStr = 'intraday';
     if (style === 'Swing') kindStr = 'swing';
 
-    // Parse Array MTF dari AI Vision
     let tfText = 'Chart';
     if (Array.isArray(p.timeframes)) {
       tfText = p.timeframes.join(', ');
@@ -1131,7 +1162,6 @@ export default async function handler(req, res) {
       timeframes: tfText 
     });
 
-    // Susun langkah-langkah validasi dinamis untuk frontend (Vision)
     const visionSteps = [
       `Membaca Pair & Timeframe (${symbol} - ${tfText})`,
       `Menganalisa struktur MTF (${tfText})`,
@@ -1189,7 +1219,13 @@ export default async function handler(req, res) {
   const pip = pipSizeOf(symbol, dec);
   const gold = isGold(symbol);
   const prof = pairProfile(symbol);
-  const f = v => Number(Number(v).toFixed(dec));
+  
+  const f = v => {
+    if (v === 0) return 0;
+    if (v < 0.001) return Number(v).toFixed(8);
+    return Number(Number(v).toFixed(dec));
+  };
+  
   const ctx = { symbol, dec, pip, gold, f, prof, lang };
 
   let apiKey = API_KEYS[0] || process.env.TICKERLAYER_API_KEY || '';
