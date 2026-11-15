@@ -1,5 +1,5 @@
 // api/generate.js
-// v86 (Vision Mode fully aligned with SMC Architecture: State Machine, Premium/Discount, Killzones)
+// v87 (Fix HTTP 500: AI Timeout Protection + Global Try-Catch)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
@@ -553,17 +553,28 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
   });
   
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8500); // Timeout 8.5 detik agar tidak kena limit Vercel 10s
+
     const resp = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
-      method: 'POST', headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: AI_MODEL, messages: [{ role: 'system', content: t.aiSystem }, { role: 'user', content: prompt }], max_tokens: 600, temperature: 0.2 })
+      method: 'POST', 
+      headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: AI_MODEL, messages: [{ role: 'system', content: t.aiSystem }, { role: 'user', content: prompt }], max_tokens: 500, temperature: 0.2 }),
+      signal: controller.signal
     });
+    
+    clearTimeout(timeoutId);
+
     if (!resp.ok) return null;
     const data = await resp.json();
     return data.choices?.[0]?.message?.content?.trim() || null;
-  } catch (err) { return null; }
+  } catch (err) { 
+    console.error('AI Reasoning Exception/Timeout:', err.message);
+    return null; 
+  }
 }
 
-// ── VISION AI (STATE MACHINE ARCHITECTURE ALIGNED) ──
+// ── VISION AI ──
 async function getVisionSignal(images, lang) {
   if (!OPENAI_API_KEY) return { plan: null, reason: 'API Key AI tidak ada.' };
   
@@ -607,10 +618,18 @@ KEMBALIKAN HANYA DALAM FORMAT JSON:
   ];
 
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8500); // Timeout Vision juga
+
     const resp = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
-      method: 'POST', headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: AI_VISION_MODEL, messages: [{ role: 'user', content: userContent }], max_tokens: 1500, temperature: 0.1 })
+      method: 'POST', 
+      headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: AI_VISION_MODEL, messages: [{ role: 'user', content: userContent }], max_tokens: 1500, temperature: 0.1 }),
+      signal: controller.signal
     });
+
+    clearTimeout(timeoutId);
+
     if (!resp.ok) return { plan: null, reason: `Server AI menolak (HTTP ${resp.status}).` };
     const data = await resp.json();
     let content = data.choices?.[0]?.message?.content?.trim() || '';
@@ -627,7 +646,10 @@ KEMBALIKAN HANYA DALAM FORMAT JSON:
       } catch (parseError) { return { plan: null, reason: 'Format JSON AI rusak.' }; }
     }
     return { plan: null, reason: `AI tidak mengembalikan JSON.` };
-  } catch (err) { return { plan: null, reason: err.message }; }
+  } catch (err) { 
+    console.error('Vision AI Exception:', err.message);
+    return { plan: null, reason: err.message }; 
+  }
 }
 
 // ── FINALIZE PLAN ──
@@ -676,7 +698,6 @@ async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
   const t = tx(ctx);
   const atrM1 = atrOf(m1, pip);
   
-  // 1. HTF (M15) Bias Check
   const biasM15 = analyzePureSMCStructure(m15);
   const rangeM15 = getRangeInfo(m15, 50);
   let rangeInfoStr = '-';
@@ -689,10 +710,7 @@ async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
       rangeInfoStr = `M15 Range: ${isPremium ? 'PREMIUM' : 'DISCOUNT'} (Pos: ${(pricePos*100).toFixed(1)}%)`;
   }
 
-  // 2. Structure (M5) - Deteksi MSS/Sweep
   const structM5 = analyzePureSMCStructure(m5);
-  
-  // 3. Signal Trigger (M1)
   const structM1 = analyzePureSMCStructure(m1);
   
   const demand = findSDZones(m1, 1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
@@ -705,7 +723,6 @@ async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
   const inDemand = (demand && price >= demand.bottom && price <= demand.top) || inBullFVG;
   const inSupply = (supply && price >= supply.bottom && price <= supply.top) || inBearFVG;
 
-  // State Machine Logic
   let state = 'IDLE';
   let chartContext = '';
   
@@ -716,7 +733,6 @@ async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
   let setup = `Market NOW (${srcName(structM1.src, ctx.lang)})`;
   let lines = [`Eksekusi NOW mengikuti momentum M1: ${srcName(structM1.src, ctx.lang)}`];
 
-  // Premium/Discount + Zone Reaction Logic
   if (inDemand && inSupply) {
     return { plan: null, reason: 'Dibatalkan: Harga terjepit di antara Supply dan Demand (Konsolidasi).' };
   } else if (inDemand) {
@@ -1044,7 +1060,7 @@ function toSignal(result, style, ctx) {
     zoneLabel: isLimit ? 'Limit Entry Zone' : 'Market Execution Zone',
     zoneNote: plan.zoneNote,
     reason: meta.reason,
-    chartContext: plan.chartContext // Tambahan sesuai dokumen
+    chartContext: plan.chartContext
   };
 }
 
@@ -1075,169 +1091,173 @@ function resolveSymbol(body, query) {
 
 // ═══════════════════════════ MAIN HANDLER ═══════════════════════════
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  try {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  let body = req.body || {};
-  if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
+    let body = req.body || {};
+    if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
 
-  const lang = pickLang(body, req.query);
-  const t = TX[lang];
+    const lang = pickLang(body, req.query);
+    const t = TX[lang];
 
-  // Killzone Filter (Opsional - Soft check)
-  const inSession = isWithinKillzone();
-  const sessionNote = inSession ? '' : '(Di luar sesi London/NY, volatilitas mungkin rendah)';
+    const inSession = isWithinKillzone();
+    const sessionNote = inSession ? '' : '(Di luar sesi London/NY, volatilitas mungkin rendah)';
 
-  // =====================================================================
-  // LOGIKA 1: JIKA REQUEST DARI VISION (ADA GAMBAR)
-  // =====================================================================
-  if (body.images && Array.isArray(body.images) && body.images.length > 0) {
+    // =====================================================================
+    // LOGIKA 1: JIKA REQUEST DARI VISION (ADA GAMBAR)
+    // =====================================================================
+    if (body.images && Array.isArray(body.images) && body.images.length > 0) {
+      const access = await checkAccess(body.email);
+      if (!access.ok) return res.status(403).json({ error: t[access.key] });
+
+      const trial = await checkTrialLimit(body.email, access.status);
+      if (!trial.ok) return res.status(403).json({ error: trial.msg });
+
+      const visionRes = await getVisionSignal(body.images, lang);
+
+      if (!visionRes.plan) {
+         return res.status(400).json({ error: visionRes.reason });
+      }
+
+      const p = visionRes.plan;
+      const entry = Number(p.entry);
+      const sl = Number(p.sl);
+      const tps = [p.tp1, p.tp2, p.tp3].filter(v => v != null).map(Number);
+      const orderType = p.orderType === 'LIMIT' ? 'LIMIT' : 'NOW';
+
+      if (!['BUY', 'SELL'].includes(p.signal)) return res.status(400).json({ error: 'AI gagal menentukan arah BUY/SELL.' });
+      if (entry <= 0 || sl <= 0 || tps.some(t => t <= 0)) return res.status(400).json({ error: 'AI mengembalikan harga 0.0. Pastikan chart jelas.' });
+
+      const dir = p.signal === 'BUY' ? 1 : -1;
+      let symbol = resolveSymbol(body, req.query) || (p.symbol && p.symbol !== 'UNKNOWN' ? normalizeSymbol(p.symbol) : null);
+      if (!symbol) symbol = 'UNKNOWN_PAIR';
+      
+      let dec = 2, pip = 0.01, gold = false, prof = PAIR_CLASS_PROFILE.fx;
+      if (isKnownSymbol(symbol)) {
+        dec = DECIMALS[symbol] || 2; pip = pipSizeOf(symbol, dec); gold = isGold(symbol); prof = pairProfile(symbol);
+      } else {
+         if (entry > 1000) { dec = 2; pip = 0.1; } else if (entry > 100) { dec = 2; pip = 0.01; } else if (entry > 1) { dec = 4; pip = 0.0001; } else if (entry > 0.01) { dec = 5; pip = 0.00001; } else if (entry > 0.0001) { dec = 6; pip = 0.000001; } else if (entry > 0.00001) { dec = 7; pip = 0.0000001; } else { dec = 8; pip = 0.00000001; }
+         if (symbol.includes('XAU')) { gold = true; dec = 2; pip = 0.1; }
+         prof = pairProfile(symbol.includes('XAU') ? 'gold' : (symbol.includes('BTC') ? 'crypto' : 'fx'));
+      }
+
+      const ctx = { symbol, dec, pip, gold, prof, lang };
+      const f = v => { if (v === 0) return 0; if (v < 0.001) return Number(v).toFixed(8); return Number(Number(v).toFixed(dec)); };
+      const riskPips = Math.abs(entry - sl) / pip;
+      
+      let tfText = 'Chart';
+      if (Array.isArray(p.timeframes)) tfText = p.timeframes.join(', ');
+      else if (typeof p.timeframes === 'string') tfText = p.timeframes;
+
+      const aiReason = await getAIReasoning({
+        ctx, dir, kind: 'vision', orderType: orderType, entry, sl, tps, setup: p.setup || 'SMC Top-Down', rawReason: p.reason, riskPips: riskPips, zoneLine: `MTF: ${tfText}`, timeframes: tfText, rangeInfo: p.range_info || '-', chartContext: p.chartContext || '-'
+      });
+
+      return res.status(200).json({
+        ok: true,
+        analysis_steps: [`Analisa Top-Down (${tfText})`, `Identifikasi Likuiditas & Trend HTF`, `Konfirmasi Zona LTF`, `Penentuan Entry & Anti-Sweep SL`],
+        signal: {
+          symbol, decimals: dec, pipSize: pip, signal: p.signal, mode: orderType === 'LIMIT' ? 'LIMIT' : 'MARKET', orderType: orderType, orderLabel: `${p.signal} ${orderType}`, status: orderType === 'LIMIT' ? 'PENDING' : 'RUNNING',
+          entry: f(entry), sl: f(sl), tp1: tps[0] != null ? f(tps[0]) : null, tp2: tps[1] != null ? f(tps[1]) : null, tp3: tps[2] != null ? f(tps[2]) : null, tpCount: tps.length,
+          zone: null, expireMs: 0, confidence: 'HIGH', risk: 'MEDIUM', setup: p.setup || `SMC MTF (${tfText})`, entryStyle: 'Rekomendasi AI', setupLabel: 'SMC Top-Down', zoneLabel: orderType === 'LIMIT' ? 'Limit Entry Zone' : 'Market Execution Zone', zoneNote: `Timeframes: ${tfText}`,
+          reason: (aiReason || p.reason) + sessionNote,
+          chartContext: p.chartContext || '-'
+        }
+      });
+    }
+
+    // =====================================================================
+    // LOGIKA 2: JIKA REQUEST DARI LIVE SMC (TIDAK ADA GAMBAR)
+    // =====================================================================
+    const symbol = resolveSymbol(body, req.query);
+    if (!symbol) return res.status(400).json({ error: t.noPair(Object.keys(body).join(', ') || t.emptyBody) });
+
+    const styleKey = String(body.style || body.tradingStyle || 'Scalping').trim();
+    const style = STYLES[styleKey] ? styleKey : 'Scalping';
+    const styleCfg = STYLES[style];
+
     const access = await checkAccess(body.email);
     if (!access.ok) return res.status(403).json({ error: t[access.key] });
 
     const trial = await checkTrialLimit(body.email, access.status);
     if (!trial.ok) return res.status(403).json({ error: trial.msg });
 
-    const visionRes = await getVisionSignal(body.images, lang);
-
-    if (!visionRes.plan) {
-       return res.status(400).json({ error: visionRes.reason });
-    }
-
-    const p = visionRes.plan;
-    const entry = Number(p.entry);
-    const sl = Number(p.sl);
-    const tps = [p.tp1, p.tp2, p.tp3].filter(v => v != null).map(Number);
-    const orderType = p.orderType === 'LIMIT' ? 'LIMIT' : 'NOW';
-
-    if (!['BUY', 'SELL'].includes(p.signal)) return res.status(400).json({ error: 'AI gagal menentukan arah BUY/SELL.' });
-    if (entry <= 0 || sl <= 0 || tps.some(t => t <= 0)) return res.status(400).json({ error: 'AI mengembalikan harga 0.0. Pastikan chart jelas.' });
-
-    const dir = p.signal === 'BUY' ? 1 : -1;
-    let symbol = resolveSymbol(body, req.query) || (p.symbol && p.symbol !== 'UNKNOWN' ? normalizeSymbol(p.symbol) : null);
-    if (!symbol) symbol = 'UNKNOWN_PAIR';
-    
-    let dec = 2, pip = 0.01, gold = false, prof = PAIR_CLASS_PROFILE.fx;
-    if (isKnownSymbol(symbol)) {
-      dec = DECIMALS[symbol] || 2; pip = pipSizeOf(symbol, dec); gold = isGold(symbol); prof = pairProfile(symbol);
-    } else {
-       if (entry > 1000) { dec = 2; pip = 0.1; } else if (entry > 100) { dec = 2; pip = 0.01; } else if (entry > 1) { dec = 4; pip = 0.0001; } else if (entry > 0.01) { dec = 5; pip = 0.00001; } else if (entry > 0.0001) { dec = 6; pip = 0.000001; } else if (entry > 0.00001) { dec = 7; pip = 0.0000001; } else { dec = 8; pip = 0.00000001; }
-       if (symbol.includes('XAU')) { gold = true; dec = 2; pip = 0.1; }
-       prof = pairProfile(symbol.includes('XAU') ? 'gold' : (symbol.includes('BTC') ? 'crypto' : 'fx'));
-    }
-
-    const ctx = { symbol, dec, pip, gold, prof, lang };
+    const dec = DECIMALS[symbol];
+    const pip = pipSizeOf(symbol, dec);
+    const gold = isGold(symbol);
+    const prof = pairProfile(symbol);
     const f = v => { if (v === 0) return 0; if (v < 0.001) return Number(v).toFixed(8); return Number(Number(v).toFixed(dec)); };
-    const riskPips = Math.abs(entry - sl) / pip;
-    
-    let tfText = 'Chart';
-    if (Array.isArray(p.timeframes)) tfText = p.timeframes.join(', ');
-    else if (typeof p.timeframes === 'string') tfText = p.timeframes;
+    const ctx = { symbol, dec, pip, gold, f, prof, lang };
 
-    const aiReason = await getAIReasoning({
-      ctx, dir, kind: 'vision', orderType: orderType, entry, sl, tps, setup: p.setup || 'SMC Top-Down', rawReason: p.reason, riskPips: riskPips, zoneLine: `MTF: ${tfText}`, timeframes: tfText, rangeInfo: p.range_info || '-', chartContext: p.chartContext || '-'
-    });
+    let apiKey = API_KEYS[0] || process.env.TICKERLAYER_API_KEY || '';
 
-    return res.status(200).json({
-      ok: true,
-      analysis_steps: [`Analisa Top-Down (${tfText})`, `Identifikasi Likuiditas & Trend HTF`, `Konfirmasi Zona LTF`, `Penentuan Entry & Anti-Sweep SL`],
-      signal: {
-        symbol, decimals: dec, pipSize: pip, signal: p.signal, mode: orderType === 'LIMIT' ? 'LIMIT' : 'MARKET', orderType: orderType, orderLabel: `${p.signal} ${orderType}`, status: orderType === 'LIMIT' ? 'PENDING' : 'RUNNING',
-        entry: f(entry), sl: f(sl), tp1: tps[0] != null ? f(tps[0]) : null, tp2: tps[1] != null ? f(tps[1]) : null, tp3: tps[2] != null ? f(tps[2]) : null, tpCount: tps.length,
-        zone: null, expireMs: 0, confidence: 'HIGH', risk: 'MEDIUM', setup: p.setup || `SMC MTF (${tfText})`, entryStyle: 'Rekomendasi AI', setupLabel: 'SMC Top-Down', zoneLabel: orderType === 'LIMIT' ? 'Limit Entry Zone' : 'Market Execution Zone', zoneNote: `Timeframes: ${tfText}`,
-        reason: (aiReason || p.reason) + sessionNote,
-        chartContext: p.chartContext || '-'
-      }
-    });
+    let m1 = cleanCandles(body.candles?.m1);
+    let m5 = cleanCandles(body.candles?.m5);
+    let m15 = cleanCandles(body.candles?.m15);
+
+    let price = Number(body.currentPrice);
+    if (!(price > 0)) price = lastClosePrice(m5) || lastClosePrice(m15) || lastClosePrice(m1);
+    if (!(price > 0)) return res.status(400).json({ error: t.noPrice });
+
+    const [lo, hi] = prof.range;
+    if (price < lo || price > hi) return res.status(400).json({ error: t.range(price, symbol, lo, hi) });
+
+    const needM1 = (style === 'Scalping' || style === 'Day Trading') ? NEED.m1 : 0;
+    const needM5 = (style === 'Scalping' || style === 'Day Trading' || style === 'Intraday') ? NEED.m5 : 0;
+    const needM15 = (style === 'Intraday' || style === 'Swing') ? NEED.m15 : 0;
+
+    const pick = async (arr, tf, need) => {
+      if (!need) return { candles: [], source: 'none', tried: [] };
+      const frontOk = arr.length >= Math.min(need, 60) && matchesRef(arr, price);
+      if (frontOk && arr.length >= need) return { candles: arr, source: 'frontend', tried: [] };
+      const r = await getCandles(symbol, tf, need, apiKey, price);
+      if (!r.candles.length && frontOk) return { candles: arr, source: 'frontend (parsial)', tried: r.tried };
+      return r;
+    };
+
+    const [r1, r5, r15] = await Promise.all([
+      pick(m1, '1m', needM1), pick(m5, '5m', needM5), pick(m15, '15m', needM15),
+    ]);
+
+    if (needM1) m1 = r1.candles;
+    if (needM5) m5 = r5.candles;
+    if (needM15) m15 = r15.candles;
+
+    const failed = [['m1', r1, needM1], ['m5', r5, needM5], ['m15', r15, needM15]].filter(([, r, need]) => need && r.candles.length === 0);
+    if (failed.length) {
+      const detail = failed.map(([k, r]) => `${k}: ${describeTried(r.tried, price, lang)}`).join(' | ');
+      return res.status(502).json({ error: t.candle(symbol, price, detail) });
+    }
+
+    if (needM1) m1 = mergeLiveBar(m1, price, 1);
+    if (needM5) m5 = mergeLiveBar(m5, price, 5);
+    if (needM15) m15 = mergeLiveBar(m15, price, 15);
+
+    const rrList = styleCfg.rr;
+    let result = { plan: null, reason: t.notProcessed };
+    let liveSteps = [];
+
+    if (style === 'Scalping') {
+      liveSteps = [`Cek Premium/Discount Range (M15)`, `Analisa Struktur M5`, `Validasi Trigger M1`, `Entry Market NOW`];
+      result = await buildScalpPlan({ m1, m5, m15, price, rrList, ctx }); 
+    } else if (style === 'Day Trading') {
+      liveSteps = [`Cek Zona / FVG M5`, `Validasi Likuiditas (SSL/BSL)`, `Menghitung Limit Entry`];
+      result = await buildDayPlan({ m1, m5, price, rrList, ctx }); 
+    } else if (style === 'Intraday') {
+      liveSteps = [`Memeriksa bias M15 & H1`, `Mencari Zona Supply & Demand M5`, `Cek Liquidity Sweep (SSL/BSL)`, `Validasi rejection candle`];
+      result = await buildIntradayPlan({ m5, m15, price, rrList, ctx });
+    } else if (style === 'Swing') {
+      liveSteps = [`Memeriksa bias D1, H4 & H1`, `Mencari Zona Supply & Demand M15`, `Cek Liquidity Sweep (SSL/BSL)`, `Validasi rejection candle`];
+      result = await buildSwingPlan({ m15, price, rrList, ctx });
+    }
+
+    if (!result.plan) return res.status(200).json({ ok: false, reason: result.reason || t.noSetup, analysis_steps: liveSteps });
+
+    const payload = toSignal(result, styleCfg, ctx);
+    return res.status(200).json({ ok: true, analysis_steps: liveSteps, signal: payload });
+
+  } catch (globalError) {
+    console.error('Global Handler Error:', globalError);
+    return res.status(500).json({ error: `Internal Server Error: ${globalError.message}` });
   }
-
-  // =====================================================================
-  // LOGIKA 2: JIKA REQUEST DARI LIVE SMC (TIDAK ADA GAMBAR)
-  // =====================================================================
-  const symbol = resolveSymbol(body, req.query);
-  if (!symbol) return res.status(400).json({ error: t.noPair(Object.keys(body).join(', ') || t.emptyBody) });
-
-  const styleKey = String(body.style || body.tradingStyle || 'Scalping').trim();
-  const style = STYLES[styleKey] ? styleKey : 'Scalping';
-  const styleCfg = STYLES[style];
-
-  const access = await checkAccess(body.email);
-  if (!access.ok) return res.status(403).json({ error: t[access.key] });
-
-  const trial = await checkTrialLimit(body.email, access.status);
-  if (!trial.ok) return res.status(403).json({ error: trial.msg });
-
-  const dec = DECIMALS[symbol];
-  const pip = pipSizeOf(symbol, dec);
-  const gold = isGold(symbol);
-  const prof = pairProfile(symbol);
-  const f = v => { if (v === 0) return 0; if (v < 0.001) return Number(v).toFixed(8); return Number(Number(v).toFixed(dec)); };
-  const ctx = { symbol, dec, pip, gold, f, prof, lang };
-
-  let apiKey = API_KEYS[0] || process.env.TICKERLAYER_API_KEY || '';
-
-  let m1 = cleanCandles(body.candles?.m1);
-  let m5 = cleanCandles(body.candles?.m5);
-  let m15 = cleanCandles(body.candles?.m15);
-
-  let price = Number(body.currentPrice);
-  if (!(price > 0)) price = lastClosePrice(m5) || lastClosePrice(m15) || lastClosePrice(m1);
-  if (!(price > 0)) return res.status(400).json({ error: t.noPrice });
-
-  const [lo, hi] = prof.range;
-  if (price < lo || price > hi) return res.status(400).json({ error: t.range(price, symbol, lo, hi) });
-
-  // Penyesuaian MTF sesuai Arsitektur Dokumen
-  const needM1 = (style === 'Scalping' || style === 'Day Trading') ? NEED.m1 : 0;
-  const needM5 = (style === 'Scalping' || style === 'Day Trading' || style === 'Intraday') ? NEED.m5 : 0; // M5 untuk struktur Scalp
-  const needM15 = (style === 'Intraday' || style === 'Swing') ? NEED.m15 : 0;
-
-  const pick = async (arr, tf, need) => {
-    if (!need) return { candles: [], source: 'none', tried: [] };
-    const frontOk = arr.length >= Math.min(need, 60) && matchesRef(arr, price);
-    if (frontOk && arr.length >= need) return { candles: arr, source: 'frontend', tried: [] };
-    const r = await getCandles(symbol, tf, need, apiKey, price);
-    if (!r.candles.length && frontOk) return { candles: arr, source: 'frontend (parsial)', tried: r.tried };
-    return r;
-  };
-
-  const [r1, r5, r15] = await Promise.all([
-    pick(m1, '1m', needM1), pick(m5, '5m', needM5), pick(m15, '15m', needM15),
-  ]);
-
-  if (needM1) m1 = r1.candles;
-  if (needM5) m5 = r5.candles;
-  if (needM15) m15 = r15.candles;
-
-  const failed = [['m1', r1, needM1], ['m5', r5, needM5], ['m15', r15, needM15]].filter(([, r, need]) => need && r.candles.length === 0);
-  if (failed.length) {
-    const detail = failed.map(([k, r]) => `${k}: ${describeTried(r.tried, price, lang)}`).join(' | ');
-    return res.status(502).json({ error: t.candle(symbol, price, detail) });
-  }
-
-  if (needM1) m1 = mergeLiveBar(m1, price, 1);
-  if (needM5) m5 = mergeLiveBar(m5, price, 5);
-  if (needM15) m15 = mergeLiveBar(m15, price, 15);
-
-  const rrList = styleCfg.rr;
-  let result = { plan: null, reason: t.notProcessed };
-  let liveSteps = [];
-
-  if (style === 'Scalping') {
-    liveSteps = [`Cek Premium/Discount Range (M15)`, `Analisa Struktur M5`, `Validasi Trigger M1`, `Entry Market NOW`];
-    result = await buildScalpPlan({ m1, m5, m15, price, rrList, ctx }); 
-  } else if (style === 'Day Trading') {
-    liveSteps = [`Cek Zona / FVG M5`, `Validasi Likuiditas (SSL/BSL)`, `Menghitung Limit Entry`];
-    result = await buildDayPlan({ m1, m5, price, rrList, ctx }); 
-  } else if (style === 'Intraday') {
-    liveSteps = [`Memeriksa bias M15 & H1`, `Mencari Zona Supply & Demand M5`, `Cek Liquidity Sweep (SSL/BSL)`, `Validasi rejection candle`];
-    result = await buildIntradayPlan({ m5, m15, price, rrList, ctx });
-  } else if (style === 'Swing') {
-    liveSteps = [`Memeriksa bias D1, H4 & H1`, `Mencari Zona Supply & Demand M15`, `Cek Liquidity Sweep (SSL/BSL)`, `Validasi rejection candle`];
-    result = await buildSwingPlan({ m15, price, rrList, ctx });
-  }
-
-  if (!result.plan) return res.status(200).json({ ok: false, reason: result.reason || t.noSetup, analysis_steps: liveSteps });
-
-  const payload = toSignal(result, styleCfg, ctx);
-  return res.status(200).json({ ok: true, analysis_steps: liveSteps, signal: payload });
 }
