@@ -1,5 +1,5 @@
 // api/generate.js
-// v82 (Aggressive Scalping Zone-Aware: Adapts to S/D & FVG rejection)
+// v86 (Vision Mode fully aligned with SMC Architecture: State Machine, Premium/Discount, Killzones)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
@@ -9,7 +9,6 @@ const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
 // ── AI CONFIG ──
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-
 const AI_MODEL = process.env.AI_MODEL || 'qwen-3.8-max';
 const AI_VISION_MODEL = process.env.AI_VISION_MODEL || 'gpt-6-luna';
 
@@ -34,7 +33,6 @@ const DECIMALS = {
 const CRYPTO_LIST = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'BNBUSD', 'ADAUSD', 'DOGEUSD', 'AVAXUSD', 'LINKUSD', 'DOTUSD', 'MATICUSD', 'UNIUSD'];
 const GOLD_SYMBOLS = ['XAUUSD', 'XAUUSDX'];
 const isGold = symbol => GOLD_SYMBOLS.includes(symbol);
-
 const MAX_SRC_DEVIATION = 0.05;
 
 const pairClassOf = symbol => {
@@ -60,7 +58,6 @@ const PAIR_CLASS_PROFILE = {
 };
 
 const PAIR_OVERRIDE = {};
-
 const pairProfile = symbol => {
   const cls = pairClassOf(symbol);
   return { cls, ...PAIR_CLASS_PROFILE[cls], ...(PAIR_OVERRIDE[symbol] || {}) };
@@ -74,8 +71,8 @@ const pipSizeOf = (symbol, dec) => PIP_OVERRIDE[symbol] ?? Math.pow(10, -(dec - 
 
 const STYLES = {
   'Scalping': {
-    label: 'Scalping Agresif · Market Execution NOW (Struktur & Area M1)',
-    labelEn: 'Aggressive Scalping · Market Execution NOW (M1 Structure & Zone)',
+    label: 'Scalping Agresif · Market Execution NOW (M1/M5 Structure)',
+    labelEn: 'Aggressive Scalping · Market Execution NOW (M1/M5 Structure)',
     entryStyle: 'Agresif', entryStyleEn: 'Aggressive', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
   'Day Trading': {
@@ -128,34 +125,9 @@ const FVG_MIN_SIZE_ATR = 0.15;
 const SCALP_ZONE_MIN_AGE_BARS = 8;
 const FIXED_RISK_XAU_DAY_PIPS = 50;
 
-function reactionRangeFor(kind, atrVal, ctx) {
-  return Math.max((REACTION_ATR[kind] || 1.5) * atrVal, REACTION_MIN_PIP * ctx.pip);
-}
-
 function fixedRiskFor(kind, ctx) {
   if (kind === 'day' && ctx.gold) return FIXED_RISK_XAU_DAY_PIPS * ctx.pip;
   return null;
-}
-
-function detectRejection(refineC, price, demand, supply, atrVal, nowMaxAtr) {
-  if (!refineC || refineC.length < 5) return { buyOk: false, sellOk: false };
-  const last5 = refineC.slice(-5);
-  const last = last5[last5.length - 1];
-  const bearCount = last5.filter(c => c.c < c.o).length;
-  const bullCount = last5.filter(c => c.c > c.o).length;
-  let sellWick = false, buyWick = false;
-  if (supply) {
-    const touched = last5.some(c => c.h >= supply.bottom);
-    sellWick = touched && last.c < last.o && last.c < supply.bottom;
-  }
-  if (demand) {
-    const touched = last5.some(c => c.l <= demand.top);
-    buyWick = touched && last.c > last.o && last.c > demand.top;
-  }
-  const nearMax = nowMaxAtr * atrVal;
-  const sellOk = sellWick || (bearCount >= 3 && supply && (supply.bottom - price) <= nearMax);
-  const buyOk  = buyWick  || (bullCount >= 3 && demand && (price - demand.top)  <= nearMax);
-  return { buyOk, sellOk };
 }
 
 function findRecentFVGs(candles, lookback) {
@@ -203,6 +175,31 @@ const isoDate = d => d.toISOString().slice(0, 10);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const lastClosePrice = arr => (arr && arr.length ? arr[arr.length - 1].c : 0);
 
+// ── KILLZONE & FILTERS ──
+function isWithinKillzone() {
+  const now = new Date();
+  const utcHour = now.getUTCHours();
+  return (utcHour >= 7 && utcHour <= 10) || (utcHour >= 12 && utcHour <= 15);
+}
+
+// ── PREMIUM / DISCOUNT & LIQUIDITY HELPERS ──
+function getRangeInfo(candles, lookback = 50) {
+  const s = candles.slice(-lookback);
+  if (s.length < 10) return null;
+  const high = Math.max(...s.map(c => c.h));
+  const low = Math.min(...s.map(c => c.l));
+  const eq = (high + low) / 2;
+  return { high, low, eq };
+}
+
+function getLiquidityLevels(candles, lookback = 30) {
+  const s = candles.slice(-lookback);
+  if (s.length < 10) return { ssl: 0, bsl: 0 };
+  const lows = s.map(c => c.l).sort((a, b) => a - b);
+  const highs = s.map(c => c.h).sort((a, b) => b - a);
+  return { ssl: lows[0], bsl: highs[0] };
+}
+
 // ── KV & AUTH ──
 async function kv(command) {
   if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) return null;
@@ -217,12 +214,8 @@ async function kv(command) {
 }
 
 async function kvGetJSON(key) {
-  try {
-    const raw = await kv(['GET', key]);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
+  try { const raw = await kv(['GET', key]); return raw ? JSON.parse(raw) : null; } catch { return null; }
 }
-
 async function kvSetJSON(key, value, ttl) {
   try { await kv(['SET', key, JSON.stringify(value), 'EX', ttl]); } catch (e) {}
 }
@@ -251,17 +244,13 @@ async function checkTrialLimit(email, status) {
     const totalRaw = await kv(['GET', totalKey]);
     const dailyCount = parseInt(dailyRaw || '0', 10);
     const totalCount = parseInt(totalRaw || '0', 10);
-
     if (totalCount >= 15) return { ok: false, msg: 'Batas maksimal 15 kali request untuk masa trial telah habis.' };
     if (dailyCount >= 5) return { ok: false, msg: 'Batas harian 5 kali request untuk masa trial telah habis. Coba lagi besok.' };
-
     await kv(['INCR', dailyKey]);
     if (dailyCount === 0) await kv(['EXPIRE', dailyKey, 172800]);
     await kv(['INCR', totalKey]);
     return { ok: true };
-  } catch (e) {
-    return { ok: true };
-  }
+  } catch (e) { return { ok: true }; }
 }
 
 // ── TRANSLATIONS ──
@@ -269,6 +258,7 @@ const pickLang = (body, query) => {
   const raw = String(body?.lang ?? body?.language ?? body?.locale ?? query?.lang ?? '').toLowerCase();
   return raw.startsWith('en') ? 'en' : 'id';
 };
+
 const TX = {
   id: {
     pip: 'pip',
@@ -276,70 +266,25 @@ const TX = {
     kind: { scalp: 'Scalping (Agresif)', day: 'Scalping (Konservatif)', intraday: 'Day Trading (Intraday)', swing: 'Swing (Positioning)' },
     classLabel: { gold: 'Emas', silver: 'Perak', metal: 'Logam', fx: 'Forex', fx_jpy: 'Forex JPY', index: 'Indeks', commodity: 'Komoditas', crypto: 'Kripto' },
     headLine: (title, dir, ot, sym) => `${title} ${dir} ${ot} pada ${sym}`,
-    inZone: (side, tf, lo, hi) => `Harga di dalam ${side} ${tf} ${lo} - ${hi}`,
-    limitEdge: (side, tf, px, pips) => `Limit di tepi ${side} ${tf} (${px}), ${pips} pip dari harga`,
-    aligned: (tf, src) => `Arah ${tf} ${src} searah`,
-    opposed: (tf, src) => `Hati-hati: arah ${tf} ${src} berlawanan, reaksi belum terbukti`,
-    outside: (zoneTf, tf, src) => `Di luar area S/D ${zoneTf}, ikuti struktur ${tf} (${src}) → Market Execution`,
-    nearM5: 'Area M5 terdekat:',
-    noM5Zone: n => `Tidak ada area S/D M5 valid dalam ${n} candle terakhir`,
-    insideAlready: 'sudah di dalam',
-    dist: (pips, above) => `${pips} pip ${above ? 'di atas' : 'di bawah'}`,
-    opposing: (oppName, tf, lo, hi, dist, dirW) => `Hati-hati, ada ${oppName} ${tf} ${lo} - ${hi} (${dist}), berpotensi menahan ${dirW}`,
-    zoneSetup: (tf, side, ot) => `Area S/D ${tf} ${side} · ${ot}`,
-    marketExec: src => `Market Execution (${src})`,
-    zoneName: (side, type, tf) => `Zona ${side}/${type} ${tf}`,
-    zoneSD: tf => `Zona S/D ${tf}`,
-    swingLevel: tf => `Level swing ${tf}`,
-    refineIn: (ref, parent) => `Refine ${ref} di dalam area ${parent}`,
-    nearZone: ref => `Zona ${ref} terdekat`,
-    noRefine: (ref, parent) => `Refine ${ref} belum ada, memakai area ${parent}`,
-    noSDLastSwing: 'Area S/D belum ada, memakai swing terakhir',
-    swRefineIn: 'Refine H1 berada di dalam area H4',
-    swRefineNear: 'Refine H1 terdekat searah bias',
-    swRefineNoH4: 'Refine H1 belum ada, memakai area H4',
-    swNoAreaH1: 'Area S/D belum ada, memakai swing H1 terakhir',
-    biasBOS: (tf, bull, lvl) => `Bias ${tf}: BOS ${bull ? 'bullish' : 'bearish'} di ${lvl}`,
-    biasStruct: (tf, src) => `Bias ${tf}: struktur ${src}`,
-    twoWay: (bDir, bScore, oDir, oScore) => `Dua arah dinilai: ${bDir} skor ${bScore} vs ${oDir} ${oScore}`,
-    counterTrend: 'Counter-trend: zona lawan bias lebih kuat, risiko lebih tinggi',
-    noBBConfirm: 'belum ada konfirmasi BB',
-    brokenSetup: a => `${a} tertembus · NOW`,
-    brokenNote: (a, ref) => `Harga sudah melewati ${a}, masuk NOW dengan SL dari struktur ${ref} terakhir`,
-    inAreaSetup: (a, c) => `${a} · ${c}`,
-    inAreaConfirm: (a, setup, ref) => `Harga di ${a}, konfirmasi ${setup} (${ref})`,
-    inAreaNoConfirm: (a, ref) => `Harga di ${a}, belum ada konfirmasi BB ${ref}, hati-hati`,
-    limitSetup: a => `${a} · Limit`,
-    limitNote: (a, px, pips) => `Limit di tepi ${a} (${px}), ${pips} pip dari harga`,
-    farLimit: 'Jarak limit cukup jauh, kemungkinan lama terisi',
-    bbNote: (ref, hit, edge, band) => `BB ${ref}: limit ${hit ? 'bertemu' : 'belum bertemu'} ${edge} band (${band})`,
-    slCapped: (max, raw) => `SL dibatasi ${max} pip, struktur lebih lebar (${raw} pip)`,
-    entryLine: (e, pips, sl) => `Entry ${e}, SL (${pips} pip) di ${sl}`,
-    noPair: keys => `Pair tidak terbaca. Field: ${keys}.`,
-    emptyBody: '(body kosong)', noEmail: 'Sesi tidak punya email.', notRegistered: 'Email tidak terdaftar.',
-    expired: 'Masa aktif habis.', noPrice: 'Harga belum tersedia.',
-    range: (price, symbol, lo, hi) => `Harga ${price} di luar rentang wajar ${symbol} (${lo} - ${hi}).`,
-    candle: (symbol, price, detail) => `Data candle ${symbol} tidak cocok (${price}). ${detail}`,
-    noSource: 'tidak ada sumber', noSetup: 'Tidak ada setup yang valid saat ini.', notProcessed: 'Belum diproses',
-    zoneFresh: (side, tf, lo, hi, inside) => `Zona ${side} ${tf} VALID & FRESH ${inside ? '(harga di dalam)' : '(harga dekat)'}: ${lo} - ${hi}`,
     aiPrompt: (d) => `
-Anda adalah "Alu Signal Z", trader SMC/ICT profesional. Tulis 1 paragraf analisa eksekusi (maks 500 karakter, tegas, bahasa Indonesia).
-WAJIB mencakup 4 poin berikut secara mengalir:
-1. **Analisa Struktur & Area**: Sebutkan kondisi market di timeframe relevan (${d.tfs}) dan posisi harga saat ini terhadap zona FVG/OB/S&D.
-2. **Alasan Eksekusi**: Jelaskan mengapa entry diambil. 
-   *PENTING: Jika gaya "Scalping Agresif", jika harga berada di dalam zona Demand/FVG, sistem akan memprioritaskan BUY (Reversal). Jika di dalam zona Supply/FVG, sistem akan memprioritaskan SELL (Reversal). Jika di luar zona, sistem mengikuti momentum struktur berjalan.*
-3. **Invalidasi**: Sebutkan level harga yang membatalkan setup ini (SL).
-4. **Aksi**: Tegaskan tipe order (Market NOW atau Limit).
+Anda adalah "Alu Signal Z", trader institusional SMC/ICT. Tulis analisa eksekusi (maks 600 karakter, bahasa Indonesia) berdasarkan data di bawah.
+WAJIB jelaskan narasi:
+1. **Konteks State Machine**: Jelaskan alur dari Sweep -> MSS -> POI -> Signal.
+2. **Konteks Premium/Discount**: Sebutkan apakah harga saat ini di area Premium (Mahal) atau Discount (Murah).
+3. **Analisa Struktur & Zona**: Sebutkan zona kunci (Supply/Demand/FVG/OB) dan konfirmasi Liquidity Sweep (SSL/BSL).
+4. **Alasan & Tipe Entry**: Apakah ini setup Reversal, Continuity, atau Retest?
+5. **Invalidasi**: Sebutkan alasan SL diletakkan di level tersebut.
 
 === DATA ===
 - Pair/Aset: ${d.symbol}
-- Gaya: ${d.kind} (${d.tfs})
+- Timeframe: ${d.tfs}
 - Sinyal: ${d.sideW} | Order: ${d.orderType}
-- Entry: ${d.entry} | SL (Invalidasi): ${d.sl} (${d.riskPips} pip)
+- Entry: ${d.entry} | SL: ${d.sl} (${d.riskPips} pip)
 - TP: ${d.tps}
-- Setup: ${d.setup}
-- Struktur MTF: ${d.zone || '-'}
-- Data Internal: ${d.raw}
+- Setup Type: ${d.setup}
+- Chart Context: ${d.chartContext}
+- Range Info: ${d.rangeInfo || '-'}
+- Detail Zona/Struktur: ${d.raw}
 `,
     aiSystem: 'Anda adalah AI analis trading SMC/ICT yang objektif, dingin, dan presisi.',
   },
@@ -349,70 +294,25 @@ WAJIB mencakup 4 poin berikut secara mengalir:
     kind: { scalp: 'Scalping (Aggressive)', day: 'Scalping (Conservative)', intraday: 'Day Trading (Intraday)', swing: 'Swing (Positioning)' },
     classLabel: { gold: 'Gold', silver: 'Silver', metal: 'Metal', fx: 'Forex', fx_jpy: 'JPY Forex', index: 'Index', commodity: 'Commodity', crypto: 'Crypto' },
     headLine: (title, dir, ot, sym) => `${title} ${dir} ${ot} on ${sym}`,
-    inZone: (side, tf, lo, hi) => `Price inside ${side} ${tf} ${lo} - ${hi}`,
-    limitEdge: (side, tf, px, pips) => `Limit at ${side} edge ${tf} (${px}), ${pips} pips from price`,
-    aligned: (tf, src) => `${tf} direction ${src} aligned`,
-    opposed: (tf, src) => `Caution: ${tf} direction ${src} is opposing`,
-    outside: (zoneTf, tf, src) => `Outside S/D ${zoneTf} zone, following ${tf} structure (${src}) → Market Execution`,
-    nearM5: 'Nearest M5 zones:',
-    noM5Zone: n => `No valid M5 S/D zone in the last ${n} candles`,
-    insideAlready: 'already inside',
-    dist: (pips, above) => `${pips} pips ${above ? 'above' : 'below'}`,
-    opposing: (oppName, tf, lo, hi, dist, dirW) => `Caution: ${oppName} ${tf} ${lo} - ${hi} (${dist}) may hold the ${dirW}`,
-    zoneSetup: (tf, side, ot) => `S/D ${tf} ${side} zone · ${ot}`,
-    marketExec: src => `Market Execution (${src})`,
-    zoneName: (side, type, tf) => `${side} zone/${type} ${tf}`,
-    zoneSD: tf => `S/D zone ${tf}`,
-    swingLevel: tf => `${tf} swing level`,
-    refineIn: (ref, parent) => `${ref} refine inside ${parent} area`,
-    nearZone: ref => `Nearest ${ref} zone`,
-    noRefine: (ref, parent) => `No ${ref} refine yet, using ${parent} area`,
-    noSDLastSwing: 'No S/D zone yet, using last swing',
-    swRefineIn: 'H1 refine sits inside the H4 area',
-    swRefineNear: 'Nearest H1 refine aligned with bias',
-    swRefineNoH4: 'No H1 refine yet, using H4 area',
-    swNoAreaH1: 'No S/D zone yet, using last H1 swing',
-    biasBOS: (tf, bull, lvl) => `${tf} bias: BOS ${bull ? 'bullish' : 'bearish'} at ${lvl}`,
-    biasStruct: (tf, src) => `${tf} bias: ${src}`,
-    twoWay: (bDir, bScore, oDir, oScore) => `Both sides scored: ${bDir} ${bScore} vs ${oDir} ${oScore}`,
-    counterTrend: 'Counter-trend: opposing-bias zone is stronger, higher risk',
-    noBBConfirm: 'no BB confirmation yet',
-    brokenSetup: a => `${a} breached · NOW`,
-    brokenNote: (a, ref) => `Price passed ${a}, entering NOW with SL from the last ${ref} structure`,
-    inAreaSetup: (a, c) => `${a} · ${c}`,
-    inAreaConfirm: (a, setup, ref) => `Price in ${a}, confirmed by ${setup} (${ref})`,
-    inAreaNoConfirm: (a, ref) => `Price in ${a}, no BB confirmation on ${ref} yet`,
-    limitSetup: a => `${a} · Limit`,
-    limitNote: (a, px, pips) => `Limit at ${a} edge (${px}), ${pips} pips from price`,
-    farLimit: 'Limit distance is large, may take a while to fill',
-    bbNote: (ref, hit, edge, band) => `BB ${ref}: limit ${hit ? 'touches' : 'does not touch'} ${edge} band (${band})`,
-    slCapped: (max, raw) => `SL capped at ${max} pips, structure is wider (${raw} pips)`,
-    entryLine: (e, pips, sl) => `Entry ${e}, SL (${pips} pips) at ${sl}`,
-    noPair: keys => `Pair not found. Received: ${keys}.`,
-    emptyBody: '(empty body)', noEmail: 'Session has no email.', notRegistered: 'Email is not registered.',
-    expired: 'Subscription has expired.', noPrice: 'Current price is not available yet.',
-    range: (price, symbol, lo, hi) => `Price ${price} is outside the expected range for ${symbol} (${lo} - ${hi}).`,
-    candle: (symbol, price, detail) => `Candle data for ${symbol} does not match (${price}). ${detail}`,
-    noSource: 'no source', noSetup: 'No valid setup right now.', notProcessed: 'Not processed yet',
-    zoneFresh: (side, tf, lo, hi, inside) => `${side.toUpperCase()} zone ${tf} VALID & FRESH ${inside ? '(price inside)' : '(price near)'}: ${lo} - ${hi}`,
     aiPrompt: (d) => `
-You are "Alu Signal Z", a professional SMC/ICT trader. Write ONE execution analysis paragraph (max 500 characters, assertive, in English).
-MUST include these 4 points flowing naturally:
-1. **Structure & Area Analysis**: State market conditions in relevant timeframes (${d.tfs}) and current price position relative to FVG/OB/S&D zones.
-2. **Execution Reason**: Explain why the entry was taken. 
-   *IMPORTANT: If style is "Aggressive Scalping", if price is inside Demand/Bullish FVG, the system prioritizes BUY (Reversal). If inside Supply/Bearish FVG, it prioritizes SELL (Reversal). If outside zones, it follows current M1 momentum.*
-3. **Invalidation**: State the price level that invalidates this setup (SL).
-4. **Action**: Reiterate the order type (Market NOW or Limit).
+You are "Alu Signal Z", an institutional SMC/ICT trader. Write an execution analysis (max 600 characters, in English) based on the data below.
+MUST explain the narrative:
+1. **State Machine Context**: Explain the flow from Sweep -> MSS -> POI -> Signal.
+2. **Premium/Discount Context**: State whether the current price is in Premium or Discount.
+3. **Structure & Zone Analysis**: State the key zones used (Supply/Demand/FVG/OB) and confirm Liquidity Sweep (SSL/BSL).
+4. **Reason & Entry Type**: Is this a Reversal, Continuity, or Retest setup?
+5. **Invalidation**: Explain the reasoning behind the SL placement.
 
 === DATA ===
 - Pair/Asset: ${d.symbol}
-- Style: ${d.kind} (${d.tfs})
+- Timeframe: ${d.tfs}
 - Signal: ${d.sideW} | Order: ${d.orderType}
-- Entry: ${d.entry} | SL (Invalidation): ${d.sl} (${d.riskPips} pips)
+- Entry: ${d.entry} | SL: ${d.sl} (${d.riskPips} pips)
 - TP: ${d.tps}
-- Setup: ${d.setup}
-- MTF Context: ${d.zone || '-'}
-- Internal Data: ${d.raw}
+- Setup Type: ${d.setup}
+- Chart Context: ${d.chartContext}
+- Range Info: ${d.rangeInfo || '-'}
+- Zone/Structure Details: ${d.raw}
 `,
     aiSystem: 'You are an objective, calm, and precise SMC/ICT trading analyst.',
   },
@@ -635,11 +535,10 @@ function slBounds(kind, ctx, atrVal) {
 }
 
 // ── AI REASONING ──
-async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup, rawReason, riskPips, zoneLine, timeframes }) {
+async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup, rawReason, riskPips, zoneLine, timeframes, rangeInfo, chartContext }) {
   if (!OPENAI_API_KEY) return null;
   const { symbol, dec, prof, lang } = ctx;
   const t = TX[lang] || TX.id;
-  
   const p = v => {
     if (v === 0) return "0";
     if (v < 0.001) return Number(v).toFixed(8);
@@ -650,13 +549,13 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
     symbol, classLabel: t.classLabel[prof.cls] || prof.label, sideW: dir === 1 ? 'BUY' : 'SELL',
     kind: t.kind[kind] || kind, orderType, entry: p(entry), sl: p(sl),
     riskPips: riskPips.toFixed(1), tps: tps.map(p).join(', '), setup, zone: zoneLine || '', raw: rawReason,
-    tfs: timeframes || 'Chart'
+    tfs: timeframes || 'Chart', rangeInfo: rangeInfo || '-', chartContext: chartContext || '-'
   });
   
   try {
     const resp = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
       method: 'POST', headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: AI_MODEL, messages: [{ role: 'system', content: t.aiSystem }, { role: 'user', content: prompt }], max_tokens: 500, temperature: 0.2 })
+      body: JSON.stringify({ model: AI_MODEL, messages: [{ role: 'system', content: t.aiSystem }, { role: 'user', content: prompt }], max_tokens: 600, temperature: 0.2 })
     });
     if (!resp.ok) return null;
     const data = await resp.json();
@@ -664,33 +563,42 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
   } catch (err) { return null; }
 }
 
-// ── VISION AI ──
-async function getVisionSignal(images, style, lang) {
+// ── VISION AI (STATE MACHINE ARCHITECTURE ALIGNED) ──
+async function getVisionSignal(images, lang) {
   if (!OPENAI_API_KEY) return { plan: null, reason: 'API Key AI tidak ada.' };
+  
   const prompt = `
-Anda adalah trader profesional SMC/ICT. Anda menerima ${images.length} gambar chart trading (Multi-Timeframe / MTF).
-Gaya Trading: ${style}.
+Anda adalah trader institusional SMC/ICT profesional. Anda menerima ${images.length} gambar chart TradingView (Multi-Timeframe).
+TIDAK ADA gaya trading. Berikan REKOMENDASI murni berdasarkan arsitektur SMC State Machine.
 
-Instruksi Wajib (Sangat Penting):
-1. LIHAT SETIAP GAMBAR. Baca TIMEFRAME masing-masing gambar (misal: 1h, 15m, 5m). Kumpulkan SEMUA timeframe ke dalam ARRAY (contoh: ["1h", "15m", "5m"]). JANGAN hanya mengambil satu.
-2. LIHAT POJOK KIRI ATAS GAMBAR. Ini adalah format TradingView. Baca NAMA PAIR/ASSET. Contoh: "PEPE / TetherUS" berarti "PEPEUSDT". TULISKAN NAMA PAIR DALAM FORMAT GABUNG (contoh: PEPEUSDT). Jika tidak ada, tulis "UNKNOWN".
-3. Analisa struktur pasar pada MASING-MASING timeframe (Trend, Support, Resistance, FVG, Order Block).
-4. Cari CONFLUENCE (persetujuan) antar timeframe. Tentukan arah entry yang valid (BUY atau SELL) berdasarkan keseluruhan MTF.
-5. Tentukan level Entry, Stop Loss (SL), TP1, TP2, dan TP3 berdasarkan harga yang tertera. 
-   PERHATIAN SANGAT PENTING: Untuk koin mikro (seperti PEPE, SHIB) yang harganya sangat kecil, TULISKAN ANGKA DESIMAL LENGKAP SESUAI CHART. **DILARANG MENGEMBALIKAN ANGKA 0**.
-6. Tuliskan alasan (reason) maksimal 500 karakter (bahasa Indonesia). WAJIB jelaskan kondisi di masing-masing timeframe lalu simpulkan alasannya.
+LANGKAH WAJIB (Analisa Top-Down + State Machine):
+1. **Baca TF**: Semua TF di tiap gambar. Kumpulkan ke ARRAY (misal ["H4", "M15", "M5"]).
+2. **Baca Pair**: Pojok kiri atas ("PEPE / TetherUS" -> "PEPEUSDT"). Jika tidak ada, "UNKNOWN".
+3. **IDLE (Dealing Range)**: Tentukan range harga saat ini (High-Low). Apakah harga berada di Premium (>50%) atau Discount (<50%)?
+4. **SWEEP DETECTED**: Apakah ada likuiditas (BSL/SSL) yang baru saja disapu?
+5. **MSS CONFIRMED**: Apakah ada Market Structure Shift / CHoCH di LTF?
+6. **POI_REACHED**: Cari zona kunci (FVG, Order Block, Breaker). Apakah harga sudah menyentuh zona ini?
+7. **SIGNAL FIRED (Entry & SL)**:
+   - Tentukan Entry (NOW jika di POI, LIMIT jika menunggu retest).
+   - **SL ANTI-SWEEP**: Letakkan SL di LUAR zona pelindung (buffer 1.5 ATR).
+   - Tentukan TP1, TP2, TP3 berdasarkan likuiditas berikutnya.
+8. **chartContext**: Tuliskan alur state machine secara eksplisit (contoh: "HTF H4 Bullish -> Sweep SSL M15 -> MSS M5 -> POI FVG -> SIGNAL BUY").
 
-KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI INI:
+KEMBALIKAN HANYA DALAM FORMAT JSON:
 {
-  "symbol": "PEPEUSDT",
-  "timeframes": ["1h", "15m", "5m"],
+  "symbol": "BTCUSDT",
+  "timeframes": ["H4", "M15", "M5"],
   "signal": "BUY",
-  "entry": 0.00000403,
-  "sl": 0.00000380,
-  "tp1": 0.00000420,
-  "tp2": 0.00000450,
-  "tp3": 0.00000500,
-  "reason": "Pada 5m harga menyapu likuiditas, didukung oleh struktur 15m yang bullish dan 1h yang mulai berbalik arah (BOS). Confluence ini mengindikasikan potensi pantulan naik yang kuat."
+  "orderType": "LIMIT",
+  "entry": 65276.37,
+  "sl": 64800.00,
+  "tp1": 65800.00,
+  "tp2": 66500.00,
+  "tp3": 67000.00,
+  "setup": "M15 Demand Retest (Continuity)",
+  "range_info": "H4 Premium (70%), M15 Discount (30%)",
+  "chartContext": "IDLE at Premium -> Sweep SSL M15 -> MSS M5 -> POI FVG -> SIGNAL FIRED",
+  "reason": "Harga menyapu SSL di M15 (Sweep Detected), lalu terjadi MSS Bullish di M5. Entry Limit di FVG M5 yang berada di area Discount. SL aman di bawah swing low dengan buffer."
 }`;
 
   const userContent = [
@@ -723,7 +631,7 @@ KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI INI:
 }
 
 // ── FINALIZE PLAN ──
-async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, rrList, confidence, setup, zoneNote, zoneRange, head, lines, zoneLine, timeframes }) {
+async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, rrList, confidence, setup, zoneNote, zoneRange, head, lines, zoneLine, timeframes, rangeInfo, chartContext }) {
   const { f, pip, gold, prof } = ctx;
   const t = tx(ctx);
 
@@ -752,24 +660,41 @@ async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, 
   const parts = [head, ...lines, slNote, t.entryLine(f(entry), (risk / pip).toFixed(0), f(sl)), rrList.map((x, i) => `TP${i + 1} 1:${x}`).join(', ')].filter(Boolean);
   const manualReason = parts.map(s => s.replace(/\.?$/, '.')).join(' • ');
 
-  const aiReason = await getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup, rawReason: manualReason, riskPips: risk / pip, zoneLine, timeframes });
+  const aiReason = await getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup, rawReason: manualReason, riskPips: risk / pip, zoneLine, timeframes, rangeInfo, chartContext });
 
   return {
     dir,
-    plan: { kind, orderType, status: orderType === 'LIMIT' ? 'PENDING' : 'RUNNING', entry, bufferEnd: entry, sl, tps, zone: zoneRange || null, expireMs: 0, zoneNote },
+    plan: { kind, orderType, status: orderType === 'LIMIT' ? 'PENDING' : 'RUNNING', entry, bufferEnd: entry, sl, tps, zone: zoneRange || null, expireMs: 0, zoneNote, chartContext },
     meta: { confidence, riskLabel: 'MEDIUM', setup, reason: aiReason || manualReason },
   };
 }
 
-// ═══════════════════════════ WORKFLOW MTF ═══════════════════════════
+// ═══════════════════════════ WORKFLOW MTF (STATE MACHINE SIMULATION) ═══════════════════════════
 
-async function buildScalpPlan({ m1, price, rrList, ctx }) {
+async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
   const { pip } = ctx;
   const t = tx(ctx);
   const atrM1 = atrOf(m1, pip);
+  
+  // 1. HTF (M15) Bias Check
+  const biasM15 = analyzePureSMCStructure(m15);
+  const rangeM15 = getRangeInfo(m15, 50);
+  let rangeInfoStr = '-';
+  let isPremium = false, isDiscount = false;
+  if (rangeM15 && rangeM15.high > rangeM15.low) {
+      const diff = rangeM15.high - rangeM15.low;
+      const pricePos = (price - rangeM15.low) / diff;
+      isPremium = pricePos > 0.5;
+      isDiscount = pricePos <= 0.5;
+      rangeInfoStr = `M15 Range: ${isPremium ? 'PREMIUM' : 'DISCOUNT'} (Pos: ${(pricePos*100).toFixed(1)}%)`;
+  }
+
+  // 2. Structure (M5) - Deteksi MSS/Sweep
+  const structM5 = analyzePureSMCStructure(m5);
+  
+  // 3. Signal Trigger (M1)
   const structM1 = analyzePureSMCStructure(m1);
   
-  // 1. Cek Area Terlebih Dahulu (S&D / FVG)
   const demand = findSDZones(m1, 1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
   const supply = findSDZones(m1, -1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
   
@@ -780,24 +705,40 @@ async function buildScalpPlan({ m1, price, rrList, ctx }) {
   const inDemand = (demand && price >= demand.bottom && price <= demand.top) || inBullFVG;
   const inSupply = (supply && price >= supply.bottom && price <= supply.top) || inBearFVG;
 
-  // 2. Tentukan Aksi Berdasarkan Area
+  // State Machine Logic
+  let state = 'IDLE';
+  let chartContext = '';
+  
+  if (structM5.dir !== 0) state = 'SWEEP_DETECTED';
+  if (structM1.dir !== 0) state = 'MSS_CONFIRMED';
+  
   let dir = structM1.dir;
   let setup = `Market NOW (${srcName(structM1.src, ctx.lang)})`;
   let lines = [`Eksekusi NOW mengikuti momentum M1: ${srcName(structM1.src, ctx.lang)}`];
 
+  // Premium/Discount + Zone Reaction Logic
   if (inDemand && inSupply) {
     return { plan: null, reason: 'Dibatalkan: Harga terjepit di antara Supply dan Demand (Konsolidasi).' };
   } else if (inDemand) {
-    dir = 1; // Paksa BUY di Demand
-    setup = `Reaksi Demand / Bullish FVG (Buy on Support)`;
-    lines = [`Harga berada di dalam area Demand/FVG M1. Prioritas BUY (Reversal/Bounce).`];
+    if (state !== 'IDLE') state = 'POI_REACHED';
+    dir = 1; 
+    setup = `Reaksi Demand / Bullish FVG (Discount Buy)`;
+    lines = [`Harga di area Demand/FVG M1 (${isDiscount ? 'Discount' : 'Premium'}). Prioritas BUY.`];
   } else if (inSupply) {
-    dir = -1; // Paksa SELL di Supply
-    setup = `Reaksi Supply / Bearish FVG (Sell on Resistance)`;
-    lines = [`Harga berada di dalam area Supply/FVG M1. Prioritas SELL (Reversal/Bounce).`];
+    if (state !== 'IDLE') state = 'POI_REACHED';
+    dir = -1; 
+    setup = `Reaksi Supply / Bearish FVG (Premium Sell)`;
+    lines = [`Harga di area Supply/FVG M1 (${isPremium ? 'Premium' : 'Discount'}). Prioritas SELL.`];
   } else if (dir === 0) {
     return { plan: null, reason: 'Dibatalkan: Struktur M1 ranging & harga di luar zona.' };
+  } else if (isPremium && dir === 1) {
+    return { plan: null, reason: 'Dibatalkan: Harga di area Premium (Mahal), tapi struktur M1 Bullish. Rawan fakeout.' };
+  } else if (isDiscount && dir === -1) {
+    return { plan: null, reason: 'Dibatalkan: Harga di area Discount (Murah), tapi struktur M1 Bearish. Rawan fakeout.' };
   }
+
+  if (state === 'POI_REACHED') state = 'SIGNAL_FIRED';
+  chartContext = `HTF M15 ${biasM15.src} -> M5 ${structM5.src} -> M1 ${state} at POI`;
 
   const side = dir === 1 ? 'BUY' : 'SELL';
   const baseSL = inDemand ? (demand ? demand.sl : recentExtreme(m1, dir, 5)) : (inSupply ? (supply ? supply.sl : recentExtreme(m1, dir, 5)) : recentExtreme(m1, dir, 10));
@@ -807,7 +748,7 @@ async function buildScalpPlan({ m1, price, rrList, ctx }) {
     dir, entry: price, orderType: 'NOW', baseSL, kind: 'scalp', atrVal: atrM1, ctx, rrList,
     confidence: 'HIGH', setup,
     zoneNote: inDemand ? 'Area Demand / Bullish FVG' : (inSupply ? 'Area Supply / Bearish FVG' : 'Momentum M1'), 
-    zoneRange, timeframes: 'M1',
+    zoneRange, timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr, chartContext,
     head: t.headLine(t.title.scalp, side, 'NOW', ctx.symbol),
     lines,
   });
@@ -818,18 +759,36 @@ async function buildDayPlan({ m1, m5, price, rrList, ctx }) {
   const { f, pip } = ctx;
   const atrM5 = atrOf(m5, pip);
   
-  // QC: Cari zona di M5 untuk Scalping Konservatif (OB/SD/Retest)
+  const rangeM5 = getRangeInfo(m5, 50);
+  let rangeInfoStr = '-';
+  if (rangeM5 && rangeM5.high > rangeM5.low) {
+      const diff = rangeM5.high - rangeM5.low;
+      const pricePos = (price - rangeM5.low) / diff;
+      rangeInfoStr = `M5 Range Pos: ${(pricePos*100).toFixed(1)}%`;
+  }
+
   const demand = findSDZones(m5, 1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
   const supply = findSDZones(m5, -1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
-  
+  const liqM5 = getLiquidityLevels(m5, 30);
+
   let dir, entry, baseSL, zoneRange, setup;
   let lines = [];
+  let state = 'IDLE';
+  let chartContext = '';
 
   if (demand && (!supply || demand.dist <= supply.dist)) {
+    if (liqM5.ssl > 0 && liqM5.ssl > demand.bottom && liqM5.ssl < demand.top) {
+       return { plan: null, reason: 'Dibatalkan: Ada likuiditas (SSL) di dalam zona Demand M5. Rentan tersapu. Menunggu sweep.' };
+    }
+    state = 'POI_REACHED';
     dir = 1; entry = demand.top; baseSL = demand.sl; zoneRange = { min: demand.bottom, max: demand.top };
     setup = `M5 Demand Limit (Zone Scalping)`;
     lines.push(`Setup M5: Zona Demand Fresh (OB/SD)`);
   } else if (supply) {
+    if (liqM5.bsl > 0 && liqM5.bsl < supply.top && liqM5.bsl > supply.bottom) {
+       return { plan: null, reason: 'Dibatalkan: Ada likuiditas (BSL) di dalam zona Supply M5. Rentan tersapu. Menunggu sweep.' };
+    }
+    state = 'POI_REACHED';
     dir = -1; entry = supply.bottom; baseSL = supply.sl; zoneRange = { min: supply.bottom, max: supply.top };
     setup = `M5 Supply Limit (Zone Scalping)`;
     lines.push(`Setup M5: Zona Supply Fresh (OB/SD)`);
@@ -838,11 +797,13 @@ async function buildDayPlan({ m1, m5, price, rrList, ctx }) {
     const fvgSell = evaluateFVG(m5, price, -1, atrM5, 40);
 
     if (fvgBuy.useFVG && (!fvgSell.useFVG || Math.abs(price - fvgBuy.entry) < Math.abs(price - fvgSell.entry))) {
+      state = 'POI_REACHED';
       dir = 1; entry = fvgBuy.entry; baseSL = fvgBuy.sl; 
       zoneRange = { min: fvgBuy.fvg.lo, max: fvgBuy.fvg.hi };
       setup = `M5 FVG Bullish Limit (Continuity)`;
       lines.push(`Setup M5: FVG Bullish (Retest)`);
     } else if (fvgSell.useFVG) {
+      state = 'POI_REACHED';
       dir = -1; entry = fvgSell.entry; baseSL = fvgSell.sl; 
       zoneRange = { min: fvgSell.fvg.lo, max: fvgSell.fvg.hi };
       setup = `M5 FVG Bearish Limit (Continuity)`;
@@ -852,9 +813,12 @@ async function buildDayPlan({ m1, m5, price, rrList, ctx }) {
     }
   }
 
+  if (state === 'POI_REACHED') state = 'SIGNAL_FIRED';
+  chartContext = `M5 Structure IDLE -> POI_REACHED -> ${state}`;
+
   return await finalizePlan({
     dir, entry, orderType: 'LIMIT', baseSL, kind: 'day', atrVal: atrM5, ctx, rrList,
-    confidence: 'HIGH', setup, zoneNote: setup, zoneRange, timeframes: 'M1, M5',
+    confidence: 'HIGH', setup, zoneNote: setup, zoneRange, timeframes: 'M1, M5', rangeInfo: rangeInfoStr, chartContext,
     head: t.headLine(t.title.day, dir === 1 ? 'BUY' : 'SELL', 'LIMIT', ctx.symbol),
     lines: [...lines, `Area Eksekusi M5: ${f(zoneRange.min)} - ${f(zoneRange.max)}`],
   });
@@ -865,6 +829,14 @@ async function buildIntradayPlan({ m5, m15, price, rrList, ctx }) {
   const { f, pip } = ctx;
   const h1 = aggregateCandles(m15, 60);
   const atrM5 = atrOf(m5, pip);
+
+  const rangeH1 = getRangeInfo(h1, 50);
+  let rangeInfoStr = '-';
+  if (rangeH1 && rangeH1.high > rangeH1.low) {
+      const diff = rangeH1.high - rangeH1.low;
+      const pricePos = (price - rangeH1.low) / diff;
+      rangeInfoStr = `H1 Range Pos: ${(pricePos*100).toFixed(1)}% (${pricePos > 0.5 ? 'Premium' : 'Discount'})`;
+  }
 
   const biasH1 = analyzePureSMCStructure(h1);
   const biasM15 = analyzePureSMCStructure(m15);
@@ -882,11 +854,18 @@ async function buildIntradayPlan({ m5, m15, price, rrList, ctx }) {
     `Bias H1: ${srcName(biasH1.src, ctx.lang)}`,
     `Bias M15: ${srcName(biasM15.src, ctx.lang)}`
   ];
+  let state = 'MSS_CONFIRMED';
+  let chartContext = '';
+
+  const liqM15 = getLiquidityLevels(m15, 40);
 
   if (htfBias === 1) {
     dir = 1;
     const demand = findSDZones(m5, 1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
     if (demand) {
+      if (liqM15.ssl > 0 && liqM15.ssl > demand.bottom && liqM15.ssl < demand.top) {
+         return { plan: null, reason: 'Dibatalkan: Likuiditas (SSL) terdeteksi di dalam zona Demand. Risiko sweep tinggi.' };
+      }
       entry = demand.top; baseSL = demand.sl; zoneRange = { min: demand.bottom, max: demand.top };
       setup = `M5 Demand Limit (Trend Follow)`;
       lines.push(`Setup M5: Zona Demand Fresh (OB/SD)`);
@@ -904,6 +883,9 @@ async function buildIntradayPlan({ m5, m15, price, rrList, ctx }) {
     dir = -1;
     const supply = findSDZones(m5, -1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
     if (supply) {
+      if (liqM15.bsl > 0 && liqM15.bsl < supply.top && liqM15.bsl > supply.bottom) {
+         return { plan: null, reason: 'Dibatalkan: Likuiditas (BSL) terdeteksi di dalam zona Supply. Risiko sweep tinggi.' };
+      }
       entry = supply.bottom; baseSL = supply.sl; zoneRange = { min: supply.bottom, max: supply.top };
       setup = `M5 Supply Limit (Trend Follow)`;
       lines.push(`Setup M5: Zona Supply Fresh (OB/SD)`);
@@ -919,9 +901,12 @@ async function buildIntradayPlan({ m5, m15, price, rrList, ctx }) {
     }
   }
 
+  state = 'SIGNAL_FIRED';
+  chartContext = `HTF H1/M15 ${htfBias === 1 ? 'Bullish' : 'Bearish'} -> MSS M15 -> POI M5 -> ${state}`;
+
   return await finalizePlan({
     dir, entry, orderType: 'LIMIT', baseSL, kind: 'intraday', atrVal: atrM5, ctx, rrList,
-    confidence: 'HIGH', setup, zoneNote: setup, zoneRange, timeframes: 'M5, M15, H1',
+    confidence: 'HIGH', setup, zoneNote: setup, zoneRange, timeframes: 'M5, M15, H1', rangeInfo: rangeInfoStr, chartContext,
     head: t.headLine(t.title.intraday, dir === 1 ? 'BUY' : 'SELL', 'LIMIT', ctx.symbol),
     lines: [...lines, `Area Eksekusi M5: ${f(zoneRange.min)} - ${f(zoneRange.max)}`],
   });
@@ -934,6 +919,14 @@ async function buildSwingPlan({ m15, price, rrList, ctx }) {
   const h4 = aggregateCandles(m15, 240);
   const d1 = aggregateCandles(m15, 1440);
   const atrM15 = atrOf(m15, pip);
+
+  const rangeH4 = getRangeInfo(h4, 50);
+  let rangeInfoStr = '-';
+  if (rangeH4 && rangeH4.high > rangeH4.low) {
+      const diff = rangeH4.high - rangeH4.low;
+      const pricePos = (price - rangeH4.low) / diff;
+      rangeInfoStr = `H4 Range Pos: ${(pricePos*100).toFixed(1)}% (${pricePos > 0.5 ? 'Premium' : 'Discount'})`;
+  }
 
   const biasD1 = analyzePureSMCStructure(d1);
   const biasH4 = analyzePureSMCStructure(h4);
@@ -956,11 +949,18 @@ async function buildSwingPlan({ m15, price, rrList, ctx }) {
     `Bias H4: ${srcName(biasH4.src, ctx.lang)}`,
     `Bias H1: ${srcName(biasH1.src, ctx.lang)}`
   ];
+  let state = 'MSS_CONFIRMED';
+  let chartContext = '';
+
+  const liqH1 = getLiquidityLevels(h1, 40);
 
   if (htfBias === 1) {
     dir = 1;
     const demand = findSDZones(m15, 1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
     if (demand) {
+      if (liqH1.ssl > 0 && liqH1.ssl > demand.bottom && liqH1.ssl < demand.top) {
+         return { plan: null, reason: 'Dibatalkan: Likuiditas (SSL) berada di dalam zona Demand M15. Risiko sweep tinggi.' };
+      }
       entry = demand.top; baseSL = demand.sl; zoneRange = { min: demand.bottom, max: demand.top };
       setup = `M15 Demand Limit (Trend Follow)`;
       lines.push(`Setup M15: Zona Demand Fresh (OB/SD)`);
@@ -978,6 +978,9 @@ async function buildSwingPlan({ m15, price, rrList, ctx }) {
     dir = -1;
     const supply = findSDZones(m15, -1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
     if (supply) {
+      if (liqH1.bsl > 0 && liqH1.bsl < supply.top && liqH1.bsl > supply.bottom) {
+         return { plan: null, reason: 'Dibatalkan: Likuiditas (BSL) berada di dalam zona Supply M15. Risiko sweep tinggi.' };
+      }
       entry = supply.bottom; baseSL = supply.sl; zoneRange = { min: supply.bottom, max: supply.top };
       setup = `M15 Supply Limit (Trend Follow)`;
       lines.push(`Setup M15: Zona Supply Fresh (OB/SD)`);
@@ -993,9 +996,12 @@ async function buildSwingPlan({ m15, price, rrList, ctx }) {
     }
   }
 
+  state = 'SIGNAL_FIRED';
+  chartContext = `HTF D1/H4/H1 Sync -> MSS H1 -> POI M15 -> ${state}`;
+
   return await finalizePlan({
     dir, entry, orderType: 'LIMIT', baseSL, kind: 'swing', atrVal: atrM15, ctx, rrList,
-    confidence: 'HIGH', setup, zoneNote: setup, zoneRange, timeframes: 'M15, H1, H4, D1',
+    confidence: 'HIGH', setup, zoneNote: setup, zoneRange, timeframes: 'M15, H1, H4, D1', rangeInfo: rangeInfoStr, chartContext,
     head: t.headLine(t.title.swing, dir === 1 ? 'BUY' : 'SELL', 'LIMIT', ctx.symbol),
     lines: [...lines, `Area Eksekusi M15: ${f(zoneRange.min)} - ${f(zoneRange.max)}`],
   });
@@ -1004,7 +1010,6 @@ async function buildSwingPlan({ m15, price, rrList, ctx }) {
 // ═══════════════════════════ OUTPUT ═══════════════════════════
 function toSignal(result, style, ctx) {
   const { dir, plan, meta } = result;
-  
   const r = v => {
     if (v === 0) return 0;
     if (v < 0.001) return Number(v).toFixed(8);
@@ -1039,12 +1044,12 @@ function toSignal(result, style, ctx) {
     zoneLabel: isLimit ? 'Limit Entry Zone' : 'Market Execution Zone',
     zoneNote: plan.zoneNote,
     reason: meta.reason,
+    chartContext: plan.chartContext // Tambahan sesuai dokumen
   };
 }
 
 // ── REQUEST RESOLVER ──
 const isKnownSymbol = s => Object.prototype.hasOwnProperty.call(DECIMALS, s);
-
 const normalizeSymbol = raw => {
   let s = String(raw ?? '').toUpperCase().trim();
   s = s.replace(/TETHERUS/g, 'USDT').replace(/TETHER/g, 'USDT');
@@ -1078,6 +1083,10 @@ export default async function handler(req, res) {
   const lang = pickLang(body, req.query);
   const t = TX[lang];
 
+  // Killzone Filter (Opsional - Soft check)
+  const inSession = isWithinKillzone();
+  const sessionNote = inSession ? '' : '(Di luar sesi London/NY, volatilitas mungkin rendah)';
+
   // =====================================================================
   // LOGIKA 1: JIKA REQUEST DARI VISION (ADA GAMBAR)
   // =====================================================================
@@ -1088,116 +1097,55 @@ export default async function handler(req, res) {
     const trial = await checkTrialLimit(body.email, access.status);
     if (!trial.ok) return res.status(403).json({ error: trial.msg });
 
-    const style = String(body.tradingStyle || 'Scalping');
-    const visionRes = await getVisionSignal(body.images, style, lang);
+    const visionRes = await getVisionSignal(body.images, lang);
 
     if (!visionRes.plan) {
        return res.status(400).json({ error: visionRes.reason });
     }
 
     const p = visionRes.plan;
-    
     const entry = Number(p.entry);
     const sl = Number(p.sl);
     const tps = [p.tp1, p.tp2, p.tp3].filter(v => v != null).map(Number);
+    const orderType = p.orderType === 'LIMIT' ? 'LIMIT' : 'NOW';
 
-    if (!['BUY', 'SELL'].includes(p.signal)) {
-       return res.status(400).json({ error: 'AI gagal menentukan arah BUY/SELL.' });
-    }
-    if (entry <= 0 || sl <= 0 || tps.some(t => t <= 0)) {
-       return res.status(400).json({ error: 'AI mengembalikan harga 0.0. Pastikan chart jelas atau coba lagi.' });
-    }
+    if (!['BUY', 'SELL'].includes(p.signal)) return res.status(400).json({ error: 'AI gagal menentukan arah BUY/SELL.' });
+    if (entry <= 0 || sl <= 0 || tps.some(t => t <= 0)) return res.status(400).json({ error: 'AI mengembalikan harga 0.0. Pastikan chart jelas.' });
 
     const dir = p.signal === 'BUY' ? 1 : -1;
-    
     let symbol = resolveSymbol(body, req.query) || (p.symbol && p.symbol !== 'UNKNOWN' ? normalizeSymbol(p.symbol) : null);
     if (!symbol) symbol = 'UNKNOWN_PAIR';
     
     let dec = 2, pip = 0.01, gold = false, prof = PAIR_CLASS_PROFILE.fx;
-    
     if (isKnownSymbol(symbol)) {
-      dec = DECIMALS[symbol] || 2;
-      pip = pipSizeOf(symbol, dec);
-      gold = isGold(symbol);
-      prof = pairProfile(symbol);
+      dec = DECIMALS[symbol] || 2; pip = pipSizeOf(symbol, dec); gold = isGold(symbol); prof = pairProfile(symbol);
     } else {
-       if (entry > 1000) { dec = 2; pip = 0.1; }
-       else if (entry > 100) { dec = 2; pip = 0.01; }
-       else if (entry > 1) { dec = 4; pip = 0.0001; }
-       else if (entry > 0.01) { dec = 5; pip = 0.00001; }
-       else if (entry > 0.0001) { dec = 6; pip = 0.000001; }
-       else if (entry > 0.00001) { dec = 7; pip = 0.0000001; }
-       else { dec = 8; pip = 0.00000001; }
-       
+       if (entry > 1000) { dec = 2; pip = 0.1; } else if (entry > 100) { dec = 2; pip = 0.01; } else if (entry > 1) { dec = 4; pip = 0.0001; } else if (entry > 0.01) { dec = 5; pip = 0.00001; } else if (entry > 0.0001) { dec = 6; pip = 0.000001; } else if (entry > 0.00001) { dec = 7; pip = 0.0000001; } else { dec = 8; pip = 0.00000001; }
        if (symbol.includes('XAU')) { gold = true; dec = 2; pip = 0.1; }
        prof = pairProfile(symbol.includes('XAU') ? 'gold' : (symbol.includes('BTC') ? 'crypto' : 'fx'));
     }
 
     const ctx = { symbol, dec, pip, gold, prof, lang };
-    const f = v => {
-      if (v === 0) return 0;
-      if (v < 0.001) return Number(v).toFixed(8);
-      return Number(Number(v).toFixed(dec));
-    };
-    
+    const f = v => { if (v === 0) return 0; if (v < 0.001) return Number(v).toFixed(8); return Number(Number(v).toFixed(dec)); };
     const riskPips = Math.abs(entry - sl) / pip;
     
-    let kindStr = 'scalp';
-    if (style === 'Day Trading') kindStr = 'day';
-    if (style === 'Intraday') kindStr = 'intraday';
-    if (style === 'Swing') kindStr = 'swing';
-
     let tfText = 'Chart';
-    if (Array.isArray(p.timeframes)) {
-      tfText = p.timeframes.join(', ');
-    } else if (typeof p.timeframes === 'string') {
-      tfText = p.timeframes;
-    } else if (p.timeframe) {
-      tfText = p.timeframe;
-    }
+    if (Array.isArray(p.timeframes)) tfText = p.timeframes.join(', ');
+    else if (typeof p.timeframes === 'string') tfText = p.timeframes;
 
     const aiReason = await getAIReasoning({
-      ctx, dir, kind: kindStr, orderType: 'NOW', entry, sl, tps,
-      setup: `Vision AI (${tfText})`,
-      rawReason: p.reason,
-      riskPips: riskPips,
-      zoneLine: `MTF: ${tfText}`,
-      timeframes: tfText 
+      ctx, dir, kind: 'vision', orderType: orderType, entry, sl, tps, setup: p.setup || 'SMC Top-Down', rawReason: p.reason, riskPips: riskPips, zoneLine: `MTF: ${tfText}`, timeframes: tfText, rangeInfo: p.range_info || '-', chartContext: p.chartContext || '-'
     });
-
-    const visionSteps = [
-      `Membaca Pair & Timeframe (${symbol} - ${tfText})`,
-      `Menganalisa struktur MTF (${tfText})`,
-      `Mencari confluence zona Supply & Demand / FVG`,
-      `Validasi rejection candle`,
-      `Menghitung entry, SL, TP`
-    ];
 
     return res.status(200).json({
       ok: true,
-      analysis_steps: visionSteps,
+      analysis_steps: [`Analisa Top-Down (${tfText})`, `Identifikasi Likuiditas & Trend HTF`, `Konfirmasi Zona LTF`, `Penentuan Entry & Anti-Sweep SL`],
       signal: {
-        signal: p.signal,
-        mode: 'MARKET',
-        orderType: 'NOW',
-        orderLabel: `${p.signal} NOW`,
-        status: 'RUNNING',
-        entry: f(entry),
-        sl: f(sl),
-        tp1: tps[0] != null ? f(tps[0]) : null,
-        tp2: tps[1] != null ? f(tps[1]) : null,
-        tp3: tps[2] != null ? f(tps[2]) : null,
-        tpCount: tps.length,
-        zone: null,
-        expireMs: 0,
-        confidence: 'MEDIUM',
-        risk: 'HIGH',
-        setup: `Vision AI (${tfText})`, 
-        entryStyle: style,
-        setupLabel: style,
-        zoneLabel: 'Vision Entry',
-        zoneNote: `Timeframes: ${tfText}`,
-        reason: aiReason || p.reason 
+        symbol, decimals: dec, pipSize: pip, signal: p.signal, mode: orderType === 'LIMIT' ? 'LIMIT' : 'MARKET', orderType: orderType, orderLabel: `${p.signal} ${orderType}`, status: orderType === 'LIMIT' ? 'PENDING' : 'RUNNING',
+        entry: f(entry), sl: f(sl), tp1: tps[0] != null ? f(tps[0]) : null, tp2: tps[1] != null ? f(tps[1]) : null, tp3: tps[2] != null ? f(tps[2]) : null, tpCount: tps.length,
+        zone: null, expireMs: 0, confidence: 'HIGH', risk: 'MEDIUM', setup: p.setup || `SMC MTF (${tfText})`, entryStyle: 'Rekomendasi AI', setupLabel: 'SMC Top-Down', zoneLabel: orderType === 'LIMIT' ? 'Limit Entry Zone' : 'Market Execution Zone', zoneNote: `Timeframes: ${tfText}`,
+        reason: (aiReason || p.reason) + sessionNote,
+        chartContext: p.chartContext || '-'
       }
     });
   }
@@ -1222,13 +1170,7 @@ export default async function handler(req, res) {
   const pip = pipSizeOf(symbol, dec);
   const gold = isGold(symbol);
   const prof = pairProfile(symbol);
-  
-  const f = v => {
-    if (v === 0) return 0;
-    if (v < 0.001) return Number(v).toFixed(8);
-    return Number(Number(v).toFixed(dec));
-  };
-  
+  const f = v => { if (v === 0) return 0; if (v < 0.001) return Number(v).toFixed(8); return Number(Number(v).toFixed(dec)); };
   const ctx = { symbol, dec, pip, gold, f, prof, lang };
 
   let apiKey = API_KEYS[0] || process.env.TICKERLAYER_API_KEY || '';
@@ -1244,9 +1186,9 @@ export default async function handler(req, res) {
   const [lo, hi] = prof.range;
   if (price < lo || price > hi) return res.status(400).json({ error: t.range(price, symbol, lo, hi) });
 
-  // Agresif Scalping murni butuh M1. Konservatif butuh M5 & M1.
+  // Penyesuaian MTF sesuai Arsitektur Dokumen
   const needM1 = (style === 'Scalping' || style === 'Day Trading') ? NEED.m1 : 0;
-  const needM5 = (style === 'Day Trading' || style === 'Intraday') ? NEED.m5 : 0;
+  const needM5 = (style === 'Scalping' || style === 'Day Trading' || style === 'Intraday') ? NEED.m5 : 0; // M5 untuk struktur Scalp
   const needM15 = (style === 'Intraday' || style === 'Swing') ? NEED.m15 : 0;
 
   const pick = async (arr, tf, need) => {
@@ -1259,9 +1201,7 @@ export default async function handler(req, res) {
   };
 
   const [r1, r5, r15] = await Promise.all([
-    pick(m1, '1m', needM1),
-    pick(m5, '5m', needM5),
-    pick(m15, '15m', needM15),
+    pick(m1, '1m', needM1), pick(m5, '5m', needM5), pick(m15, '15m', needM15),
   ]);
 
   if (needM1) m1 = r1.candles;
@@ -1283,16 +1223,16 @@ export default async function handler(req, res) {
   let liveSteps = [];
 
   if (style === 'Scalping') {
-    liveSteps = [`Analisa Struktur Berjalan M1`, `Cek Area FVG/SD/OB`, `Validasi Momentum`, `Entry Market NOW`];
-    result = await buildScalpPlan({ m1, price, rrList, ctx }); 
+    liveSteps = [`Cek Premium/Discount Range (M15)`, `Analisa Struktur M5`, `Validasi Trigger M1`, `Entry Market NOW`];
+    result = await buildScalpPlan({ m1, m5, m15, price, rrList, ctx }); 
   } else if (style === 'Day Trading') {
-    liveSteps = [`Cek Zona / FVG M5`, `Cari Refinement M1`, `Menghitung Limit Entry`];
+    liveSteps = [`Cek Zona / FVG M5`, `Validasi Likuiditas (SSL/BSL)`, `Menghitung Limit Entry`];
     result = await buildDayPlan({ m1, m5, price, rrList, ctx }); 
   } else if (style === 'Intraday') {
-    liveSteps = [`Memeriksa bias M15 & H1`, `Mencari Zona Supply & Demand M5`, `Cek FVG & displacement`, `Validasi rejection candle`];
+    liveSteps = [`Memeriksa bias M15 & H1`, `Mencari Zona Supply & Demand M5`, `Cek Liquidity Sweep (SSL/BSL)`, `Validasi rejection candle`];
     result = await buildIntradayPlan({ m5, m15, price, rrList, ctx });
   } else if (style === 'Swing') {
-    liveSteps = [`Memeriksa bias D1, H4 & H1`, `Mencari Zona Supply & Demand M15`, `Cek FVG & displacement`, `Validasi rejection candle`];
+    liveSteps = [`Memeriksa bias D1, H4 & H1`, `Mencari Zona Supply & Demand M15`, `Cek Liquidity Sweep (SSL/BSL)`, `Validasi rejection candle`];
     result = await buildSwingPlan({ m15, price, rrList, ctx });
   }
 
