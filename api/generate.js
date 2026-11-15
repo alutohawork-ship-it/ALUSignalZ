@@ -1,5 +1,5 @@
 // api/generate.js
-// v77 (Vision: GPT-6 Luna satu panggilan + validasi ketat | Live: Qwen untuk reasoning)
+// v79 (Vision: GPT-6 Luna satu panggilan + placeholder harga | Live: Qwen untuk reasoning)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
@@ -11,7 +11,7 @@ const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 // AI_MODEL: reasoning jalur live (Qwen)
-// AI_VISION_MODEL: analisa gambar + reasoning jalur vision (GPT-6 Luna)
+// AI_VISION_MODEL: analisa gambar (GPT-6 Luna)
 const AI_MODEL = process.env.AI_MODEL || 'qwen-3.8-max';
 const AI_VISION_MODEL = process.env.AI_VISION_MODEL || 'gpt-6-luna';
 
@@ -739,13 +739,12 @@ const parseLooseNumber = v => {
   return Number(s);
 };
 
-const dynamicDecimals = px => {
-  if (px > 100) return 2;
-  if (px > 1) return 4;
-  if (px > 0.01) return 5;
-  if (px > 0.0001) return 6;
-  if (px > 0.00001) return 7;
-  return 8;
+// Desimal untuk pair yang tidak ada di DECIMALS: 4 digit signifikan
+const decimalsFor = px => {
+  if (!(px > 0)) return 2;
+  if (px >= 100) return 2;
+  if (px >= 1) return 4;
+  return Math.min(12, Math.max(4, -Math.floor(Math.log10(px)) + 2));
 };
 
 // Token angka harga dalam teks: harus punya pemisah desimal dan minimal 4 digit
@@ -812,15 +811,16 @@ LANGKAH WAJIB:
 2. Baca PAIR dari pojok kiri atas (contoh "PEPE / TetherUS" menjadi "PEPEUSDT"). Format gabung, huruf besar, tanpa spasi. Jika tidak terbaca, tulis "UNKNOWN".
 3. Baca HARGA TERAKHIR dari label harga aktif (contoh "0,00000403" menjadi 0.00000403) ke "last_price".
 4. Baca batas atas dan bawah sumbu harga yang terlihat ke "range_high" dan "range_low".
-5. Analisa tiap timeframe secara singkat (trend, support/resistance, FVG, order block, sweep) ke "timeframe_notes", dengan kunci berupa timeframe.
-6. Tentukan arah BUY atau SELL dari confluence antar timeframe.
-7. Tentukan entry, sl, tp1, tp2, tp3 dengan aturan:
+5. Tentukan arah BUY atau SELL dari confluence antar timeframe.
+6. Tentukan entry, sl, tp1, tp2, tp3 dengan aturan:
    - BUY: sl < entry < tp1 < tp2 < tp3
    - SELL: tp3 < tp2 < tp1 < entry < sl
    - ${isMarket ? 'Order NOW: entry WAJIB sama dengan last_price.' : 'Order LIMIT: entry berada di tepi zona FVG/OB/Supply/Demand yang terlihat.'}
    - Entry dan SL harus berada di dalam range_low sampai range_high.
    - Gunakan harga persis dari chart. DILARANG mengembalikan 0.
-8. "reason": maksimal 600 karakter, Bahasa Indonesia, 4 poin yang mengalir: (a) kondisi struktur tiap timeframe, (b) alasan entry (Reversal / Continuation / Retest FVG / Sweep Liquidity / Order Block), (c) level invalidasi, (d) aksi: ${isMarket ? 'Market NOW' : 'Limit'}. Gunakan titik sebagai desimal untuk harga. Hanya sebut harga yang terlihat di chart.
+7. "timeframe_notes": analisa singkat tiap timeframe (trend, support/resistance, FVG, order block, sweep), dengan kunci berupa timeframe. Tanpa angka harga.
+8. "reason": maksimal 600 karakter, Bahasa Indonesia, 4 poin yang mengalir: (a) kondisi tiap timeframe, (b) alasan entry (Reversal / Continuation / Retest FVG / Sweep Liquidity / Order Block), (c) level invalidasi, (d) aksi: ${isMarket ? 'Market NOW' : 'Limit'}.
+   ATURAN HARGA DI TEKS: jangan tulis angka harga secara langsung. Gunakan placeholder persis ini: {ENTRY}, {SL}, {TP1}, {TP2}, {TP3}, {LAST}, {HIGH}, {LOW}. Contoh: "Eksekusi Market NOW pada {ENTRY}, invalidasi bila harga menembus {SL}."
 
 FORMAT ANGKA (WAJIB): nilai harga dalam JSON harus berupa number tanpa tanda kutip, memakai TITIK sebagai pemisah desimal, dan tanpa pemisah ribuan. Benar: 0.00000403. Salah: "0,00000403" atau "3.884,02".
 
@@ -864,8 +864,17 @@ KEMBALIKAN HANYA JSON, tanpa markdown dan tanpa teks lain. Angka di bawah hanya 
     }
 
     const data = await resp.json();
-    let content = String(data.choices?.[0]?.message?.content || '').trim();
-    if (!content) return { plan: null, reason: `AI tidak memberikan respons. Model ${AI_VISION_MODEL} gagal membaca gambar.` };
+    const choice = data.choices?.[0];
+    const msg = choice?.message || {};
+    let content = Array.isArray(msg.content)
+      ? msg.content.map(c => c?.text || '').join('')
+      : String(msg.content || '');
+    content = content.trim();
+
+    if (!content) {
+      console.error('Vision kosong. finish_reason:', choice?.finish_reason);
+      return { plan: null, reason: `AI tidak memberikan respons (finish_reason: ${choice?.finish_reason || '-'}). Model ${AI_VISION_MODEL} gagal membaca gambar.` };
+    }
 
     content = content.replace(/```json/gi, '').replace(/```/g, '').trim();
     const start = content.indexOf('{');
@@ -1223,7 +1232,6 @@ export default async function handler(req, res) {
     const style = String(body.tradingStyle || 'Scalping');
     const isMarket = style === 'Scalping';
 
-    // Maksimal 2 percobaan: jika AI mengembalikan angka tidak valid, minta ulang sekali
     let vision = null;
     let lastError = 'Analisa gambar gagal, coba lagi.';
     for (let attempt = 1; attempt <= 2 && !vision; attempt++) {
@@ -1239,7 +1247,7 @@ export default async function handler(req, res) {
     }
     if (!vision) return res.status(400).json({ error: lastError });
 
-    const { p, dir, entry, sl, tps, hi, lo } = vision;
+    const { p, dir, entry, sl, tps, last, hi, lo } = vision;
     const sideW = dir === 1 ? 'BUY' : 'SELL';
     const orderType = isMarket ? 'NOW' : 'LIMIT';
 
@@ -1247,30 +1255,45 @@ export default async function handler(req, res) {
     const chartPair = p.symbol && String(p.symbol).toUpperCase() !== 'UNKNOWN' ? normalizeSymbol(p.symbol) : '';
     const symbol = chartPair || resolveSymbol(body, req.query) || 'UNKNOWN_PAIR';
     const gold = isGold(symbol) || symbol.includes('XAU');
-    const dec = isKnownSymbol(symbol) ? DECIMALS[symbol] : (gold ? 2 : dynamicDecimals(entry));
+    const dec = isKnownSymbol(symbol) ? DECIMALS[symbol] : (gold ? 2 : decimalsFor(entry));
     const pip = pipSizeOf(symbol, dec);
-    const f = v => (v < 0.001 ? Number(v).toFixed(8) : Number(Number(v).toFixed(dec)));
+
+    // px: angka untuk JSON. fmt: teks untuk reasoning, tanpa nol di belakang.
+    const px = v => Number(Number(v).toFixed(dec));
+    const fmt = v => {
+      const s = Number(v).toFixed(dec);
+      return s.includes('.') ? s.replace(/\.?0+$/, '') : s;
+    };
 
     const tfText = (Array.isArray(p.timeframes) ? p.timeframes.join(', ') : String(p.timeframes || p.timeframe || '')) || 'Chart';
-    const tfNotes = p.timeframe_notes && typeof p.timeframe_notes === 'object'
+    const tfNotesRaw = p.timeframe_notes && typeof p.timeframe_notes === 'object'
       ? Object.entries(p.timeframe_notes).map(([tf, note]) => `${tf}: ${note}`).join(' | ')
       : '';
-    const tpsS = tps.map(v => f(v));
     const riskPips = Math.abs(entry - sl) / pip;
     const setup = `Vision AI (${tfText})`;
 
-    // Ringkasan deterministik dari angka yang sudah divalidasi (dipakai jika reasoning GPT tidak lolos cek)
-    const tpText = tpsS.map((v, i) => `TP${i + 1} ${v}`).join(', ');
+    const tpsS = tps.map(v => px(v));
+    const tpText = tpsS.map((v, i) => `TP${i + 1} ${fmt(v)}`).join(', ');
+
+    // Placeholder diisi hanya dengan angka hasil validasi. Nilai yang tidak tersedia dikosongkan.
+    const values = { ENTRY: entry, SL: sl, TP1: tps[0], TP2: tps[1], TP3: tps[2], LAST: last ?? entry, HIGH: hi, LOW: lo };
+    const fillPrices = text => String(text || '').replace(
+      /\{(ENTRY|SL|TP1|TP2|TP3|LAST|HIGH|LOW)\}/g,
+      (m, k) => (Number.isFinite(values[k]) ? fmt(values[k]) : '')
+    );
+    const allowed = [entry, sl, ...tps, last, hi, lo].filter(v => Number.isFinite(v) && v > 0);
+    const priceOk = text => !/\{[A-Z0-9]+\}/.test(text)
+      && priceTokens(text).map(parseLooseNumber).every(v => !Number.isFinite(v) || allowed.some(a => Math.abs(a - v) / a <= 0.003));
+
+    const reasonText = fillPrices(p.reason).replace(/\s{2,}/g, ' ').trim();
+    const notesText = fillPrices(tfNotesRaw).replace(/\s{2,}/g, ' ').trim();
+    const safeNotes = priceOk(notesText) ? notesText : '';
+
     const fallbackReason = lang === 'en'
-      ? `${sideW} ${orderType} on ${symbol}, based on ${tfText}. ${tfNotes} Entry ${f(entry)}, SL ${f(sl)} (${riskPips.toFixed(1)} ${t.pip}), ${tpText}. Invalidated if price breaks the SL.`
-      : `${sideW} ${orderType} ${symbol} berdasarkan ${tfText}. ${tfNotes} Entry ${f(entry)}, SL ${f(sl)} (${riskPips.toFixed(1)} ${t.pip}), ${tpText}. Setup batal jika harga menembus SL.`;
+      ? `${sideW} ${orderType} on ${symbol}, based on ${tfText}. ${safeNotes} Entry ${fmt(entry)}, SL ${fmt(sl)} (${riskPips.toFixed(1)} ${t.pip}), ${tpText}. Invalidated if price breaks the SL.`
+      : `${sideW} ${orderType} ${symbol} berdasarkan ${tfText}. ${safeNotes} Entry ${fmt(entry)}, SL ${fmt(sl)} (${riskPips.toFixed(1)} ${t.pip}), ${tpText}. Setup batal jika harga menembus SL.`;
 
-    // Reasoning dari GPT (satu panggilan). Setiap angka harga di teks harus berada dalam rentang chart yang terlihat.
-    const inVisibleRange = v => !(hi > 0 && lo > 0) || (v >= lo * 0.95 && v <= hi * 1.05);
-    const reasonText = String(p.reason || '').trim();
-    const reasonOk = reasonText.length >= 80
-      && priceTokens(reasonText).map(parseLooseNumber).every(v => !Number.isFinite(v) || inVisibleRange(v));
-
+    const reasonOk = reasonText.length >= 80 && priceOk(reasonText);
     if (!reasonOk) console.warn('Reason GPT ditolak, memakai fallback:', reasonText.slice(0, 200));
     const reason = reasonOk ? reasonText : fallbackReason;
 
@@ -1286,18 +1309,22 @@ export default async function handler(req, res) {
       ok: true,
       analysis_steps: visionSteps,
       signal: {
+        symbol,
+        decimals: dec,
+        pipSize: pip,
         signal: sideW,
         mode: isMarket ? 'MARKET' : 'LIMIT',
         orderType,
         orderLabel: `${sideW} ${orderType}`,
         status: isMarket ? 'RUNNING' : 'PENDING',
-        entry: f(entry),
-        bufferEnd: f(entry),
-        sl: f(sl),
+        entry: px(entry),
+        bufferEnd: px(entry),
+        sl: px(sl),
         tp1: tpsS[0] ?? null,
         tp2: tpsS[1] ?? null,
         tp3: tpsS[2] ?? null,
         tpCount: tpsS.length,
+        lastPrice: px(last ?? entry),
         zone: null,
         expireMs: 0,
         confidence: 'MEDIUM',
