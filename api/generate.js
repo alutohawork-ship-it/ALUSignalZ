@@ -1,5 +1,5 @@
 // api/generate.js
-// v65 (Live SMC v60 + Vision AI + Trial Limits + Empty Response Fix)
+// v66 (Live SMC v60 + Vision AI + AI Reasoning + Trial Limits + Empty Response Fix)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } }; // Limit dinaikkan untuk gambar
 
@@ -664,6 +664,7 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
 async function getVisionSignal(images, style, lang) {
   if (!OPENAI_API_KEY) return { plan: null, reason: 'API Key AI tidak ada.' };
   
+  // Prompt diupdate agar AI memberikan alasan yang lebih komprehensif
   const prompt = `
 Anda adalah trader profesional SMC/ICT. Tugas Anda adalah menganalisa gambar chart trading yang dilampirkan.
 Gaya Trading: ${style}.
@@ -673,7 +674,7 @@ Instruksi Wajib:
 2. Baca struktur market (Trend, Support, Resistance, FVG, Order Block) yang terlihat.
 3. Tentukan arah entry yang valid (BUY atau SELL).
 4. Tentukan level Entry, Stop Loss (SL), TP1, TP2, dan TP3 berdasarkan harga yang tertera.
-5. Tuliskan alasan (reason) singkat maksimal 2 kalimat yang menjelaskan setup SMC/ICT dan sebutkan timeframe-nya.
+5. Tuliskan alasan (reason) yang komprehensif (maksimal 400 karakter, bahasa Indonesia, tegas) yang menjelaskan MENGAPA entry ini diambil. Gunakan gaya bahasa SMC/ICT seperti "mitigasi FVG", "sweep liquidity", "BOS", dll. Sebutkan juga timeframe-nya.
 
 KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI CONTOH DI BAWAH INI. JANGAN ADA TEKS LAIN SEBELUM ATAU SESUDAHNYA:
 {
@@ -684,7 +685,7 @@ KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI CONTOH DI BAWAH INI. JANGAN ADA TEKS 
   "tp1": 3885.00,
   "tp2": 3890.00,
   "tp3": 3895.00,
-  "reason": "Pada timeframe H1, harga menyapu likuiditas di area demand dan membentuk FVG, memungkinkan pantulan naik."
+  "reason": "Pada H1, harga menyapu likuiditas di area demand dan membentuk FVG, memungkinkan pantulan naik menuju BOS terdekat."
 }
 `;
 
@@ -703,7 +704,7 @@ KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI CONTOH DI BAWAH INI. JANGAN ADA TEKS 
       body: JSON.stringify({ 
         model: AI_MODEL, 
         messages: [{ role: 'user', content: userContent }], 
-        max_tokens: 500, 
+        max_tokens: 600, 
         temperature: 0.1 
       })
     });
@@ -1066,6 +1067,48 @@ export default async function handler(req, res) {
     const valid = ['BUY', 'SELL'].includes(p.signal) && [p.entry, p.sl, p.tp1].every(v => v != null && Number.isFinite(Number(v)));
     if (!valid) return res.status(400).json({ error: 'AI mengekstrak JSON, tapi angka Entry/SL/TP tidak valid atau kosong.' });
 
+    // ── INTEGRASI AI REASONING UNTUK VISION ──
+    const dir = p.signal === 'BUY' ? 1 : -1;
+    const entry = Number(p.entry);
+    const sl = Number(p.sl);
+    const tps = [p.tp1, p.tp2, p.tp3].filter(v => v != null).map(Number);
+    
+    let symbol = resolveSymbol(body, req.query);
+    let dec = 2, pip = 0.01, gold = false, prof = PAIR_CLASS_PROFILE.fx;
+    
+    if (symbol) {
+      dec = DECIMALS[symbol] || 2;
+      pip = pipSizeOf(symbol, dec);
+      gold = isGold(symbol);
+      prof = pairProfile(symbol);
+    } else {
+       // Fallback jika hanya gambar yang dikirim tanpa nama pair
+       if (entry > 50000) { symbol = 'BTCUSD'; dec = 2; pip = 1; } 
+       else if (entry > 1000) { symbol = 'XAUUSD'; dec = 2; pip = 0.1; gold = true; }
+       else if (entry > 10) { symbol = 'US30'; dec = 2; pip = 1; }
+       else { symbol = 'EURUSD'; dec = 5; pip = 0.0001; }
+       gold = isGold(symbol);
+       prof = pairProfile(symbol);
+    }
+
+    const ctx = { symbol, dec, pip, gold, prof, lang };
+    const f = v => Number(Number(v).toFixed(dec));
+    const riskPips = Math.abs(entry - sl) / pip;
+    
+    // Map style ke kind untuk prompt
+    let kindStr = 'scalp';
+    if (style === 'Day Trading') kindStr = 'day';
+    if (style === 'Intraday') kindStr = 'intraday';
+    if (style === 'Swing') kindStr = 'swing';
+
+    const aiReason = await getAIReasoning({
+      ctx, dir, kind: kindStr, orderType: 'NOW', entry, sl, tps,
+      setup: `Vision AI (${p.timeframe || 'Chart'})`,
+      rawReason: p.reason,
+      riskPips: riskPips,
+      zoneLine: p.timeframe ? `Timeframe: ${p.timeframe}` : 'Berdasarkan gambar'
+    });
+
     return res.status(200).json({
       ok: true,
       signal: {
@@ -1074,12 +1117,12 @@ export default async function handler(req, res) {
         orderType: 'NOW',
         orderLabel: `${p.signal} NOW`,
         status: 'RUNNING',
-        entry: Number(p.entry),
-        sl: Number(p.sl),
-        tp1: Number(p.tp1),
-        tp2: p.tp2 ? Number(p.tp2) : null,
-        tp3: p.tp3 ? Number(p.tp3) : null,
-        tpCount: p.tp3 ? 3 : p.tp2 ? 2 : 1,
+        entry: f(entry),
+        sl: f(sl),
+        tp1: tps[0] != null ? f(tps[0]) : null,
+        tp2: tps[1] != null ? f(tps[1]) : null,
+        tp3: tps[2] != null ? f(tps[2]) : null,
+        tpCount: tps.length,
         zone: null,
         expireMs: 0,
         confidence: 'MEDIUM',
@@ -1089,7 +1132,7 @@ export default async function handler(req, res) {
         setupLabel: style,
         zoneLabel: 'Vision Entry',
         zoneNote: p.timeframe ? `Timeframe: ${p.timeframe}` : 'Berdasarkan gambar',
-        reason: p.reason
+        reason: aiReason || p.reason // GUNAKAN HASIL REASONING BARU
       }
     });
   }
