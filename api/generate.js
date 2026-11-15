@@ -1,5 +1,5 @@
 // api/generate.js
-// v61 (Merged: Live SMC v60 + Vision AI + Trial Limits)
+// v64 (Live SMC v60 + Vision AI + Trial Limits + Robust JSON Parsing)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } }; // Limit dinaikkan untuk gambar
 
@@ -33,7 +33,8 @@ const CRYPTO_LIST = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'BNBUSD', 'ADAUSD',
 const GOLD_SYMBOLS = ['XAUUSD', 'XAUUSDX'];
 const isGold = symbol => GOLD_SYMBOLS.includes(symbol);
 
-const MAX_SRC_DEVIATION = 0.05;
+// ── PROFIL PER PAIR ──
+const MAX_SRC_DEVIATION = 0.05; 
 
 const pairClassOf = symbol => {
   if (isGold(symbol)) return 'gold';
@@ -58,7 +59,6 @@ const PAIR_CLASS_PROFILE = {
 };
 
 const PAIR_OVERRIDE = {};
-
 const pairProfile = symbol => {
   const cls = pairClassOf(symbol);
   return { cls, ...PAIR_CLASS_PROFILE[cls], ...(PAIR_OVERRIDE[symbol] || {}) };
@@ -252,7 +252,7 @@ async function checkAccess(email) {
   return { ok: true, status: 'admin' };
 }
 
-// ── FUNGSI BARU: CEK BATAS TRIAL ──
+// ── FUNGSI CEK BATAS TRIAL ──
 async function checkTrialLimit(email, status) {
   if (status !== 'trial') return { ok: true }; // Bypass untuk monthly/lifetime
 
@@ -282,7 +282,7 @@ async function checkTrialLimit(email, status) {
     return { ok: true };
   } catch (e) {
     console.error('KV Error Trial Limit:', e);
-    return { ok: true }; // Fail-open
+    return { ok: true }; // Fail-open jika KV error
   }
 }
 
@@ -638,7 +638,7 @@ function slBounds(kind, ctx, atrVal) {
   return { min: a * ctx.prof.slMul * atrVal, max: b * ctx.prof.slMul * atrVal };
 }
 
-// ── AI REASONING (TEXT) ──
+// ── AI REASONING (TEXT LIVE SMC) ──
 async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup, rawReason, riskPips, zoneLine }) {
   if (!OPENAI_API_KEY) return null;
   const { symbol, dec, prof, lang } = ctx;
@@ -669,20 +669,22 @@ Anda adalah trader profesional SMC/ICT. Tugas Anda adalah menganalisa gambar cha
 Gaya Trading: ${style}.
 
 Instruksi Wajib:
-1. Baca struktur market (Trend, Support, Resistance, FVG, Order Block) yang terlihat pada gambar.
-2. Tentukan arah entry yang valid (BUY atau SELL).
-3. Tentukan level Entry, Stop Loss (SL), TP1, TP2, dan TP3 berdasarkan harga yang tertera/terlihat di gambar.
-4. Tuliskan alasan (reason) singkat maksimal 2 kalimat yang menjelaskan setup SMC/ICT tersebut.
+1. Amati gambar dan baca TIMEFRAME yang tertulis di dalamnya (misal: M1, M5, H1, D1).
+2. Baca struktur market (Trend, Support, Resistance, FVG, Order Block) yang terlihat.
+3. Tentukan arah entry yang valid (BUY atau SELL).
+4. Tentukan level Entry, Stop Loss (SL), TP1, TP2, dan TP3 berdasarkan harga yang tertera.
+5. Tuliskan alasan (reason) singkat maksimal 2 kalimat yang menjelaskan setup SMC/ICT dan sebutkan timeframe-nya.
 
-KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI CONTOH DI BAWAH INI (Tanpa teks pembuka atau penutup):
+KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI CONTOH DI BAWAH INI. JANGAN ADA TEKS LAIN SEBELUM ATAU SESUDAHNYA:
 {
+  "timeframe": "H1",
   "signal": "BUY",
   "entry": 3880.50,
   "sl": 3875.00,
   "tp1": 3885.00,
   "tp2": 3890.00,
   "tp3": 3895.00,
-  "reason": "Harga menyapu likuiditas di area demand dan membentuk FVG, memungkinkan pantulan naik menuju BSL."
+  "reason": "Pada timeframe H1, harga menyapu likuiditas di area demand dan membentuk FVG, memungkinkan pantulan naik."
 }
 `;
 
@@ -699,28 +701,42 @@ KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI CONTOH DI BAWAH INI (Tanpa teks pembu
       method: 'POST', 
       headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
-        model: AI_MODEL, // Tetap pakai qwen-3.8-max sesuai permintaan
+        model: AI_MODEL, 
         messages: [{ role: 'user', content: userContent }], 
-        max_tokens: 500, temperature: 0.1 
+        max_tokens: 500, 
+        temperature: 0.1 
       })
     });
     
     if (!resp.ok) {
       console.error('Vision API Error:', await resp.text());
-      return { plan: null, reason: 'AI Vision gagal membaca gambar. Pastikan model mendukung input gambar.' };
+      return { plan: null, reason: 'AI Vision gagal merespon. Cek log server.' };
     }
     
     const data = await resp.json();
     let content = data.choices?.[0]?.message?.content?.trim() || '';
-    content = content.replace(/```json/g, '').replace(/```/g, '').trim();
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
     
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      return { plan: parsed, reason: parsed.reason || 'Vision Analysis' };
+    // PARSING JSON YANG LEBIH PINTAR
+    content = content.replace(/```json/g, '').replace(/```/g, '').trim();
+    const startIdx = content.indexOf('{');
+    const endIdx = content.lastIndexOf('}');
+    
+    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+      const jsonString = content.substring(startIdx, endIdx + 1);
+      try {
+        const parsed = JSON.parse(jsonString);
+        return { plan: parsed, reason: parsed.reason || 'Vision Analysis' };
+      } catch (parseError) {
+        console.error('JSON Parse Error:', parseError, 'Raw string:', jsonString);
+        return { plan: null, reason: 'Format JSON dari AI rusak (Syntax Error).' };
+      }
     }
-    return { plan: null, reason: 'AI tidak mengembalikan format JSON yang valid.' };
+    
+    console.error('Raw AI Response (Bukan JSON):', content);
+    return { plan: null, reason: `AI tidak mengembalikan format JSON. Jawaban AI: "${content.substring(0, 50)}..."` };
+    
   } catch (err) {
+    console.error('Vision Exception:', err);
     return { plan: null, reason: err.message };
   }
 }
@@ -1028,6 +1044,10 @@ export default async function handler(req, res) {
     const access = await checkAccess(body.email);
     if (!access.ok) return res.status(403).json({ error: t[access.key] });
 
+    // Cek Limit Trial untuk Vision juga
+    const trial = await checkTrialLimit(body.email, access.status);
+    if (!trial.ok) return res.status(403).json({ error: trial.msg });
+
     const style = String(body.tradingStyle || 'Scalping');
     const visionRes = await getVisionSignal(body.images, style, lang);
 
@@ -1037,7 +1057,7 @@ export default async function handler(req, res) {
 
     const p = visionRes.plan;
     const valid = ['BUY', 'SELL'].includes(p.signal) && [p.entry, p.sl, p.tp1].every(v => v != null && Number.isFinite(Number(v)));
-    if (!valid) return res.status(400).json({ error: 'AI gagal mengekstrak angka Entry/SL/TP dari gambar.' });
+    if (!valid) return res.status(400).json({ error: 'AI mengekstrak JSON, tapi angka Entry/SL/TP tidak valid atau kosong.' });
 
     return res.status(200).json({
       ok: true,
@@ -1057,11 +1077,11 @@ export default async function handler(req, res) {
         expireMs: 0,
         confidence: 'MEDIUM',
         risk: 'HIGH',
-        setup: 'Vision AI Analysis',
+        setup: `Vision AI (${p.timeframe || 'Chart'})`,
         entryStyle: style,
         setupLabel: style,
         zoneLabel: 'Vision Entry',
-        zoneNote: 'Berdasarkan gambar chart yang diupload',
+        zoneNote: p.timeframe ? `Timeframe: ${p.timeframe}` : 'Berdasarkan gambar',
         reason: p.reason
       }
     });
@@ -1080,10 +1100,9 @@ export default async function handler(req, res) {
   const access = await checkAccess(body.email);
   if (!access.ok) return res.status(403).json({ error: t[access.key] });
 
-  // ================= TAMBAHKAN CEK LIMIT TRIAL DI SINI =================
+  // Cek Limit Trial untuk Live SMC
   const trial = await checkTrialLimit(body.email, access.status);
   if (!trial.ok) return res.status(403).json({ error: trial.msg });
-  // =====================================================================
 
   const dec = DECIMALS[symbol];
   const pip = pipSizeOf(symbol, dec);
