@@ -1,5 +1,5 @@
 // api/generate.js
-// v64 (Live SMC v60 + Vision AI + Trial Limits + Robust JSON Parsing)
+// v65 (Live SMC v60 + Vision AI + Trial Limits + Empty Response Fix)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } }; // Limit dinaikkan untuk gambar
 
@@ -33,8 +33,7 @@ const CRYPTO_LIST = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'BNBUSD', 'ADAUSD',
 const GOLD_SYMBOLS = ['XAUUSD', 'XAUUSDX'];
 const isGold = symbol => GOLD_SYMBOLS.includes(symbol);
 
-// ── PROFIL PER PAIR ──
-const MAX_SRC_DEVIATION = 0.05; 
+const MAX_SRC_DEVIATION = 0.05;
 
 const pairClassOf = symbol => {
   if (isGold(symbol)) return 'gold';
@@ -59,6 +58,7 @@ const PAIR_CLASS_PROFILE = {
 };
 
 const PAIR_OVERRIDE = {};
+
 const pairProfile = symbol => {
   const cls = pairClassOf(symbol);
   return { cls, ...PAIR_CLASS_PROFILE[cls], ...(PAIR_OVERRIDE[symbol] || {}) };
@@ -709,12 +709,19 @@ KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI CONTOH DI BAWAH INI. JANGAN ADA TEKS 
     });
     
     if (!resp.ok) {
-      console.error('Vision API Error:', await resp.text());
-      return { plan: null, reason: 'AI Vision gagal merespon. Cek log server.' };
+      const errText = await resp.text();
+      console.error('Vision API HTTP Error:', resp.status, errText);
+      return { plan: null, reason: `Server AI menolak (HTTP ${resp.status}).` };
     }
     
     const data = await resp.json();
     let content = data.choices?.[0]?.message?.content?.trim() || '';
+    
+    // PENGAMAN JIKA AI MENGEMBALIKAN RESPONS KOSONG
+    if (!content || content.length === 0) {
+      console.error('AI Response Kosong (Empty). Data:', data);
+      return { plan: null, reason: 'AI tidak memberikan respons. Kemungkinan model qwen-3.8-max di GutsAI tidak mendukung gambar (Vision). Hubungi admin untuk ganti model ke qwen-vl-max.' };
+    }
     
     // PARSING JSON YANG LEBIH PINTAR
     content = content.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -1044,7 +1051,7 @@ export default async function handler(req, res) {
     const access = await checkAccess(body.email);
     if (!access.ok) return res.status(403).json({ error: t[access.key] });
 
-    // Cek Limit Trial untuk Vision juga
+    // Cek Limit Trial untuk Vision
     const trial = await checkTrialLimit(body.email, access.status);
     if (!trial.ok) return res.status(403).json({ error: trial.msg });
 
