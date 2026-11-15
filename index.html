@@ -39,12 +39,14 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
 .validation-progress{width:100%;height:3px;background:rgba(245,158,11,.15);border-radius:2px;overflow:hidden;margin-top:14px}
 .validation-progress-fill{height:100%;width:0%;background:linear-gradient(90deg,#f59e0b,#fbbf24);transition:width .3s ease}
-.log-item{animation:slideLeft .3s ease-out}
-@keyframes slideLeft{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:translateX(0)}}
 
 /* Styling tombol TF SMC */
 .smc-tf-btn { transition: all 0.2s; }
 .smc-tf-btn.active { background-color: #2962ff; color: white; border-color: #2962ff; }
+
+/* Mencegah scroll saat drag canvas */
+#smcCanvas { touch-action: none; cursor: grab; }
+#smcCanvas:active { cursor: grabbing; }
 </style>
 </head>
 <body class="bg-darkbg text-gray-200 font-sans min-h-screen flex flex-col justify-between p-2 sm:p-4">
@@ -154,6 +156,14 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
 
     <!-- KOLOM KIRI -->
     <div class="flex flex-col gap-2 min-w-0">
+      
+      <!-- 1. LIVE MARKET STREAM -->
+      <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-1">
+        <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-tower-broadcast text-accentblue"></i> <span data-i18n="lblStream"></span></span>
+        <div id="tickerList" class="grid grid-cols-1 gap-1"></div>
+      </div>
+
+      <!-- 2. PAIR & STYLE & GENERATE -->
       <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
         <div class="flex justify-between items-center">
           <span data-i18n="lblMarket" class="text-[9px] font-bold text-gray-400"></span>
@@ -175,7 +185,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
             <option value="Swing" data-i18n="optSwing"></option>
           </select>
           <div id="styleInfoBox" class="hidden mt-2 bg-darkbg border border-panelborder rounded-lg p-2 text-[9px] text-gray-300 space-y-2 leading-relaxed">
-            <div><span class="font-bold text-accentblue">1. Scalping Agresif</span><br><span data-i18n="infoScalp"></span></div>
+            <div><span class="font-bold text-accentblue">1. Scalping Agresif (High Risk)</span><br><span data-i18n="infoScalp"></span></div>
             <div><span class="font-bold text-accentblue">2. Scalping Konservatif</span><br><span data-i18n="infoDay"></span></div>
             <div><span class="font-bold text-accentblue">3. Intraday / Day Trade</span><br><span data-i18n="infoIntra"></span></div>
             <div><span class="font-bold text-accentblue">4. Swing</span><br><span data-i18n="infoSwing"></span></div>
@@ -184,7 +194,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
         <button id="signalBtn" onclick="generateSignal()" class="w-full bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 text-darkbg font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20 transition active:scale-95"><i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnText" data-i18n="btnGen"></span></button>
       </div>
 
-      <!-- BIAS & STREAM -->
+      <!-- 3. BIAS -->
       <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
         <div class="flex justify-between items-center border-b border-panelborder pb-1">
           <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-compass text-accentblue"></i> <span data-i18n="lblBias"></span></span>
@@ -192,28 +202,10 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
         </div>
         <div id="biasGrid" class="grid grid-cols-3 sm:grid-cols-6 gap-1.5"></div>
         <p id="biasInfo" class="text-[8px] font-mono text-gray-500">memuat...</p>
-        <div class="border-t border-panelborder/50 pt-2 space-y-1">
-          <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-tower-broadcast text-accentblue"></i> <span data-i18n="lblStream"></span></span>
-          <div id="tickerList" class="grid grid-cols-1 gap-1"></div>
-        </div>
       </div>
 
-      <!-- SESI MARKET -->
+      <!-- 4. SIGNAL CARD -->
       <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
-        <div class="flex justify-between items-center border-b border-panelborder pb-2">
-          <span id="lblSession" class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-clock text-accentblue"></i> MARKET SESSIONS</span>
-          <span id="currentSessionBadge" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-gray-500/20 text-gray-400 border-gray-500/40">--</span>
-        </div>
-        <div id="sessionList" class="space-y-1.5 text-[9px] font-mono"></div>
-      </div>
-
-      <!-- KARTU SIGNAL + CHART -->
-      <div class="bg-cardbg rounded-xl border border-panelborder p-3 shadow-md space-y-3 relative">
-        <div class="flex items-center justify-between border-b border-panelborder pb-2">
-          <span id="cardTitle" class="text-xs font-bold text-white">XAUUSD</span>
-          <span id="cardPriceTop" class="text-xs font-mono font-bold text-yellow-400">--.--</span>
-        </div>
-
         <div id="standbyView" class="py-3 text-center text-xs text-gray-400" data-i18n="standby1"></div>
 
         <div id="activeCard" class="hidden space-y-3">
@@ -262,94 +254,87 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
             <span id="cardReason">---</span>
           </div>
         </div>
+      </div>
 
-        <!-- CHART (Line Chart & SMC) -->
-        <div id="chartPanel" class="bg-darkbg/80 border border-panelborder rounded-xl p-2.5 space-y-2">
-          <div class="flex flex-wrap justify-between items-start gap-1">
-            <div class="flex items-center gap-2">
-              <p data-i18n="lblMap" class="text-[9px] font-bold text-gray-400 tracking-wider"></p>
-              <div class="flex items-center gap-1">
-                <button id="btnSmcToggle" onclick="toggleSMC()" class="text-[10px] text-gray-500 hover:text-accentblue flex items-center gap-1 bg-darkbg border border-panelborder px-1.5 py-0.5 rounded transition"><i class="fa-solid fa-layer-group"></i> <span class="font-mono font-bold text-[8px]">SMC</span></button>
-                <button id="btnTvToggle" onclick="toggleTV()" class="text-[10px] text-gray-500 hover:text-accentblue flex items-center gap-1 bg-darkbg border border-panelborder px-1.5 py-0.5 rounded transition"><i class="fa-solid fa-chart-candlestick"></i> <span id="btnTvText" class="font-mono font-bold text-[8px]">TV</span></button>
-              </div>
+      <!-- 5. LIVE CHART -->
+      <div id="chartPanel" class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
+        <div class="flex flex-wrap justify-between items-start gap-1">
+          <div class="flex items-center gap-2">
+            <p data-i18n="lblMap" class="text-[9px] font-bold text-gray-400 tracking-wider"></p>
+            <div class="flex items-center gap-1">
+              <button id="btnTvToggle" onclick="toggleTV()" class="text-[10px] text-gray-500 hover:text-accentblue flex items-center gap-1 bg-darkbg border border-panelborder px-1.5 py-0.5 rounded transition"><i class="fa-solid fa-chart-candlestick"></i> <span id="btnTvText" class="font-mono font-bold text-[8px]">TV</span></button>
             </div>
-            <span id="tradeStatus" class="hidden text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40 whitespace-nowrap">RUNNING</span>
           </div>
-          <p id="tradePnl" class="text-[10px] font-mono font-bold text-gray-400"></p>
-          <p id="tradeLive" class="text-[8px] font-mono text-gray-400"></p>
-          <p id="smcInfo" class="text-[8px] font-mono text-gray-400 break-words"></p>
+          <span id="tradeStatus" class="hidden text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40 whitespace-nowrap">RUNNING</span>
+        </div>
+        <p id="tradePnl" class="text-[10px] font-mono font-bold text-gray-400"></p>
+        <p id="tradeLive" class="text-[8px] font-mono text-gray-400"></p>
 
-          <!-- Chart utama: LINE CHART (Diperbesar sedikit tingginya) -->
-          <div class="relative w-full h-[220px] sm:h-[280px] lg:h-[320px]">
-            <canvas id="priceChart" class="absolute inset-0 w-full h-full"></canvas>
-          </div>
+        <div class="relative w-full h-[220px] sm:h-[280px] lg:h-[320px]">
+          <canvas id="priceChart" class="absolute inset-0 w-full h-full"></canvas>
+        </div>
 
-          <!-- Panel SMC terpisah (Ukuran diperbesar) -->
-          <div id="smcBox" class="hidden w-full rounded-lg overflow-hidden border border-panelborder bg-darkbg p-1 space-y-1">
-            <!-- TOMBOL TIMEFRAME SMC -->
-            <div class="flex justify-center gap-1 mb-1 mt-0.5">
+        <div id="tvBox" class="hidden w-full h-[300px] mt-2 rounded-lg overflow-hidden border border-panelborder bg-darkbg"><div id="tvWidget" class="w-full h-full"></div></div>
+      </div>
+
+      <!-- 6. SMC MAP PERMANENT -->
+      <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
+        <p id="smcInfo" class="text-[8px] font-mono text-gray-400 break-words"></p>
+        <div id="smcBox" class="w-full rounded-lg overflow-hidden border border-panelborder bg-darkbg p-1 space-y-1">
+          <!-- TOMBOL TIMEFRAME & ZOOM SMC -->
+          <div class="flex justify-between items-center mb-1 mt-0.5 px-1 gap-1">
+            <div class="flex gap-1">
               <button onclick="setSmcTf('1m')" class="smc-tf-btn text-[9px] font-bold px-2 py-0.5 rounded border border-panelborder text-gray-400" data-tf="1m">1m</button>
               <button onclick="setSmcTf('5m')" class="smc-tf-btn text-[9px] font-bold px-2 py-0.5 rounded border border-panelborder text-gray-400" data-tf="5m">5m</button>
               <button onclick="setSmcTf('15m')" class="smc-tf-btn text-[9px] font-bold px-2 py-0.5 rounded border border-panelborder text-gray-400" data-tf="15m">15m</button>
               <button onclick="setSmcTf('1h')" class="smc-tf-btn text-[9px] font-bold px-2 py-0.5 rounded border border-panelborder text-gray-400" data-tf="1h">1H</button>
               <button onclick="setSmcTf('4h')" class="smc-tf-btn text-[9px] font-bold px-2 py-0.5 rounded border border-panelborder text-gray-400" data-tf="4h">4H</button>
             </div>
-
-            <div class="relative w-full h-[320px] sm:h-[400px] lg:h-[480px]">
-              <canvas id="smcCanvas" class="absolute inset-0 w-full h-full"></canvas>
-            </div>
-            <div class="flex flex-wrap gap-x-2.5 gap-y-0.5 text-[7px] font-mono text-gray-400 px-1 pb-0.5">
-              <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(59,130,246,.6)"></i> FVG ▲</span>
-              <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(168,85,247,.6)"></i> FVG ▼</span>
-              <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(16,185,129,.6)"></i> Demand</span>
-              <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(239,68,68,.6)"></i> Supply</span>
-              <!-- Breaker Block Legend -->
-              <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(34,211,238,.6)"></i> BB ▲</span>
-              <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(244,114,182,.6)"></i> BB ▼</span>
-              
-              <span class="text-amber-400">┄ BSL/SSL · EQH/EQL</span>
-              <span class="text-yellow-300">SW sweep</span>
-              <span class="text-sky-300">BOS / CHoCH</span>
-              <span class="text-fuchsia-300">┈ CISD</span>
-              <span class="text-teal-300">Asia</span>
-              <span class="text-red-400">London KZ</span>
-              <span class="text-blue-400">London</span>
-              <span class="text-red-400">NY KZ</span>
-              <span class="text-sky-400">New York</span>
+            <div class="flex gap-1">
+              <button onclick="zoomSMC(-1)" class="bg-panelborder text-white rounded w-5 h-5 flex items-center justify-center text-[10px] font-bold hover:bg-gray-600">-</button>
+              <button onclick="zoomSMC(1)" class="bg-panelborder text-white rounded w-5 h-5 flex items-center justify-center text-[10px] font-bold hover:bg-gray-600">+</button>
+              <button onclick="resetSMC()" class="bg-panelborder text-white rounded px-1.5 h-5 flex items-center justify-center text-[8px] font-bold hover:bg-gray-600" title="Reset Zoom">↺</button>
             </div>
           </div>
 
-          <div id="tvBox" class="hidden w-full h-[300px] mt-2 rounded-lg overflow-hidden border border-panelborder bg-darkbg"><div id="tvWidget" class="w-full h-full"></div></div>
-        </div>
-
-        <div id="validationOverlay" class="validation-overlay hidden">
-          <div class="validation-box">
-            <svg class="hourglass-spin" viewBox="0 0 64 96">
-              <defs><linearGradient id="sandGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#fbbf24"/><stop offset="100%" stop-color="#d97706"/></linearGradient></defs>
-              <rect x="4" y="2" width="56" height="6" rx="3" fill="#f59e0b"/>
-              <path d="M 12 10 L 52 10 L 32 48 Z" fill="url(#sandGrad)" opacity="0.9"/>
-              <path d="M 12 86 L 52 86 L 32 48 Z" fill="url(#sandGrad)" opacity="0.55"/>
-              <rect x="4" y="88" width="56" height="6" rx="3" fill="#f59e0b"/>
-            </svg>
-            <div data-i18n="valTitle" class="validation-title"></div>
-            <div class="validation-steps" id="validationSteps"></div>
-            <div class="validation-progress"><div class="validation-progress-fill" id="validationProgress"></div></div>
+          <div class="relative w-full h-[320px] sm:h-[400px] lg:h-[480px]">
+            <canvas id="smcCanvas" class="absolute inset-0 w-full h-full"></canvas>
+          </div>
+          <div class="flex flex-wrap gap-x-2.5 gap-y-0.5 text-[7px] font-mono text-gray-400 px-1 pb-0.5">
+            <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(59,130,246,.6)"></i> FVG ▲</span>
+            <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(168,85,247,.6)"></i> FVG ▼</span>
+            <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(16,185,129,.6)"></i> Demand</span>
+            <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(239,68,68,.6)"></i> Supply</span>
+            <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(34,211,238,.6)"></i> BB ▲</span>
+            <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(244,114,182,.6)"></i> BB ▼</span>
+            <span class="text-amber-400">┄ BSL/SSL · EQH/EQL</span>
+            <span class="text-yellow-300">SW sweep</span>
+            <span class="text-sky-300">BOS / CHoCH</span>
+            <span class="text-fuchsia-300">┈ CISD</span>
+            <span class="text-teal-300">Asia</span>
+            <span class="text-red-400">London KZ</span>
+            <span class="text-blue-400">London</span>
+            <span class="text-red-400">NY KZ</span>
+            <span class="text-sky-400">New York</span>
           </div>
         </div>
       </div>
+
+      <!-- 7. MARKET SESSION -->
+      <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
+        <div class="flex justify-between items-center border-b border-panelborder pb-2">
+          <span id="lblSession" class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-clock text-accentblue"></i> MARKET SESSIONS</span>
+          <span id="currentSessionBadge" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-gray-500/20 text-gray-400 border-gray-500/40">--</span>
+        </div>
+        <div id="sessionList" class="space-y-1.5 text-[9px] font-mono"></div>
+      </div>
+
     </div>
 
     <!-- KOLOM KANAN -->
     <div class="flex flex-col gap-2 min-w-0">
+      
       <div id="highlightList" class="flex flex-col gap-2"></div>
-
-      <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
-        <div class="flex justify-between items-center border-b border-panelborder pb-2">
-          <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-list-ul text-accentblue"></i> <span data-i18n="lblLog"></span></span>
-          <span class="text-[8px] text-emerald-400 font-mono">● Sistem</span>
-        </div>
-        <div id="activityLogList" class="space-y-1 mt-1 max-h-[160px] overflow-y-auto pr-1 text-[9px] font-mono flex flex-col"></div>
-      </div>
 
       <div id="calCard" class="hidden bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
         <div class="flex justify-between items-center gap-2">
@@ -431,6 +416,13 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
       </div>
     </div>
   </main>
+
+  <!-- DISCLAIMER -->
+  <footer class="mt-6 pb-4 text-center">
+    <p class="text-[9px] text-gray-500 font-mono leading-relaxed px-4">
+      <strong>DISCLAIMER:</strong> Sinyal dan analisa ini hanya untuk tujuan edukasi. Bukan merupakan saran keuangan (Financial Advisor). Trading memiliki risiko kehilangan modal. Selalu lakukan riset Anda sendiri (DYOR).
+    </p>
+  </footer>
 </div>
 
 <script>
@@ -447,7 +439,7 @@ const CAL_SINCE_KEY = 'aluGold_calendar_since';
 const LIVE_KEY = 'aluLive_v1';
 const K = { type: 'alu_session_type', email: 'alu_user_email', admin: 'alu_admin_code' };
 const JSON_H = { 'Content-Type': 'application/json' };
-const HISTORY_MS = 600000, STALE_MS = 30000, CHART_GUT = 85, CH_PAD = 4;
+const HISTORY_MS = 600000, STALE_MS = 30000, CHART_GUT = 80, CH_PAD = 4;
 const TFS = [1, 5, 15, 30, 60, 240, 1440];
 const HL_TF = [[1, 'M1'], [5, 'M5'], [15, 'M15'], [60, 'H1'], [240, 'H4'], [1440, 'D1']];
 const TF_MIN = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 };
@@ -495,13 +487,13 @@ const I18N = {
   id: {
     subHeader: 'SMC x ICT x Alchemist (XAUUSD & BTCUSD)', loginSub: 'Silakan masukkan email terdaftar atau kode admin',
     lblAccess: 'ACCESS LOGIN', btnLogin: 'MASUK SISTEM', btnLogout: 'LOGOUT', loginNeed: 'Isi email atau kode admin dulu.', checking: 'Mengecek...', denied: 'Login ditolak: ',
-    lblMarket: 'TARGET ASET AKTIF', lblStyle: 'GAYA TRADING / STRATEGI', optScalp: 'Scalping Agresif', optDay: 'Scalping Konservatif', optIntra: 'Intraday / Day Trade', optSwing: 'Swing',
+    lblMarket: 'TARGET ASET AKTIF', lblStyle: 'GAYA TRADING / STRATEGI', optScalp: 'Scalping Agresif (High Risk)', optDay: 'Scalping Konservatif', optIntra: 'Intraday / Day Trade', optSwing: 'Swing',
     infoScalp: 'Buy Now / Sell Now sesuai arah pasar. Jika ada di area pantulan, fokus ambil pantulan (tanpa limit order).',
     infoDay: 'Fokus menunggu Limit Order di zona pantulan / FVG.', infoIntra: 'Konsep Day Trade (H1/M15), menunggu retest zona yang lebih lebar.', infoSwing: 'Positioning di H4, menahan posisi lebih lama.',
     btnGen: 'Analisa Signal', lblBias: 'BIAS MULTI-TIMEFRAME', lblStream: 'LIVE MARKET STREAM', lblSession: 'MARKET SESSIONS',
     standby1: 'Chart di bawah sudah aktif. Tekan Analisa Signal untuk membuat sinyal.', entryZone: 'ENTRY ZONE', lblMap: 'LIVE MAP CHART', lblReason: 'ANALYSIS REASON (CONFLUENCE SCORE):',
     valTitle: 'Validasi Analisa Structure', steps: ['Menganalisa struktur pasar...', 'Mencari zona supply & demand fresh...', 'Memeriksa bias M15 & H1...', 'Cek FVG & displacement...', 'Validasi rejection candle...', 'Menghitung entry, SL, TP...'],
-    lblLog: 'LOG AKTIVITAS USER', lblHistory: 'TRADING HISTORY', histToday: 'Hari ini', histAll: 'Semua',
+    lblHistory: 'TRADING HISTORY', histToday: 'Hari ini', histAll: 'Semua',
     winLbl: 'WIN', loseLbl: 'LOSE', totalLbl: 'TOTAL PNL (WIN − LOSE)', ratioLbl: 'WIN RATIO',
     calMonthLbl: 'PNL BULAN INI', calWinLbl: 'TOTAL WIN', calLoseLbl: 'TOTAL LOSE', calNetLbl: 'NET', calWRLbl: 'WIN RATIO', calResetBtn: 'RESET KALENDER',
     noHistory: 'Belum ada history.', running: 'berjalan', waitEntry: 'WAITING ENTRY', waitTick: 'Menunggu data candle / live tick...',
@@ -510,13 +502,13 @@ const I18N = {
   en: {
     subHeader: 'SMC x ICT x Alchemist (XAUUSD & BTCUSD)', loginSub: 'Enter your registered email or admin code',
     lblAccess: 'ACCESS LOGIN', btnLogin: 'LOG IN', btnLogout: 'LOGOUT', loginNeed: 'Enter your email or admin code first.', checking: 'Checking...', denied: 'Login denied: ',
-    lblMarket: 'ACTIVE TARGET ASSET', lblStyle: 'TRADING STYLE / STRATEGY', optScalp: 'Aggressive Scalping', optDay: 'Conservative Scalping', optIntra: 'Intraday / Day Trade', optSwing: 'Swing',
+    lblMarket: 'ACTIVE TARGET ASSET', lblStyle: 'TRADING STYLE / STRATEGY', optScalp: 'Aggressive Scalping (High Risk)', optDay: 'Conservative Scalping', optIntra: 'Intraday / Day Trade', optSwing: 'Swing',
     infoScalp: 'Buy Now / Sell Now following market direction. If in a bounce zone, focus on the bounce (no limit orders).',
     infoDay: 'Wait for Limit Orders at retracement zones / FVG.', infoIntra: 'Day Trade concept (H1/M15), waiting for retest of wider zones.', infoSwing: 'Positioning on H4, holding positions longer.',
     btnGen: 'Analyze Signal', lblBias: 'MULTI-TIMEFRAME BIAS', lblStream: 'LIVE MARKET STREAM', lblSession: 'MARKET SESSIONS',
     standby1: 'The chart below is active. Press Analyze Signal to create a signal.', entryZone: 'ENTRY ZONE', lblMap: 'LIVE MAP CHART', lblReason: 'ANALYSIS REASON (CONFLUENCE SCORE):',
     valTitle: 'Validating Market Structure', steps: ['Analyzing market structure...', 'Finding fresh supply & demand zones...', 'Checking M15 & H1 bias...', 'Checking FVG & displacement...', 'Validating rejection candles...', 'Calculating entry, SL, TP...'],
-    lblLog: 'USER ACTIVITY LOG', lblHistory: 'TRADING HISTORY', histToday: 'Today', histAll: 'All',
+    lblHistory: 'TRADING HISTORY', histToday: 'Today', histAll: 'All',
     winLbl: 'WIN', loseLbl: 'LOSE', totalLbl: 'TOTAL PNL (WIN − LOSE)', ratioLbl: 'WIN RATIO',
     calMonthLbl: 'MONTHLY PNL', calWinLbl: 'TOTAL WIN', calLoseLbl: 'TOTAL LOSE', calNetLbl: 'NET', calWRLbl: 'WIN RATIO', calResetBtn: 'RESET CALENDAR',
     noHistory: 'No trading history yet.', running: 'running', waitEntry: 'WAITING ENTRY', waitTick: 'Waiting for candle / live tick data...',
@@ -556,8 +548,10 @@ const toMs = v => {
 
 /* ================= STATE ================= */
 let lang = 'id', market = 'XAUUSD', ws = null, connId = 0, reconT = null, pingT = null, authFailed = false, streamStarted = false;
-let trades = [], activeId = null, tvOn = false, showSMC = false;
+let trades = [], activeId = null, tvOn = false, showSMC = true; // SMC Map selalu ON
 let smcTfOverride = null; 
+let smcZoom = 1; 
+let smcPan = 0; 
 let calView = { y: new Date().getFullYear(), m: new Date().getMonth() };
 const prices = {}, hist = {}, candles = {}, workingSym = {}, aliasIdx = {}, subAt = {};
 const SER = {}, CSYM = {}, dispCache = {};
@@ -567,18 +561,9 @@ const cx = cv.getContext('2d');
 const scv = $('smcCanvas');
 const sx = scv.getContext('2d');
 
-/* ================= LOG ================= */
+/* ================= LOG (Hanya ke Console) ================= */
 function log(msg, type) {
-  const box = $('activityLogList');
-  if (!box) return;
-  const color = { buy: TXT.green, sell: TXT.red, system: TXT.yellow, error: 'text-red-500' }[type] || TXT.gray;
-  const time = new Date().toLocaleTimeString(lang === 'id' ? 'id-ID' : 'en-US', { hour12: false });
-  const d = document.createElement('div');
-  d.className = 'log-item flex gap-1 leading-tight items-start';
-  d.innerHTML = `<span class="text-gray-500 shrink-0">[${time}]</span> <span class="${color}">${esc(msg)}</span>`;
-  box.appendChild(d);
-  box.scrollTop = box.scrollHeight;
-  while (box.children.length > 30) box.removeChild(box.firstChild);
+  console.log(`[${type || 'info'}] ${msg}`);
 }
 
 /* ================= COPY SIGNAL ================= */
@@ -740,15 +725,13 @@ async function connect() {
   const email = localStorage.getItem(K.email);
   if (!email) { wsBadge('LOGIN DULU', 'gray'); reconT = setTimeout(connect, 2000); return; }
   
-  // Coba ambil token dari backend
   const r = await post('/api/stream-token', { value: email });
   if (my !== connId) return;
   
-  // Jika backend gagal, coba koneksi langsung tanpa token (mode publik)
   if (!(r.ok && r.data && r.data.token)) {
     if (r.status === 401) { authFailed = true; wsBadge('SESI INVALID', 'red'); return; }
     log('[WS] Gagal dapat token backend, mencoba koneksi publik XBTFX...', 'system');
-    openSocket(null); // Panggil tanpa token
+    openSocket(null); 
     return;
   }
   openSocket(r.data.token);
@@ -763,7 +746,6 @@ function openSocket(token) {
     if (token) {
       send(sock, { action: 'auth', token });
     } else {
-      // Jika tanpa token, langsung subscribe quotes
       wsBadge('XBTFX PUB', 'green');
       KEYS.forEach(k => { subAt[k] = Date.now(); });
       send(sock, { action: 'subscribe', channel: 'quotes', symbols: KEYS.map(symOf) });
@@ -1054,32 +1036,67 @@ function checkTrades(k, p) {
   for (const t of trades) if (t.key === k && t.status !== 'CLOSED' && evalTrade(t, p)) ch = true;
   if (ch) { saveTrades(); renderHistory(); }
 }
+
+// ================= LOGIKA ENTRY =================
 function evalTrade(t, p) {
   const d = t.dir;
+
   if (t.status === 'PENDING') {
-    const filled = t.fill === 'STOP' ? (d > 0 ? p >= t.entry : p <= t.entry) : (d > 0 ? p <= t.entry : p >= t.entry);
-    if (filled) {
-      t.status = 'RUNNING';
-      t.filledAt = Date.now();
-      log(`Trade #${t.no} ${t.key} terisi (${t.signal})`, t.signal === 'BUY' ? 'buy' : 'sell');
+    if (t.expiresAt && Date.now() > t.expiresAt) {
+      cancelTrade(t, 'Zona tidak tersentuh (Expired)');
       return true;
     }
-    if (d > 0 ? p <= t.sl : p >= t.sl) { cancelTrade(t, 'SL tersentuh sebelum entry'); return true; }
+    if (d > 0 ? p <= t.sl : p >= t.sl) {
+      cancelTrade(t, 'SL tersentuh sebelum entry');
+      return true;
+    }
+    const isStop = t.fill === 'STOP';
+    const fillCond = isStop 
+      ? (d > 0 ? p >= t.entry : p <= t.entry) 
+      : (d > 0 ? p <= t.entry : p >= t.entry);
+
+    if (fillCond) {
+      t.status = 'RUNNING';
+      t.filledAt = Date.now();
+      log(`Trade #${t.no} ${t.key} TERISI di ${fmt(t.entry)} (${t.signal})`, t.signal === 'BUY' ? 'buy' : 'sell');
+      return true;
+    }
     return false;
   }
+
   const reached = v => v != null && (d > 0 ? p >= v : p <= v);
   const lost = v => v != null && (d > 0 ? p <= v : p >= v);
   let changed = false;
+
   for (const k of TP_KEYS) {
-    if (t[k] != null && !t.hits[k] && reached(t[k])) { t.hits[k] = { at: Date.now(), price: t[k] }; changed = true; }
+    if (t[k] != null && !t.hits[k] && reached(t[k])) { 
+      t.hits[k] = { at: Date.now(), price: t[k] }; 
+      changed = true; 
+      log(`Trade #${t.no} ${t.key} hit ${k.toUpperCase()}!`, 'buy');
+    }
   }
-  if (hitKeys(t).length && t.status !== 'BE') { t.status = 'BE'; changed = true; }
+
+  if (hitKeys(t).length && t.status !== 'BE') { 
+    t.status = 'BE'; 
+    changed = true; 
+  }
+
   const defined = TP_KEYS.filter(k => t[k] != null);
-  if (defined.length && defined.every(k => t.hits[k])) { closeTrade(t, 'TP', t[defined[defined.length - 1]]); return true; }
+  if (defined.length && defined.every(k => t.hits[k])) { 
+    closeTrade(t, 'TP', t[defined[defined.length - 1]]); 
+    return true; 
+  }
+
   const stop = hitKeys(t).length ? t.entry : t.sl;
-  if (lost(stop)) { closeTrade(t, hitKeys(t).length ? 'BE' : 'SL', stop); return true; }
+  if (lost(stop)) { 
+    closeTrade(t, hitKeys(t).length ? 'BE' : 'SL', stop); 
+    return true; 
+  }
+
   return changed;
 }
+// ==================================================================
+
 function closeTrade(t, result, exitPrice) {
   Object.assign(t, { status: 'CLOSED', result, exitPrice, closedAt: Date.now() });
   t.maxTp = maxHit(t);
@@ -1419,22 +1436,9 @@ function updateSessionCard() {
 }
 
 /* ================= SMC: DETEKSI ================= */
-function paintSmcBtn() {
-  const b = $('btnSmcToggle');
-  b.classList.toggle('bg-accentblue', showSMC);
-  b.classList.toggle('text-white', showSMC);
-  b.classList.toggle('border-accentblue', showSMC);
-  b.classList.toggle('text-gray-500', !showSMC);
-}
-function toggleSMC() {
-  showSMC = !showSMC;
-  $('smcBox').classList.toggle('hidden', !showSMC);
-  paintSmcBtn();
-  renderSmcInfo();
-}
-
 function setSmcTf(tf) {
   smcTfOverride = tf;
+  smcPan = 0; // Reset posisi geser saat ganti TF
   document.querySelectorAll('.smc-tf-btn').forEach(btn => {
     if (btn.dataset.tf === tf) {
       btn.classList.add('active');
@@ -1445,6 +1449,41 @@ function setSmcTf(tf) {
   fetchSeries(market, tf, false);
   renderSmcInfo();
 }
+
+/* ================= FITUR ZOOM & PAN SMC ================= */
+function zoomSMC(dir) {
+  if (dir > 0) smcZoom = Math.min(5, smcZoom + 0.2); // Max zoom 5x
+  else smcZoom = Math.max(0.5, smcZoom - 0.2);       // Min zoom 0.5x
+  renderSmcInfo();
+}
+function resetSMC() {
+  smcZoom = 1;
+  smcPan = 0;
+  renderSmcInfo();
+}
+
+// Event listener untuk Drag/Pan di Canvas SMC
+let isDragging = false;
+let lastX = 0;
+scv.addEventListener('pointerdown', e => {
+  isDragging = true;
+  lastX = e.clientX;
+  scv.setPointerCapture(e.pointerId);
+});
+scv.addEventListener('pointermove', e => {
+  if (!isDragging) return;
+  const dx = e.clientX - lastX;
+  // Konversi pixel ke jumlah candle (asumsi 5px per candle slot)
+  const candlesMoved = dx / 5;
+  smcPan += candlesMoved * smcZoom;
+  lastX = e.clientX;
+  renderSmcInfo();
+});
+scv.addEventListener('pointerup', e => {
+  isDragging = false;
+  scv.releasePointerCapture(e.pointerId);
+});
+
 
 function invalidZone(rows, from, dir, bottom, top) {
   for (let j = from; j < rows.length; j++) {
@@ -1617,7 +1656,6 @@ function renderSmcInfo() {
 
   const s = getSmc(k, iv);
   const head = `${k} ${iv} · ${srcOf(k, iv)} · ${s.n || 0} candle`;
-  if (!showSMC) return setTxt('smcInfo', head + ' · SMC off (tekan SMC untuk panel)');
   if (s.status !== 'ok') return setTxt('smcInfo', head + (s.err ? ' · ' + s.err : ' · memuat candle (min 20)...'));
   setTxt('smcInfo', `${head} · ${s.fvgs.length} FVG · ${s.obs.length} S/D · ${s.breakers.length} BB · ${s.liq.pools.length} BSL/SSL · ${s.ev.length} BOS/CHoCH · ${s.cisd.length} CISD · ${s.liq.sweeps.length} SW`);
 }
@@ -1672,7 +1710,7 @@ function layoutX(rows, plotL, plotR, tfMs) {
 }
 function srcLabel(k, iv) { return `${k} · ${iv} · WIB · ${srcOf(k, iv)}`; }
 
-/* ================= CHART UTAMA (CANDLESTICK + ZOOM ON ENTRY) ================= */
+/* ================= CHART UTAMA (CANDLESTICK + FULL FRAME LINES) ================= */
 function drawChart() {
   const d = fitCv(cv, cx);
   if (!d) return;
@@ -1765,7 +1803,7 @@ function drawChart() {
   }
 
   if (t && t.zone && t.mode === 'LIMIT') {
-    const x0 = clampX(xOfT(t.createdAt));
+    const x0 = plotL; // Ubah ke plotL agar kotak penuh
     const y1 = yOf(t.zone.max), y2 = yOf(t.zone.min);
     cx.save();
     cx.fillStyle = 'rgba(41,98,255,.16)';
@@ -1796,8 +1834,8 @@ function drawChart() {
     cx.fillRect(x - bodyW / 2, bY, bodyW, bH);
   }
 
+  // ================== GARIS FULL FRAME ==================
   if (t) {
-    const x0 = clampX(xOfT(t.createdAt));
     L.forEach(l => {
       const y = yOf(l.v);
       cx.save();
@@ -1805,10 +1843,14 @@ function drawChart() {
       cx.globalAlpha = l.label === 'ENTRY' ? .95 : .8;
       cx.lineWidth = l.label === 'ENTRY' ? 1.4 : 1;
       cx.setLineDash(l.dash);
-      cx.beginPath(); cx.moveTo(x0, y); cx.lineTo(plotR, y); cx.stroke();
+      cx.beginPath(); 
+      cx.moveTo(plotL, y); // Mulai dari ujung kiri
+      cx.lineTo(plotR, y); // Sampai ujung kanan
+      cx.stroke();
       cx.restore();
     });
   }
+  // ======================================================
 
   if (live != null) {
     const y = yOf(live);
@@ -1909,7 +1951,23 @@ function drawSMC() {
     return;
   }
 
-  const { vis, slot, t0, xOfT } = layoutX(rows, plotL, plotR, tfMs);
+  // --- LOGIKA ZOOM & PAN ---
+  const plotW = plotR - plotL;
+  const baseN = Math.max(12, Math.floor(plotW / 5) - CH_PAD);
+  const nWant = Math.floor(baseN / smcZoom);
+  const slot = plotW / (Math.max(nWant, 5) + CH_PAD);
+  
+  // Hitung batas pan
+  const maxPan = Math.max(0, rows.length - nWant);
+  smcPan = Math.max(0, Math.min(smcPan, maxPan));
+  
+  const startIdx = Math.max(0, rows.length - nWant - Math.floor(smcPan));
+  const endIdx = Math.min(rows.length, startIdx + nWant);
+  const vis = rows.slice(startIdx, endIdx);
+  
+  const t0 = vis.length ? vis[0].t : Date.now() - tfMs * nWant;
+  const xOfT = tm => plotL + ((tm - t0) / tfMs + 0.5) * slot;
+
   const clampX = x => Math.max(plotL, Math.min(plotR, x));
   const ref = live != null ? live : (vis.length ? vis[vis.length - 1].c : 0);
   const near = p => Math.abs(p - ref) / ref < 0.03;
@@ -2277,8 +2335,6 @@ $('authForm').addEventListener('submit', handleLogin);
 loadLive();
 trades = loadTrades();
 applyLang();
-paintSmcBtn();
-$('smcBox').classList.toggle('hidden', !showSMC);
 calSync();
 updateSessionCard();
 checkSession();
