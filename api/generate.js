@@ -1,5 +1,5 @@
 // api/generate.js
-// v68 (Live SMC + Vision AI gpt-6-luna + Reasoning AI + Trial Limits)
+// v69 (Live SMC + Vision AI gpt-6-luna + Reasoning + Fix Pair Name in Reasoning)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
@@ -14,7 +14,6 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const AI_MODEL = process.env.AI_MODEL || 'qwen-3.8-max'; 
 
 // Model Khusus Vision (Untuk Baca Gambar/Chart)
-// Diset default ke gpt-6-luna yang sangat bagus untuk visual
 const AI_VISION_MODEL = process.env.AI_VISION_MODEL || 'gpt-6-luna'; 
 
 const API_KEYS = [
@@ -340,8 +339,11 @@ const TX = {
     noSource: 'tidak ada sumber', noSetup: 'Tidak ada setup yang valid saat ini.', notProcessed: 'Belum diproses',
     zoneFresh: (side, tf, lo, hi, inside) => `Zona ${side} ${tf} VALID & FRESH ${inside ? '(harga di dalam)' : '(harga dekat)'}: ${lo} - ${hi}`,
     aiPrompt: (d) => `
-Anda adalah "Alu Signal Z", trader SMC/ICT. Tulis 1 paragraf (maks 400 karakter, bahasa Indonesia, tegas) yang menjelaskan MENGAPA entry ini diambil. Gunakan HANYA data di bawah.
+Anda adalah "Alu Signal Z", trader SMC/ICT. Tulis 1 paragraf (maks 400 karakter, bahasa Indonesia, tegas) yang menjelaskan MENGAPA entry ini diambil. 
+WAJIB: Sebutkan nama Pair/Aset (${d.symbol}) secara eksplisit di dalam teks paragraf pertama.
+Gunakan HANYA data di bawah.
 === DATA ===
+- Pair/Aset: ${d.symbol}
 - Sinyal: ${d.sideW} | Gaya: ${d.kind} | Order: ${d.orderType}
 - Entry: ${d.entry} | SL: ${d.sl} (${d.riskPips} pip)
 - TP: ${d.tps}
@@ -405,7 +407,10 @@ Anda adalah "Alu Signal Z", trader SMC/ICT. Tulis 1 paragraf (maks 400 karakter,
     zoneFresh: (side, tf, lo, hi, inside) => `${side.toUpperCase()} zone ${tf} VALID & FRESH ${inside ? '(price inside)' : '(price near)'}: ${lo} - ${hi}`,
     aiPrompt: (d) => `
 You are "Alu Signal Z", an SMC/ICT trader. Write ONE paragraph in English (max 400 characters) explaining WHY this entry was taken.
+MANDATORY: Explicitly mention the Pair/Asset name (${d.symbol}) in the text.
+Use ONLY the data below.
 === DATA ===
+- Pair/Asset: ${d.symbol}
 - Signal: ${d.sideW} | Style: ${d.kind} | Order: ${d.orderType}
 - Entry: ${d.entry} | SL: ${d.sl} (${d.riskPips} pips)
 - TP: ${d.tps}
@@ -669,9 +674,11 @@ Instruksi Wajib:
 3. Tentukan arah entry yang valid (BUY atau SELL).
 4. Tentukan level Entry, Stop Loss (SL), TP1, TP2, dan TP3 berdasarkan harga yang tertera.
 5. Tuliskan alasan (reason) yang komprehensif (maksimal 400 karakter, bahasa Indonesia, tegas) yang menjelaskan MENGAPA entry ini diambil. Gunakan gaya bahasa SMC/ICT seperti "mitigasi FVG", "sweep liquidity", "BOS", dll. Sebutkan juga timeframe-nya.
+6. Baca atau tebak nama PAIR/SYMBOL (misal: XAUUSD, BTCUSD, EURUSD) dari gambar. Jika tidak terbaca, kosongkan.
 
 KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI CONTOH DI BAWAH INI. JANGAN ADA TEKS LAIN SEBELUM ATAU SESUDAHNYA:
 {
+  "symbol": "XAUUSD",
   "timeframe": "H1",
   "signal": "BUY",
   "entry": 3880.50,
@@ -696,7 +703,7 @@ KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI CONTOH DI BAWAH INI. JANGAN ADA TEKS 
       method: 'POST', 
       headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
-        model: AI_VISION_MODEL, // <--- MENGGUNAKAN GPT-6-LUNA
+        model: AI_VISION_MODEL, // Menggunakan GPT-6-LUNA
         messages: [{ role: 'user', content: userContent }], 
         max_tokens: 600, 
         temperature: 0.1 
@@ -1064,10 +1071,12 @@ export default async function handler(req, res) {
     const sl = Number(p.sl);
     const tps = [p.tp1, p.tp2, p.tp3].filter(v => v != null).map(Number);
     
-    let symbol = resolveSymbol(body, req.query);
+    // Prioritas: 1. Dari input text user, 2. Dari gambar (AI Vision), 3. Tebak dari harga
+    let symbol = resolveSymbol(body, req.query) || (p.symbol ? normalizeSymbol(p.symbol) : null);
+    
     let dec = 2, pip = 0.01, gold = false, prof = PAIR_CLASS_PROFILE.fx;
     
-    if (symbol) {
+    if (symbol && isKnownSymbol(symbol)) {
       dec = DECIMALS[symbol] || 2;
       pip = pipSizeOf(symbol, dec);
       gold = isGold(symbol);
@@ -1090,6 +1099,7 @@ export default async function handler(req, res) {
     if (style === 'Intraday') kindStr = 'intraday';
     if (style === 'Swing') kindStr = 'swing';
 
+    // Panggil AI Reasoning menggunakan model teks utama (AI_MODEL)
     const aiReason = await getAIReasoning({
       ctx, dir, kind: kindStr, orderType: 'NOW', entry, sl, tps,
       setup: `Vision AI (${p.timeframe || 'Chart'})`,
@@ -1121,7 +1131,7 @@ export default async function handler(req, res) {
         setupLabel: style,
         zoneLabel: 'Vision Entry',
         zoneNote: p.timeframe ? `Timeframe: ${p.timeframe}` : 'Berdasarkan gambar',
-        reason: aiReason || p.reason
+        reason: aiReason || p.reason // GUNAKAN HASIL REASONING BARU
       }
     });
   }
