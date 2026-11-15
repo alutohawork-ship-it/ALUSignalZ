@@ -1,5 +1,5 @@
 // api/generate.js
-// v80 (QC Passed: HTF Filter for Scalp, Dynamic Zones, RR Protection)
+// v81 (Agresif Scalping murni M1 momentum, Label Fixed, Intraday Zona Focus)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
@@ -74,18 +74,18 @@ const pipSizeOf = (symbol, dec) => PIP_OVERRIDE[symbol] ?? Math.pow(10, -(dec - 
 
 const STYLES = {
   'Scalping': {
-    label: 'Scalping Agresif · Market Execution NOW (M1 Structure)',
+    label: 'Scalping Agresif · Market Execution NOW (Struktur M1)',
     labelEn: 'Aggressive Scalping · Market Execution NOW (M1 Structure)',
     entryStyle: 'Agresif', entryStyleEn: 'Aggressive', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
   'Day Trading': {
-    label: 'Scalping Konservatif · Fokus Zona/FVG M1 (Bebas Arah)',
-    labelEn: 'Conservative Scalping · M1 Zone/FVG Focused (Any Direction)',
+    label: 'Scalping Konservatif · Fokus Zona/FVG M5 (Refine M1)',
+    labelEn: 'Conservative Scalping · M5 Zone/FVG Focused (M1 Refine)',
     entryStyle: 'Konservatif', entryStyleEn: 'Conservative', mode: 'LIMIT', kind: 'day', rr: [1.0, 1.5, 2.0],
   },
   'Intraday': {
-    label: 'Day Trading · Strict Trend Following (Bias H1+M15, Zona/FVG M5)',
-    labelEn: 'Day Trading · Strict Trend Following (H1+M15 Bias, M5 Zone/FVG)',
+    label: 'Day Trading / Intraday · Strict Trend Following (Bias H1+M15, Zona/FVG M5)',
+    labelEn: 'Day Trading / Intraday · Strict Trend Following (H1+M15 Bias, M5 Zone/FVG)',
     entryStyle: 'Moderat', entryStyleEn: 'Moderate', mode: 'LIMIT', kind: 'intraday', rr: [1.0, 2.0, 3.0],
   },
   'Swing': {
@@ -272,8 +272,8 @@ const pickLang = (body, query) => {
 const TX = {
   id: {
     pip: 'pip',
-    title: { scalp: 'Scalping', day: 'Day Trading (Scalping Konservatif)', intraday: 'Intraday', swing: 'Swing' },
-    kind: { scalp: 'Scalping (Agresif)', day: 'Day Trade (Konservatif)', intraday: 'Intraday (Moderat)', swing: 'Swing (Positioning)' },
+    title: { scalp: 'Scalping', day: 'Scalping Konservatif', intraday: 'Day Trading / Intraday', swing: 'Swing' },
+    kind: { scalp: 'Scalping (Agresif)', day: 'Scalping (Konservatif)', intraday: 'Day Trading (Intraday)', swing: 'Swing (Positioning)' },
     classLabel: { gold: 'Emas', silver: 'Perak', metal: 'Logam', fx: 'Forex', fx_jpy: 'Forex JPY', index: 'Indeks', commodity: 'Komoditas', crypto: 'Kripto' },
     headLine: (title, dir, ot, sym) => `${title} ${dir} ${ot} pada ${sym}`,
     inZone: (side, tf, lo, hi) => `Harga di dalam ${side} ${tf} ${lo} - ${hi}`,
@@ -325,10 +325,11 @@ const TX = {
     aiPrompt: (d) => `
 Anda adalah "Alu Signal Z", trader SMC/ICT profesional. Tulis 1 paragraf analisa eksekusi (maks 500 karakter, tegas, bahasa Indonesia).
 WAJIB mencakup 4 poin berikut secara mengalir:
-1. **Analisa Struktur MTF**: Sebutkan kondisi market di masing-masing timeframe (${d.tfs}) berdasarkan data.
-2. **Alasan Eksekusi**: Jelaskan mengapa entry diambil (Reversal / Continuation / Retest FVG / Sweep Liquidity / Order Block).
-3. **Invalidasi**: Sebutkan level harga yang membatalkan setup ini (SL / struktur tertembus).
-4. **Aksi**: Tegaskan tipe order (Market NOW atau Limit) sesuai gaya trading.
+1. **Analisa Struktur**: Sebutkan kondisi market di timeframe yang relevan (${d.tfs}).
+2. **Alasan Eksekusi**: Jelaskan mengapa entry diambil (Reversal / Continuation / Retest FVG / Sweep Liquidity / Order Block). 
+   *Catatan: Jika gaya "Scalping Agresif", entry mengikuti momentum struktur M1 saat ini (bisa jadi counter-trend/pullback terhadap M15). Jika gaya "Scalping Konservatif" atau "Day Trading / Intraday", entry berdasarkan validasi zona OB/SD/FVG/Retest.*
+3. **Invalidasi**: Sebutkan level harga yang membatalkan setup ini (SL).
+4. **Aksi**: Tegaskan tipe order (Market NOW atau Limit).
 
 === DATA ===
 - Pair/Aset: ${d.symbol}
@@ -344,8 +345,8 @@ WAJIB mencakup 4 poin berikut secara mengalir:
   },
   en: {
     pip: 'pips',
-    title: { scalp: 'Scalping', day: 'Day Trading (Conservative Scalping)', intraday: 'Intraday', swing: 'Swing' },
-    kind: { scalp: 'Scalping (Aggressive)', day: 'Day Trade (Conservative)', intraday: 'Intraday (Moderate)', swing: 'Swing (Positioning)' },
+    title: { scalp: 'Scalping', day: 'Conservative Scalping', intraday: 'Day Trading / Intraday', swing: 'Swing' },
+    kind: { scalp: 'Scalping (Aggressive)', day: 'Scalping (Conservative)', intraday: 'Day Trading (Intraday)', swing: 'Swing (Positioning)' },
     classLabel: { gold: 'Gold', silver: 'Silver', metal: 'Metal', fx: 'Forex', fx_jpy: 'JPY Forex', index: 'Index', commodity: 'Commodity', crypto: 'Crypto' },
     headLine: (title, dir, ot, sym) => `${title} ${dir} ${ot} on ${sym}`,
     inZone: (side, tf, lo, hi) => `Price inside ${side} ${tf} ${lo} - ${hi}`,
@@ -397,10 +398,11 @@ WAJIB mencakup 4 poin berikut secara mengalir:
     aiPrompt: (d) => `
 You are "Alu Signal Z", a professional SMC/ICT trader. Write ONE execution analysis paragraph (max 500 characters, assertive, in English).
 MUST include these 4 points flowing naturally:
-1. **MTF Structure Analysis**: State market conditions in each timeframe (${d.tfs}) based on data.
-2. **Execution Reason**: Explain why the entry was taken (Reversal / Continuation / Retest FVG / Sweep Liquidity / Order Block).
-3. **Invalidation**: State the price level that invalidates this setup (SL / broken structure).
-4. **Action**: Reiterate the order type (Market NOW or Limit) according to the trading style.
+1. **Structure Analysis**: State market conditions in relevant timeframes (${d.tfs}).
+2. **Execution Reason**: Explain why the entry was taken (Reversal / Continuation / Retest FVG / Sweep Liquidity / Order Block). 
+   *Note: If style is "Aggressive Scalping", entry follows current M1 momentum (can be a counter-trend pullback against M15). If style is "Conservative Scalping" or "Day Trading / Intraday", entry is based on OB/SD/FVG/Retest zone validation.*
+3. **Invalidation**: State the price level that invalidates this setup (SL).
+4. **Action**: Reiterate the order type (Market NOW or Limit).
 
 === DATA ===
 - Pair/Asset: ${d.symbol}
@@ -563,7 +565,7 @@ function analyzePureSMCStructure(candles) {
   if (lastC < l2.p) return { dir: -1, src: 'BOS Bearish' };
   if (h2.p > h1.p && l2.p > l1.p) return { dir: 1, src: 'Struktur HH + HL' };
   if (h2.p < h1.p && l2.p < l1.p) return { dir: -1, src: 'Struktur LH + LL' };
-  return { dir: 0, src: 'Ranging / Inducement' }; // 0 berarti ranging
+  return { dir: 0, src: 'Ranging / Inducement' };
 }
 
 function aggregateCandles(candles, tfMin) {
@@ -637,17 +639,20 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
   if (!OPENAI_API_KEY) return null;
   const { symbol, dec, prof, lang } = ctx;
   const t = TX[lang] || TX.id;
+  
   const p = v => {
-    if (v === 0) return '0';
+    if (v === 0) return "0";
     if (v < 0.001) return Number(v).toFixed(8);
     return Number(v).toFixed(dec);
   };
+  
   const prompt = t.aiPrompt({
     symbol, classLabel: t.classLabel[prof.cls] || prof.label, sideW: dir === 1 ? 'BUY' : 'SELL',
     kind: t.kind[kind] || kind, orderType, entry: p(entry), sl: p(sl),
     riskPips: riskPips.toFixed(1), tps: tps.map(p).join(', '), setup, zone: zoneLine || '', raw: rawReason,
     tfs: timeframes || 'Chart'
   });
+  
   try {
     const resp = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
       method: 'POST', headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
@@ -739,7 +744,6 @@ async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, 
   const sl = entry - dir * risk;
   const tps = rrList.map(x => entry + dir * x * risk);
 
-  // FILTER PROFITABILITAS: Minimal jarak TP1 harus > 0.5 ATR (anti-noise)
   const minDist = atrVal * 0.5; 
   if (Math.abs(tps[0] - entry) < minDist) {
      return { plan: null, reason: 'Dibatalkan: Target TP terlalu dekat dengan Entry (terkena noise volatilitas).' };
@@ -759,20 +763,15 @@ async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, 
 
 // ═══════════════════════════ WORKFLOW MTF ═══════════════════════════
 
-async function buildScalpPlan({ m1, m15, price, rrList, ctx }) {
+async function buildScalpPlan({ m1, price, rrList, ctx }) {
   const { pip } = ctx;
   const t = tx(ctx);
   const atrM1 = atrOf(m1, pip);
-  
-  // QC: Ambil bias M15 untuk filter arah
-  const structM15 = analyzePureSMCStructure(m15);
   const structM1 = analyzePureSMCStructure(m1);
   
-  if (structM15.dir === 0) {
-      return { plan: null, reason: 'Dibatalkan: M15 sedang ranging, scalping agresif rawan fakeout.' };
-  }
-  if (structM1.dir !== structM15.dir) {
-      return { plan: null, reason: 'Dibatalkan: Arah M1 berlawanan dengan tren M15.' };
+  // Agresif Scalping murni mengikuti momentum M1 (Struktur Berjalan)
+  if (structM1.dir === 0) {
+      return { plan: null, reason: 'Dibatalkan: Struktur M1 sedang ranging/noise (tidak ada arah jelas).' };
   }
 
   const dir = structM1.dir;
@@ -782,9 +781,9 @@ async function buildScalpPlan({ m1, m15, price, rrList, ctx }) {
   return await finalizePlan({
     dir, entry: price, orderType: 'NOW', baseSL, kind: 'scalp', atrVal: atrM1, ctx, rrList,
     confidence: 'HIGH', setup: `Market NOW (${srcName(structM1.src, ctx.lang)})`,
-    zoneNote: `M1 Trend aligned with M15`, zoneRange: { min: price, max: price }, timeframes: 'M1, M15',
+    zoneNote: `Murni Struktur M1 (Struktur Berjalan)`, zoneRange: { min: price, max: price }, timeframes: 'M1',
     head: t.headLine(t.title.scalp, side, 'NOW', ctx.symbol),
-    lines: [`Struktur M1: ${srcName(structM1.src, ctx.lang)}`, `Filter M15: ${srcName(structM15.src, ctx.lang)}`],
+    lines: [`Eksekusi NOW mengikuti momentum M1: ${srcName(structM1.src, ctx.lang)}`],
   });
 }
 
@@ -793,7 +792,7 @@ async function buildDayPlan({ m1, m5, price, rrList, ctx }) {
   const { f, pip } = ctx;
   const atrM5 = atrOf(m5, pip);
   
-  // QC: Cari zona di M5, bukan M1 (lebih valid)
+  // QC: Cari zona di M5 untuk Scalping Konservatif (OB/SD/Retest)
   const demand = findSDZones(m5, 1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
   const supply = findSDZones(m5, -1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
   
@@ -802,14 +801,13 @@ async function buildDayPlan({ m1, m5, price, rrList, ctx }) {
 
   if (demand && (!supply || demand.dist <= supply.dist)) {
     dir = 1; entry = demand.top; baseSL = demand.sl; zoneRange = { min: demand.bottom, max: demand.top };
-    setup = `M5 Demand Limit (Conservative Scalp)`;
-    lines.push(`Setup M5: Zona Demand Fresh`);
+    setup = `M5 Demand Limit (Zone Scalping)`;
+    lines.push(`Setup M5: Zona Demand Fresh (OB/SD)`);
   } else if (supply) {
     dir = -1; entry = supply.bottom; baseSL = supply.sl; zoneRange = { min: supply.bottom, max: supply.top };
-    setup = `M5 Supply Limit (Conservative Scalp)`;
-    lines.push(`Setup M5: Zona Supply Fresh`);
+    setup = `M5 Supply Limit (Zone Scalping)`;
+    lines.push(`Setup M5: Zona Supply Fresh (OB/SD)`);
   } else {
-    // QC: Kalau tidak ada zona M5, cari FVG di M5
     const fvgBuy = evaluateFVG(m5, price, 1, atrM5, 40);
     const fvgSell = evaluateFVG(m5, price, -1, atrM5, 40);
 
@@ -817,12 +815,12 @@ async function buildDayPlan({ m1, m5, price, rrList, ctx }) {
       dir = 1; entry = fvgBuy.entry; baseSL = fvgBuy.sl; 
       zoneRange = { min: fvgBuy.fvg.lo, max: fvgBuy.fvg.hi };
       setup = `M5 FVG Bullish Limit (Continuity)`;
-      lines.push(`Setup M5: FVG Bullish`);
+      lines.push(`Setup M5: FVG Bullish (Retest)`);
     } else if (fvgSell.useFVG) {
       dir = -1; entry = fvgSell.entry; baseSL = fvgSell.sl; 
       zoneRange = { min: fvgSell.fvg.lo, max: fvgSell.fvg.hi };
       setup = `M5 FVG Bearish Limit (Continuity)`;
-      lines.push(`Setup M5: FVG Bearish`);
+      lines.push(`Setup M5: FVG Bearish (Retest)`);
     } else {
       return { plan: null, reason: 'Tidak ada setup valid. Tidak ada Zona S/D atau FVG M5 yang fresh.' };
     }
@@ -865,13 +863,13 @@ async function buildIntradayPlan({ m5, m15, price, rrList, ctx }) {
     if (demand) {
       entry = demand.top; baseSL = demand.sl; zoneRange = { min: demand.bottom, max: demand.top };
       setup = `M5 Demand Limit (Trend Follow)`;
-      lines.push(`Setup M5: Zona Demand Fresh`);
+      lines.push(`Setup M5: Zona Demand Fresh (OB/SD)`);
     } else {
       const fvgBuy = evaluateFVG(m5, price, 1, atrM5, 40);
       if (fvgBuy.useFVG) {
         entry = fvgBuy.entry; baseSL = fvgBuy.sl; zoneRange = { min: fvgBuy.fvg.lo, max: fvgBuy.fvg.hi };
         setup = `M5 FVG Bullish Limit (Trend Continuity)`;
-        lines.push(`Setup M5: FVG Bullish`);
+        lines.push(`Setup M5: FVG Bullish (Retest)`);
       } else {
         return { plan: null, reason: 'Tren Bullish, tetapi tidak ada zona Demand M5 atau FVG Bullish M5 yang fresh.' };
       }
@@ -882,13 +880,13 @@ async function buildIntradayPlan({ m5, m15, price, rrList, ctx }) {
     if (supply) {
       entry = supply.bottom; baseSL = supply.sl; zoneRange = { min: supply.bottom, max: supply.top };
       setup = `M5 Supply Limit (Trend Follow)`;
-      lines.push(`Setup M5: Zona Supply Fresh`);
+      lines.push(`Setup M5: Zona Supply Fresh (OB/SD)`);
     } else {
       const fvgSell = evaluateFVG(m5, price, -1, atrM5, 40);
       if (fvgSell.useFVG) {
         entry = fvgSell.entry; baseSL = fvgSell.sl; zoneRange = { min: fvgSell.fvg.lo, max: fvgSell.fvg.hi };
         setup = `M5 FVG Bearish Limit (Trend Continuity)`;
-        lines.push(`Setup M5: FVG Bearish`);
+        lines.push(`Setup M5: FVG Bearish (Retest)`);
       } else {
         return { plan: null, reason: 'Tren Bearish, tetapi tidak ada zona Supply M5 atau FVG Bearish M5 yang fresh.' };
       }
@@ -939,13 +937,13 @@ async function buildSwingPlan({ m15, price, rrList, ctx }) {
     if (demand) {
       entry = demand.top; baseSL = demand.sl; zoneRange = { min: demand.bottom, max: demand.top };
       setup = `M15 Demand Limit (Trend Follow)`;
-      lines.push(`Setup M15: Zona Demand Fresh`);
+      lines.push(`Setup M15: Zona Demand Fresh (OB/SD)`);
     } else {
       const fvgBuy = evaluateFVG(m15, price, 1, atrM15, 40);
       if (fvgBuy.useFVG) {
         entry = fvgBuy.entry; baseSL = fvgBuy.sl; zoneRange = { min: fvgBuy.fvg.lo, max: fvgBuy.fvg.hi };
         setup = `M15 FVG Bullish Limit (Trend Continuity)`;
-        lines.push(`Setup M15: FVG Bullish`);
+        lines.push(`Setup M15: FVG Bullish (Retest)`);
       } else {
         return { plan: null, reason: 'Tren Makro Bullish, tetapi tidak ada zona Demand M15 atau FVG Bullish M15 yang fresh.' };
       }
@@ -956,13 +954,13 @@ async function buildSwingPlan({ m15, price, rrList, ctx }) {
     if (supply) {
       entry = supply.bottom; baseSL = supply.sl; zoneRange = { min: supply.bottom, max: supply.top };
       setup = `M15 Supply Limit (Trend Follow)`;
-      lines.push(`Setup M15: Zona Supply Fresh`);
+      lines.push(`Setup M15: Zona Supply Fresh (OB/SD)`);
     } else {
       const fvgSell = evaluateFVG(m15, price, -1, atrM15, 40);
       if (fvgSell.useFVG) {
         entry = fvgSell.entry; baseSL = fvgSell.sl; zoneRange = { min: fvgSell.fvg.lo, max: fvgSell.fvg.hi };
         setup = `M15 FVG Bearish Limit (Trend Continuity)`;
-        lines.push(`Setup M15: FVG Bearish`);
+        lines.push(`Setup M15: FVG Bearish (Retest)`);
       } else {
         return { plan: null, reason: 'Tren Makro Bearish, tetapi tidak ada zona Supply M15 atau FVG Bearish M15 yang fresh.' };
       }
@@ -1220,10 +1218,10 @@ export default async function handler(req, res) {
   const [lo, hi] = prof.range;
   if (price < lo || price > hi) return res.status(400).json({ error: t.range(price, symbol, lo, hi) });
 
-  // QC UPDATE: Scalping butuh M15 untuk filter, Day Trading butuh M5 untuk zona
+  // Agresif Scalping murni butuh M1. Konservatif butuh M5 & M1.
   const needM1 = (style === 'Scalping' || style === 'Day Trading') ? NEED.m1 : 0;
   const needM5 = (style === 'Day Trading' || style === 'Intraday') ? NEED.m5 : 0;
-  const needM15 = (style === 'Scalping' || style === 'Intraday' || style === 'Swing') ? NEED.m15 : 0;
+  const needM15 = (style === 'Intraday' || style === 'Swing') ? NEED.m15 : 0;
 
   const pick = async (arr, tf, need) => {
     if (!need) return { candles: [], source: 'none', tried: [] };
@@ -1259,11 +1257,11 @@ export default async function handler(req, res) {
   let liveSteps = [];
 
   if (style === 'Scalping') {
-    liveSteps = [`Cek HTF Bias (M15)`, `Analisa Struktur M1`, `Validasi Entry Market NOW`];
-    result = await buildScalpPlan({ m1, m15, price, rrList, ctx }); // M15 dilempar untuk filter
+    liveSteps = [`Analisa Struktur Berjalan M1`, `Validasi Momentum`, `Entry Market NOW`];
+    result = await buildScalpPlan({ m1, price, rrList, ctx }); 
   } else if (style === 'Day Trading') {
     liveSteps = [`Cek Zona / FVG M5`, `Cari Refinement M1`, `Menghitung Limit Entry`];
-    result = await buildDayPlan({ m1, m5, price, rrList, ctx }); // M5 dilempar untuk zona
+    result = await buildDayPlan({ m1, m5, price, rrList, ctx }); 
   } else if (style === 'Intraday') {
     liveSteps = [`Memeriksa bias M15 & H1`, `Mencari Zona Supply & Demand M5`, `Cek FVG & displacement`, `Validasi rejection candle`];
     result = await buildIntradayPlan({ m5, m15, price, rrList, ctx });
