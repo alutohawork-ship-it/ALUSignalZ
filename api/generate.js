@@ -1,5 +1,5 @@
 // api/generate.js
-// v81 (Agresif Scalping murni M1 momentum, Label Fixed, Intraday Zona Focus)
+// v82 (Aggressive Scalping Zone-Aware: Adapts to S/D & FVG rejection)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
@@ -74,8 +74,8 @@ const pipSizeOf = (symbol, dec) => PIP_OVERRIDE[symbol] ?? Math.pow(10, -(dec - 
 
 const STYLES = {
   'Scalping': {
-    label: 'Scalping Agresif · Market Execution NOW (Struktur M1)',
-    labelEn: 'Aggressive Scalping · Market Execution NOW (M1 Structure)',
+    label: 'Scalping Agresif · Market Execution NOW (Struktur & Area M1)',
+    labelEn: 'Aggressive Scalping · Market Execution NOW (M1 Structure & Zone)',
     entryStyle: 'Agresif', entryStyleEn: 'Aggressive', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
   'Day Trading': {
@@ -325,9 +325,9 @@ const TX = {
     aiPrompt: (d) => `
 Anda adalah "Alu Signal Z", trader SMC/ICT profesional. Tulis 1 paragraf analisa eksekusi (maks 500 karakter, tegas, bahasa Indonesia).
 WAJIB mencakup 4 poin berikut secara mengalir:
-1. **Analisa Struktur**: Sebutkan kondisi market di timeframe yang relevan (${d.tfs}).
-2. **Alasan Eksekusi**: Jelaskan mengapa entry diambil (Reversal / Continuation / Retest FVG / Sweep Liquidity / Order Block). 
-   *Catatan: Jika gaya "Scalping Agresif", entry mengikuti momentum struktur M1 saat ini (bisa jadi counter-trend/pullback terhadap M15). Jika gaya "Scalping Konservatif" atau "Day Trading / Intraday", entry berdasarkan validasi zona OB/SD/FVG/Retest.*
+1. **Analisa Struktur & Area**: Sebutkan kondisi market di timeframe relevan (${d.tfs}) dan posisi harga saat ini terhadap zona FVG/OB/S&D.
+2. **Alasan Eksekusi**: Jelaskan mengapa entry diambil. 
+   *PENTING: Jika gaya "Scalping Agresif", jika harga berada di dalam zona Demand/FVG, sistem akan memprioritaskan BUY (Reversal). Jika di dalam zona Supply/FVG, sistem akan memprioritaskan SELL (Reversal). Jika di luar zona, sistem mengikuti momentum struktur berjalan.*
 3. **Invalidasi**: Sebutkan level harga yang membatalkan setup ini (SL).
 4. **Aksi**: Tegaskan tipe order (Market NOW atau Limit).
 
@@ -398,9 +398,9 @@ WAJIB mencakup 4 poin berikut secara mengalir:
     aiPrompt: (d) => `
 You are "Alu Signal Z", a professional SMC/ICT trader. Write ONE execution analysis paragraph (max 500 characters, assertive, in English).
 MUST include these 4 points flowing naturally:
-1. **Structure Analysis**: State market conditions in relevant timeframes (${d.tfs}).
-2. **Execution Reason**: Explain why the entry was taken (Reversal / Continuation / Retest FVG / Sweep Liquidity / Order Block). 
-   *Note: If style is "Aggressive Scalping", entry follows current M1 momentum (can be a counter-trend pullback against M15). If style is "Conservative Scalping" or "Day Trading / Intraday", entry is based on OB/SD/FVG/Retest zone validation.*
+1. **Structure & Area Analysis**: State market conditions in relevant timeframes (${d.tfs}) and current price position relative to FVG/OB/S&D zones.
+2. **Execution Reason**: Explain why the entry was taken. 
+   *IMPORTANT: If style is "Aggressive Scalping", if price is inside Demand/Bullish FVG, the system prioritizes BUY (Reversal). If inside Supply/Bearish FVG, it prioritizes SELL (Reversal). If outside zones, it follows current M1 momentum.*
 3. **Invalidation**: State the price level that invalidates this setup (SL).
 4. **Action**: Reiterate the order type (Market NOW or Limit).
 
@@ -769,21 +769,47 @@ async function buildScalpPlan({ m1, price, rrList, ctx }) {
   const atrM1 = atrOf(m1, pip);
   const structM1 = analyzePureSMCStructure(m1);
   
-  // Agresif Scalping murni mengikuti momentum M1 (Struktur Berjalan)
-  if (structM1.dir === 0) {
-      return { plan: null, reason: 'Dibatalkan: Struktur M1 sedang ranging/noise (tidak ada arah jelas).' };
+  // 1. Cek Area Terlebih Dahulu (S&D / FVG)
+  const demand = findSDZones(m1, 1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
+  const supply = findSDZones(m1, -1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
+  
+  const fvgs = findRecentFVGs(m1, 20);
+  const inBullFVG = fvgs.some(f => f.dir === 1 && price >= f.lo && price <= f.hi);
+  const inBearFVG = fvgs.some(f => f.dir === -1 && price >= f.lo && price <= f.hi);
+
+  const inDemand = (demand && price >= demand.bottom && price <= demand.top) || inBullFVG;
+  const inSupply = (supply && price >= supply.bottom && price <= supply.top) || inBearFVG;
+
+  // 2. Tentukan Aksi Berdasarkan Area
+  let dir = structM1.dir;
+  let setup = `Market NOW (${srcName(structM1.src, ctx.lang)})`;
+  let lines = [`Eksekusi NOW mengikuti momentum M1: ${srcName(structM1.src, ctx.lang)}`];
+
+  if (inDemand && inSupply) {
+    return { plan: null, reason: 'Dibatalkan: Harga terjepit di antara Supply dan Demand (Konsolidasi).' };
+  } else if (inDemand) {
+    dir = 1; // Paksa BUY di Demand
+    setup = `Reaksi Demand / Bullish FVG (Buy on Support)`;
+    lines = [`Harga berada di dalam area Demand/FVG M1. Prioritas BUY (Reversal/Bounce).`];
+  } else if (inSupply) {
+    dir = -1; // Paksa SELL di Supply
+    setup = `Reaksi Supply / Bearish FVG (Sell on Resistance)`;
+    lines = [`Harga berada di dalam area Supply/FVG M1. Prioritas SELL (Reversal/Bounce).`];
+  } else if (dir === 0) {
+    return { plan: null, reason: 'Dibatalkan: Struktur M1 ranging & harga di luar zona.' };
   }
 
-  const dir = structM1.dir;
   const side = dir === 1 ? 'BUY' : 'SELL';
-  const baseSL = recentExtreme(m1, dir, 10);
-  
+  const baseSL = inDemand ? (demand ? demand.sl : recentExtreme(m1, dir, 5)) : (inSupply ? (supply ? supply.sl : recentExtreme(m1, dir, 5)) : recentExtreme(m1, dir, 10));
+  const zoneRange = inDemand ? (demand ? { min: demand.bottom, max: demand.top } : { min: price, max: price }) : (inSupply ? (supply ? { min: supply.bottom, max: supply.top } : { min: price, max: price }) : { min: price, max: price });
+
   return await finalizePlan({
     dir, entry: price, orderType: 'NOW', baseSL, kind: 'scalp', atrVal: atrM1, ctx, rrList,
-    confidence: 'HIGH', setup: `Market NOW (${srcName(structM1.src, ctx.lang)})`,
-    zoneNote: `Murni Struktur M1 (Struktur Berjalan)`, zoneRange: { min: price, max: price }, timeframes: 'M1',
+    confidence: 'HIGH', setup,
+    zoneNote: inDemand ? 'Area Demand / Bullish FVG' : (inSupply ? 'Area Supply / Bearish FVG' : 'Momentum M1'), 
+    zoneRange, timeframes: 'M1',
     head: t.headLine(t.title.scalp, side, 'NOW', ctx.symbol),
-    lines: [`Eksekusi NOW mengikuti momentum M1: ${srcName(structM1.src, ctx.lang)}`],
+    lines,
   });
 }
 
@@ -1257,7 +1283,7 @@ export default async function handler(req, res) {
   let liveSteps = [];
 
   if (style === 'Scalping') {
-    liveSteps = [`Analisa Struktur Berjalan M1`, `Validasi Momentum`, `Entry Market NOW`];
+    liveSteps = [`Analisa Struktur Berjalan M1`, `Cek Area FVG/SD/OB`, `Validasi Momentum`, `Entry Market NOW`];
     result = await buildScalpPlan({ m1, price, rrList, ctx }); 
   } else if (style === 'Day Trading') {
     liveSteps = [`Cek Zona / FVG M5`, `Cari Refinement M1`, `Menghitung Limit Entry`];
