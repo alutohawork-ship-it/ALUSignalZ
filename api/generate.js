@@ -1,5 +1,5 @@
 // api/generate.js
-// v75 (TradingView Symbol Parser + Micro-Cap Decimals + Full MTF)
+// v76 (Strict Vision Validation + Enhanced Reasoning + Micro-Cap Fixes)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
@@ -650,6 +650,7 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
   if (!OPENAI_API_KEY) return null;
   const { symbol, dec, prof, lang } = ctx;
   const t = TX[lang] || TX.id;
+  
   const p = v => {
     if (v === 0) return "0";
     if (v < 0.001) return Number(v).toFixed(8);
@@ -662,15 +663,22 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
     riskPips: riskPips.toFixed(1), tps: tps.map(p).join(', '), setup, zone: zoneLine || '', raw: rawReason,
     tfs: timeframes || 'Chart'
   });
+  
   try {
     const resp = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
       method: 'POST', headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: AI_MODEL, messages: [{ role: 'system', content: t.aiSystem }, { role: 'user', content: prompt }], max_tokens: 400, temperature: 0.2 })
+      body: JSON.stringify({ model: AI_MODEL, messages: [{ role: 'system', content: t.aiSystem }, { role: 'user', content: prompt }], max_tokens: 600, temperature: 0.2 })
     });
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      console.error('AI Reasoning HTTP Error:', resp.status);
+      return null;
+    }
     const data = await resp.json();
     return data.choices?.[0]?.message?.content?.trim() || null;
-  } catch (err) { return null; }
+  } catch (err) { 
+    console.error('AI Reasoning Exception:', err);
+    return null; 
+  }
 }
 
 // ── VISION AI (MULTI-IMAGE / MTF) MENGGUNAKAN GPT-6-LUNA ──
@@ -687,7 +695,7 @@ Instruksi Wajib (Sangat Penting):
 3. Analisa struktur pasar pada MASING-MASING timeframe (Trend, Support, Resistance, FVG, Order Block).
 4. Cari CONFLUENCE (persetujuan) antar timeframe. Tentukan arah entry yang valid (BUY atau SELL) berdasarkan keseluruhan MTF.
 5. Tentukan level Entry, Stop Loss (SL), TP1, TP2, dan TP3 berdasarkan harga yang tertera. 
-   PERHATIAN: Untuk koin mikro (seperti PEPE, SHIB) yang harganya sangat kecil (contoh: 0.00000403), TULISKAN ANGKA DESIMAL LENGKAP SESUAI CHART. JANGAN DIBULATKAN MENJADI 0.
+   PERHATIAN SANGAT PENTING: Untuk koin mikro (seperti PEPE, SHIB) yang harganya sangat kecil (contoh: 0.00000403), TULISKAN ANGKA DESIMAL LENGKAP SESUAI CHART. **DILARANG MENGEMBALIKAN ANGKA 0 UNTUK ENTRY, SL, ATAU TP**.
 6. Tuliskan alasan (reason) maksimal 500 karakter (bahasa Indonesia). WAJIB jelaskan kondisi di masing-masing timeframe (contoh: "Pada 5m terjadi..., didukung oleh 15m yang...") lalu simpulkan alasannya.
 
 KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI INI:
@@ -1095,14 +1103,21 @@ export default async function handler(req, res) {
     }
 
     const p = visionRes.plan;
-    const valid = ['BUY', 'SELL'].includes(p.signal) && [p.entry, p.sl, p.tp1].every(v => v != null && Number.isFinite(Number(v)));
-    if (!valid) return res.status(400).json({ error: 'AI mengekstrak JSON, tapi angka Entry/SL/TP tidak valid atau kosong.' });
-
-    // ── INTEGRASI AI REASONING UNTUK VISION ──
-    const dir = p.signal === 'BUY' ? 1 : -1;
+    
+    // VALIDASI KETAT: Harus ada angka dan BUKAN 0
     const entry = Number(p.entry);
     const sl = Number(p.sl);
     const tps = [p.tp1, p.tp2, p.tp3].filter(v => v != null).map(Number);
+
+    if (!['BUY', 'SELL'].includes(p.signal)) {
+       return res.status(400).json({ error: 'AI gagal menentukan arah BUY/SELL.' });
+    }
+    if (entry <= 0 || sl <= 0 || tps.some(t => t <= 0)) {
+       return res.status(400).json({ error: 'AI mengembalikan harga 0.0. Pastikan chart jelas atau coba lagi.' });
+    }
+
+    // ── INTEGRASI AI REASONING UNTUK VISION ──
+    const dir = p.signal === 'BUY' ? 1 : -1;
     
     let symbol = resolveSymbol(body, req.query) || (p.symbol && p.symbol !== 'UNKNOWN' ? normalizeSymbol(p.symbol) : null);
     if (!symbol) symbol = 'UNKNOWN_PAIR';
