@@ -163,7 +163,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
         <div id="tickerList" class="grid grid-cols-1 gap-1"></div>
       </div>
 
-      <!-- 2. PAIR & STYLE & GENERATE -->
+      <!-- 2. PAIR & STYLE -->
       <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
         <div class="flex justify-between items-center">
           <span data-i18n="lblMarket" class="text-[9px] font-bold text-gray-400"></span>
@@ -191,7 +191,6 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
             <div><span class="font-bold text-accentblue">4. Swing</span><br><span data-i18n="infoSwing"></span></div>
           </div>
         </div>
-        <button id="signalBtn" onclick="generateSignal()" class="w-full bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 text-darkbg font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20 transition active:scale-95"><i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnText" data-i18n="btnGen"></span></button>
       </div>
 
       <!-- 3. BIAS -->
@@ -204,8 +203,11 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
         <p id="biasInfo" class="text-[8px] font-mono text-gray-500">memuat...</p>
       </div>
 
-      <!-- 4. SIGNAL CARD -->
-      <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
+      <!-- 4. GENERATE BUTTON -->
+      <button id="signalBtn" onclick="generateSignal()" class="w-full bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 text-darkbg font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20 transition active:scale-95"><i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnText" data-i18n="btnGen"></span></button>
+
+      <!-- 5. SIGNAL CARD -->
+      <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2 relative">
         <div id="standbyView" class="py-3 text-center text-xs text-gray-400" data-i18n="standby1"></div>
 
         <div id="activeCard" class="hidden space-y-3">
@@ -254,9 +256,25 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
             <span id="cardReason">---</span>
           </div>
         </div>
+
+        <!-- OVERLAY LOADING (Dikembalikan ke sini) -->
+        <div id="validationOverlay" class="validation-overlay hidden">
+          <div class="validation-box">
+            <svg class="hourglass-spin" viewBox="0 0 64 96">
+              <defs><linearGradient id="sandGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#fbbf24"/><stop offset="100%" stop-color="#d97706"/></linearGradient></defs>
+              <rect x="4" y="2" width="56" height="6" rx="3" fill="#f59e0b"/>
+              <path d="M 12 10 L 52 10 L 32 48 Z" fill="url(#sandGrad)" opacity="0.9"/>
+              <path d="M 12 86 L 52 86 L 32 48 Z" fill="url(#sandGrad)" opacity="0.55"/>
+              <rect x="4" y="88" width="56" height="6" rx="3" fill="#f59e0b"/>
+            </svg>
+            <div data-i18n="valTitle" class="validation-title"></div>
+            <div class="validation-steps" id="validationSteps"></div>
+            <div class="validation-progress"><div class="validation-progress-fill" id="validationProgress"></div></div>
+          </div>
+        </div>
       </div>
 
-      <!-- 5. LIVE CHART -->
+      <!-- 6. LIVE CHART -->
       <div id="chartPanel" class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
         <div class="flex flex-wrap justify-between items-start gap-1">
           <div class="flex items-center gap-2">
@@ -277,7 +295,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
         <div id="tvBox" class="hidden w-full h-[300px] mt-2 rounded-lg overflow-hidden border border-panelborder bg-darkbg"><div id="tvWidget" class="w-full h-full"></div></div>
       </div>
 
-      <!-- 6. SMC MAP PERMANENT -->
+      <!-- 7. SMC MAP (PERMANENT) -->
       <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
         <p id="smcInfo" class="text-[8px] font-mono text-gray-400 break-words"></p>
         <div id="smcBox" class="w-full rounded-lg overflow-hidden border border-panelborder bg-darkbg p-1 space-y-1">
@@ -320,7 +338,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
         </div>
       </div>
 
-      <!-- 7. MARKET SESSION -->
+      <!-- 8. MARKET SESSION -->
       <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
         <div class="flex justify-between items-center border-b border-panelborder pb-2">
           <span id="lblSession" class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-clock text-accentblue"></i> MARKET SESSIONS</span>
@@ -669,6 +687,7 @@ async function registerClient() {
 }
 async function loadClients() {
   const box = $('adminClientTableList');
+  if(!box) return;
   box.innerHTML = '<p class="text-[10px] text-gray-500 text-center py-2">Memuat data...</p>';
   const r = await api('/api/clients', { headers: adminH() });
   if (!r.ok) { box.innerHTML = `<p class="text-[10px] text-red-400 text-center">${esc(errOf(r, 'Gagal memuat.'))}</p>`; return; }
@@ -1132,7 +1151,9 @@ function viewTrade(id) {
 function renderAll() { renderTickers(); renderHighlights(); renderBias(); renderHistory(); refreshCard(); renderCalendar(); renderSmcInfo(); updateSessionCard(); }
 
 function renderTickers() {
-  $('tickerList').innerHTML = KEYS.map(k => {
+  const el = $('tickerList');
+  if (!el) return;
+  el.innerHTML = KEYS.map(k => {
     const p = prices[k];
     const fresh = !!p && Date.now() - p.recv < STALE_MS;
     const st = p ? (fresh ? 'LIVE' : 'SEPI') : (subAt[k] ? 'SUB' : 'MENUNGGU');
@@ -1146,7 +1167,9 @@ function renderTickers() {
 }
 
 function renderHighlights() {
-  $('highlightList').innerHTML = KEYS.map(k => {
+  const el = $('highlightList');
+  if (!el) return;
+  el.innerHTML = KEYS.map(k => {
     const p = prices[k];
     const cells = HL_TF.map(([tf, lab]) => {
       const arr = candles[k] && candles[k][tf];
@@ -1165,7 +1188,9 @@ function renderHighlights() {
 }
 
 function renderHistory() {
-  const filter = $('histFilter').value;
+  const filterEl = $('histFilter');
+  if (!filterEl) return;
+  const filter = filterEl.value;
   const today = new Date().toDateString();
   const closed = trades.filter(t => t.status === 'CLOSED' && (filter === 'all' || new Date(t.closedAt).toDateString() === today));
   const wins = closed.filter(t => t.pips > 0);
@@ -1183,6 +1208,7 @@ function renderHistory() {
   setTxt('sumRatio', ratio.toFixed(1) + '%');
   setTxt('sumRatioSub', wins.length + 'W / ' + losses.length + 'L');
   const box = $('historyList');
+  if (!box) return;
   if (!trades.length) { box.innerHTML = `<p class="text-center text-[10px] text-gray-500 py-3">${T('noHistory')}</p>`; return; }
   box.innerHTML = trades.slice().reverse().map(t => {
     const f = tradeFlow(t), s = statusOf(t);
@@ -1257,8 +1283,10 @@ async function refreshBias(force) {
   renderBias();
 }
 function renderBias() {
+  const el = $('biasGrid');
+  if (!el) return;
   const list = BIAS_TF.map(tf => calcBias(seriesRows(market, tf.iv)));
-  $('biasGrid').innerHTML = BIAS_TF.map((tf, i) => {
+  el.innerHTML = BIAS_TF.map((tf, i) => {
     const b = list[i];
     const sc = b.bias !== 'WAIT' ? `skor ${b.score > 0 ? '+' : ''}${b.score}` : '';
     return `<div class="bg-darkbg border border-panelborder rounded-lg p-1.5 text-center space-y-0.5">
@@ -2203,19 +2231,24 @@ function toggleTV() {
 /* ================= OVERLAY ANALISA ================= */
 function showOverlay() {
   const o = $('validationOverlay');
-  $('validationSteps').innerHTML = '';
-  $('validationProgress').style.width = '0%';
+  if (!o) return;
+  const steps = $('validationSteps');
+  const bar = $('validationProgress');
+  if (steps) steps.innerHTML = '';
+  if (bar) bar.style.width = '0%';
   o.classList.remove('hidden');
   void o.offsetWidth;
   o.classList.add('active');
 }
 function hideOverlay() {
   const o = $('validationOverlay');
+  if (!o) return;
   o.classList.remove('active');
   setTimeout(() => o.classList.add('hidden'), 320);
 }
 async function runSteps(ms) {
   const steps = T('steps'), box = $('validationSteps'), bar = $('validationProgress');
+  if (!box || !bar) return; // Guard clause
   const start = Date.now(), per = Math.max(400, ms / steps.length);
   for (let i = 0; i < steps.length; i++) {
     const el = document.createElement('div');
