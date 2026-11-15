@@ -1,7 +1,7 @@
 // api/generate.js
-// v66 (Live SMC v60 + Vision AI + AI Reasoning + Trial Limits + Empty Response Fix)
+// v68 (Live SMC + Vision AI gpt-6-luna + Reasoning AI + Trial Limits)
 
-export const config = { api: { bodyParser: { sizeLimit: '15mb' } } }; // Limit dinaikkan untuk gambar
+export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
 const KV_KEY = 'alu_clients';
 const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
@@ -9,7 +9,13 @@ const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
 // ── AI CONFIG ──
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const AI_MODEL = process.env.AI_MODEL || 'qwen-3.8-max'; // Default Qwen 3.8 Max
+
+// Model Utama (Untuk Reasoning / Analisa Teks SMC)
+const AI_MODEL = process.env.AI_MODEL || 'qwen-3.8-max'; 
+
+// Model Khusus Vision (Untuk Baca Gambar/Chart)
+// Diset default ke gpt-6-luna yang sangat bagus untuk visual
+const AI_VISION_MODEL = process.env.AI_VISION_MODEL || 'gpt-6-luna'; 
 
 const API_KEYS = [
   process.env.TICKERLAYER_API_KEY,
@@ -242,47 +248,36 @@ async function checkAccess(email) {
   if (!email) return { ok: false, key: 'noEmail' };
   try {
     const raw = await kv(['GET', KV_KEY]);
-    if (!raw) return { ok: true, status: 'admin' }; // Admin bypass
+    if (!raw) return { ok: true, status: 'admin' };
     const clients = JSON.parse(raw);
     const c = clients.find(x => x.email === email);
     if (!c) return { ok: false, key: 'notRegistered' };
     if (new Date(c.expires_at) <= new Date()) return { ok: false, key: 'expired' };
-    return { ok: true, status: c.status }; // Kembalikan status
+    return { ok: true, status: c.status };
   } catch (e) {}
   return { ok: true, status: 'admin' };
 }
 
-// ── FUNGSI CEK BATAS TRIAL ──
 async function checkTrialLimit(email, status) {
-  if (status !== 'trial') return { ok: true }; // Bypass untuk monthly/lifetime
-
+  if (status !== 'trial') return { ok: true };
   const today = new Date().toISOString().slice(0, 10);
   const dailyKey = `trial_daily:${email}:${today}`;
   const totalKey = `trial_total:${email}`;
-
   try {
     const dailyRaw = await kv(['GET', dailyKey]);
     const totalRaw = await kv(['GET', totalKey]);
-
     const dailyCount = parseInt(dailyRaw || '0', 10);
     const totalCount = parseInt(totalRaw || '0', 10);
 
-    if (totalCount >= 15) {
-       return { ok: false, msg: 'Batas maksimal 15 kali request untuk masa trial telah habis. Silakan upgrade ke paket berbayar.' };
-    }
-    if (dailyCount >= 5) {
-       return { ok: false, msg: 'Batas harian 5 kali request untuk masa trial telah habis. Coba lagi besok.' };
-    }
+    if (totalCount >= 15) return { ok: false, msg: 'Batas maksimal 15 kali request untuk masa trial telah habis.' };
+    if (dailyCount >= 5) return { ok: false, msg: 'Batas harian 5 kali request untuk masa trial telah habis. Coba lagi besok.' };
 
-    // Catat pemakaian (Increment)
     await kv(['INCR', dailyKey]);
     if (dailyCount === 0) await kv(['EXPIRE', dailyKey, 172800]); 
     await kv(['INCR', totalKey]);
-
     return { ok: true };
   } catch (e) {
-    console.error('KV Error Trial Limit:', e);
-    return { ok: true }; // Fail-open jika KV error
+    return { ok: true };
   }
 }
 
@@ -660,11 +655,10 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
   } catch (err) { return null; }
 }
 
-// ── VISION AI (IMAGE) ──
+// ── VISION AI (IMAGE) MENGGUNAKAN GPT-6-LUNA ──
 async function getVisionSignal(images, style, lang) {
   if (!OPENAI_API_KEY) return { plan: null, reason: 'API Key AI tidak ada.' };
   
-  // Prompt diupdate agar AI memberikan alasan yang lebih komprehensif
   const prompt = `
 Anda adalah trader profesional SMC/ICT. Tugas Anda adalah menganalisa gambar chart trading yang dilampirkan.
 Gaya Trading: ${style}.
@@ -702,7 +696,7 @@ KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI CONTOH DI BAWAH INI. JANGAN ADA TEKS 
       method: 'POST', 
       headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
-        model: AI_MODEL, 
+        model: AI_VISION_MODEL, // <--- MENGGUNAKAN GPT-6-LUNA
         messages: [{ role: 'user', content: userContent }], 
         max_tokens: 600, 
         temperature: 0.1 
@@ -718,13 +712,11 @@ KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI CONTOH DI BAWAH INI. JANGAN ADA TEKS 
     const data = await resp.json();
     let content = data.choices?.[0]?.message?.content?.trim() || '';
     
-    // PENGAMAN JIKA AI MENGEMBALIKAN RESPONS KOSONG
     if (!content || content.length === 0) {
       console.error('AI Response Kosong (Empty). Data:', data);
-      return { plan: null, reason: 'AI tidak memberikan respons. Kemungkinan model qwen-3.8-max di GutsAI tidak mendukung gambar (Vision). Hubungi admin untuk ganti model ke qwen-vl-max.' };
+      return { plan: null, reason: `AI tidak memberikan respons. Model ${AI_VISION_MODEL} gagal membaca gambar.` };
     }
     
-    // PARSING JSON YANG LEBIH PINTAR
     content = content.replace(/```json/g, '').replace(/```/g, '').trim();
     const startIdx = content.indexOf('{');
     const endIdx = content.lastIndexOf('}');
@@ -1052,7 +1044,6 @@ export default async function handler(req, res) {
     const access = await checkAccess(body.email);
     if (!access.ok) return res.status(403).json({ error: t[access.key] });
 
-    // Cek Limit Trial untuk Vision
     const trial = await checkTrialLimit(body.email, access.status);
     if (!trial.ok) return res.status(403).json({ error: trial.msg });
 
@@ -1082,7 +1073,6 @@ export default async function handler(req, res) {
       gold = isGold(symbol);
       prof = pairProfile(symbol);
     } else {
-       // Fallback jika hanya gambar yang dikirim tanpa nama pair
        if (entry > 50000) { symbol = 'BTCUSD'; dec = 2; pip = 1; } 
        else if (entry > 1000) { symbol = 'XAUUSD'; dec = 2; pip = 0.1; gold = true; }
        else if (entry > 10) { symbol = 'US30'; dec = 2; pip = 1; }
@@ -1095,7 +1085,6 @@ export default async function handler(req, res) {
     const f = v => Number(Number(v).toFixed(dec));
     const riskPips = Math.abs(entry - sl) / pip;
     
-    // Map style ke kind untuk prompt
     let kindStr = 'scalp';
     if (style === 'Day Trading') kindStr = 'day';
     if (style === 'Intraday') kindStr = 'intraday';
@@ -1132,7 +1121,7 @@ export default async function handler(req, res) {
         setupLabel: style,
         zoneLabel: 'Vision Entry',
         zoneNote: p.timeframe ? `Timeframe: ${p.timeframe}` : 'Berdasarkan gambar',
-        reason: aiReason || p.reason // GUNAKAN HASIL REASONING BARU
+        reason: aiReason || p.reason
       }
     });
   }
@@ -1150,7 +1139,6 @@ export default async function handler(req, res) {
   const access = await checkAccess(body.email);
   if (!access.ok) return res.status(403).json({ error: t[access.key] });
 
-  // Cek Limit Trial untuk Live SMC
   const trial = await checkTrialLimit(body.email, access.status);
   if (!trial.ok) return res.status(403).json({ error: trial.msg });
 
