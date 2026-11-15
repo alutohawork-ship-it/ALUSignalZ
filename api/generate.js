@@ -1,5 +1,5 @@
 // api/generate.js
-// v70 (Dynamic Validation Steps + Strict Vision TF/Pair Reading + Live SMC)
+// v73 (Enhanced Live Reasoning: Per-TF Structure, Execution Logic, Invalidation)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
@@ -10,10 +10,7 @@ const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// Model Utama (Untuk Reasoning / Analisa Teks SMC)
 const AI_MODEL = process.env.AI_MODEL || 'qwen-3.8-max'; 
-
-// Model Khusus Vision (Untuk Baca Gambar/Chart)
 const AI_VISION_MODEL = process.env.AI_VISION_MODEL || 'gpt-6-luna'; 
 
 const API_KEYS = [
@@ -339,17 +336,22 @@ const TX = {
     noSource: 'tidak ada sumber', noSetup: 'Tidak ada setup yang valid saat ini.', notProcessed: 'Belum diproses',
     zoneFresh: (side, tf, lo, hi, inside) => `Zona ${side} ${tf} VALID & FRESH ${inside ? '(harga di dalam)' : '(harga dekat)'}: ${lo} - ${hi}`,
     aiPrompt: (d) => `
-Anda adalah "Alu Signal Z", trader SMC/ICT. Tulis 1 paragraf (maks 400 karakter, bahasa Indonesia, tegas) yang menjelaskan MENGAPA entry ini diambil. 
-WAJIB: Sebutkan nama Pair/Aset (${d.symbol}) secara eksplisit di dalam teks paragraf pertama.
-Gunakan HANYA data di bawah.
+Anda adalah "Alu Signal Z", trader SMC/ICT profesional. Tulis 1 paragraf analisa eksekusi (maks 500 karakter, tegas, bahasa Indonesia).
+WAJIB mencakup 4 poin berikut secara mengalir:
+1. **Analisa Struktur MTF**: Sebutkan kondisi market di masing-masing timeframe (${d.tfs}) berdasarkan data.
+2. **Alasan Eksekusi**: Jelaskan mengapa entry diambil (Reversal / Continuation / Retest FVG / Sweep Liquidity / Order Block).
+3. **Invalidasi**: Sebutkan level harga yang membatalkan setup ini (SL / struktur tertembus).
+4. **Aksi**: Tegaskan tipe order (Market NOW atau Limit) sesuai gaya trading.
+
 === DATA ===
 - Pair/Aset: ${d.symbol}
-- Sinyal: ${d.sideW} | Gaya: ${d.kind} | Order: ${d.orderType}
-- Entry: ${d.entry} | SL: ${d.sl} (${d.riskPips} pip)
+- Gaya: ${d.kind} (${d.tfs})
+- Sinyal: ${d.sideW} | Order: ${d.orderType}
+- Entry: ${d.entry} | SL (Invalidasi): ${d.sl} (${d.riskPips} pip)
 - TP: ${d.tps}
 - Setup: ${d.setup}
-- Konteks MTF: ${d.zone || '-'}
-- Alasan: ${d.raw}
+- Struktur MTF: ${d.zone || '-'}
+- Data Internal: ${d.raw}
 `,
     aiSystem: 'Anda adalah AI analis trading SMC/ICT yang objektif, dingin, dan presisi.',
   },
@@ -406,17 +408,22 @@ Gunakan HANYA data di bawah.
     noSource: 'no source', noSetup: 'No valid setup right now.', notProcessed: 'Not processed yet',
     zoneFresh: (side, tf, lo, hi, inside) => `${side.toUpperCase()} zone ${tf} VALID & FRESH ${inside ? '(price inside)' : '(price near)'}: ${lo} - ${hi}`,
     aiPrompt: (d) => `
-You are "Alu Signal Z", an SMC/ICT trader. Write ONE paragraph in English (max 400 characters) explaining WHY this entry was taken.
-MANDATORY: Explicitly mention the Pair/Asset name (${d.symbol}) in the text.
-Use ONLY the data below.
+You are "Alu Signal Z", a professional SMC/ICT trader. Write ONE execution analysis paragraph (max 500 characters, assertive, in English).
+MUST include these 4 points flowing naturally:
+1. **MTF Structure Analysis**: State market conditions in each timeframe (${d.tfs}) based on data.
+2. **Execution Reason**: Explain why the entry was taken (Reversal / Continuation / Retest FVG / Sweep Liquidity / Order Block).
+3. **Invalidation**: State the price level that invalidates this setup (SL / broken structure).
+4. **Action**: Reiterate the order type (Market NOW or Limit) according to the trading style.
+
 === DATA ===
 - Pair/Asset: ${d.symbol}
-- Signal: ${d.sideW} | Style: ${d.kind} | Order: ${d.orderType}
-- Entry: ${d.entry} | SL: ${d.sl} (${d.riskPips} pips)
+- Style: ${d.kind} (${d.tfs})
+- Signal: ${d.sideW} | Order: ${d.orderType}
+- Entry: ${d.entry} | SL (Invalidation): ${d.sl} (${d.riskPips} pips)
 - TP: ${d.tps}
 - Setup: ${d.setup}
 - MTF Context: ${d.zone || '-'}
-- Reason: ${d.raw}
+- Internal Data: ${d.raw}
 `,
     aiSystem: 'You are an objective, calm, and precise SMC/ICT trading analyst.',
   },
@@ -638,21 +645,23 @@ function slBounds(kind, ctx, atrVal) {
   return { min: a * ctx.prof.slMul * atrVal, max: b * ctx.prof.slMul * atrVal };
 }
 
-// ── AI REASONING (TEXT LIVE SMC) ──
-async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup, rawReason, riskPips, zoneLine }) {
+// ── AI REASONING (TEXT LIVE SMC & VISION) ──
+async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup, rawReason, riskPips, zoneLine, timeframes }) {
   if (!OPENAI_API_KEY) return null;
   const { symbol, dec, prof, lang } = ctx;
   const t = TX[lang] || TX.id;
   const p = v => Number(v).toFixed(dec);
+  
   const prompt = t.aiPrompt({
     symbol, classLabel: t.classLabel[prof.cls] || prof.label, sideW: dir === 1 ? 'BUY' : 'SELL',
     kind: t.kind[kind] || kind, orderType, entry: p(entry), sl: p(sl),
     riskPips: riskPips.toFixed(1), tps: tps.map(p).join(', '), setup, zone: zoneLine || '', raw: rawReason,
+    tfs: timeframes || 'Chart'
   });
   try {
     const resp = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
       method: 'POST', headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: AI_MODEL, messages: [{ role: 'system', content: t.aiSystem }, { role: 'user', content: prompt }], max_tokens: 200, temperature: 0.1 })
+      body: JSON.stringify({ model: AI_MODEL, messages: [{ role: 'system', content: t.aiSystem }, { role: 'user', content: prompt }], max_tokens: 400, temperature: 0.2 })
     });
     if (!resp.ok) return null;
     const data = await resp.json();
@@ -660,33 +669,33 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
   } catch (err) { return null; }
 }
 
-// ── VISION AI (IMAGE) MENGGUNAKAN GPT-6-LUNA ──
+// ── VISION AI (MULTI-IMAGE / MTF) MENGGUNAKAN GPT-6-LUNA ──
 async function getVisionSignal(images, style, lang) {
   if (!OPENAI_API_KEY) return { plan: null, reason: 'API Key AI tidak ada.' };
   
-  // PROMPT DIPERKETAT: Membaca teks TF & Pair secara eksplisit, DILARANG menebak.
   const prompt = `
-Anda adalah trader profesional SMC/ICT. Tugas Anda adalah menganalisa gambar chart trading yang dilampirkan.
+Anda adalah trader profesional SMC/ICT. Anda menerima ${images.length} gambar chart trading (Multi-Timeframe / MTF).
+Gaya Trading: ${style}.
 
 Instruksi Wajib (Sangat Penting):
-1. LIHAT POJOK KIRI ATAS atau KANAN ATAS chart. Baca NAMA PAIR/ASSET yang tertulis (contoh: XAUUSD, BTCUSD, EURUSD). Jika tidak ada, tulis "UNKNOWN".
-2. LIHAT POJOK chart. Baca TIMEFRAME yang tertulis (contoh: M1, M3, M5, M15, H1, H4). Jika tidak ada, tulis "UNKNOWN". JANGAN MENEBAK (jika tulisannya M3, jangan tulis M15).
-3. Baca struktur market HANYA berdasarkan gambar tersebut (Trend, Support, Resistance, FVG, Order Block).
-4. Tentukan arah entry yang valid (BUY atau SELL).
+1. LIHAT SETIAP GAMBAR. Baca TIMEFRAME masing-masing gambar (misal: Gambar 1 = M3, Gambar 2 = M15, Gambar 3 = M30). Kumpulkan SEMUA timeframe yang ada ke dalam bentuk ARRAY (contoh: ["M3", "M15", "M30"]). JANGAN hanya mengambil satu.
+2. LIHAT POJOK GAMBAR. Baca NAMA PAIR/ASSET yang tertulis (contoh: XAUUSD). Jika tidak ada, tulis "UNKNOWN".
+3. Analisa struktur pasar pada MASING-MASING timeframe (Trend, Support, Resistance, FVG, Order Block).
+4. Cari CONFLUENCE (persetujuan) antar timeframe. Tentukan arah entry yang valid (BUY atau SELL) berdasarkan keseluruhan MTF.
 5. Tentukan level Entry, Stop Loss (SL), TP1, TP2, dan TP3 berdasarkan harga yang tertera.
-6. Tuliskan alasan (reason) maksimal 400 karakter (bahasa Indonesia). WAJIB sebutkan nama Pair dan Timeframe yang sudah Anda baca di langkah 1 & 2.
+6. Tuliskan alasan (reason) maksimal 500 karakter (bahasa Indonesia). WAJIB jelaskan kondisi di masing-masing timeframe (contoh: "Pada M3 terjadi..., didukung oleh M15 yang...") lalu simpulkan alasannya.
 
 KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI INI:
 {
   "symbol": "XAUUSD",
-  "timeframe": "M3",
+  "timeframes": ["M3", "M15", "M30"],
   "signal": "BUY",
   "entry": 3880.50,
   "sl": 3875.00,
   "tp1": 3885.00,
   "tp2": 3890.00,
   "tp3": 3895.00,
-  "reason": "Pada XAUUSD M3, harga menyapu likuiditas di area demand dan membentuk FVG, memungkinkan pantulan naik menuju BOS terdekat."
+  "reason": "Pada M3 harga menyapu likuiditas, didukung oleh struktur M15 yang bullish dan M30 yang mulai berbalik arah (BOS). Confluence ini mengindikasikan potensi pantulan naik yang kuat."
 }
 `;
 
@@ -705,7 +714,7 @@ KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI INI:
       body: JSON.stringify({ 
         model: AI_VISION_MODEL, 
         messages: [{ role: 'user', content: userContent }], 
-        max_tokens: 600, 
+        max_tokens: 1000, 
         temperature: 0.1 
       })
     });
@@ -720,7 +729,6 @@ KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI INI:
     let content = data.choices?.[0]?.message?.content?.trim() || '';
     
     if (!content || content.length === 0) {
-      console.error('AI Response Kosong (Empty). Data:', data);
       return { plan: null, reason: `AI tidak memberikan respons. Model ${AI_VISION_MODEL} gagal membaca gambar.` };
     }
     
@@ -739,7 +747,6 @@ KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI INI:
       }
     }
     
-    console.error('Raw AI Response (Bukan JSON):', content);
     return { plan: null, reason: `AI tidak mengembalikan format JSON. Jawaban AI: "${content.substring(0, 50)}..."` };
     
   } catch (err) {
@@ -749,7 +756,7 @@ KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI INI:
 }
 
 // ── FINALIZE PLAN ──
-async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, rrList, confidence, setup, zoneNote, zoneRange, head, lines, zoneLine }) {
+async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, rrList, confidence, setup, zoneNote, zoneRange, head, lines, zoneLine, timeframes }) {
   const { f, pip, gold, prof } = ctx;
   const t = tx(ctx);
 
@@ -772,7 +779,7 @@ async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, 
   const parts = [head, ...lines, slNote, t.entryLine(f(entry), (risk / pip).toFixed(0), f(sl)), rrList.map((x, i) => `TP${i + 1} 1:${x}`).join(', ')].filter(Boolean);
   const manualReason = parts.map(s => s.replace(/\.?$/, '.')).join(' • ');
 
-  const aiReason = await getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup, rawReason: manualReason, riskPips: risk / pip, zoneLine });
+  const aiReason = await getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup, rawReason: manualReason, riskPips: risk / pip, zoneLine, timeframes });
 
   return {
     dir,
@@ -795,9 +802,9 @@ async function buildScalpPlan({ m1, price, rrList, ctx }) {
   return await finalizePlan({
     dir, entry: price, orderType: 'NOW', baseSL, kind: 'scalp', atrVal: atrM1, ctx, rrList,
     confidence: 'HIGH', setup: `Market NOW (${srcName(struct.src, ctx.lang)})`,
-    zoneNote: `Murni Struktur M1`, zoneRange: { min: price, max: price },
+    zoneNote: `Murni Struktur M1`, zoneRange: { min: price, max: price }, timeframes: 'M1',
     head: t.headLine(t.title.scalp, side, 'NOW', ctx.symbol),
-    lines: [`Eksekusi NOW mengikuti momentum M1: ${srcName(struct.src, ctx.lang)}`],
+    lines: [`Struktur M1: ${srcName(struct.src, ctx.lang)}`],
   });
 }
 
@@ -815,11 +822,11 @@ async function buildDayPlan({ m1, price, rrList, ctx }) {
   if (demand && (!supply || demand.dist <= supply.dist)) {
     dir = 1; entry = demand.top; baseSL = demand.sl; zoneRange = { min: demand.bottom, max: demand.top };
     setup = `M1 Demand Limit (Zone Scalping)`;
-    lines.push(`Mengeksekusi BUY LIMIT di zona Demand M1.`);
+    lines.push(`Setup M1: Zona Demand Fresh`);
   } else if (supply) {
     dir = -1; entry = supply.bottom; baseSL = supply.sl; zoneRange = { min: supply.bottom, max: supply.top };
     setup = `M1 Supply Limit (Zone Scalping)`;
-    lines.push(`Mengeksekusi SELL LIMIT di zona Supply M1.`);
+    lines.push(`Setup M1: Zona Supply Fresh`);
   } else {
     const fvgBuy = evaluateFVG(m1, price, 1, atrM1, 40);
     const fvgSell = evaluateFVG(m1, price, -1, atrM1, 40);
@@ -828,12 +835,12 @@ async function buildDayPlan({ m1, price, rrList, ctx }) {
       dir = 1; entry = fvgBuy.entry; baseSL = fvgBuy.sl; 
       zoneRange = { min: fvgBuy.fvg.lo, max: fvgBuy.fvg.hi };
       setup = `M1 FVG Bullish Limit (Continuity)`;
-      lines.push(`Tidak ada zona fresh, menunggu retest FVG M1.`);
+      lines.push(`Setup M1: FVG Bullish`);
     } else if (fvgSell.useFVG) {
       dir = -1; entry = fvgSell.entry; baseSL = fvgSell.sl; 
       zoneRange = { min: fvgSell.fvg.lo, max: fvgSell.fvg.hi };
       setup = `M1 FVG Bearish Limit (Continuity)`;
-      lines.push(`Tidak ada zona fresh, menunggu retest FVG M1.`);
+      lines.push(`Setup M1: FVG Bearish`);
     } else {
       return { plan: null, reason: 'Tidak ada setup valid. Tidak ada Zona S/D atau FVG M1 yang fresh.' };
     }
@@ -841,9 +848,9 @@ async function buildDayPlan({ m1, price, rrList, ctx }) {
 
   return await finalizePlan({
     dir, entry, orderType: 'LIMIT', baseSL, kind: 'day', atrVal: atrM1, ctx, rrList,
-    confidence: 'HIGH', setup, zoneNote: setup, zoneRange,
+    confidence: 'HIGH', setup, zoneNote: setup, zoneRange, timeframes: 'M1',
     head: t.headLine(t.title.day, dir === 1 ? 'BUY' : 'SELL', 'LIMIT', ctx.symbol),
-    lines: [...lines, `Target: ${f(zoneRange.min)} - ${f(zoneRange.max)}`],
+    lines: [...lines, `Area Eksekusi: ${f(zoneRange.min)} - ${f(zoneRange.max)}`],
   });
 }
 
@@ -865,7 +872,10 @@ async function buildIntradayPlan({ m5, m15, price, rrList, ctx }) {
   }
 
   let dir, entry, baseSL, zoneRange, setup;
-  let lines = [t.biasStruct('H1+M15', 'Trend Following')];
+  let lines = [
+    `Bias H1: ${srcName(biasH1.src, ctx.lang)}`,
+    `Bias M15: ${srcName(biasM15.src, ctx.lang)}`
+  ];
 
   if (htfBias === 1) {
     dir = 1;
@@ -873,13 +883,13 @@ async function buildIntradayPlan({ m5, m15, price, rrList, ctx }) {
     if (demand) {
       entry = demand.top; baseSL = demand.sl; zoneRange = { min: demand.bottom, max: demand.top };
       setup = `M5 Demand Limit (Trend Follow)`;
-      lines.push(`Menemukan Zona Demand M5 untuk BUY.`);
+      lines.push(`Setup M5: Zona Demand Fresh`);
     } else {
       const fvgBuy = evaluateFVG(m5, price, 1, atrM5, 40);
       if (fvgBuy.useFVG) {
         entry = fvgBuy.entry; baseSL = fvgBuy.sl; zoneRange = { min: fvgBuy.fvg.lo, max: fvgBuy.fvg.hi };
         setup = `M5 FVG Bullish Limit (Trend Continuity)`;
-        lines.push(`Tidak ada zona fresh, menggunakan FVG M5 untuk BUY.`);
+        lines.push(`Setup M5: FVG Bullish`);
       } else {
         return { plan: null, reason: 'Tren Bullish, tetapi tidak ada zona Demand M5 atau FVG Bullish M5 yang fresh.' };
       }
@@ -890,13 +900,13 @@ async function buildIntradayPlan({ m5, m15, price, rrList, ctx }) {
     if (supply) {
       entry = supply.bottom; baseSL = supply.sl; zoneRange = { min: supply.bottom, max: supply.top };
       setup = `M5 Supply Limit (Trend Follow)`;
-      lines.push(`Menemukan Zona Supply M5 untuk SELL.`);
+      lines.push(`Setup M5: Zona Supply Fresh`);
     } else {
       const fvgSell = evaluateFVG(m5, price, -1, atrM5, 40);
       if (fvgSell.useFVG) {
         entry = fvgSell.entry; baseSL = fvgSell.sl; zoneRange = { min: fvgSell.fvg.lo, max: fvgSell.fvg.hi };
         setup = `M5 FVG Bearish Limit (Trend Continuity)`;
-        lines.push(`Tidak ada zona fresh, menggunakan FVG M5 untuk SELL.`);
+        lines.push(`Setup M5: FVG Bearish`);
       } else {
         return { plan: null, reason: 'Tren Bearish, tetapi tidak ada zona Supply M5 atau FVG Bearish M5 yang fresh.' };
       }
@@ -905,9 +915,9 @@ async function buildIntradayPlan({ m5, m15, price, rrList, ctx }) {
 
   return await finalizePlan({
     dir, entry, orderType: 'LIMIT', baseSL, kind: 'intraday', atrVal: atrM5, ctx, rrList,
-    confidence: 'HIGH', setup, zoneNote: setup, zoneRange,
+    confidence: 'HIGH', setup, zoneNote: setup, zoneRange, timeframes: 'M5, M15, H1',
     head: t.headLine(t.title.intraday, dir === 1 ? 'BUY' : 'SELL', 'LIMIT', ctx.symbol),
-    lines: [...lines, `Target retest M5: ${f(zoneRange.min)} - ${f(zoneRange.max)}`],
+    lines: [...lines, `Area Eksekusi M5: ${f(zoneRange.min)} - ${f(zoneRange.max)}`],
   });
 }
 
@@ -935,7 +945,11 @@ async function buildSwingPlan({ m15, price, rrList, ctx }) {
   }
 
   let dir, entry, baseSL, zoneRange, setup;
-  let lines = [t.biasStruct('D1+H4+H1', 'Trend Following')];
+  let lines = [
+    `Bias D1: ${srcName(biasD1.src, ctx.lang)}`,
+    `Bias H4: ${srcName(biasH4.src, ctx.lang)}`,
+    `Bias H1: ${srcName(biasH1.src, ctx.lang)}`
+  ];
 
   if (htfBias === 1) {
     dir = 1;
@@ -943,13 +957,13 @@ async function buildSwingPlan({ m15, price, rrList, ctx }) {
     if (demand) {
       entry = demand.top; baseSL = demand.sl; zoneRange = { min: demand.bottom, max: demand.top };
       setup = `M15 Demand Limit (Trend Follow)`;
-      lines.push(`Menemukan Zona Demand M15 untuk BUY.`);
+      lines.push(`Setup M15: Zona Demand Fresh`);
     } else {
       const fvgBuy = evaluateFVG(m15, price, 1, atrM15, 40);
       if (fvgBuy.useFVG) {
         entry = fvgBuy.entry; baseSL = fvgBuy.sl; zoneRange = { min: fvgBuy.fvg.lo, max: fvgBuy.fvg.hi };
         setup = `M15 FVG Bullish Limit (Trend Continuity)`;
-        lines.push(`Tidak ada zona fresh, menggunakan FVG M15 untuk BUY.`);
+        lines.push(`Setup M15: FVG Bullish`);
       } else {
         return { plan: null, reason: 'Tren Makro Bullish, tetapi tidak ada zona Demand M15 atau FVG Bullish M15 yang fresh.' };
       }
@@ -960,13 +974,13 @@ async function buildSwingPlan({ m15, price, rrList, ctx }) {
     if (supply) {
       entry = supply.bottom; baseSL = supply.sl; zoneRange = { min: supply.bottom, max: supply.top };
       setup = `M15 Supply Limit (Trend Follow)`;
-      lines.push(`Menemukan Zona Supply M15 untuk SELL.`);
+      lines.push(`Setup M15: Zona Supply Fresh`);
     } else {
       const fvgSell = evaluateFVG(m15, price, -1, atrM15, 40);
       if (fvgSell.useFVG) {
         entry = fvgSell.entry; baseSL = fvgSell.sl; zoneRange = { min: fvgSell.fvg.lo, max: fvgSell.fvg.hi };
         setup = `M15 FVG Bearish Limit (Trend Continuity)`;
-        lines.push(`Tidak ada zona fresh, menggunakan FVG M15 untuk SELL.`);
+        lines.push(`Setup M15: FVG Bearish`);
       } else {
         return { plan: null, reason: 'Tren Makro Bearish, tetapi tidak ada zona Supply M15 atau FVG Bearish M15 yang fresh.' };
       }
@@ -975,9 +989,9 @@ async function buildSwingPlan({ m15, price, rrList, ctx }) {
 
   return await finalizePlan({
     dir, entry, orderType: 'LIMIT', baseSL, kind: 'swing', atrVal: atrM15, ctx, rrList,
-    confidence: 'HIGH', setup, zoneNote: setup, zoneRange,
+    confidence: 'HIGH', setup, zoneNote: setup, zoneRange, timeframes: 'M15, H1, H4, D1',
     head: t.headLine(t.title.swing, dir === 1 ? 'BUY' : 'SELL', 'LIMIT', ctx.symbol),
-    lines: [...lines, `Target retest M15: ${f(zoneRange.min)} - ${f(zoneRange.max)}`],
+    lines: [...lines, `Area Eksekusi M15: ${f(zoneRange.min)} - ${f(zoneRange.max)}`],
   });
 }
 
@@ -1071,7 +1085,6 @@ export default async function handler(req, res) {
     const sl = Number(p.sl);
     const tps = [p.tp1, p.tp2, p.tp3].filter(v => v != null).map(Number);
     
-    // Prioritas: 1. Dari input text user, 2. Dari gambar (AI Vision), 3. Tebak dari harga
     let symbol = resolveSymbol(body, req.query) || (p.symbol && p.symbol !== 'UNKNOWN' ? normalizeSymbol(p.symbol) : null);
     
     let dec = 2, pip = 0.01, gold = false, prof = PAIR_CLASS_PROFILE.fx;
@@ -1099,29 +1112,37 @@ export default async function handler(req, res) {
     if (style === 'Intraday') kindStr = 'intraday';
     if (style === 'Swing') kindStr = 'swing';
 
-    const tfText = p.timeframe && p.timeframe !== 'UNKNOWN' ? p.timeframe : 'Chart';
+    // Parse Array MTF dari AI Vision
+    let tfText = 'Chart';
+    if (Array.isArray(p.timeframes)) {
+      tfText = p.timeframes.join(', ');
+    } else if (typeof p.timeframes === 'string') {
+      tfText = p.timeframes;
+    } else if (p.timeframe) {
+      tfText = p.timeframe;
+    }
 
-    // Panggil AI Reasoning menggunakan model teks utama (AI_MODEL)
     const aiReason = await getAIReasoning({
       ctx, dir, kind: kindStr, orderType: 'NOW', entry, sl, tps,
       setup: `Vision AI (${tfText})`,
       rawReason: p.reason,
       riskPips: riskPips,
-      zoneLine: `Timeframe: ${tfText}`
+      zoneLine: `MTF: ${tfText}`,
+      timeframes: tfText 
     });
 
     // Susun langkah-langkah validasi dinamis untuk frontend (Vision)
     const visionSteps = [
       `Membaca Pair & Timeframe (${symbol} - ${tfText})`,
-      `Menganalisa struktur pasar ${tfText}`,
-      `Mencari zona Supply & Demand / FVG`,
+      `Menganalisa struktur MTF (${tfText})`,
+      `Mencari confluence zona Supply & Demand / FVG`,
       `Validasi rejection candle`,
       `Menghitung entry, SL, TP`
     ];
 
     return res.status(200).json({
       ok: true,
-      analysis_steps: visionSteps, // <--- KIRIM INI KE FRONTEND
+      analysis_steps: visionSteps,
       signal: {
         signal: p.signal,
         mode: 'MARKET',
@@ -1138,11 +1159,11 @@ export default async function handler(req, res) {
         expireMs: 0,
         confidence: 'MEDIUM',
         risk: 'HIGH',
-        setup: `Vision AI (${tfText})`,
+        setup: `Vision AI (${tfText})`, 
         entryStyle: style,
         setupLabel: style,
         zoneLabel: 'Vision Entry',
-        zoneNote: `Timeframe: ${tfText}`,
+        zoneNote: `Timeframes: ${tfText}`,
         reason: aiReason || p.reason 
       }
     });
