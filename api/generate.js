@@ -1,5 +1,5 @@
 // api/generate.js
-// v87 (Fix HTTP 500: AI Timeout Protection + Global Try-Catch)
+// v88 (Fixed missing TX functions: entryLine & slCapped)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
@@ -266,6 +266,8 @@ const TX = {
     kind: { scalp: 'Scalping (Agresif)', day: 'Scalping (Konservatif)', intraday: 'Day Trading (Intraday)', swing: 'Swing (Positioning)' },
     classLabel: { gold: 'Emas', silver: 'Perak', metal: 'Logam', fx: 'Forex', fx_jpy: 'Forex JPY', index: 'Indeks', commodity: 'Komoditas', crypto: 'Kripto' },
     headLine: (title, dir, ot, sym) => `${title} ${dir} ${ot} pada ${sym}`,
+    entryLine: (e, pips, sl) => `Entry ${e}, SL (${pips} pip) di ${sl}`,
+    slCapped: (max, raw) => `SL dibatasi ${max} pip, struktur lebih lebar (${raw} pip)`,
     aiPrompt: (d) => `
 Anda adalah "Alu Signal Z", trader institusional SMC/ICT. Tulis analisa eksekusi (maks 600 karakter, bahasa Indonesia) berdasarkan data di bawah.
 WAJIB jelaskan narasi:
@@ -294,6 +296,8 @@ WAJIB jelaskan narasi:
     kind: { scalp: 'Scalping (Aggressive)', day: 'Scalping (Conservative)', intraday: 'Day Trading (Intraday)', swing: 'Swing (Positioning)' },
     classLabel: { gold: 'Gold', silver: 'Silver', metal: 'Metal', fx: 'Forex', fx_jpy: 'JPY Forex', index: 'Index', commodity: 'Commodity', crypto: 'Crypto' },
     headLine: (title, dir, ot, sym) => `${title} ${dir} ${ot} on ${sym}`,
+    entryLine: (e, pips, sl) => `Entry ${e}, SL (${pips} pips) at ${sl}`,
+    slCapped: (max, raw) => `SL capped at ${max} pips, structure is wider (${raw} pips)`,
     aiPrompt: (d) => `
 You are "Alu Signal Z", an institutional SMC/ICT trader. Write an execution analysis (max 600 characters, in English) based on the data below.
 MUST explain the narrative:
@@ -554,7 +558,7 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
   
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8500); // Timeout 8.5 detik agar tidak kena limit Vercel 10s
+    const timeoutId = setTimeout(() => controller.abort(), 8500); 
 
     const resp = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
       method: 'POST', 
@@ -619,7 +623,7 @@ KEMBALIKAN HANYA DALAM FORMAT JSON:
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8500); // Timeout Vision juga
+    const timeoutId = setTimeout(() => controller.abort(), 8500); 
 
     const resp = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
       method: 'POST', 
