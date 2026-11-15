@@ -1,5 +1,5 @@
 // api/generate.js
-// v69 (Live SMC + Vision AI gpt-6-luna + Reasoning + Fix Pair Name in Reasoning)
+// v70 (Dynamic Validation Steps + Strict Vision TF/Pair Reading + Live SMC)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
@@ -664,29 +664,29 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
 async function getVisionSignal(images, style, lang) {
   if (!OPENAI_API_KEY) return { plan: null, reason: 'API Key AI tidak ada.' };
   
+  // PROMPT DIPERKETAT: Membaca teks TF & Pair secara eksplisit, DILARANG menebak.
   const prompt = `
 Anda adalah trader profesional SMC/ICT. Tugas Anda adalah menganalisa gambar chart trading yang dilampirkan.
-Gaya Trading: ${style}.
 
-Instruksi Wajib:
-1. Amati gambar dan baca TIMEFRAME yang tertulis di dalamnya (misal: M1, M5, H1, D1).
-2. Baca struktur market (Trend, Support, Resistance, FVG, Order Block) yang terlihat.
-3. Tentukan arah entry yang valid (BUY atau SELL).
-4. Tentukan level Entry, Stop Loss (SL), TP1, TP2, dan TP3 berdasarkan harga yang tertera.
-5. Tuliskan alasan (reason) yang komprehensif (maksimal 400 karakter, bahasa Indonesia, tegas) yang menjelaskan MENGAPA entry ini diambil. Gunakan gaya bahasa SMC/ICT seperti "mitigasi FVG", "sweep liquidity", "BOS", dll. Sebutkan juga timeframe-nya.
-6. Baca atau tebak nama PAIR/SYMBOL (misal: XAUUSD, BTCUSD, EURUSD) dari gambar. Jika tidak terbaca, kosongkan.
+Instruksi Wajib (Sangat Penting):
+1. LIHAT POJOK KIRI ATAS atau KANAN ATAS chart. Baca NAMA PAIR/ASSET yang tertulis (contoh: XAUUSD, BTCUSD, EURUSD). Jika tidak ada, tulis "UNKNOWN".
+2. LIHAT POJOK chart. Baca TIMEFRAME yang tertulis (contoh: M1, M3, M5, M15, H1, H4). Jika tidak ada, tulis "UNKNOWN". JANGAN MENEBAK (jika tulisannya M3, jangan tulis M15).
+3. Baca struktur market HANYA berdasarkan gambar tersebut (Trend, Support, Resistance, FVG, Order Block).
+4. Tentukan arah entry yang valid (BUY atau SELL).
+5. Tentukan level Entry, Stop Loss (SL), TP1, TP2, dan TP3 berdasarkan harga yang tertera.
+6. Tuliskan alasan (reason) maksimal 400 karakter (bahasa Indonesia). WAJIB sebutkan nama Pair dan Timeframe yang sudah Anda baca di langkah 1 & 2.
 
-KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI CONTOH DI BAWAH INI. JANGAN ADA TEKS LAIN SEBELUM ATAU SESUDAHNYA:
+KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI INI:
 {
   "symbol": "XAUUSD",
-  "timeframe": "H1",
+  "timeframe": "M3",
   "signal": "BUY",
   "entry": 3880.50,
   "sl": 3875.00,
   "tp1": 3885.00,
   "tp2": 3890.00,
   "tp3": 3895.00,
-  "reason": "Pada H1, harga menyapu likuiditas di area demand dan membentuk FVG, memungkinkan pantulan naik menuju BOS terdekat."
+  "reason": "Pada XAUUSD M3, harga menyapu likuiditas di area demand dan membentuk FVG, memungkinkan pantulan naik menuju BOS terdekat."
 }
 `;
 
@@ -703,7 +703,7 @@ KEMBALIKAN HANYA DALAM FORMAT JSON SEPERTI CONTOH DI BAWAH INI. JANGAN ADA TEKS 
       method: 'POST', 
       headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
-        model: AI_VISION_MODEL, // Menggunakan GPT-6-LUNA
+        model: AI_VISION_MODEL, 
         messages: [{ role: 'user', content: userContent }], 
         max_tokens: 600, 
         temperature: 0.1 
@@ -1072,7 +1072,7 @@ export default async function handler(req, res) {
     const tps = [p.tp1, p.tp2, p.tp3].filter(v => v != null).map(Number);
     
     // Prioritas: 1. Dari input text user, 2. Dari gambar (AI Vision), 3. Tebak dari harga
-    let symbol = resolveSymbol(body, req.query) || (p.symbol ? normalizeSymbol(p.symbol) : null);
+    let symbol = resolveSymbol(body, req.query) || (p.symbol && p.symbol !== 'UNKNOWN' ? normalizeSymbol(p.symbol) : null);
     
     let dec = 2, pip = 0.01, gold = false, prof = PAIR_CLASS_PROFILE.fx;
     
@@ -1099,17 +1099,29 @@ export default async function handler(req, res) {
     if (style === 'Intraday') kindStr = 'intraday';
     if (style === 'Swing') kindStr = 'swing';
 
+    const tfText = p.timeframe && p.timeframe !== 'UNKNOWN' ? p.timeframe : 'Chart';
+
     // Panggil AI Reasoning menggunakan model teks utama (AI_MODEL)
     const aiReason = await getAIReasoning({
       ctx, dir, kind: kindStr, orderType: 'NOW', entry, sl, tps,
-      setup: `Vision AI (${p.timeframe || 'Chart'})`,
+      setup: `Vision AI (${tfText})`,
       rawReason: p.reason,
       riskPips: riskPips,
-      zoneLine: p.timeframe ? `Timeframe: ${p.timeframe}` : 'Berdasarkan gambar'
+      zoneLine: `Timeframe: ${tfText}`
     });
+
+    // Susun langkah-langkah validasi dinamis untuk frontend (Vision)
+    const visionSteps = [
+      `Membaca Pair & Timeframe (${symbol} - ${tfText})`,
+      `Menganalisa struktur pasar ${tfText}`,
+      `Mencari zona Supply & Demand / FVG`,
+      `Validasi rejection candle`,
+      `Menghitung entry, SL, TP`
+    ];
 
     return res.status(200).json({
       ok: true,
+      analysis_steps: visionSteps, // <--- KIRIM INI KE FRONTEND
       signal: {
         signal: p.signal,
         mode: 'MARKET',
@@ -1126,12 +1138,12 @@ export default async function handler(req, res) {
         expireMs: 0,
         confidence: 'MEDIUM',
         risk: 'HIGH',
-        setup: `Vision AI (${p.timeframe || 'Chart'})`,
+        setup: `Vision AI (${tfText})`,
         entryStyle: style,
         setupLabel: style,
         zoneLabel: 'Vision Entry',
-        zoneNote: p.timeframe ? `Timeframe: ${p.timeframe}` : 'Berdasarkan gambar',
-        reason: aiReason || p.reason // GUNAKAN HASIL REASONING BARU
+        zoneNote: `Timeframe: ${tfText}`,
+        reason: aiReason || p.reason 
       }
     });
   }
@@ -1207,19 +1219,24 @@ export default async function handler(req, res) {
 
   const rrList = styleCfg.rr;
   let result = { plan: null, reason: t.notProcessed };
+  let liveSteps = [];
 
   if (style === 'Scalping') {
+    liveSteps = [`Analisa Struktur M1`, `Cek Zona S/D M1`, `Validasi Entry Market NOW`];
     result = await buildScalpPlan({ m1, price, rrList, ctx });
   } else if (style === 'Day Trading') {
+    liveSteps = [`Cek Zona / FVG M1`, `Konfirmasi Arah`, `Menghitung Limit Entry`];
     result = await buildDayPlan({ m1, price, rrList, ctx });
   } else if (style === 'Intraday') {
+    liveSteps = [`Memeriksa bias M15 & H1`, `Mencari Zona Supply & Demand M5`, `Cek FVG & displacement`, `Validasi rejection candle`];
     result = await buildIntradayPlan({ m5, m15, price, rrList, ctx });
   } else if (style === 'Swing') {
+    liveSteps = [`Memeriksa bias D1, H4 & H1`, `Mencari Zona Supply & Demand M15`, `Cek FVG & displacement`, `Validasi rejection candle`];
     result = await buildSwingPlan({ m15, price, rrList, ctx });
   }
 
-  if (!result.plan) return res.status(200).json({ ok: false, reason: result.reason || t.noSetup });
+  if (!result.plan) return res.status(200).json({ ok: false, reason: result.reason || t.noSetup, analysis_steps: liveSteps });
 
   const payload = toSignal(result, styleCfg, ctx);
-  return res.status(200).json({ ok: true, signal: payload });
+  return res.status(200).json({ ok: true, analysis_steps: liveSteps, signal: payload });
 }
