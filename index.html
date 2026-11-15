@@ -145,9 +145,9 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
         <p data-i18n="subHeader" class="text-[8px] text-gray-400 truncate"></p>
       </div>
     </div>
-    
+
     <div class="flex items-center gap-1.5 flex-wrap justify-end">
-      
+
       <!-- BADGE STATUS CLIENT -->
       <div id="userStatusBadge" class="hidden text-[9px] font-bold font-mono px-2 py-0.5 rounded border bg-darkbg text-gray-300 border-panelborder flex items-center gap-1.5 shadow-sm">
         <span id="statusType">TRIAL</span>
@@ -155,7 +155,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
         <span id="statusUsage" class="text-emerald-400 border-l border-panelborder pl-1.5">0/5 req</span>
       </div>
       <!-- END BADGE -->
-      
+
       <button onclick="logout()" data-i18n="btnLogout" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40"></button>
       <button onclick="toggleLang()" id="langBtn" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-panelborder text-gray-300 border border-panelborder hover:border-accentblue">ID 🌐</button>
       <span id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">WS: OFF</span>
@@ -166,7 +166,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
 
     <!-- KOLOM KIRI -->
     <div class="flex flex-col gap-2 min-w-0">
-      
+
       <!-- 1. LIVE MARKET STREAM -->
       <div id="streamPanel" class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-1">
         <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-tower-broadcast text-accentblue"></i> <span data-i18n="lblStream"></span></span>
@@ -234,6 +234,9 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
 
       <!-- 5. SIGNAL CARD -->
       <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2 relative">
+        <!-- Daftar setup pair aktif (chip) -->
+        <div id="setupChips" class="hidden flex-wrap gap-1 justify-center"></div>
+
         <div id="standbyView" class="py-3 text-center text-xs text-gray-400" data-i18n="standby1"></div>
 
         <div id="activeCard" class="hidden space-y-3">
@@ -377,7 +380,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
 
     <!-- KOLOM KANAN -->
     <div class="flex flex-col gap-2 min-w-0">
-      
+
       <div id="highlightList" class="flex flex-col gap-2"></div>
 
       <div id="calCard" class="hidden bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
@@ -506,7 +509,7 @@ const CANDLE_TTL = { '1m': 30000, '5m': 60000, '15m': 120000, '30m': 180000, '1h
 const PRIO_IV = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
 const CANDLE_LIMIT = 200;
 const SWING_L = 2;
-const BIN_SYM = { BTCUSD: 'BTCUSDT', XAUUSD: 'PAXGUSDT' }; 
+const BIN_SYM = { BTCUSD: 'BTCUSDT', XAUUSD: 'PAXGUSDT' };
 const BIN_HOSTS = ['https://api.binance.com', 'https://data-api.binance.vision'];
 const SESS = [
   { name: 'Asia', h1: 0, h2: 8, col: '45,212,191' },
@@ -570,10 +573,19 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const norm = s => String(s ?? '').toUpperCase().replace(/^XYZ:/, '').replace(/\.[A-Z]+$/, '').replace(/[^A-Z0-9]/g, '');
 const ALIAS_MAP = new Map();
 KEYS.forEach(k => MARKETS[k].aliases.forEach(a => ALIAS_MAP.set(norm(a), k)));
-const fmt = p => Number(p).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Format harga: desimal mengikuti besar harga (PEPE 0.00000403 tetap tampil penuh)
+const fmt = p => {
+  const n = Number(p);
+  if (!Number.isFinite(n)) return '--';
+  if (n === 0) return '0.00';
+  const a = Math.abs(n);
+  const d = a >= 100 ? 2 : a >= 1 ? 4 : Math.min(10, Math.max(2, -Math.floor(Math.log10(a)) + 2));
+  return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+};
 const fmtPips = p => `${p > 0 ? '+' : p < 0 ? '−' : ''}${Number(Math.abs(p).toFixed(1))} pip`;
 const pipColor = p => (p > 0 ? TXT.green : p < 0 ? TXT.red : TXT.gray);
-const pipsOf = (t, p) => (p - t.entry) * t.dir / MARKETS[t.key].pip;
+const pipsOf = (t, p) => (p - t.entry) * t.dir / (t.pip || MARKETS[t.key].pip);
 const send = (s, o) => { if (s && s.readyState === 1) s.send(JSON.stringify(o)); };
 const hitKeys = t => TP_KEYS.filter(k => t.hits && t.hits[k]);
 const maxHit = t => TP_KEYS.reduce((m, k, i) => (t.hits && t.hits[k] ? i + 1 : m), 0);
@@ -583,7 +595,8 @@ const marketOpen = k => MARKETS[k].h24 || ![0, 6].includes(new Date().getUTCDay(
 const T = k => I18N[lang][k];
 const optOf = s => T((STYLE_CFG[s] || STYLE_CFG.Scalping).opt);
 const symOf = k => workingSym[k] || MARKETS[k].aliases[aliasIdx[k] || 0];
-const activeTrade = () => trades.find(t => t.id === activeId && t.key === market) || null;
+// Kartu sinyal: untuk VISION pakai hasil analisa gambar, untuk pair pakai setup yang dipilih
+const activeTrade = () => (market === 'VISION' ? visionTrade : (trades.find(t => t.id === activeId && t.key === market) || null));
 const toMs = v => {
   const n = Number(v);
   if (Number.isFinite(n) && n > 0) return n < 1e11 ? n * 1000 : n;
@@ -593,10 +606,11 @@ const toMs = v => {
 
 /* ================= STATE ================= */
 let lang = 'id', market = 'XAUUSD', ws = null, connId = 0, reconT = null, pingT = null, authFailed = false, streamStarted = false;
-let trades = [], activeId = null, tvOn = false, showSMC = true; 
-let smcTfOverride = null; 
-let smcZoom = 1; 
-let smcPan = 0; 
+let trades = [], activeId = null, tvOn = false, showSMC = true;
+let visionTrade = null; // hasil analisa gambar, terpisah dari history dan rekap
+let smcTfOverride = null;
+let smcZoom = 1;
+let smcPan = 0;
 let statusInterval = null;
 let visionImages = []; // State untuk upload gambar
 let calView = { y: new Date().getFullYear(), m: new Date().getMonth() };
@@ -633,7 +647,7 @@ async function fetchUserStatus() {
 
 function startStatusTimer(data) {
   if (statusInterval) clearInterval(statusInterval);
-  
+
   const badge = $('userStatusBadge');
   const elType = $('statusType');
   const elTimer = $('statusTimer');
@@ -675,7 +689,7 @@ function startStatusTimer(data) {
   const tick = () => {
     const now = Date.now();
     const diff = expires - now;
-    
+
     if (diff <= 0) {
       elTimer.textContent = 'EXPIRED';
       elTimer.className = 'text-red-400';
@@ -697,7 +711,7 @@ function startStatusTimer(data) {
     elTimer.textContent = parts.join(' ') + ' left';
     elTimer.className = 'text-yellow-400';
   };
-  
+
   tick();
   statusInterval = setInterval(tick, 1000);
 }
@@ -714,7 +728,7 @@ function copySignal() {
     const tp1 = t.tp1 ? fmt(t.tp1) : '-';
     const tp2 = t.tp2 ? fmt(t.tp2) : '-';
     const tp3 = t.tp3 ? fmt(t.tp3) : '-';
-    
+
     const text = `${t.key}
 ${styleText}
 ${dirText} ${orderText}
@@ -844,10 +858,24 @@ function wsBadge(text, color) {
   e.textContent = 'WS: ' + text;
   e.className = 'text-[8px] font-mono px-2 py-0.5 rounded border ' + PILL[color];
 }
-function syncMarket() {
+
+/* ================= PILIH PAIR & SETUP ================= */
+function openOf(k) { return trades.filter(x => x.key === k && x.status !== 'CLOSED'); }
+
+// Pilih setup untuk pair k: prioritas yang diminta, lalu yang sedang tampil, lalu setup berjalan terbaru
+function pickTradeFor(k, preferId) {
+  const list = trades.filter(x => x.key === k);
+  if (preferId) { const hit = list.find(x => x.id === preferId); if (hit) return hit.id; }
+  if (list.some(x => x.id === activeId)) return activeId;
+  const open = openOf(k);
+  const pool = open.length ? open : list;
+  return pool.length ? pool[pool.length - 1].id : null;
+}
+
+function syncMarket(tradeId) {
   market = $('marketSelect').value;
   setTxt('selectedPairBadge', market);
-  
+
   // LOGIKA VISIBILITY PANEL
   const isVision = market === 'VISION';
   $('visionPanel').classList.toggle('hidden', !isVision);
@@ -856,20 +884,58 @@ function syncMarket() {
   $('chartPanel').classList.toggle('hidden', isVision);
   $('smcPanel').classList.toggle('hidden', isVision);
   $('sessionPanel').classList.toggle('hidden', isVision);
-  
+
   // Update tombol text
   setTxt('btnText', isVision ? 'Analisa Gambar' : T('btnGen'));
-  
-  // Reset active card jika ganti pair
-  activeId = null;
+
+  activeId = isVision ? null : pickTradeFor(market, tradeId);
   refreshCard();
+  renderHistory();
 
   if (!isVision) {
     pump();
     renderAll();
   }
 }
-function pickMarket(k) { $('marketSelect').value = k; syncMarket(); }
+
+function pickMarket(k, tradeId) {
+  $('marketSelect').value = k;
+  syncMarket(tradeId);
+}
+
+// Tap pair yang sudah aktif dengan lebih dari satu setup berjalan: pindah ke setup berikutnya
+function tapTicker(k) {
+  const open = openOf(k);
+  if (k === market && open.length > 1) {
+    const i = open.findIndex(x => x.id === activeId);
+    return pickMarket(k, open[(i + 1) % open.length].id);
+  }
+  pickMarket(k);
+}
+
+function viewTrade(id) {
+  const t = trades.find(x => x.id === id);
+  if (!t) return;
+  pickMarket(t.key, id);
+}
+
+// Tap lewat pointerdown/pointerup pada container yang tetap, supaya tidak hilang saat list dirender ulang
+function bindTap(el, handler) {
+  if (!el) return;
+  let start = null;
+  el.addEventListener('pointerdown', e => {
+    const node = e.target.closest('[data-tap]');
+    start = node ? { x: e.clientX, y: e.clientY, v: node.dataset.tap } : null;
+  });
+  el.addEventListener('pointerup', e => {
+    if (!start) return;
+    const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8;
+    const v = start.v;
+    start = null;
+    if (!moved) handler(v);
+  });
+  el.addEventListener('pointercancel', () => { start = null; });
+}
 
 /* ================= FITUR VISION (UPLOAD) ================= */
 function handleImageUpload(e) {
@@ -887,7 +953,7 @@ function handleImageUpload(e) {
     };
     reader.readAsDataURL(file);
   });
-  
+
   e.target.value = ''; // Reset input
 }
 
@@ -918,14 +984,14 @@ async function connect() {
   wsBadge('XBTFX TOKEN...', 'yellow');
   const email = localStorage.getItem(K.email);
   if (!email) { wsBadge('LOGIN DULU', 'gray'); reconT = setTimeout(connect, 2000); return; }
-  
+
   const r = await post('/api/stream-token', { value: email });
   if (my !== connId) return;
-  
+
   if (!(r.ok && r.data && r.data.token)) {
     if (r.status === 401) { authFailed = true; wsBadge('SESI INVALID', 'red'); return; }
     log('[WS] Gagal dapat token backend, mencoba koneksi publik XBTFX...', 'system');
-    openSocket(null); 
+    openSocket(null);
     return;
   }
   openSocket(r.data.token);
@@ -935,7 +1001,7 @@ function openSocket(token) {
   wsBadge('XBTFX CONNECTING...', 'yellow');
   const sock = new WebSocket(WS_URL);
   ws = sock;
-  
+
   sock.onopen = () => {
     if (token) {
       send(sock, { action: 'auth', token });
@@ -962,7 +1028,7 @@ function openSocket(token) {
     }
     if (m.channel === 'quote') onQuote(m);
   };
-  
+
   sock.onclose = () => {
     wsBadge('CLOSED', 'red');
     if (ws === sock && !authFailed) reconT = setTimeout(connect, 4000);
@@ -1148,7 +1214,7 @@ function seriesRows(k, iv) {
       out.push({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close });
     }
   }
-  
+
   if (out.length > 1) {
     const last = out[out.length - 1];
     const prev = out[out.length - 2];
@@ -1188,11 +1254,13 @@ function pump() {
 
 /* ================= TRADE ================= */
 function loadTrades() {
-  try { return (JSON.parse(localStorage.getItem(STORE_KEY)) || []).map(normalize); }
-  catch (e) { return []; }
+  try {
+    return (JSON.parse(localStorage.getItem(STORE_KEY)) || [])
+      .filter(t => MARKETS[t.key] && t.key !== 'VISION')
+      .map(normalize);
+  } catch (e) { return []; }
 }
 function normalize(t) {
-  if (!MARKETS[t.key] || t.key === 'VISION') t.key = 'XAUUSD'; // Pastikan Vision tidak masuk rekap
   t.hits = t.hits || {};
   for (const k of TP_KEYS) if (typeof t.hits[k] === 'number') t.hits[k] = { at: t.hits[k], price: t[k] };
   if (t.status === 'CLOSED') {
@@ -1226,6 +1294,7 @@ function statusOf(t) {
   return { text: maxHit(t) ? `TP${maxHit(t)} HIT` : 'RUNNING', color: 'blue' };
 }
 function tradeFlow(t) {
+  if (t.key === 'VISION') return { main: `Entry ${fmt(t.entry)} · ${t.signal}`, sub: t.last ? 'last ' + fmt(t.last) : '', pips: 0 };
   const live = prices[t.key] ? prices[t.key].price : null;
   if (t.status === 'PENDING') {
     const z = t.zone ? fmt(t.zone.min) + ' – ' + fmt(t.zone.max) : '--';
@@ -1266,8 +1335,8 @@ function evalTrade(t, p) {
       return true;
     }
     const isStop = t.fill === 'STOP';
-    const fillCond = isStop 
-      ? (d > 0 ? p >= t.entry : p <= t.entry) 
+    const fillCond = isStop
+      ? (d > 0 ? p >= t.entry : p <= t.entry)
       : (d > 0 ? p <= t.entry : p >= t.entry);
 
     if (fillCond) {
@@ -1284,28 +1353,28 @@ function evalTrade(t, p) {
   let changed = false;
 
   for (const k of TP_KEYS) {
-    if (t[k] != null && !t.hits[k] && reached(t[k])) { 
-      t.hits[k] = { at: Date.now(), price: t[k] }; 
-      changed = true; 
+    if (t[k] != null && !t.hits[k] && reached(t[k])) {
+      t.hits[k] = { at: Date.now(), price: t[k] };
+      changed = true;
       log(`Trade #${t.no} ${t.key} hit ${k.toUpperCase()}!`, 'buy');
     }
   }
 
-  if (hitKeys(t).length && t.status !== 'BE') { 
-    t.status = 'BE'; 
-    changed = true; 
+  if (hitKeys(t).length && t.status !== 'BE') {
+    t.status = 'BE';
+    changed = true;
   }
 
   const defined = TP_KEYS.filter(k => t[k] != null);
-  if (defined.length && defined.every(k => t.hits[k])) { 
-    closeTrade(t, 'TP', t[defined[defined.length - 1]]); 
-    return true; 
+  if (defined.length && defined.every(k => t.hits[k])) {
+    closeTrade(t, 'TP', t[defined[defined.length - 1]]);
+    return true;
   }
 
   const stop = hitKeys(t).length ? t.entry : t.sl;
-  if (lost(stop)) { 
-    closeTrade(t, hitKeys(t).length ? 'BE' : 'SL', stop); 
-    return true; 
+  if (lost(stop)) {
+    closeTrade(t, hitKeys(t).length ? 'BE' : 'SL', stop);
+    return true;
   }
 
   return changed;
@@ -1336,17 +1405,11 @@ function clearHistory() {
   saveTrades();
   renderAll();
 }
-function viewTrade(id) {
-  const t = trades.find(x => x.id === id);
-  if (!t) return;
-  activeId = id;
-  pickMarket(t.key);
-}
 
 /* ================= RENDER ================= */
-function renderAll() { 
+function renderAll() {
   if (market === 'VISION') return; // Jangan render live data jika Vision
-  renderTickers(); renderHighlights(); renderBias(); renderHistory(); refreshCard(); renderCalendar(); renderSmcInfo(); updateSessionCard(); 
+  renderTickers(); renderHighlights(); renderBias(); renderHistory(); refreshCard(); renderCalendar(); renderSmcInfo(); updateSessionCard();
 }
 
 function renderTickers() {
@@ -1357,8 +1420,10 @@ function renderTickers() {
     const fresh = !!p && Date.now() - p.recv < STALE_MS;
     const st = p ? (fresh ? 'LIVE' : 'SEPI') : (subAt[k] ? 'SUB' : 'MENUNGGU');
     const pc = !p ? TXT.gray : p.dir > 0 ? TXT.green : p.dir < 0 ? TXT.red : 'text-white';
-    return `<div onclick="pickMarket('${k}')" class="bg-darkbg hover:bg-panelborder/60 border ${k === market ? 'border-accentblue' : 'border-panelborder'} px-2 py-1 rounded flex items-center justify-between cursor-pointer">
-      <span class="font-bold text-[10px] text-white">${k} <span class="text-[7px] text-gray-500">${esc(symOf(k))}</span></span>
+    const run = openOf(k).length;
+    const runBadge = run ? `<span class="text-[7px] font-mono font-bold px-1 rounded bg-blue-500/20 text-blue-400 border border-blue-500/40">${run} RUN</span>` : '';
+    return `<div data-tap="${k}" class="bg-darkbg hover:bg-panelborder/60 border ${k === market ? 'border-accentblue' : 'border-panelborder'} px-2 py-1 rounded flex items-center justify-between cursor-pointer select-none">
+      <span class="flex items-center gap-1.5 font-bold text-[10px] text-white">${k} ${runBadge} <span class="text-[7px] text-gray-500 font-normal">${esc(symOf(k))}</span></span>
       <span class="flex items-center gap-1.5"><span class="text-[7px] font-mono ${fresh ? TXT.green : TXT.gray}">${st}</span>
       <span class="text-[11px] font-mono font-bold ${pc}">${p ? fmt(p.price) : '--.--'}</span></span>
     </div>`;
@@ -1412,7 +1477,7 @@ function renderHistory() {
   box.innerHTML = trades.slice().reverse().filter(t => t.key !== 'VISION').map(t => {
     const f = tradeFlow(t), s = statusOf(t);
     const hits = hitKeys(t).map(k => '✓' + k.toUpperCase()).join(' ');
-    return `<div onclick="viewTrade('${esc(t.id)}')" class="bg-darkbg hover:bg-panelborder/60 border ${t.id === activeId ? 'border-accentblue' : 'border-panelborder'} px-2 py-1.5 rounded cursor-pointer space-y-0.5">
+    return `<div data-tap="${esc(t.id)}" class="bg-darkbg hover:bg-panelborder/60 border ${t.id === activeId ? 'border-accentblue' : 'border-panelborder'} px-2 py-1.5 rounded cursor-pointer select-none space-y-0.5">
       <div class="flex justify-between items-center gap-2 text-[9px] font-bold">
         <span class="text-white truncate">${t.no}. ${esc(t.key)} <span class="text-[8px] text-gray-400">${esc(optOf(t.style))} · ${esc(t.signal)}</span></span>
         <span class="font-mono whitespace-nowrap ${TXT[s.color]}">${esc(s.text)}</span>
@@ -1424,18 +1489,42 @@ function renderHistory() {
   }).join('');
 }
 
+// Chip setup untuk pair aktif: tampil jika pair punya lebih dari satu setup
+function renderChips() {
+  const el = $('setupChips');
+  if (!el) return;
+  const list = market === 'VISION' ? [] : trades.filter(x => x.key === market).slice(-8).reverse();
+  if (list.length < 2) {
+    el.classList.add('hidden');
+    el.classList.remove('flex');
+    el.innerHTML = '';
+    return;
+  }
+  el.classList.remove('hidden');
+  el.classList.add('flex');
+  el.innerHTML = list.map(x => {
+    const act = x.id === activeId;
+    const s = statusOf(x);
+    const cls = act
+      ? 'bg-accentblue border-accentblue text-white'
+      : `bg-darkbg border-panelborder ${TXT[s.color]}`;
+    return `<button data-tap="${esc(x.id)}" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border ${cls}">#${esc(x.no)} ${esc(x.signal)} · ${esc(s.text)}</button>`;
+  }).join('');
+}
+
 const BADGE = 'text-[8px] font-mono font-bold px-2 py-0.5 rounded border ';
 function refreshCard() {
   const t = activeTrade();
   const isVision = market === 'VISION';
   const p = prices[market];
-  const priceTxt = p ? fmt(p.price) : '--.--';
-  setTxt('cardTitle', isVision ? 'Vision Analysis' : market + ' (Pure SMC AI)');
-  setTxt('cardPriceTop', isVision ? 'AI' : priceTxt);
+  const priceTxt = isVision
+    ? (t && t.last ? fmt(t.last) : '--')
+    : (p ? fmt(p.price) : '--.--');
+  renderChips();
   $('standbyView').classList.toggle('hidden', !!t);
   $('activeCard').classList.toggle('hidden', !t);
   $('tradeStatus').classList.toggle('hidden', !t);
-  
+
   if (!t) { setTxt('tradePnl', ''); setTxt('tradeLive', ''); return; }
 
   const sig = $('sigBadge');
@@ -1611,7 +1700,7 @@ function updateSessionCard() {
     const now = new Date();
     const currentUTCSeconds = now.getUTCHours() * 3600 + now.getUTCMinutes() * 60 + now.getUTCSeconds();
     let activeName = 'No Session', activeColor = 'text-gray-400', activeBorder = 'border-gray-500/40', html = '';
-    
+
     const SESSION_UI = [
         { name: 'Asia Session', startUTC: 0, endUTC: 9, color: 'text-yellow-400', border: 'border-yellow-500/50' },
         { name: 'London Kill Zone', startUTC: 7, endUTC: 10, color: 'text-red-400', border: 'border-red-500/50' },
@@ -1621,7 +1710,7 @@ function updateSessionCard() {
     ];
 
     const sorted = [...SESSION_UI].sort((a, b) => a.startUTC - b.startUTC);
-    
+
     sorted.forEach(s => {
         const startSec = s.startUTC * 3600;
         const endSec = s.endUTC * 3600;
@@ -1630,13 +1719,13 @@ function updateSessionCard() {
 
         const d1 = new Date(); d1.setUTCHours(s.startUTC, 0, 0, 0);
         const d2 = new Date(); d2.setUTCHours(s.endUTC, 0, 0, 0);
-        
+
         const formatOpt = { hour: '2-digit', minute: '2-digit', hour12: true };
         const localStart = d1.toLocaleTimeString('en-US', formatOpt).toLowerCase().replace(' ', '');
         const localEnd = d2.toLocaleTimeString('en-US', formatOpt).toLowerCase().replace(' ', '');
 
         let statusHtml = '';
-        
+
         if (isActive) {
             activeName = s.name;
             activeColor = s.color;
@@ -1828,7 +1917,7 @@ function cisdOf(rows) {
 
 function detectSMC(rows) {
   const fvgs = [], obs = [], breakers = [];
-  
+
   for (let i = 1; i < rows.length - 1; i++) {
     const a = rows[i - 1], b = rows[i], c = rows[i + 1];
     if (a.h < c.l && !invalidZone(rows, i + 2, 1, a.h, c.l)) fvgs.push({ dir: 1, bottom: a.h, top: c.l, t: b.t });
@@ -1887,8 +1976,8 @@ function renderSmcInfo() {
   const t = activeTrade();
   const k = t ? t.key : market;
   const style = t ? t.style : $('tradingStyleSelect').value;
-  const iv = smcTfOverride || SMC_TF_MAP[style] || '5m'; 
-  
+  const iv = smcTfOverride || SMC_TF_MAP[style] || '5m';
+
   document.querySelectorAll('.smc-tf-btn').forEach(btn => {
     if (btn.dataset.tf === iv) btn.classList.add('active');
     else btn.classList.remove('active');
@@ -1948,705 +2037,4 @@ function layoutX(rows, plotL, plotR, tfMs) {
   const xOfT = tm => plotL + ((tm - t0) / tfMs + 0.5) * slot;
   return { vis, slot, t0, xOfT };
 }
-function srcLabel(k, iv) { return `${k} · ${iv} · WIB · ${srcOf(k, iv)}`; }
-
-/* ================= CHART UTAMA (CANDLESTICK + FULL FRAME LINES) ================= */
-function drawChart() {
-  const d = fitCv(cv, cx);
-  if (!d || market === 'VISION') return;
-  const CW = d.w, CH = d.h;
-  const t = activeTrade();
-  const k = market;
-  
-  const iv = '1m'; 
-  const tfMs = TF_MIN[iv] * 60000;
-  const rows = displayRows(k, iv);
-  const live = prices[k] ? prices[k].price : null;
-  const liveDir = prices[k] ? prices[k].dir : 0;
-  const plotL = 6, plotT = 20, plotB = CH - 14, plotR = CW - CHART_GUT;
-  const plotH = plotB - plotT;
-
-  cx.font = '8px ui-monospace, monospace';
-  cx.textAlign = 'left';
-  cx.textBaseline = 'top';
-  cx.fillStyle = 'rgba(148,163,184,.9)';
-  cx.fillText(srcLabel(k, iv), plotL + 2, 3);
-
-  if (!rows.length && live == null) {
-    cx.font = 'bold 11px ui-monospace, monospace';
-    cx.fillStyle = '#94a3b8';
-    cx.textAlign = 'center';
-    cx.textBaseline = 'middle';
-    cx.fillText(T('waitTick'), CW / 2, CH / 2);
-    cx.textAlign = 'left';
-    return;
-  }
-
-  const { vis, slot, xOfT } = layoutX(rows, plotL, plotR, tfMs);
-  const clampX = x => Math.max(plotL, Math.min(plotR, x));
-
-  const L = t ? [
-    { label: 'ENTRY', v: t.entry, c: '#93c5fd', bg: 'rgba(147,197,253,.14)', dash: [] },
-    { label: 'SL', v: t.sl, c: '#f87171', bg: 'rgba(248,113,113,.14)', dash: [4, 4], hit: t.result === 'SL' },
-    { label: 'TP1', v: t.tp1, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp1 },
-    { label: 'TP2', v: t.tp2, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp2 },
-    { label: 'TP3', v: t.tp3, c: '#38bdf8', bg: 'rgba(56,189,248,.14)', dash: [4, 4], hit: !!t.hits.tp3 }
-  ].filter(l => Number.isFinite(l.v)) : [];
-
-  let lo = Infinity, hi = -Infinity;
-  
-  const isRunning = t && (t.status === 'RUNNING' || (t.hits && Object.keys(t.hits).length > 0));
-  const hitEntry = t && live != null && (t.dir > 0 ? live <= t.entry : live >= t.entry);
-  const isZoomed = t && (isRunning || hitEntry);
-
-  if (isZoomed) {
-    const levels = [t.sl, t.entry, t.tp1, t.tp2, t.tp3, live].filter(v => v != null && Number.isFinite(v));
-    lo = Math.min(...levels);
-    hi = Math.max(...levels);
-  } else {
-    vis.forEach(c => { 
-      if (c.h < lo) lo = c.h; 
-      if (c.h > hi) hi = c.h; 
-      if (c.l < lo) lo = c.l; 
-      if (c.l > hi) hi = c.l; 
-    });
-    if (live != null) { 
-      if (live < lo) lo = live; 
-      if (live > hi) hi = live; 
-    }
-    if (t) {
-      L.forEach(l => { 
-        if (l.v < lo) lo = l.v; 
-        if (l.v > hi) hi = l.v; 
-      });
-      if (t.zone) { 
-        if (t.zone.min < lo) lo = t.zone.min; 
-        if (t.zone.max > hi) hi = t.zone.max; 
-      }
-    }
-  }
-
-  if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
-  if (!(hi - lo > 0)) { const dd = Math.abs(hi) * 0.001 || 1; lo -= dd; hi += dd; }
-  
-  const pad = (hi - lo) * (isZoomed ? 0.05 : 0.12); 
-  lo -= pad;
-  hi += pad;
-  
-  const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * plotH;
-
-  cx.lineWidth = 1;
-  cx.strokeStyle = 'rgba(148,163,184,.08)';
-  for (let i = 1; i < 4; i++) {
-    const y = plotT + plotH * i / 4;
-    cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
-  }
-
-  if (t && t.zone && t.mode === 'LIMIT') {
-    const x0 = plotL; // Ubah ke plotL agar kotak penuh
-    const y1 = yOf(t.zone.max), y2 = yOf(t.zone.min);
-    cx.save();
-    cx.fillStyle = 'rgba(41,98,255,.16)';
-    cx.fillRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
-    cx.strokeStyle = 'rgba(41,98,255,.5)';
-    cx.lineWidth = 1;
-    cx.setLineDash([2, 2]);
-    cx.strokeRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
-    cx.restore();
-  }
-
-  const bodyW = Math.max(1.5, slot * 0.62);
-  cx.lineWidth = 1;
-  for (const c of vis) {
-    const x = xOfT(c.t);
-    if (x < plotL || x > plotR) continue;
-
-    const up = c.c >= c.o;
-    const col = up ? '#34d399' : '#f87171';
-    const yH = yOf(c.h), yL = yOf(c.l), yO = yOf(c.o), yC = yOf(c.c);
-    
-    cx.strokeStyle = col;
-    cx.beginPath(); cx.moveTo(x, yH); cx.lineTo(x, yL); cx.stroke();
-    
-    cx.fillStyle = col;
-    const bY = Math.min(yO, yC);
-    const bH = Math.max(1, Math.abs(yC - yO));
-    cx.fillRect(x - bodyW / 2, bY, bodyW, bH);
-  }
-
-  // ================== GARIS FULL FRAME ==================
-  if (t) {
-    L.forEach(l => {
-      const y = yOf(l.v);
-      cx.save();
-      cx.strokeStyle = l.c;
-      cx.globalAlpha = l.label === 'ENTRY' ? .95 : .8;
-      cx.lineWidth = l.label === 'ENTRY' ? 1.4 : 1;
-      cx.setLineDash(l.dash);
-      cx.beginPath(); 
-      cx.moveTo(plotL, y); // Mulai dari ujung kiri
-      cx.lineTo(plotR, y); // Sampai ujung kanan
-      cx.stroke();
-      cx.restore();
-    });
-  }
-  // ======================================================
-
-  if (live != null) {
-    const y = yOf(live);
-    const lc = liveDir < 0 ? '#f87171' : '#34d399';
-    cx.save();
-    cx.strokeStyle = lc;
-    cx.globalAlpha = .6;
-    cx.lineWidth = 1;
-    cx.setLineDash([1, 3]);
-    cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
-    cx.restore();
-    if (vis.length) {
-      const hx = xOfT(vis[vis.length - 1].t);
-      const pr = 3 + Math.sin(Date.now() / 150) * 1.5;
-      cx.save();
-      cx.beginPath(); cx.arc(hx, y, pr + 2.5, 0, Math.PI * 2); cx.fillStyle = 'rgba(41,98,255,.35)'; cx.fill();
-      cx.beginPath(); cx.arc(hx, y, 3, 0, Math.PI * 2); cx.fillStyle = '#fff'; cx.shadowColor = '#2962ff'; cx.shadowBlur = 8; cx.fill();
-      cx.restore();
-    }
-  }
-
-  if (vis.length) {
-    const step = Math.max(1, Math.round(vis.length / 5));
-    cx.font = '8px ui-monospace, monospace';
-    cx.fillStyle = 'rgba(148,163,184,.85)';
-    cx.textAlign = 'center';
-    cx.textBaseline = 'bottom';
-    for (let i = 0; i < vis.length; i += step) {
-      const c = vis[i];
-      const hm = new Date(c.t + 7 * 3600000).toISOString().slice(11, 16);
-      cx.fillText(hm, xOfT(c.t), CH - 1);
-    }
-  }
-
-  const tags = L.map(l => ({ text: (l.hit ? '✓ ' : '') + l.label + ' ' + fmt(l.v), c: l.c, bg: l.bg, y: yOf(l.v) }));
-  if (live != null) {
-    tags.push({
-      text: fmt(live),
-      c: liveDir < 0 ? '#fca5a5' : '#86efac',
-      bg: liveDir < 0 ? 'rgba(239,68,68,.25)' : 'rgba(16,185,129,.25)',
-      y: yOf(live)
-    });
-  }
-  tags.sort((a, b) => a.y - b.y);
-  
-  const GAP = 16, capT = plotT + 6, capB = plotB - 6;
-  tags.forEach(g => { g.y = Math.max(capT, Math.min(capB, g.y)); });
-  for (let i = 1; i < tags.length; i++) if (tags[i].y < tags[i - 1].y + GAP) tags[i].y = tags[i - 1].y + GAP;
-  if (tags.length && tags[tags.length - 1].y > capB) {
-    tags[tags.length - 1].y = capB;
-    for (let i = tags.length - 2; i >= 0; i--) if (tags[i].y > tags[i + 1].y - GAP) tags[i].y = tags[i + 1].y - GAP;
-  }
-  
-  cx.font = 'bold 8px ui-monospace, monospace'; 
-  cx.textAlign = 'left';
-  cx.textBaseline = 'middle';
-  for (const g of tags) {
-    const x = plotR + 6, w = CHART_GUT - 12, h = 15, y = g.y - h / 2;
-    rr(cx, x, y, w, h, 3);
-    cx.fillStyle = g.bg; cx.fill();
-    cx.strokeStyle = g.c; cx.lineWidth = .8; cx.stroke();
-    cx.fillStyle = g.c;
-    cx.fillText(g.text, x + 4, g.y + .5);
-  }
-}
-
-/* ================= PANEL SMC (CANDLESTICK + ZONA) ================= */
-function drawSMC() {
-  const d = fitCv(scv, sx);
-  if (!d || market === 'VISION') return;
-  const CW = d.w, CH = d.h;
-  const k = market;
-  const t = activeTrade();
-  const style = t ? t.style : $('tradingStyleSelect').value;
-  
-  const iv = smcTfOverride || SMC_TF_MAP[style] || '5m'; 
-  
-  const tfMs = TF_MIN[iv] * 60000;
-  const rows = displayRows(k, iv);
-  const live = prices[k] ? prices[k].price : null;
-  const plotL = 6, plotT = 18, plotB = CH - 14, plotR = CW - CHART_GUT;
-  const plotH = plotB - plotT;
-
-  sx.font = '8px ui-monospace, monospace';
-  sx.textAlign = 'left';
-  sx.textBaseline = 'top';
-  sx.fillStyle = 'rgba(148,163,184,.9)';
-  sx.fillText('SMC · ' + srcLabel(k, iv), plotL + 2, 3);
-
-  const s = getSmc(k, iv);
-  if (s.status !== 'ok') {
-    sx.font = 'bold 10px ui-monospace, monospace';
-    sx.fillStyle = '#94a3b8';
-    sx.textAlign = 'center';
-    sx.textBaseline = 'middle';
-    sx.fillText(s.err ? 'Candle belum tersedia: ' + s.err : `Memuat candle (${s.n || 0}/20)...`, CW / 2, CH / 2);
-    sx.textAlign = 'left';
-    return;
-  }
-
-  // --- LOGIKA ZOOM & PAN ---
-  const plotW = plotR - plotL;
-  const baseN = Math.max(12, Math.floor(plotW / 5) - CH_PAD);
-  const nWant = Math.floor(baseN / smcZoom);
-  const slot = plotW / (Math.max(nWant, 5) + CH_PAD);
-  
-  // Hitung batas pan
-  const maxPan = Math.max(0, rows.length - nWant);
-  smcPan = Math.max(0, Math.min(smcPan, maxPan));
-  
-  const startIdx = Math.max(0, rows.length - nWant - Math.floor(smcPan));
-  const endIdx = Math.min(rows.length, startIdx + nWant);
-  const vis = rows.slice(startIdx, endIdx);
-  
-  const t0 = vis.length ? vis[0].t : Date.now() - tfMs * nWant;
-  const xOfT = tm => plotL + ((tm - t0) / tfMs + 0.5) * slot;
-
-  const clampX = x => Math.max(plotL, Math.min(plotR, x));
-  const ref = live != null ? live : (vis.length ? vis[vis.length - 1].c : 0);
-  const near = p => Math.abs(p - ref) / ref < 0.03;
-  const inBand = (a, b) => b >= ref * 0.97 && a <= ref * 1.03;
-
-  const fvgs = s.fvgs.filter(z => inBand(z.bottom, z.top));
-  const obs = s.obs.filter(z => inBand(z.bottom, z.top));
-  const breakers = s.breakers.filter(z => inBand(z.bottom, z.top)); 
-  const pools = s.liq.pools.filter(p => near(p.p));
-  const sweeps = s.liq.sweeps.filter(p => near(p.p));
-  const ev = s.ev.filter(e => near(e.p) && e.toT >= t0);
-  const cis = s.cisd.filter(c => near(c.p) && c.toT >= t0);
-  const sess = sessionBoxes(rows, Date.now()).filter(se => se.b > t0);
-
-  let lo = Infinity, hi = -Infinity;
-  const grow = v => { if (Number.isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; } };
-  vis.forEach(c => { grow(c.h); grow(c.l); });
-  if (live != null) grow(live);
-  fvgs.concat(obs).concat(breakers).forEach(z => { grow(z.bottom); grow(z.top); });
-  pools.forEach(p => grow(p.p));
-  sess.forEach(se => { grow(se.hi); grow(se.lo); });
-  if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
-  if (!(hi - lo > 0)) { const dd = Math.abs(hi) * 0.001 || 1; lo -= dd; hi += dd; }
-  const pad = (hi - lo) * 0.1;
-  lo -= pad;
-  hi += pad;
-  const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * plotH;
-
-  // grid
-  sx.lineWidth = 1;
-  sx.strokeStyle = 'rgba(148,163,184,.08)';
-  for (let i = 1; i < 4; i++) {
-    const y = plotT + plotH * i / 4;
-    sx.beginPath(); sx.moveTo(plotL, y); sx.lineTo(plotR, y); sx.stroke();
-  }
-
-  // session box
-  sess.forEach(se => {
-    const x0 = clampX(xOfT(se.a)), x1 = clampX(xOfT(se.b));
-    if (x1 <= x0) return;
-    const yh = yOf(se.hi), yl = yOf(se.lo);
-    sx.save();
-    sx.fillStyle = `rgba(${se.col},.07)`;
-    sx.fillRect(x0, Math.min(yh, yl), x1 - x0, Math.abs(yl - yh));
-    sx.strokeStyle = `rgba(${se.col},.85)`;
-    sx.lineWidth = 1;
-    sx.beginPath();
-    sx.moveTo(x0, yh); sx.lineTo(x1, yh);
-    sx.moveTo(x0, yl); sx.lineTo(x1, yl);
-    sx.stroke();
-    sx.setLineDash([2, 3]);
-    sx.strokeStyle = 'rgba(250,204,21,.6)';
-    sx.beginPath();
-    sx.moveTo(x1, yh); sx.lineTo(plotR, yh);
-    sx.moveTo(x1, yl); sx.lineTo(plotR, yl);
-    sx.stroke();
-    sx.setLineDash([]);
-    sx.font = 'bold 8px ui-monospace, monospace';
-    sx.fillStyle = `rgba(${se.col},1)`;
-    sx.textAlign = 'left';
-    sx.textBaseline = 'top';
-    sx.fillText(se.name, x0 + 3, Math.min(yh, yl) + 2);
-    sx.restore();
-  });
-
-  // FVG & OB/SND (Supply/Demand)
-  const zone = (z, label, rgb) => {
-    const x0 = clampX(xOfT(z.t));
-    if (plotR - x0 < 2) return;
-    const y1 = yOf(z.top), y2 = yOf(z.bottom);
-    const y = Math.min(y1, y2), h = Math.abs(y2 - y1);
-    sx.save();
-    sx.fillStyle = `rgba(${rgb},.18)`;
-    sx.fillRect(x0, y, plotR - x0, h);
-    sx.strokeStyle = `rgba(${rgb},.6)`;
-    sx.lineWidth = 1;
-    sx.strokeRect(x0, y, plotR - x0, h);
-    sx.font = 'bold 8px ui-monospace, monospace';
-    sx.fillStyle = `rgba(${rgb},1)`;
-    sx.textAlign = 'left';
-    sx.textBaseline = 'top';
-    sx.fillText(label, x0 + 3, y + 2);
-    sx.restore();
-  };
-  fvgs.forEach(z => zone(z, z.dir > 0 ? 'FVG ▲' : 'FVG ▼', z.dir > 0 ? '59,130,246' : '168,85,247'));
-  obs.forEach(z => zone(z, z.dir > 0 ? 'Demand' : 'Supply', z.dir > 0 ? '16,185,129' : '239,68,68'));
-  breakers.forEach(z => zone(z, z.dir > 0 ? 'BB ▲' : 'BB ▼', z.dir > 0 ? '34,211,238' : '244,114,182'));
-
-  // BSL / SSL / EQH / EQL
-  pools.forEach(p => {
-    const y = yOf(p.p), x0 = clampX(xOfT(p.t));
-    sx.save();
-    sx.strokeStyle = 'rgba(245,158,11,.85)';
-    sx.lineWidth = 1;
-    sx.setLineDash([3, 3]);
-    sx.beginPath(); sx.moveTo(x0, y); sx.lineTo(plotR, y); sx.stroke();
-    sx.setLineDash([]);
-    sx.font = 'bold 8px ui-monospace, monospace';
-    sx.fillStyle = 'rgba(245,158,11,1)';
-    sx.textAlign = 'right';
-    sx.textBaseline = p.high ? 'bottom' : 'top';
-    sx.fillText(p.label, plotR - 4, y + (p.high ? -2 : 2));
-    sx.restore();
-  });
-
-  // Sweep (SW)
-  sweeps.forEach(w => {
-    const x = clampX(xOfT(w.t)), y = yOf(w.p);
-    sx.save();
-    sx.fillStyle = '#fbbf24';
-    sx.beginPath(); sx.arc(x, y, 2.5, 0, Math.PI * 2); sx.fill();
-    sx.font = 'bold 8px ui-monospace, monospace';
-    sx.textAlign = 'center';
-    sx.textBaseline = w.high ? 'bottom' : 'top';
-    sx.fillText('SW', x, y + (w.high ? -4 : 4));
-    sx.restore();
-  });
-
-  // BOS / CHoCH
-  ev.forEach(e => {
-    const x0 = clampX(xOfT(e.fromT)), x1 = clampX(xOfT(e.toT)), y = yOf(e.p);
-    const col = e.dir > 0 ? '125,211,252' : '251,146,60';
-    sx.save();
-    sx.strokeStyle = `rgba(${col},.95)`;
-    sx.lineWidth = 1;
-    sx.beginPath(); sx.moveTo(x0, y); sx.lineTo(x1, y); sx.stroke();
-    sx.font = 'bold 8px ui-monospace, monospace';
-    sx.fillStyle = `rgba(${col},1)`;
-    sx.textAlign = 'right';
-    sx.textBaseline = e.dir > 0 ? 'bottom' : 'top';
-    sx.fillText(`${e.type} ${e.dir > 0 ? '▲' : '▼'}`, x1, y + (e.dir > 0 ? -2 : 2));
-    sx.restore();
-  });
-
-  // CISD
-  cis.forEach(c => {
-    const x0 = clampX(xOfT(c.t)), x1 = clampX(xOfT(c.toT)), y = yOf(c.p);
-    sx.save();
-    sx.strokeStyle = 'rgba(232,121,249,.95)';
-    sx.lineWidth = 1;
-    sx.setLineDash([1, 2]);
-    sx.beginPath(); sx.moveTo(x0, y); sx.lineTo(x1, y); sx.stroke();
-    sx.setLineDash([]);
-    sx.font = 'bold 8px ui-monospace, monospace';
-    sx.fillStyle = 'rgba(232,121,249,1)';
-    sx.textAlign = 'left';
-    sx.textBaseline = 'middle';
-    sx.fillText('CISD', x1 + 3, y);
-    sx.restore();
-  });
-
-  // candle (sebagai referensi harga)
-  const bodyW = Math.max(1.5, slot * 0.62);
-  sx.lineWidth = 1;
-  sx.globalAlpha = .9;
-  for (const c of vis) {
-    const x = xOfT(c.t);
-    const up = c.c >= c.o;
-    const col = up ? '#34d399' : '#f87171';
-    const yH = yOf(c.h), yL = yOf(c.l), yO = yOf(c.o), yC = yOf(c.c);
-    sx.strokeStyle = col;
-    sx.fillStyle = col;
-    sx.beginPath(); sx.moveTo(x, yH); sx.lineTo(x, yL); sx.stroke();
-    sx.fillRect(x - bodyW / 2, Math.min(yO, yC), bodyW, Math.max(1, Math.abs(yC - yO)));
-  }
-  sx.globalAlpha = 1;
-
-  // harga live
-  if (live != null && vis.length) {
-    const y = yOf(live);
-    const hx = xOfT(vis[vis.length - 1].t);
-    const pr = 3 + Math.sin(Date.now() / 150) * 1.5;
-    sx.save();
-    sx.strokeStyle = 'rgba(41,98,255,.6)';
-    sx.lineWidth = 1;
-    sx.setLineDash([1, 3]);
-    sx.beginPath(); sx.moveTo(plotL, y); sx.lineTo(plotR, y); sx.stroke();
-    sx.setLineDash([]);
-    sx.beginPath(); sx.arc(hx, y, pr + 2.5, 0, Math.PI * 2); sx.fillStyle = 'rgba(41,98,255,.35)'; sx.fill();
-    sx.beginPath(); sx.arc(hx, y, 3, 0, Math.PI * 2); sx.fillStyle = '#fff'; sx.fill();
-    sx.restore();
-    sx.save();
-    sx.font = 'bold 8px ui-monospace, monospace';
-    sx.textAlign = 'left';
-    sx.textBaseline = 'middle';
-    rr(sx, plotR + 6, y - 7.5, CHART_GUT - 12, 15, 3);
-    sx.fillStyle = 'rgba(41,98,255,.25)'; sx.fill();
-    sx.strokeStyle = '#2962ff'; sx.lineWidth = .8; sx.stroke();
-    sx.fillStyle = '#93c5fd';
-    sx.fillText(fmt(live), plotR + 10, y + .5);
-    sx.restore();
-  }
-
-  // label waktu WIB
-  if (vis.length) {
-    const step = Math.max(1, Math.round(vis.length / 5));
-    sx.font = '8px ui-monospace, monospace';
-    sx.fillStyle = 'rgba(148,163,184,.85)';
-    sx.textAlign = 'center';
-    sx.textBaseline = 'bottom';
-    for (let i = 0; i < vis.length; i += step) {
-      const c = vis[i];
-      sx.fillText(new Date(c.t + 7 * 3600000).toISOString().slice(11, 16), xOfT(c.t), CH - 1);
-    }
-  }
-}
-
-function frame() {
-  drawChart();
-  if (showSMC) drawSMC();
-  requestAnimationFrame(frame);
-}
-
-/* ================= TRADINGVIEW ================= */
-function toggleTV() {
-  if (market === 'VISION') return;
-  tvOn = !tvOn;
-  $('tvBox').classList.toggle('hidden', !tvOn);
-  $('btnTvToggle').classList.toggle('bg-accentblue', tvOn);
-  $('btnTvToggle').classList.toggle('text-white', tvOn);
-  $('btnTvToggle').classList.toggle('border-accentblue', tvOn);
-  $('btnTvToggle').classList.toggle('text-gray-500', !tvOn);
-  setTxt('btnTvText', tvOn ? 'CLOSE' : 'TV');
-  $('tvWidget').innerHTML = '';
-  if (tvOn && window.TradingView) {
-    new TradingView.widget({
-      autosize: true, symbol: MARKETS[market].tv, interval: '5', timezone: 'Asia/Jakarta',
-      theme: 'dark', style: '1', locale: 'id', hide_side_toolbar: true, allow_symbol_change: false,
-      container_id: 'tvWidget', backgroundColor: '#151924', gridColor: 'rgba(35,41,54,.5)'
-    });
-  }
-}
-
-/* ================= OVERLAY ANALISA ================= */
-function showOverlay() {
-  const o = $('validationOverlay');
-  if (!o) return;
-  const steps = $('validationSteps');
-  const bar = $('validationProgress');
-  if (steps) steps.innerHTML = '';
-  if (bar) bar.style.width = '0%';
-  o.classList.remove('hidden');
-  void o.offsetWidth;
-  o.classList.add('active');
-}
-function hideOverlay() {
-  const o = $('validationOverlay');
-  if (!o) return;
-  o.classList.remove('active');
-  setTimeout(() => o.classList.add('hidden'), 320);
-}
-async function runSteps(ms) {
-  const steps = T('steps'), box = $('validationSteps'), bar = $('validationProgress');
-  if (!box || !bar) return; // Guard clause
-  const start = Date.now(), per = Math.max(400, ms / steps.length);
-  for (let i = 0; i < steps.length; i++) {
-    const el = document.createElement('div');
-    el.className = 'validation-step active';
-    el.innerHTML = `<span class="validation-step-icon">●</span><span>${esc(steps[i])}</span>`;
-    box.appendChild(el);
-    bar.style.width = ((i + 1) / steps.length * 85) + '%';
-    await sleep(per);
-    el.classList.remove('active');
-    el.classList.add('done');
-    el.querySelector('.validation-step-icon').textContent = '✓';
-  }
-  const left = ms - (Date.now() - start);
-  if (left > 0) await sleep(left);
-  bar.style.width = '100%';
-}
-
-/* ================= INDIKATOR ================= */
-function calcEMA(c, p) {
-  if (!c || !c.length) return [];
-  const k = 2 / (p + 1), out = [];
-  let prev = c[0].c;
-  out.push(prev);
-  for (let i = 1; i < c.length; i++) { prev = c[i].c * k + prev * (1 - k); out.push(prev); }
-  return out;
-}
-function calcBB(c, p = 20, m = 2) {
-  if (!c || c.length < p) return { upper: 0, middle: 0, lower: 0 };
-  const cl = c.slice(-p).map(x => x.c);
-  const mid = cl.reduce((a, b) => a + b, 0) / p;
-  const sd = Math.sqrt(cl.reduce((a, b) => a + (b - mid) ** 2, 0) / p);
-  return { middle: +mid.toFixed(5), upper: +(mid + m * sd).toFixed(5), lower: +(mid - m * sd).toFixed(5) };
-}
-function calcBias(c) {
-  if (!c || c.length < 10) return { bias: 'WAIT', score: 0 };
-  const closes = c.map(x => x.c);
-  const period = Math.min(20, Math.max(2, Math.floor(closes.length / 2)));
-  const e = calcEMA(c, period);
-  const i = closes.length - 1;
-  const score = (closes[i] >= e[i] ? 1 : -1) + (closes[i] >= closes[0] ? 1 : -1);
-  return { bias: score > 0 ? 'BULLISH' : score < 0 ? 'BEARISH' : 'NETRAL', score };
-}
-
-/* ================= GENERATE SINYAL ================= */
-async function generateSignal() {
-  const k = market;
-  const style = $('tradingStyleSelect').value;
-  const cfg = STYLE_CFG[style];
-  
-  // LOGIKA KHUSUS VISION
-  if (k === 'VISION') {
-      if (visionImages.length === 0) return alert('Silakan upload minimal 1 gambar chart terlebih dahulu.');
-      
-      const btn = $('signalBtn'), bt = $('btnText');
-      btn.disabled = true;
-      bt.textContent = 'Menganalisa Gambar...';
-      showOverlay();
-      const anim = runSteps(3500);
-      let data = null, err = null;
-
-      try {
-          const email = localStorage.getItem(K.email);
-          const res = await fetch('/api/generate', {
-              method: 'POST',
-              headers: JSON_H,
-              body: JSON.stringify({
-                  email, images: visionImages, tradingStyle: style, lang
-              })
-          });
-          const txt = await res.text();
-          try { data = JSON.parse(txt); } catch (e) { throw new Error('Server tidak kirim JSON (HTTP ' + res.status + ')'); }
-          if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-      } catch (e) { err = e.message; }
-
-      await anim;
-      hideOverlay();
-      await sleep(350);
-      btn.disabled = false;
-      bt.textContent = 'Analisa Gambar';
-
-      if (err) return alert('Gagal: ' + err);
-      const s = data && data.signal;
-      if (!s) return alert('AI tidak menemukan setup valid dari gambar tersebut.');
-
-      // Buat objek trade dummy untuk ditampilkan di kartu
-      const t = {
-          id: 'vision_' + Date.now(), key: 'VISION', style, signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
-          mode: 'MARKET', status: 'RUNNING', fill: 'NOW',
-          entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
-          zone: null, expiresAt: null,
-          confidence: s.confidence || 'MEDIUM', risk: s.risk || 'HIGH', setup: s.setup || 'Vision AI', 
-          zoneLabel: 'AI Vision', zoneNote: 'Berdasarkan gambar',
-          createdAt: Date.now(), hits: {}, card: { reason: s.reason }, no: '-'
-      };
-      activeId = t.id;
-      trades.push(t); // Tambahkan ke trades agar tampil di kartu
-      refreshCard();
-      return; // Hentikan eksekusi agar tidak masuk ke logika live
-  }
-
-  // --- LOGIKA LIVE SMC (XAUUSD / BTCUSD) ---
-  if (!marketOpen(k)) { log(T('weekend'), 'error'); return alert(T('weekend')); }
-  const live = prices[k];
-  if (!live || Date.now() - live.recv > STALE_MS) return alert(k + ' TIDAK TERSAMBUNG ke stream. Tunggu harga masuk.');
-  const email = localStorage.getItem(K.email);
-  if (!email) return alert('Sesi tidak ditemukan. Login ulang.');
-
-  const btn = $('signalBtn'), bt = $('btnText');
-  btn.disabled = true;
-  bt.textContent = T('valTitle') + '...';
-  log(lang === 'id' ? 'Meminta analisa sinyal...' : 'Requesting signal analysis...', 'system');
-  showOverlay();
-  const anim = runSteps(3500);
-  let data = null, err = null;
-
-  try {
-    await Promise.all([cfg.htf, cfg.mtf, cfg.ltf].map(iv => fetchSeries(k, iv, false)));
-    const h = seriesRows(k, cfg.htf), m = seriesRows(k, cfg.mtf), l = seriesRows(k, cfg.ltf);
-    if (m.length < 10) {
-      const sr = ser(k, cfg.mtf);
-      const why = sr.err || sr.extErr;
-      throw new Error(`candle ${cfg.mtf} belum lengkap (${m.length}/10)${why ? ': ' + why : '. Coba lagi beberapa detik.'}`);
-    }
-    const ema = {};
-    cfg.ema.forEach(p => { const r = calcEMA(l, p); ema['EMA_' + p] = r.length ? Number(r[r.length - 1].toFixed(5)) : 0; });
-    const bb = calcBB(m.length ? m : l);
-    const res = await fetch('/api/generate', {
-      method: 'POST',
-      headers: JSON_H,
-      body: JSON.stringify({
-        email, marketId: 'xbtfx|' + k, tradingStyle: style, currentPrice: live.price, lang,
-        emaFilter: ema, bbFilter: bb,
-        candles: { htf: h.slice(-200), mtf: m.slice(-200), ltf: l.slice(-200) }
-      })
-    });
-    const txt = await res.text();
-    try { data = JSON.parse(txt); } catch (e) { throw new Error('Server tidak kirim JSON (HTTP ' + res.status + ')'); }
-    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-  } catch (e) { err = e.message; }
-
-  await anim;
-  hideOverlay();
-  await sleep(350);
-  btn.disabled = false;
-  bt.textContent = T('btnGen');
-
-  if (err) return alert('Gagal: ' + err);
-  const s = data && data.signal;
-  if (!s) return alert(T('signalWait') + '\n\n' + ((data && data.reason) || ''));
-  const valid = ['BUY', 'SELL'].includes(s.signal) && [s.entry, s.sl, s.tp1].every(v => v != null && Number.isFinite(Number(v)));
-  if (!valid) return alert('Sinyal belum lengkap.');
-
-  const t = {
-    id: Date.now().toString(36), key: k, style, signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
-    mode: s.mode, status: s.status || 'RUNNING', fill: s.fill || null,
-    entry: s.entry, bufferEnd: s.bufferEnd, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
-    zone: s.zone, expiresAt: s.expireMs ? Date.now() + s.expireMs : null,
-    confidence: s.confidence, risk: s.risk, setup: s.setup, zoneLabel: s.zoneLabel, zoneNote: s.zoneNote,
-    createdAt: Date.now(), hits: {}, card: { reason: s.reason }, no: nextNo()
-  };
-  trades.push(t);
-  activeId = t.id;
-  saveTrades();
-  renderAll();
-  fetchUserStatus(); // Update status kuota setelah generate
-  log(`Signal ${s.signal} ${k} berhasil dibuat.`, s.signal === 'BUY' ? 'buy' : 'sell');
-}
-
-/* ================= BOOT ================= */
-$('authForm').addEventListener('submit', handleLogin);
-loadLive();
-trades = loadTrades();
-applyLang();
-calSync();
-updateSessionCard();
-checkSession();
-requestAnimationFrame(frame);
-setInterval(() => { watchdog(); expirePending(); }, 1000);
-setInterval(() => { renderTickers(); renderHighlights(); renderHistory(); refreshCard(); renderSmcInfo(); updateSessionCard(); }, 500);
-setInterval(pump, 1200);
-setInterval(renderBias, 5000);
-setInterval(saveLive, 15000);
-window.addEventListener('beforeunload', saveLive);
-pump();
-log(lang === 'id' ? 'Sistem siap.' : 'System ready.', 'system');
-</script>
-</body>
-</html>
+function srcLabel(k, iv) {
