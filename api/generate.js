@@ -6,6 +6,12 @@
 //  - Swing: Area S/D H4 + Refine H1.
 //  - Integrasi AI GutsAI (Qwen 3.8 Max) untuk narasi reasoning SMC/ICT.
 //  - Bahasa output (id / en) mengikuti field "lang" dari frontend.
+// 
+// [UPDATE v60]
+//  - Scalping Agresif: M1 Momentum NOW
+//  - Scalping Konservatif: M1 Zone/FVG LIMIT (Bebas Arah)
+//  - Intraday: Strict Trend Following (H1+M15 Bias, M5 Zone/FVG)
+//  - Swing: Strict Trend Following (D1+H4+H1 Bias, M15 Zone/FVG)
 
 export const config = { api: { bodyParser: { sizeLimit: '6mb' } } };
 
@@ -80,23 +86,23 @@ const pipSizeOf = (symbol, dec) => PIP_OVERRIDE[symbol] ?? Math.pow(10, -(dec - 
 
 const STYLES = {
   'Scalping': {
-    label: 'Scalping · Area S/D M5 + NOW (struktur M1 untuk XAUUSD, M5 untuk pair lain) · SL structure · TP 1:1 · 1:2 · 1:3',
-    labelEn: 'Scalping · M5 S/D zone + NOW (M1 structure for XAUUSD, M5 for other pairs) · structure SL · TP 1:1 · 1:2 · 1:3',
+    label: 'Scalping Agresif · Market Execution NOW (Struktur M1)',
+    labelEn: 'Aggressive Scalping · Market Execution NOW (M1 Structure)',
     entryStyle: 'Agresif', entryStyleEn: 'Aggressive', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
   'Day Trading': {
-    label: 'Day Trading · Scalping Konservatif · Retest FVG/OB M15',
-    labelEn: 'Day Trading · Conservative Scalping · M15 FVG/OB retest',
+    label: 'Scalping Konservatif · Fokus Zona/FVG M1 (Bebas Arah)',
+    labelEn: 'Conservative Scalping · M1 Zone/FVG Focused (Any Direction)',
     entryStyle: 'Konservatif', entryStyleEn: 'Conservative', mode: 'LIMIT', kind: 'day', rr: [1.0, 1.5, 2.0],
   },
   'Intraday': {
-    label: 'Intraday · Area S/D H1 + Refine M15 · 2 arah · 1 signal per hari · TP 1:1 · 1:2 · 1:3',
-    labelEn: 'Intraday · H1 S/D zone + M15 refine · 2-way · 1 signal per day · TP 1:1 · 1:2 · 1:3',
+    label: 'Day Trading · Strict Trend Following (Bias H1+M15, Zona/FVG M5)',
+    labelEn: 'Day Trading · Strict Trend Following (H1+M15 Bias, M5 Zone/FVG)',
     entryStyle: 'Moderat', entryStyleEn: 'Moderate', mode: 'LIMIT', kind: 'intraday', rr: [1.0, 2.0, 3.0],
   },
   'Swing': {
-    label: 'Swing · Area S/D H4 + Refine H1 · Limit/NOW · TP 1:3',
-    labelEn: 'Swing · H4 S/D zone + H1 refine · Limit/NOW · TP 1:3',
+    label: 'Swing · Strict Trend Following (Bias D1+H4+H1, Zona/FVG M15)',
+    labelEn: 'Swing · Strict Trend Following (D1+H4+H1 Bias, M15 Zone/FVG)',
     entryStyle: 'Positioning', entryStyleEn: 'Positioning', mode: 'LIMIT', kind: 'swing', rr: [3.0],
   },
 };
@@ -963,430 +969,212 @@ async function buildAreaPlan({ title, area, dir, price, refineC, refineName, kin
   });
 }
 
-// ═══════════════════════════ SCALPING ═══════════════════════════
+// ═══════════════════════════ SCALPING AGRESIF ═══════════════════════════
 
-// ═══ MODIFIED: buildScalpPlan — TRUE 2-WAY SCALPING (Trend + Counter-Trend Bounce) ═══
-async function buildScalpPlan({ m1, m5, price, rrList, ctx }) {
+// M1 Momentum NOW
+async function buildScalpPlan({ m1, price, rrList, ctx }) {
   const { f, pip, prof } = ctx;
   const t = tx(ctx);
-  const tfName = prof.structTf;
-  const struct = tfName === 'M1' ? m1 : m5;
-  const m5c = tfName === 'M1' ? aggregateCandles(m1, 5).slice(0, -1) : m5.slice(0, -1);
-  const atrVal = atrOf(m5c, pip);
-  const reactionDist = reactionRangeFor('scalp', atrVal, ctx);
-  const zOpts = { dispAtr: prof.zoneDisp, freshOnly: SCALP_ZONE_FRESH_ONLY };
-  const recent = z => z.dispIdx >= m5c.length - SCALP_ZONE_LOOKBACK_M5
-                   && z.dispIdx <= m5c.length - SCALP_ZONE_MIN_AGE_BARS;
+  const atrM1 = atrOf(m1, pip);
 
-  const demand = findSDZones(m5c, 1, price, zOpts).filter(recent)[0] || null;
-  const supply = findSDZones(m5c, -1, price, zOpts).filter(recent)[0] || null;
-  const init = analyzePureSMCStructure(struct);
-
-  // ── FUNGSI SCORING PER ARAH (BUY / SELL) ──
-  const evaluateSide = (dir) => {
-    const isBuy = dir === 1;
-    const pos = classifyPriceZone(price, demand, supply, reactionDist);
-    const rejection = detectRejection(struct, price, demand, supply, atrVal, NOW_MAX_ATR.scalp);
-    const fvgEval = evaluateFVG(m5c, price, dir, atrVal, FVG_LOOKBACK_BY_STYLE.scalp);
-    
-    let score = 0;
-    let area = null, areaName = '', zoneLine = '', orderType = 'NOW', entry = price, baseSL = price;
-    let zoneRange = null, confidence = 'MEDIUM', setup = '', lines = [];
-    
-    // 1. Struktur (Trend Following)
-    if (init.dir === dir) score += 3; 
-    else score -= 3;                  
-    
-    const inZone = isBuy ? pos.inDemand : pos.inSupply;
-    const nearZone = isBuy ? pos.nearDemand : pos.nearSupply;
-    const dist = isBuy ? pos.distToDemand : pos.distToSupply;
-    const zone = isBuy ? demand : supply;
-    const rejOk = isBuy ? rejection.buyOk : rejection.sellOk;
-    const sideName = isBuy ? 'demand' : 'supply';
-    const sideNameCap = isBuy ? 'Demand' : 'Supply';
-    
-    // TIER 1: ZONA S/D (PRIORITAS UTAMA)
-    if (inZone) {
-      score += 5;
-      area = zone;
-      areaName = sideNameCap;
-      zoneRange = { min: zone.bottom, max: zone.top };
-      zoneLine = t.zoneFresh(sideName, prof.zoneTf, f(zone.bottom), f(zone.top), true);
-      lines.push(t.inZone(sideName, prof.zoneTf, f(zone.bottom), f(zone.top)));
-      
-      if (rejOk) {
-        score += 2;
-        orderType = 'NOW'; entry = price; baseSL = zone.sl;
-        confidence = 'HIGH'; setup = isBuy ? 'Demand Bounce NOW' : 'Supply Rejection NOW';
-      } else {
-        orderType = 'LIMIT'; entry = isBuy ? zone.top : zone.bottom; baseSL = zone.sl;
-        confidence = 'MEDIUM'; setup = isBuy ? 'Demand LIMIT' : 'Supply LIMIT';
-      }
-    } else if (nearZone) {
-      score += 4;
-      area = zone;
-      areaName = sideNameCap;
-      zoneRange = { min: zone.bottom, max: zone.top };
-      zoneLine = t.zoneFresh(sideName, prof.zoneTf, f(zone.bottom), f(zone.top), false);
-      lines.push(t.dist((dist / pip).toFixed(0), !isBuy) + ` → ${prof.zoneTf} ${sideName}`);
-      
-      if (rejOk && dist <= NOW_MAX_ATR.scalp * atrVal) {
-        score += 1;
-        orderType = 'NOW'; entry = price; baseSL = zone.sl;
-        confidence = 'HIGH'; setup = isBuy ? 'Approaching Demand NOW' : 'Approaching Supply NOW';
-      } else {
-        orderType = 'LIMIT'; entry = isBuy ? zone.top : zone.bottom; baseSL = zone.sl;
-        confidence = 'HIGH'; setup = isBuy ? 'Approaching Demand LIMIT' : 'Approaching Supply LIMIT';
-      }
-    } else {
-      // TIER 2: FVG (Jika jauh dari zona, cari retrace FVG)
-      if (fvgEval.useFVG) {
-        score += 2;
-        area = { top: fvgEval.fvg.hi, bottom: fvgEval.fvg.lo, sl: fvgEval.sl };
-        areaName = `FVG ${isBuy ? 'Bull' : 'Bear'}`;
-        zoneRange = { min: fvgEval.fvg.lo, max: fvgEval.fvg.hi };
-        zoneLine = `FVG ${f(fvgEval.fvg.lo)}-${f(fvgEval.fvg.hi)}`;
-        orderType = 'LIMIT'; entry = fvgEval.entry; baseSL = fvgEval.sl;
-        confidence = 'HIGH';
-        setup = fvgEval.retraceMandatory ? `FVG Retrace (WAJIB)` : `FVG Interior`;
-        lines.push(`FVG ${f(fvgEval.fvg.lo)}-${f(fvgEval.fvg.hi)}`);
-      } 
-      // TIER 3: MOMENTUM NOW (Jika tidak ada Zona & FVG, tapi Tren sangat kuat)
-      else {
-        if (init.dir === dir) {
-          // Harga lanjut jalan (Continuation)
-          score += 2; 
-          orderType = 'NOW'; entry = price;
-          baseSL = recentExtreme(struct, dir, 10);
-          zoneRange = { min: price, max: price };
-          confidence = 'MEDIUM';
-          setup = `Market NOW (Trend Continuation)`;
-          lines.push(`Tidak ada zona/FVG, ikuti momentum ${srcName(init.src, ctx.lang)}`);
-        } else {
-          // Jika melawan tren dan tidak ada zona/FVG -> TOLAK MENTAH-MENTAH
-          score -= 99; 
-        }
-      }
-    }
-    
-    // Cek zona lawan yang terlalu dekat (Reaction Range)
-    const oppZone = isBuy ? supply : demand;
-    if (oppZone && (isBuy ? (oppZone.bottom - price) : (price - oppZone.top)) <= reactionDist) {
-      score -= 2; 
-      lines.push(t.opposing(isBuy ? 'supply' : 'demand', prof.zoneTf, f(oppZone.bottom), f(oppZone.top), 'dekat', isBuy ? 'BUY' : 'SELL'));
-    }
-
-    return { dir, score, entry, orderType, baseSL, zoneRange, confidence, setup, zoneLine, lines, areaName };
-  };
-
-  const buySetup = evaluateSide(1);
-  const sellSetup = evaluateSide(-1);
-  const best = buySetup.score >= sellSetup.score ? buySetup : sellSetup;
-
-  if (best.score < 0) {
-    return { plan: null, reason: 'Tidak ada setup valid. Harga di tengah, tren tidak jelas, dan tidak ada FVG/Zona.' };
-  }
-
+  const struct = analyzePureSMCStructure(m1);
+  const dir = struct.dir;
+  const side = dir === 1 ? 'BUY' : 'SELL';
+  
+  const baseSL = recentExtreme(m1, dir, 10);
+  
   return await finalizePlan({
-    ...best,
-    kind: 'scalp', atrVal, ctx, rrList,
-    zoneNote: best.setup,
-    head: t.headLine(t.title.scalp, best.dir === 1 ? 'BUY' : 'SELL',
-      best.orderType === 'LIMIT' ? 'LIMIT' : 'NOW', ctx.symbol),
-  });
-}
-// ═══ END MODIFIED ═══
-
-// ═══════════════ DAY TRADING (SCALPING KONSERVATIF) ═══════════════
-
-function evalSide(dir, o) {
-  const { price, bias, parentPick, parentName, refineC, refineName, refineL, atrVal } = o;
-  const t = tx(o.ctx);
-
-  const parent = parentPick(dir);
-  const refined = parent ? refineZone(refineC, parent, dir, price, refineL) : null;
-
-  let z = refined;
-  if (!z) {
-      const fvgZones = findSDZones(refineC, dir, price, { freshOnly: true, dispAtr: 0.8 }).filter(x => x.fvg);
-      z = fvgZones[0] || pickZone(refineC, dir, price, refineL);
-  }
-
-  const side = dir === 1 ? 'Demand' : 'Supply';
-  let area, areaName, refineNote, score = 0;
-
-  if (z) {
-    area = z;
-    const zoneType = z.fvg ? 'FVG' : 'OB';
-    areaName = t.zoneName(side, zoneType, refineName);
-    refineNote = refined ? t.refineIn(refineName, parentName) : t.nearZone(refineName);
-  } else if (parent) {
-    area = parent;
-    const zoneType = parent.fvg ? 'FVG' : 'OB';
-    areaName = t.zoneName(side, zoneType, parentName);
-    refineNote = t.noRefine(refineName, parentName);
-  } else {
-    area = swingArea(refineC, dir, 20);
-    areaName = t.swingLevel(refineName);
-    refineNote = t.noSDLastSwing;
-    return { dir, area, areaName, refineNote, score: -1 };
-  }
-
-  score += Math.max(0, 3 - (area.dist || 0) / atrVal);
-  if (area.fvg) score += 3;
-  if (dir === bias.dir) score += 2;
-  if (area.fresh) score += 2;
-
-  const trig = findRefineTrigger(refineC, dir);
-  if (trig) score += trig.strong ? 1.5 : 1;
-
-  return { dir, area, areaName, refineNote, score };
-}
-
-async function buildTwoWayPlan(o) {
-  const { title, kind, price, ctx, rrList, bias, biasNote, refineC, refineName, atrVal } = o;
-  const t = tx(ctx);
-  const [best, other] = [evalSide(1, o), evalSide(-1, o)].sort((a, b) => b.score - a.score);
-  const lines = [
-    biasNote,
-    best.refineNote,
-    t.twoWay(best.dir === 1 ? 'BUY' : 'SELL', best.score.toFixed(1), other.dir === 1 ? 'BUY' : 'SELL', other.score.toFixed(1)),
-    best.dir !== bias.dir ? t.counterTrend : '',
-  ].filter(Boolean);
-  return await buildAreaPlan({
-    title, area: best.area, dir: best.dir, price, refineC, refineName,
-    kind, atrVal, ctx, areaName: best.areaName, rrList, lines,
+    dir, entry: price, orderType: 'NOW', baseSL, kind: 'scalp', atrVal: atrM1, ctx, rrList,
+    confidence: 'HIGH', setup: `Market NOW (${srcName(struct.src, ctx.lang)})`,
+    zoneNote: `Murni Struktur M1`, zoneRange: { min: price, max: price },
+    head: t.headLine(t.title.scalp, side, 'NOW', ctx.symbol),
+    lines: [`Eksekusi NOW mengikuti momentum M1: ${srcName(struct.src, ctx.lang)}`],
   });
 }
 
-async function buildDayPlan({ m5, m15, price, rrList, ctx }) {
+// ═══════════════ DAY TRADING (SCALPING KONSERVATIF - ZONA M1) ═══════════════
+
+async function buildDayPlan({ m1, price, rrList, ctx }) {
   const t = tx(ctx);
   const { f, pip } = ctx;
-  const atrM15 = atrOf(m15, pip);
-  const reactionDist = reactionRangeFor('day', atrM15, ctx);
-  const zOpts = { dispAtr: 0.8, freshOnly: true };
-  const demand = findSDZones(m15, 1, price, zOpts)[0] || null;
-  const supply = findSDZones(m15, -1, price, zOpts)[0] || null;
-  const pos = classifyPriceZone(price, demand, supply, reactionDist);
-  const rejection = detectRejection(m5, price, demand, supply, atrM15, NOW_MAX_ATR.day);
-  const bos = findLastBOS(m15, DAY_PIVOT);
-  const init = analyzePureSMCStructure(m15);
-  const bias = { dir: bos ? bos.dir : init.dir };
-  const biasNote = bos
-    ? t.biasBOS('M15', bos.dir === 1, f(bos.level))
-    : t.biasStruct('M15', srcName(init.src, ctx.lang));
+  const atrM1 = atrOf(m1, pip);
+  
+  const demand = findSDZones(m1, 1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
+  const supply = findSDZones(m1, -1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
+  
+  let dir, entry, baseSL, zoneRange, setup;
+  let lines = [];
 
-  const lines = [biasNote];
-  let dir, orderType, entry, baseSL, zoneRange, confidence, setup, zoneLine;
-
-  if (pos.inSupply) {
-    dir = -1;
-    zoneRange = { min: supply.bottom, max: supply.top };
-    zoneLine = t.zoneFresh('supply', 'M15', f(supply.bottom), f(supply.top), true);
-    lines.push(t.inZone('supply', 'M15', f(supply.bottom), f(supply.top)));
-    if (rejection.sellOk) {
-      orderType = 'NOW'; entry = price; baseSL = supply.sl;
-      confidence = 'HIGH'; setup = 'Supply Rejection NOW (Day)';
-    } else {
-      orderType = 'LIMIT'; entry = supply.bottom; baseSL = supply.sl;
-      confidence = 'MEDIUM'; setup = 'Supply LIMIT (Day)';
-    }
-  } else if (pos.inDemand) {
-    dir = 1;
-    zoneRange = { min: demand.bottom, max: demand.top };
-    zoneLine = t.zoneFresh('demand', 'M15', f(demand.bottom), f(demand.top), true);
-    lines.push(t.inZone('demand', 'M15', f(demand.bottom), f(demand.top)));
-    if (rejection.buyOk) {
-      orderType = 'NOW'; entry = price; baseSL = demand.sl;
-      confidence = 'HIGH'; setup = 'Demand Bounce NOW (Day)';
-    } else {
-      orderType = 'LIMIT'; entry = demand.top; baseSL = demand.sl;
-      confidence = 'MEDIUM'; setup = 'Demand LIMIT (Day)';
-    }
-  } else if (pos.nearSupply || pos.nearDemand) {
-    const useSupply = pos.nearSupply && (!pos.nearDemand || pos.distToSupply <= pos.distToDemand);
-    if (useSupply) {
-      dir = -1;
-      zoneRange = { min: supply.bottom, max: supply.top };
-      zoneLine = t.zoneFresh('supply', 'M15', f(supply.bottom), f(supply.top), false);
-      lines.push(t.dist((pos.distToSupply / pip).toFixed(0), true) + ' → M15 supply');
-      orderType = 'LIMIT'; entry = supply.bottom; baseSL = supply.sl;
-      confidence = 'HIGH'; setup = 'Approaching Supply LIMIT (Day)';
-    } else {
-      dir = 1;
-      zoneRange = { min: demand.bottom, max: demand.top };
-      zoneLine = t.zoneFresh('demand', 'M15', f(demand.bottom), f(demand.top), false);
-      lines.push(t.dist((pos.distToDemand / pip).toFixed(0), false) + ' → M15 demand');
-      orderType = 'LIMIT'; entry = demand.top; baseSL = demand.sl;
-      confidence = 'HIGH'; setup = 'Approaching Demand LIMIT (Day)';
-    }
+  if (demand && (!supply || demand.dist <= supply.dist)) {
+    dir = 1; entry = demand.top; baseSL = demand.sl; zoneRange = { min: demand.bottom, max: demand.top };
+    setup = `M1 Demand Limit (Zone Scalping)`;
+    lines.push(`Mengeksekusi BUY LIMIT di zona Demand M1.`);
+  } else if (supply) {
+    dir = -1; entry = supply.bottom; baseSL = supply.sl; zoneRange = { min: supply.bottom, max: supply.top };
+    setup = `M1 Supply Limit (Zone Scalping)`;
+    lines.push(`Mengeksekusi SELL LIMIT di zona Supply M1.`);
   } else {
-    dir = bias.dir;
-    const fvgEval = evaluateFVG(m15, price, dir, atrM15, FVG_LOOKBACK_BY_STYLE.day);
-    lines.push(t.outside('M15', 'M15', srcName(init.src, ctx.lang)));
-    if (fvgEval.useFVG && fvgEval.retraceMandatory) {
-      orderType = 'LIMIT'; entry = fvgEval.entry; baseSL = fvgEval.sl;
-      zoneRange = { min: fvgEval.fvg.lo, max: fvgEval.fvg.hi };
-      confidence = 'HIGH';
-      setup = `FVG ${dir === 1 ? 'Bull' : 'Bear'} Retrace M15 (WAJIB)`;
-      zoneLine = `FVG M15 ${f(fvgEval.fvg.lo)}-${f(fvgEval.fvg.hi)}`;
-    } else if (fvgEval.useFVG) {
-      orderType = 'LIMIT'; entry = fvgEval.entry; baseSL = fvgEval.sl;
-      zoneRange = { min: fvgEval.fvg.lo, max: fvgEval.fvg.hi };
-      confidence = 'HIGH';
-      setup = `FVG ${dir === 1 ? 'Bull' : 'Bear'} Interior M15`;
-      zoneLine = `Harga di FVG M15 ${f(fvgEval.fvg.lo)}-${f(fvgEval.fvg.hi)}`;
+    const fvgBuy = evaluateFVG(m1, price, 1, atrM1, 40);
+    const fvgSell = evaluateFVG(m1, price, -1, atrM1, 40);
+
+    if (fvgBuy.useFVG && (!fvgSell.useFVG || Math.abs(price - fvgBuy.entry) < Math.abs(price - fvgSell.entry))) {
+      dir = 1; entry = fvgBuy.entry; baseSL = fvgBuy.sl; 
+      zoneRange = { min: fvgBuy.fvg.lo, max: fvgBuy.fvg.hi };
+      setup = `M1 FVG Bullish Limit (Continuity)`;
+      lines.push(`Tidak ada zona fresh, menunggu retest FVG M1.`);
+    } else if (fvgSell.useFVG) {
+      dir = -1; entry = fvgSell.entry; baseSL = fvgSell.sl; 
+      zoneRange = { min: fvgSell.fvg.lo, max: fvgSell.fvg.hi };
+      setup = `M1 FVG Bearish Limit (Continuity)`;
+      lines.push(`Tidak ada zona fresh, menunggu retest FVG M1.`);
     } else {
-      orderType = 'NOW'; entry = price;
-      baseSL = recentExtreme(m15, dir, 10);
-      zoneRange = { min: price, max: price };
-      confidence = 'MEDIUM';
-      setup = `Market ${srcName(init.src, ctx.lang)} (Day)`;
+      return { plan: null, reason: 'Tidak ada setup valid. Tidak ada Zona S/D atau FVG M1 yang fresh.' };
     }
   }
 
   return await finalizePlan({
-    dir, entry, orderType, baseSL, kind: 'day', atrVal: atrM15, ctx, rrList,
-    confidence, setup, zoneNote: setup, zoneRange, zoneLine,
-    head: t.headLine(t.title.day, dir === 1 ? 'BUY' : 'SELL',
-      orderType === 'LIMIT' ? 'LIMIT' : 'NOW', ctx.symbol),
-    lines,
+    dir, entry, orderType: 'LIMIT', baseSL, kind: 'day', atrVal: atrM1, ctx, rrList,
+    confidence: 'HIGH', setup, zoneNote: setup, zoneRange,
+    head: t.headLine(t.title.day, dir === 1 ? 'BUY' : 'SELL', 'LIMIT', ctx.symbol),
+    lines: [...lines, `Target: ${f(zoneRange.min)} - ${f(zoneRange.max)}`],
   });
 }
 
-// ═══════════════════════════ INTRADAY & SWING ═══════════════════════════
+// ═══════════════════════════ INTRADAY ═══════════════════════════
 
-async function buildIntradayPlan({ m15, price, rrList, ctx }) {
+async function buildIntradayPlan({ m5, m15, price, rrList, ctx }) {
   const t = tx(ctx);
   const { f, pip } = ctx;
   const h1 = aggregateCandles(m15, 60);
-  const atrH1 = atrOf(h1, pip);
-  const reactionDist = reactionRangeFor('intraday', atrH1, ctx);
-  const zOpts = { dispAtr: 0.8, freshOnly: true };
-  const demand = findSDZones(h1, 1, price, zOpts)[0] || null;
-  const supply = findSDZones(h1, -1, price, zOpts)[0] || null;
-  const pos = classifyPriceZone(price, demand, supply, reactionDist);
-  const rejection = detectRejection(m15, price, demand, supply, atrH1, NOW_MAX_ATR.intraday);
-  const bos = findLastBOS(h1, DAY_PIVOT);
-  const init = analyzePureSMCStructure(h1);
-  const bias = { dir: bos ? bos.dir : init.dir };
-  const biasNote = bos
-    ? t.biasBOS('H1', bos.dir === 1, f(bos.level))
-    : t.biasStruct('H1', srcName(init.src, ctx.lang));
+  const atrM5 = atrOf(m5, pip);
 
-  const lines = [biasNote];
-  let dir, orderType, entry, baseSL, zoneRange, confidence, setup, zoneLine;
+  const biasH1 = analyzePureSMCStructure(h1);
+  const biasM15 = analyzePureSMCStructure(m15);
+  
+  let htfBias = 0;
+  if (biasH1.dir === 1 && biasM15.dir === 1) htfBias = 1;
+  if (biasH1.dir === -1 && biasM15.dir === -1) htfBias = -1;
 
-  if (pos.inSupply) {
-    dir = -1;
-    zoneRange = { min: supply.bottom, max: supply.top };
-    zoneLine = t.zoneFresh('supply', 'H1', f(supply.bottom), f(supply.top), true);
-    lines.push(t.inZone('supply', 'H1', f(supply.bottom), f(supply.top)));
-    if (rejection.sellOk) {
-      orderType = 'NOW'; entry = price; baseSL = supply.sl;
-      confidence = 'HIGH'; setup = 'Supply Rejection NOW (Intraday)';
-    } else {
-      orderType = 'LIMIT'; entry = supply.bottom; baseSL = supply.sl;
-      confidence = 'MEDIUM'; setup = 'Supply LIMIT (Intraday)';
-    }
-  } else if (pos.inDemand) {
+  if (htfBias === 0) {
+    return { plan: null, reason: 'Bias H1 & M15 tidak searah / ranging. Menunggu tren yang jelas.' };
+  }
+
+  let dir, entry, baseSL, zoneRange, setup;
+  let lines = [t.biasStruct('H1+M15', 'Trend Following')];
+
+  if (htfBias === 1) {
     dir = 1;
-    zoneRange = { min: demand.bottom, max: demand.top };
-    zoneLine = t.zoneFresh('demand', 'H1', f(demand.bottom), f(demand.top), true);
-    lines.push(t.inZone('demand', 'H1', f(demand.bottom), f(demand.top)));
-    if (rejection.buyOk) {
-      orderType = 'NOW'; entry = price; baseSL = demand.sl;
-      confidence = 'HIGH'; setup = 'Demand Bounce NOW (Intraday)';
+    const demand = findSDZones(m5, 1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
+    if (demand) {
+      entry = demand.top; baseSL = demand.sl; zoneRange = { min: demand.bottom, max: demand.top };
+      setup = `M5 Demand Limit (Trend Follow)`;
+      lines.push(`Menemukan Zona Demand M5 untuk BUY.`);
     } else {
-      orderType = 'LIMIT'; entry = demand.top; baseSL = demand.sl;
-      confidence = 'MEDIUM'; setup = 'Demand LIMIT (Intraday)';
-    }
-  } else if (pos.nearSupply || pos.nearDemand) {
-    const useSupply = pos.nearSupply && (!pos.nearDemand || pos.distToSupply <= pos.distToDemand);
-    if (useSupply) {
-      dir = -1;
-      zoneRange = { min: supply.bottom, max: supply.top };
-      zoneLine = t.zoneFresh('supply', 'H1', f(supply.bottom), f(supply.top), false);
-      lines.push(t.dist((pos.distToSupply / pip).toFixed(0), true) + ' → H1 supply');
-      orderType = 'LIMIT'; entry = supply.bottom; baseSL = supply.sl;
-      confidence = 'HIGH'; setup = 'Approaching Supply LIMIT (Intraday)';
-    } else {
-      dir = 1;
-      zoneRange = { min: demand.bottom, max: demand.top };
-      zoneLine = t.zoneFresh('demand', 'H1', f(demand.bottom), f(demand.top), false);
-      lines.push(t.dist((pos.distToDemand / pip).toFixed(0), false) + ' → H1 demand');
-      orderType = 'LIMIT'; entry = demand.top; baseSL = demand.sl;
-      confidence = 'HIGH'; setup = 'Approaching Demand LIMIT (Intraday)';
+      const fvgBuy = evaluateFVG(m5, price, 1, atrM5, 40);
+      if (fvgBuy.useFVG) {
+        entry = fvgBuy.entry; baseSL = fvgBuy.sl; zoneRange = { min: fvgBuy.fvg.lo, max: fvgBuy.fvg.hi };
+        setup = `M5 FVG Bullish Limit (Trend Continuity)`;
+        lines.push(`Tidak ada zona fresh, menggunakan FVG M5 untuk BUY.`);
+      } else {
+        return { plan: null, reason: 'Tren Bullish, tetapi tidak ada zona Demand M5 atau FVG Bullish M5 yang fresh.' };
+      }
     }
   } else {
-    dir = bias.dir;
-    const fvgEval = evaluateFVG(h1, price, dir, atrH1, FVG_LOOKBACK_BY_STYLE.intraday);
-    lines.push(t.outside('H1', 'H1', srcName(init.src, ctx.lang)));
-    if (fvgEval.useFVG && fvgEval.retraceMandatory) {
-      orderType = 'LIMIT'; entry = fvgEval.entry; baseSL = fvgEval.sl;
-      zoneRange = { min: fvgEval.fvg.lo, max: fvgEval.fvg.hi };
-      confidence = 'HIGH';
-      setup = `FVG ${dir === 1 ? 'Bull' : 'Bear'} Retrace H1 (WAJIB)`;
-      zoneLine = `FVG H1 ${f(fvgEval.fvg.lo)}-${f(fvgEval.fvg.hi)}`;
-    } else if (fvgEval.useFVG) {
-      orderType = 'LIMIT'; entry = fvgEval.entry; baseSL = fvgEval.sl;
-      zoneRange = { min: fvgEval.fvg.lo, max: fvgEval.fvg.hi };
-      confidence = 'HIGH';
-      setup = `FVG ${dir === 1 ? 'Bull' : 'Bear'} Interior H1`;
-      zoneLine = `Harga di FVG H1 ${f(fvgEval.fvg.lo)}-${f(fvgEval.fvg.hi)}`;
+    dir = -1;
+    const supply = findSDZones(m5, -1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
+    if (supply) {
+      entry = supply.bottom; baseSL = supply.sl; zoneRange = { min: supply.bottom, max: supply.top };
+      setup = `M5 Supply Limit (Trend Follow)`;
+      lines.push(`Menemukan Zona Supply M5 untuk SELL.`);
     } else {
-      orderType = 'NOW'; entry = price;
-      baseSL = recentExtreme(h1, dir, 10);
-      zoneRange = { min: price, max: price };
-      confidence = 'MEDIUM';
-      setup = `Market ${srcName(init.src, ctx.lang)} (Intraday)`;
+      const fvgSell = evaluateFVG(m5, price, -1, atrM5, 40);
+      if (fvgSell.useFVG) {
+        entry = fvgSell.entry; baseSL = fvgSell.sl; zoneRange = { min: fvgSell.fvg.lo, max: fvgSell.fvg.hi };
+        setup = `M5 FVG Bearish Limit (Trend Continuity)`;
+        lines.push(`Tidak ada zona fresh, menggunakan FVG M5 untuk SELL.`);
+      } else {
+        return { plan: null, reason: 'Tren Bearish, tetapi tidak ada zona Supply M5 atau FVG Bearish M5 yang fresh.' };
+      }
     }
   }
 
   return await finalizePlan({
-    dir, entry, orderType, baseSL, kind: 'intraday', atrVal: atrH1, ctx, rrList,
-    confidence, setup, zoneNote: setup, zoneRange, zoneLine,
-    head: t.headLine(t.title.intraday, dir === 1 ? 'BUY' : 'SELL',
-      orderType === 'LIMIT' ? 'LIMIT' : 'NOW', ctx.symbol),
-    lines,
+    dir, entry, orderType: 'LIMIT', baseSL, kind: 'intraday', atrVal: atrM5, ctx, rrList,
+    confidence: 'HIGH', setup, zoneNote: setup, zoneRange,
+    head: t.headLine(t.title.intraday, dir === 1 ? 'BUY' : 'SELL', 'LIMIT', ctx.symbol),
+    lines: [...lines, `Target retest M5: ${f(zoneRange.min)} - ${f(zoneRange.max)}`],
   });
 }
+
+// ═══════════════════════════ SWING ═══════════════════════════
 
 async function buildSwingPlan({ m15, price, rrList, ctx }) {
   const t = tx(ctx);
-  const h4 = aggregateCandles(m15, 240);
+  const { f, pip } = ctx;
   const h1 = aggregateCandles(m15, 60);
-  const bos = findLastBOS(h4, DAY_PIVOT);
-  const init = analyzePureSMCStructure(h4);
-  const dir = bos ? bos.dir : init.dir;
+  const h4 = aggregateCandles(m15, 240);
+  const d1 = aggregateCandles(m15, 1440);
+  const atrM15 = atrOf(m15, pip);
 
-  const area4 = pickZone(h4, dir, price, h4.length);
-  const refined = area4 ? refineZone(h1, area4, dir, price, h1.length) : null;
-  const z1 = refined || pickZone(h1, dir, price, h1.length);
+  const biasD1 = analyzePureSMCStructure(d1);
+  const biasH4 = analyzePureSMCStructure(h4);
+  const biasH1 = analyzePureSMCStructure(h1);
+  
+  let bullCount = [biasD1, biasH4, biasH1].filter(x => x.dir === 1).length;
+  let bearCount = [biasD1, biasH4, biasH1].filter(x => x.dir === -1).length;
+  
+  let htfBias = 0;
+  if (bullCount >= 2) htfBias = 1;
+  if (bearCount >= 2) htfBias = -1;
 
-  let area, areaName, refineNote;
-  if (z1) {
-    area = z1;
-    areaName = t.zoneSD('H1');
-    refineNote = refined ? t.swRefineIn : t.swRefineNear;
-  } else if (area4) {
-    area = area4;
-    areaName = t.zoneSD('H4');
-    refineNote = t.swRefineNoH4;
-  } else {
-    area = swingArea(h1, dir, 20);
-    areaName = t.swingLevel('H1');
-    refineNote = t.swNoAreaH1;
+  if (htfBias === 0) {
+    return { plan: null, reason: 'Bias D1/H4/H1 tidak searah. Menunggu tren makro.' };
   }
 
-  const biasNote = bos
-    ? t.biasBOS('H4', dir === 1, ctx.f(bos.level))
-    : t.biasStruct('H4', srcName(init.src, ctx.lang));
+  let dir, entry, baseSL, zoneRange, setup;
+  let lines = [t.biasStruct('D1+H4+H1', 'Trend Following')];
 
-  return await buildAreaPlan({
-    title: t.title.swing, area, dir, price, refineC: h1, refineName: 'H1',
-    kind: 'swing', atrVal: atrOf(h4, ctx.pip), ctx, areaName, rrList,
-    lines: [biasNote, refineNote],
+  if (htfBias === 1) {
+    dir = 1;
+    const demand = findSDZones(m15, 1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
+    if (demand) {
+      entry = demand.top; baseSL = demand.sl; zoneRange = { min: demand.bottom, max: demand.top };
+      setup = `M15 Demand Limit (Trend Follow)`;
+      lines.push(`Menemukan Zona Demand M15 untuk BUY.`);
+    } else {
+      const fvgBuy = evaluateFVG(m15, price, 1, atrM15, 40);
+      if (fvgBuy.useFVG) {
+        entry = fvgBuy.entry; baseSL = fvgBuy.sl; zoneRange = { min: fvgBuy.fvg.lo, max: fvgBuy.fvg.hi };
+        setup = `M15 FVG Bullish Limit (Trend Continuity)`;
+        lines.push(`Tidak ada zona fresh, menggunakan FVG M15 untuk BUY.`);
+      } else {
+        return { plan: null, reason: 'Tren Makro Bullish, tetapi tidak ada zona Demand M15 atau FVG Bullish M15 yang fresh.' };
+      }
+    }
+  } else {
+    dir = -1;
+    const supply = findSDZones(m15, -1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
+    if (supply) {
+      entry = supply.bottom; baseSL = supply.sl; zoneRange = { min: supply.bottom, max: supply.top };
+      setup = `M15 Supply Limit (Trend Follow)`;
+      lines.push(`Menemukan Zona Supply M15 untuk SELL.`);
+    } else {
+      const fvgSell = evaluateFVG(m15, price, -1, atrM15, 40);
+      if (fvgSell.useFVG) {
+        entry = fvgSell.entry; baseSL = fvgSell.sl; zoneRange = { min: fvgSell.fvg.lo, max: fvgSell.fvg.hi };
+        setup = `M15 FVG Bearish Limit (Trend Continuity)`;
+        lines.push(`Tidak ada zona fresh, menggunakan FVG M15 untuk SELL.`);
+      } else {
+        return { plan: null, reason: 'Tren Makro Bearish, tetapi tidak ada zona Supply M15 atau FVG Bearish M15 yang fresh.' };
+      }
+    }
+  }
+
+  return await finalizePlan({
+    dir, entry, orderType: 'LIMIT', baseSL, kind: 'swing', atrVal: atrM15, ctx, rrList,
+    confidence: 'HIGH', setup, zoneNote: setup, zoneRange,
+    head: t.headLine(t.title.swing, dir === 1 ? 'BUY' : 'SELL', 'LIMIT', ctx.symbol),
+    lines: [...lines, `Target retest M15: ${f(zoneRange.min)} - ${f(zoneRange.max)}`],
   });
 }
 
@@ -1515,11 +1303,13 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: t.range(price, symbol, lo, hi) });
   }
 
-  const needM1 = gold && style === 'Scalping' ? NEED.m1 : 0;
-  const needM5 = style === 'Scalping' || style === 'Day Trading' ? NEED.m5 : 0;
-  const needM15 = NEED.m15;
+  // Kebutuhan candle disesuaikan dengan gaya trading
+  const needM1 = (style === 'Scalping' || style === 'Day Trading') ? NEED.m1 : 0;
+  const needM5 = style === 'Intraday' ? NEED.m5 : 0;
+  const needM15 = (style === 'Intraday' || style === 'Swing') ? NEED.m15 : 0;
 
   const pick = async (arr, tf, need) => {
+    if (!need) return { candles: [], source: 'none', tried: [] };
     const frontOk = arr.length >= Math.min(need, 60) && matchesRef(arr, price);
     if (frontOk && arr.length >= need) return { candles: arr, source: 'frontend', tried: [] };
     const r = await getCandles(symbol, tf, need, apiKey, price);
@@ -1528,15 +1318,16 @@ export default async function handler(req, res) {
   };
 
   const [r1, r5, r15] = await Promise.all([
-    needM1 ? pick(m1, '1m', needM1) : null,
-    needM5 ? pick(m5, '5m', needM5) : null,
+    pick(m1, '1m', needM1),
+    pick(m5, '5m', needM5),
     pick(m15, '15m', needM15),
   ]);
-  if (r1) m1 = r1.candles;
-  if (r5) m5 = r5.candles;
-  m15 = r15.candles;
 
-  const failed = [['m1', r1], ['m5', r5], ['m15', r15]].filter(([, r]) => r && r.candles.length === 0);
+  if (needM1) m1 = r1.candles;
+  if (needM5) m5 = r5.candles;
+  if (needM15) m15 = r15.candles;
+
+  const failed = [['m1', r1, needM1], ['m5', r5, needM5], ['m15', r15, needM15]].filter(([, r, need]) => need && r.candles.length === 0);
   if (failed.length) {
     const detail = failed.map(([k, r]) => `${k}: ${describeTried(r.tried, price, lang)}`).join(' | ');
     console.error('candle gagal', symbol, detail);
@@ -1546,17 +1337,17 @@ export default async function handler(req, res) {
 
   if (needM1) m1 = mergeLiveBar(m1, price, 1);
   if (needM5) m5 = mergeLiveBar(m5, price, 5);
-  m15 = mergeLiveBar(m15, price, 15);
+  if (needM15) m15 = mergeLiveBar(m15, price, 15);
 
   const rrList = styleCfg.rr;
   let result = { plan: null, reason: t.notProcessed };
 
   if (style === 'Scalping') {
-    result = await buildScalpPlan({ m1, m5, price, rrList, ctx });
+    result = await buildScalpPlan({ m1, price, rrList, ctx });
   } else if (style === 'Day Trading') {
-    result = await buildDayPlan({ m5, m15, price, rrList, ctx });
+    result = await buildDayPlan({ m1, price, rrList, ctx });
   } else if (style === 'Intraday') {
-    result = await buildIntradayPlan({ m15, price, rrList, ctx });
+    result = await buildIntradayPlan({ m5, m15, price, rrList, ctx });
   } else if (style === 'Swing') {
     result = await buildSwingPlan({ m15, price, rrList, ctx });
   }
