@@ -477,7 +477,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
 const MARKETS = {
   XAUUSD: { aliases: ['XAUUSD', 'GOLD'], min: 1000, max: 5000, pip: 0.1, tv: 'OANDA:XAUUSD', h24: false },
   BTCUSD: { aliases: ['BTCUSD', 'BTCUSDT', 'BTC'], min: 1000, max: 1000000, pip: 1, tv: 'BITSTAMP:BTCUSD', h24: true },
-  VISION: { aliases: ['VISION', 'IMAGE'], min: 0, max: 0, pip: 1, tv: '', h24: true } // Dummy config
+  VISION: { aliases: ['VISION', 'IMAGE'], min: 0, max: 0, pip: 1, tv: '', h24: true }
 };
 const KEYS = Object.keys(MARKETS);
 const WS_URL = 'wss://ws.xbtfx.com/v1/ws';
@@ -586,7 +586,6 @@ const norm = s => String(s ?? '').toUpperCase().replace(/^XYZ:/, '').replace(/\.
 const ALIAS_MAP = new Map();
 KEYS.forEach(k => MARKETS[k].aliases.forEach(a => ALIAS_MAP.set(norm(a), k)));
 
-// Format harga: desimal mengikuti besar harga (PEPE 0.00000403 tetap tampil penuh)
 const fmt = p => {
   const n = Number(p);
   if (!Number.isFinite(n)) return '--';
@@ -607,7 +606,6 @@ const marketOpen = k => MARKETS[k].h24 || ![0, 6].includes(new Date().getUTCDay(
 const T = k => I18N[lang][k];
 const optOf = s => T((STYLE_CFG[s] || STYLE_CFG.Scalping).opt);
 const symOf = k => workingSym[k] || MARKETS[k].aliases[aliasIdx[k] || 0];
-// Kartu sinyal: untuk VISION pakai hasil analisa gambar, untuk pair pakai setup yang dipilih
 const activeTrade = () => (market === 'VISION' ? visionTrade : (trades.find(t => t.id === activeId && t.key === market) || null));
 const toMs = v => {
   const n = Number(v);
@@ -617,9 +615,6 @@ const toMs = v => {
 };
 
 /* ================= REASONING 2 BAHASA ================= */
-// Ambil alasan dalam ID dan EN dari respons server (jika server mengirim keduanya).
-// Format yang dikenali: s.reasons {id,en} | s.reason_id / s.reason_en | s.reasonId / s.reasonEn.
-// Jika hanya ada satu s.reason, dianggap berbahasa sesuai permintaan (lang saat generate).
 function pickReasons(s, curLang) {
   const out = {};
   const obj = s.reasons || s.reason_i18n || {};
@@ -645,12 +640,12 @@ function reasonFor(t) {
 /* ================= STATE ================= */
 let lang = 'id', market = 'XAUUSD', ws = null, connId = 0, reconT = null, pingT = null, authFailed = false, streamStarted = false;
 let trades = [], activeId = null, tvOn = false, showSMC = true;
-let visionTrade = null; // hasil analisa gambar, terpisah dari history dan rekap
+let visionTrade = null;
 let smcTfOverride = null;
 let smcZoom = 1;
 let smcPan = 0;
 let statusInterval = null;
-let visionImages = []; // State untuk upload gambar
+let visionImages = [];
 let calView = { y: new Date().getFullYear(), m: new Date().getMonth() };
 const prices = {}, hist = {}, candles = {}, workingSym = {}, aliasIdx = {}, subAt = {};
 const SER = {}, CSYM = {}, dispCache = {};
@@ -660,12 +655,9 @@ const cx = cv.getContext('2d');
 const scv = $('smcCanvas');
 const sx = scv.getContext('2d');
 
-/* ================= LOG (Hanya ke Console) ================= */
-function log(msg, type) {
-  console.log(`[${type || 'info'}] ${msg}`);
-}
+function log(msg, type) { console.log(`[${type || 'info'}] ${msg}`); }
 
-/* ================= FUNGSI STATUS CLIENT ================= */
+/* ================= STATUS CLIENT ================= */
 async function fetchUserStatus() {
   const email = localStorage.getItem(K.email);
   if (!email) return;
@@ -685,7 +677,6 @@ async function fetchUserStatus() {
 
 function startStatusTimer(data) {
   if (statusInterval) clearInterval(statusInterval);
-
   const badge = $('userStatusBadge');
   const elType = $('statusType');
   const elTimer = $('statusTimer');
@@ -694,7 +685,6 @@ function startStatusTimer(data) {
   if (!badge || !elType || !elTimer) return;
   badge.classList.remove('hidden');
 
-  // Lifetime / Admin
   if (data.status === 'lifetime' || data.status === 'admin') {
     elType.textContent = 'LIFETIME';
     elType.className = 'text-yellow-400';
@@ -704,13 +694,11 @@ function startStatusTimer(data) {
     return;
   }
 
-  // Monthly / Trial
   if (data.status === 'trial') {
     elType.textContent = 'TRIAL';
     elType.className = 'text-yellow-400';
     elUsage.classList.remove('hidden');
     elUsage.textContent = `${data.requests_today || 0}/5 req`;
-    // Warnai merah jika limit harian tercapai
     if ((data.requests_today || 0) >= 5) {
       elUsage.className = 'text-red-400 border-l border-panelborder pl-1.5 font-bold';
     } else {
@@ -723,18 +711,15 @@ function startStatusTimer(data) {
   }
 
   const expires = new Date(data.expires_at).getTime();
-
   const tick = () => {
     const now = Date.now();
     const diff = expires - now;
-
     if (diff <= 0) {
       elTimer.textContent = 'EXPIRED';
       elTimer.className = 'text-red-400';
       clearInterval(statusInterval);
       return;
     }
-
     const d = Math.floor(diff / (1000 * 60 * 60 * 24));
     const h = Math.floor((diff / (1000 * 60 * 60)) % 24);
     const m = Math.floor((diff / 1000 / 60) % 60);
@@ -749,7 +734,6 @@ function startStatusTimer(data) {
     elTimer.textContent = parts.join(' ') + ' left';
     elTimer.className = 'text-yellow-400';
   };
-
   tick();
   statusInterval = setInterval(tick, 1000);
 }
@@ -767,15 +751,7 @@ function copySignal() {
     const tp2 = t.tp2 ? fmt(t.tp2) : '-';
     const tp3 = t.tp3 ? fmt(t.tp3) : '-';
 
-    const text = `${t.key}
-${styleText}
-${dirText} ${orderText}
-Entry: ${entry}
-SL: ${sl}
-TP1: ${tp1}
-TP2: ${tp2}
-TP3: ${tp3}`;
-
+    const text = `${t.key}\n${styleText}\n${dirText} ${orderText}\nEntry: ${entry}\nSL: ${sl}\nTP1: ${tp1}\nTP2: ${tp2}\nTP3: ${tp3}`;
     navigator.clipboard.writeText(text).then(() => {
         alert('Signal copied to clipboard!');
     }).catch(err => {
@@ -818,7 +794,6 @@ async function handleLogin(e) {
   localStorage.setItem(K.type, 'terminal');
   localStorage.setItem(K.email, r.data.email);
   showApp();
-  log('Login berhasil: ' + r.data.email, 'system');
 }
 
 async function checkSession() {
@@ -838,7 +813,7 @@ function showApp() {
   $('mainApp').classList.remove('hidden');
   $('mainApp').classList.add('flex');
   if (!streamStarted) { streamStarted = true; connect(); }
-  fetchUserStatus(); // <--- Panggil Status User
+  fetchUserStatus();
   pump();
 }
 function showAdmin() {
@@ -891,7 +866,7 @@ function applyLang() {
   setTxt('langBtn', lang.toUpperCase() + ' 🌐');
   setTxt('btnText', market === 'VISION' ? T('btnGenVision') : T('btnGen'));
   renderAll();
-  if (market === 'VISION') refreshCard(); // renderAll() berhenti lebih awal untuk VISION
+  if (market === 'VISION') refreshCard();
 }
 function toggleStyleInfo() { $('styleInfoBox').classList.toggle('hidden'); }
 function wsBadge(text, color) {
@@ -902,8 +877,6 @@ function wsBadge(text, color) {
 
 /* ================= PILIH PAIR & SETUP ================= */
 function openOf(k) { return trades.filter(x => x.key === k && x.status !== 'CLOSED'); }
-
-// Pilih setup untuk pair k: prioritas yang diminta, lalu yang sedang tampil, lalu setup berjalan terbaru
 function pickTradeFor(k, preferId) {
   const list = trades.filter(x => x.key === k);
   if (preferId) { const hit = list.find(x => x.id === preferId); if (hit) return hit.id; }
@@ -917,7 +890,6 @@ function syncMarket(tradeId) {
   market = $('marketSelect').value;
   setTxt('selectedPairBadge', market);
 
-  // LOGIKA VISIBILITY PANEL
   const isVision = market === 'VISION';
   $('visionPanel').classList.toggle('hidden', !isVision);
   $('streamPanel').classList.toggle('hidden', isVision);
@@ -926,9 +898,7 @@ function syncMarket(tradeId) {
   $('smcPanel').classList.toggle('hidden', isVision);
   $('sessionPanel').classList.toggle('hidden', isVision);
 
-  // Update tombol text
   setTxt('btnText', isVision ? T('btnGenVision') : T('btnGen'));
-
   activeId = isVision ? null : pickTradeFor(market, tradeId);
   refreshCard();
   renderHistory();
@@ -944,7 +914,6 @@ function pickMarket(k, tradeId) {
   syncMarket(tradeId);
 }
 
-// Tap pair yang sudah aktif dengan lebih dari satu setup berjalan: pindah ke setup berikutnya
 function tapTicker(k) {
   const open = openOf(k);
   if (k === market && open.length > 1) {
@@ -960,7 +929,6 @@ function viewTrade(id) {
   pickMarket(t.key, id);
 }
 
-// Tap lewat pointerdown/pointerup pada container yang tetap, supaya tidak hilang saat list dirender ulang
 function bindTap(el, handler) {
   if (!el) return;
   let start = null;
@@ -982,11 +950,9 @@ function bindTap(el, handler) {
 function handleImageUpload(e) {
   const files = e.target.files;
   if (!files.length) return;
-
   Array.from(files).forEach(file => {
     if (visionImages.length >= 3) return alert('Maksimal 3 gambar.');
     if (file.size > 5 * 1024 * 1024) return alert('Ukuran gambar maksimal 5MB.');
-
     const reader = new FileReader();
     reader.onload = (ev) => {
       visionImages.push(ev.target.result);
@@ -994,8 +960,7 @@ function handleImageUpload(e) {
     };
     reader.readAsDataURL(file);
   });
-
-  e.target.value = ''; // Reset input
+  e.target.value = '';
 }
 
 function renderVisionPreview() {
@@ -1031,7 +996,6 @@ async function connect() {
 
   if (!(r.ok && r.data && r.data.token)) {
     if (r.status === 401) { authFailed = true; wsBadge('SESI INVALID', 'red'); return; }
-    log('[WS] Gagal dapat token backend, mencoba koneksi publik XBTFX...', 'system');
     openSocket(null);
     return;
   }
@@ -1049,7 +1013,6 @@ function openSocket(token) {
     } else {
       wsBadge('XBTFX PUB', 'green');
       KEYS.forEach(k => { subAt[k] = Date.now(); });
-      // Hanya subscribe jika bukan VISION
       const activeKeys = KEYS.filter(k => k !== 'VISION');
       send(sock, { action: 'subscribe', channel: 'quotes', symbols: activeKeys.map(symOf) });
     }
@@ -1099,12 +1062,11 @@ function watchdog() {
       aliasIdx[k] = idx + 1;
       subAt[k] = now;
       send(ws, { action: 'subscribe', channel: 'quotes', symbols: [symOf(k)] });
-      log('[WS] XBTFX mencoba simbol ' + symOf(k), 'system');
     }
   }
 }
 
-/* ================= TICK & CANDLE LIVE (LOKAL, DISIMPAN) ================= */
+/* ================= TICK & CANDLE LIVE ================= */
 function addTick(k, p) {
   if (k === 'VISION') return;
   const now = Date.now();
@@ -1147,7 +1109,7 @@ function saveLive() {
   } catch (e) {}
 }
 
-/* ================= SERI CANDLE (SERVER → BINANCE → LIVE) ================= */
+/* ================= SERI CANDLE ================= */
 const ser = (k, iv) => {
   const ck = k + '|' + iv;
   return SER[ck] || (SER[ck] = {
@@ -1215,14 +1177,11 @@ function fetchExt(k, iv) {
           s.ext = arr.map(x => ({ t: +x[0], o: +x[1], h: +x[2], l: +x[3], c: +x[4] }))
             .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite));
           s.extSym = sym; s.extErr = ''; s.extErrLog = '';
-          if (!s.extOk) { s.extOk = true; log(`[REST] XBTFX ${k} ${iv} kosong, fallback Binance`, 'system'); }
           return;
         }
         why = `HTTP ${res.status}`;
       } catch (e) { why = 'tidak bisa diakses'; }
     }
-    s.extErr = `Binance ${sym}: ${why || 'tidak ada data'}`;
-    if (s.extErr !== s.extErrLog) { s.extErrLog = s.extErr; log(`[REST] Candle ${k} ${iv} — XBTFX gagal | ${s.extErr}`, 'error'); }
   })().finally(() => { s.xp = null; });
   return s.xp;
 }
@@ -1255,7 +1214,6 @@ function seriesRows(k, iv) {
       out.push({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close });
     }
   }
-
   if (out.length > 1) {
     const last = out[out.length - 1];
     const prev = out[out.length - 2];
@@ -1361,7 +1319,6 @@ function checkTrades(k, p) {
   if (ch) { saveTrades(); renderHistory(); }
 }
 
-// ================= LOGIKA ENTRY =================
 function evalTrade(t, p) {
   if (t.key === 'VISION') return false;
   const d = t.dir;
@@ -1383,7 +1340,6 @@ function evalTrade(t, p) {
     if (fillCond) {
       t.status = 'RUNNING';
       t.filledAt = Date.now();
-      log(`Trade #${t.no} ${t.key} TERISI di ${fmt(t.entry)} (${t.signal})`, t.signal === 'BUY' ? 'buy' : 'sell');
       return true;
     }
     return false;
@@ -1397,7 +1353,6 @@ function evalTrade(t, p) {
     if (t[k] != null && !t.hits[k] && reached(t[k])) {
       t.hits[k] = { at: Date.now(), price: t[k] };
       changed = true;
-      log(`Trade #${t.no} ${t.key} hit ${k.toUpperCase()}!`, 'buy');
     }
   }
 
@@ -1420,17 +1375,14 @@ function evalTrade(t, p) {
 
   return changed;
 }
-// ==================================================================
 
 function closeTrade(t, result, exitPrice) {
   Object.assign(t, { status: 'CLOSED', result, exitPrice, closedAt: Date.now() });
   t.maxTp = maxHit(t);
   t.pips = pipsOf(t, recapPrice(t) ?? exitPrice);
-  log(`Trade #${t.no} ${t.key} ditutup (${resLabel(t)}) | ${fmtPips(t.pips)}`, t.pips > 0 ? 'buy' : 'sell');
 }
 function cancelTrade(t, reason) {
   Object.assign(t, { status: 'CLOSED', result: 'CANCEL', closedAt: Date.now(), pips: 0, maxTp: 0, cancelReason: reason });
-  log(`Trade #${t.no} ${t.key}: ${reason}`, 'error');
 }
 function expirePending() {
   let ch = false;
@@ -1449,7 +1401,7 @@ function clearHistory() {
 
 /* ================= RENDER ================= */
 function renderAll() {
-  if (market === 'VISION') return; // Jangan render live data jika Vision
+  if (market === 'VISION') return;
   renderTickers(); renderHighlights(); renderBias(); renderHistory(); refreshCard(); renderCalendar(); renderSmcInfo(); updateSessionCard();
 }
 
@@ -1530,7 +1482,6 @@ function renderHistory() {
   }).join('');
 }
 
-// Chip setup untuk pair aktif: tampil jika pair punya lebih dari satu setup
 function renderChips() {
   const el = $('setupChips');
   if (!el) return;
@@ -1636,7 +1587,7 @@ const WEEKDAYS = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
 const calLoad = () => { try { return JSON.parse(localStorage.getItem(CAL_KEY)) || {}; } catch (e) { return {}; } };
 const calSave = o => { try { localStorage.setItem(CAL_KEY, JSON.stringify(o)); } catch (e) {} };
 function calEntry(t) {
-  if (t.key === 'VISION') return null; // Jangan rekap vision
+  if (t.key === 'VISION') return null;
   let res = 'OPEN', pips = 0;
   if (t.status === 'CLOSED') {
     if (t.result === 'CANCEL') res = 'CANCEL';
@@ -1765,18 +1716,7 @@ function updateSessionCard() {
         const localStart = d1.toLocaleTimeString('en-US', formatOpt).toLowerCase().replace(' ', '');
         const localEnd = d2.toLocaleTimeString('en-US', formatOpt).toLowerCase().replace(' ', '');
 
-        let statusHtml = '';
-
-        if (isActive) {
-            activeName = s.name;
-            activeColor = s.color;
-            activeBorder = s.border;
-            statusHtml = `<span class="text-emerald-400 font-bold animate-pulse">Open</span>`;
-        } else if (currentUTCSeconds < startSec) {
-            statusHtml = `<span class="text-gray-500">Closed</span>`;
-        } else {
-            statusHtml = `<span class="text-gray-600">Closed</span>`;
-        }
+        let statusHtml = isActive ? `<span class="text-emerald-400 font-bold animate-pulse">Open</span>` : `<span class="text-gray-500">Closed</span>`;
 
         html += `
             <div class="flex justify-between items-center bg-darkbg border ${isActive ? s.border : 'border-panelborder'} px-2 py-1.5 rounded transition-all">
@@ -1798,11 +1738,11 @@ function updateSessionCard() {
     if (list) list.innerHTML = html;
 }
 
-/* ================= SMC: DETEKSI ================= */
+/* ================= SMC ================= */
 function setSmcTf(tf) {
   if (market === 'VISION') return;
   smcTfOverride = tf;
-  smcPan = 0; // Reset posisi geser saat ganti TF
+  smcPan = 0;
   document.querySelectorAll('.smc-tf-btn').forEach(btn => {
     if (btn.dataset.tf === tf) {
       btn.classList.add('active');
@@ -1814,11 +1754,10 @@ function setSmcTf(tf) {
   renderSmcInfo();
 }
 
-/* ================= FITUR ZOOM & PAN SMC ================= */
 function zoomSMC(dir) {
   if (market === 'VISION') return;
-  if (dir > 0) smcZoom = Math.min(5, smcZoom + 0.2); // Max zoom 5x
-  else smcZoom = Math.max(0.5, smcZoom - 0.2);       // Min zoom 0.5x
+  if (dir > 0) smcZoom = Math.min(5, smcZoom + 0.2);
+  else smcZoom = Math.max(0.5, smcZoom - 0.2);
   renderSmcInfo();
 }
 function resetSMC() {
@@ -1828,7 +1767,6 @@ function resetSMC() {
   renderSmcInfo();
 }
 
-// Event listener untuk Drag/Pan di Canvas SMC
 let isDragging = false;
 let lastX = 0;
 scv.addEventListener('pointerdown', e => {
@@ -1840,7 +1778,6 @@ scv.addEventListener('pointerdown', e => {
 scv.addEventListener('pointermove', e => {
   if (market === 'VISION' || !isDragging) return;
   const dx = e.clientX - lastX;
-  // Konversi pixel ke jumlah candle (asumsi 5px per candle slot)
   const candlesMoved = dx / 5;
   smcPan += candlesMoved * smcZoom;
   lastX = e.clientX;
@@ -1851,7 +1788,6 @@ scv.addEventListener('pointerup', e => {
   isDragging = false;
   scv.releasePointerCapture(e.pointerId);
 });
-
 
 function invalidZone(rows, from, dir, bottom, top) {
   for (let j = from; j < rows.length; j++) {
@@ -1958,7 +1894,6 @@ function cisdOf(rows) {
 
 function detectSMC(rows) {
   const fvgs = [], obs = [], breakers = [];
-
   for (let i = 1; i < rows.length - 1; i++) {
     const a = rows[i - 1], b = rows[i], c = rows[i + 1];
     if (a.h < c.l && !invalidZone(rows, i + 2, 1, a.h, c.l)) fvgs.push({ dir: 1, bottom: a.h, top: c.l, t: b.t });
@@ -1967,11 +1902,9 @@ function detectSMC(rows) {
     if (b.c > b.o && c.c < b.l && !invalidZone(rows, i + 2, -1, b.o, b.c)) obs.push({ dir: -1, bottom: b.o, top: b.c, t: b.t });
   }
 
-  // Deteksi Breaker Block
   for (const ob of obs) {
     const startIndex = rows.findIndex(r => r.t === ob.t);
     if (startIndex === -1) continue;
-
     for (let j = startIndex + 1; j < rows.length; j++) {
       const c = rows[j];
       if (ob.dir === -1 && c.c > ob.top) {
@@ -2069,9 +2002,6 @@ function rr(c, x, y, w, h, r) {
   c.closePath();
 }
 
-// FIX WEEKEND GAP: posisi X berdasarkan URUTAN candle (bukan selisih waktu),
-// jadi jeda market tutup (Jumat malam -> Senin pagi) tidak menyisakan ruang kosong.
-// tm yang jatuh di antara dua candle dipetakan ke candle sebelumnya.
 function timeToX(vis, plotL, slot) {
   return tm => {
     if (!vis.length) return plotL;
@@ -2095,7 +2025,7 @@ function layoutX(rows, plotL, plotR, tfMs) {
 }
 function srcLabel(k, iv) { return `${k} · ${iv} · WIB · ${srcOf(k, iv)}`; }
 
-/* ================= CHART UTAMA (CANDLESTICK + FULL FRAME LINES) ================= */
+/* ================= CHART UTAMA ================= */
 function drawChart() {
   const d = fitCv(cv, cx);
   if (!d || market === 'VISION') return;
@@ -2128,8 +2058,6 @@ function drawChart() {
   }
 
   const { vis, slot, xOfT } = layoutX(rows, plotL, plotR, tfMs);
-  const clampX = x => Math.max(plotL, Math.min(plotR, x));
-
   const L = t ? [
     { label: 'ENTRY', v: t.entry, c: '#93c5fd', bg: 'rgba(147,197,253,.14)', dash: [] },
     { label: 'SL', v: t.sl, c: '#f87171', bg: 'rgba(248,113,113,.14)', dash: [4, 4], hit: t.result === 'SL' },
@@ -2139,7 +2067,6 @@ function drawChart() {
   ].filter(l => Number.isFinite(l.v)) : [];
 
   let lo = Infinity, hi = -Infinity;
-
   const isRunning = t && (t.status === 'RUNNING' || (t.hits && Object.keys(t.hits).length > 0));
   const hitEntry = t && live != null && (t.dir > 0 ? live <= t.entry : live >= t.entry);
   const isZoomed = t && (isRunning || hitEntry);
@@ -2205,7 +2132,6 @@ function drawChart() {
   for (const c of vis) {
     const x = xOfT(c.t);
     if (x < plotL || x > plotR) continue;
-
     const up = c.c >= c.o;
     const col = up ? '#34d399' : '#f87171';
     const yH = yOf(c.h), yL = yOf(c.l), yO = yOf(c.o), yC = yOf(c.c);
@@ -2219,7 +2145,6 @@ function drawChart() {
     cx.fillRect(x - bodyW / 2, bY, bodyW, bH);
   }
 
-  // ================== GARIS FULL FRAME ==================
   if (t) {
     L.forEach(l => {
       const y = yOf(l.v);
@@ -2235,7 +2160,6 @@ function drawChart() {
       cx.restore();
     });
   }
-  // ======================================================
 
   if (live != null) {
     const y = yOf(live);
@@ -2302,7 +2226,7 @@ function drawChart() {
   }
 }
 
-/* ================= PANEL SMC (CANDLESTICK + ZONA) ================= */
+/* ================= PANEL SMC ================= */
 function drawSMC() {
   const d = fitCv(scv, sx);
   if (!d || market === 'VISION') return;
@@ -2312,8 +2236,6 @@ function drawSMC() {
   const style = t ? t.style : $('tradingStyleSelect').value;
 
   const iv = smcTfOverride || SMC_TF_MAP[style] || '5m';
-
-  const tfMs = TF_MIN[iv] * 60000;
   const rows = displayRows(k, iv);
   const live = prices[k] ? prices[k].price : null;
   const plotL = 6, plotT = 18, plotB = CH - 14, plotR = CW - CHART_GUT;
@@ -2336,13 +2258,11 @@ function drawSMC() {
     return;
   }
 
-  // --- LOGIKA ZOOM & PAN ---
   const plotW = plotR - plotL;
   const baseN = Math.max(12, Math.floor(plotW / 5) - CH_PAD);
   const nWant = Math.floor(baseN / smcZoom);
   const slot = plotW / (Math.max(nWant, 5) + CH_PAD);
 
-  // Hitung batas pan
   const maxPan = Math.max(0, rows.length - nWant);
   smcPan = Math.max(0, Math.min(smcPan, maxPan));
 
@@ -2350,10 +2270,8 @@ function drawSMC() {
   const endIdx = Math.min(rows.length, startIdx + nWant);
   const vis = rows.slice(startIdx, endIdx);
 
-  // FIX WEEKEND GAP: posisi X berdasarkan urutan candle
   const t0 = vis.length ? vis[0].t : 0;
   const xOfT = timeToX(vis, plotL, slot);
-
   const clampX = x => Math.max(plotL, Math.min(plotR, x));
   const ref = live != null ? live : (vis.length ? vis[vis.length - 1].c : 0);
   const near = p => Math.abs(p - ref) / ref < 0.03;
@@ -2382,7 +2300,6 @@ function drawSMC() {
   hi += pad;
   const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * plotH;
 
-  // grid
   sx.lineWidth = 1;
   sx.strokeStyle = 'rgba(148,163,184,.08)';
   for (let i = 1; i < 4; i++) {
@@ -2390,7 +2307,6 @@ function drawSMC() {
     sx.beginPath(); sx.moveTo(plotL, y); sx.lineTo(plotR, y); sx.stroke();
   }
 
-  // session box
   sess.forEach(se => {
     const x0 = clampX(xOfT(se.a)), x1 = clampX(xOfT(se.b));
     if (x1 <= x0) return;
@@ -2419,7 +2335,6 @@ function drawSMC() {
     sx.restore();
   });
 
-  // FVG & OB/SND (Supply/Demand)
   const zone = (z, label, rgb) => {
     const x0 = clampX(xOfT(z.t));
     if (plotR - x0 < 2) return;
@@ -2442,7 +2357,6 @@ function drawSMC() {
   obs.forEach(z => zone(z, z.dir > 0 ? 'Demand' : 'Supply', z.dir > 0 ? '16,185,129' : '239,68,68'));
   breakers.forEach(z => zone(z, z.dir > 0 ? 'BB ▲' : 'BB ▼', z.dir > 0 ? '34,211,238' : '244,114,182'));
 
-  // BSL / SSL / EQH / EQL
   pools.forEach(p => {
     const y = yOf(p.p), x0 = clampX(xOfT(p.t));
     sx.save();
@@ -2459,7 +2373,6 @@ function drawSMC() {
     sx.restore();
   });
 
-  // Sweep (SW)
   sweeps.forEach(w => {
     const x = clampX(xOfT(w.t)), y = yOf(w.p);
     sx.save();
@@ -2472,7 +2385,6 @@ function drawSMC() {
     sx.restore();
   });
 
-  // BOS / CHoCH
   ev.forEach(e => {
     const x0 = clampX(xOfT(e.fromT)), x1 = clampX(xOfT(e.toT)), y = yOf(e.p);
     const col = e.dir > 0 ? '125,211,252' : '251,146,60';
@@ -2488,7 +2400,6 @@ function drawSMC() {
     sx.restore();
   });
 
-  // CISD
   cis.forEach(c => {
     const x0 = clampX(xOfT(c.t)), x1 = clampX(xOfT(c.toT)), y = yOf(c.p);
     sx.save();
@@ -2505,7 +2416,6 @@ function drawSMC() {
     sx.restore();
   });
 
-  // candle (sebagai referensi harga)
   const bodyW = Math.max(1.5, slot * 0.62);
   sx.lineWidth = 1;
   sx.globalAlpha = .9;
@@ -2521,7 +2431,6 @@ function drawSMC() {
   }
   sx.globalAlpha = 1;
 
-  // harga live
   if (live != null && vis.length) {
     const y = yOf(live);
     const hx = xOfT(vis[vis.length - 1].t);
@@ -2547,7 +2456,6 @@ function drawSMC() {
     sx.restore();
   }
 
-  // label waktu WIB
   if (vis.length) {
     const step = Math.max(1, Math.round(vis.length / 5));
     sx.font = '8px ui-monospace, monospace';
@@ -2607,7 +2515,7 @@ function hideOverlay() {
 }
 async function runSteps(ms) {
   const steps = T('steps'), box = $('validationSteps'), bar = $('validationProgress');
-  if (!box || !bar) return; // Guard clause
+  if (!box || !bar) return;
   const start = Date.now(), per = Math.max(400, ms / steps.length);
   for (let i = 0; i < steps.length; i++) {
     const el = document.createElement('div');
@@ -2634,13 +2542,6 @@ function calcEMA(c, p) {
   for (let i = 1; i < c.length; i++) { prev = c[i].c * k + prev * (1 - k); out.push(prev); }
   return out;
 }
-function calcBB(c, p = 20, m = 2) {
-  if (!c || c.length < p) return { upper: 0, middle: 0, lower: 0 };
-  const cl = c.slice(-p).map(x => x.c);
-  const mid = cl.reduce((a, b) => a + b, 0) / p;
-  const sd = Math.sqrt(cl.reduce((a, b) => a + (b - mid) ** 2, 0) / p);
-  return { middle: +mid.toFixed(5), upper: +(mid + m * sd).toFixed(5), lower: +(mid - m * sd).toFixed(5) };
-}
 function calcBias(c) {
   if (!c || c.length < 10) return { bias: 'WAIT', score: 0 };
   const closes = c.map(x => x.c);
@@ -2651,10 +2552,9 @@ function calcBias(c) {
   return { bias: score > 0 ? 'BULLISH' : score < 0 ? 'BEARISH' : 'NETRAL', score };
 }
 
-/* ================= GENERATE SINYAL ================= */
+/* ================= GENERATE SINYAL (SUDAH DIPERBAIKI) ================= */
 async function generateSignal() {
   if (market === 'VISION') {
-    // Logika Vision (Upload Gambar) biarkan sama seperti sebelumnya
     if (visionImages.length === 0) return alert('Silakan upload minimal 1 gambar chart terlebih dahulu.');
 
     const style = $('tradingStyleSelect').value;
@@ -2689,7 +2589,6 @@ async function generateSignal() {
     const s = data && data.signal;
     if (!s) return alert('AI tidak menemukan setup valid dari gambar tersebut.');
 
-    // Hasil vision disimpan terpisah (tidak masuk history dan rekap)
     visionTrade = {
         id: 'vision_' + Date.now(), key: 'VISION', style, signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
         mode: s.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET', status: 'RUNNING', fill: 'NOW',
@@ -2715,16 +2614,25 @@ async function generateSignal() {
   try {
     const style = $('tradingStyleSelect').value;
     
-    // Ambil data candle dari memori lokal
+    const formatCandles = (arr) => {
+      return (arr || []).map(c => ({
+        t: c.time,
+        o: c.open,
+        h: c.high,
+        l: c.low,
+        c: c.close
+      }));
+    };
+
     const payload = {
       email: localStorage.getItem(K.email),
       symbol: market,
       style: style,
       currentPrice: prices[market]?.price || 0,
       candles: {
-        m1: candles[market]?.[1] || [],
-        m5: candles[market]?.[5] || [],
-        m15: candles[market]?.[15] || []
+        m1: formatCandles(candles[market]?.[1]),
+        m5: formatCandles(candles[market]?.[5]),
+        m15: formatCandles(candles[market]?.[15])
       },
       lang: lang
     };
@@ -2739,81 +2647,52 @@ async function generateSignal() {
 
     const sig = data.signal;
 
-    // ==========================================
-    // 1. PENANGANAN SINYAL OCO (2 ARAH)
-    // ==========================================
-    if (sig.signal === 'OCO') {
+    // AMAN: Penanganan OCO dengan array orders
+    if (sig.signal === 'OCO' || (sig.orders && Array.isArray(sig.orders))) {
       let savedCount = 0;
-      
       sig.orders.forEach(o => {
         const newTrade = {
           id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-          no: nextNo(),
-          key: market,
-          style: style,
-          signal: o.signal, // BUY / SELL
-          mode: 'LIMIT',
-          orderType: 'LIMIT',
-          entry: Number(o.entry),
-          sl: Number(o.sl),
-          tp1: o.tp1 ? Number(o.tp1) : null,
-          tp2: o.tp2 ? Number(o.tp2) : null,
-          tp3: o.tp3 ? Number(o.tp3) : null,
-          status: 'PENDING', // Wajib Pending karena limit
-          createdAt: Date.now(),
-          expiresAt: Date.now() + 4 * 3600 * 1000, // Expire 4 jam
-          zone: o.zone,
-          zoneNote: o.zoneNote,
-          setup: o.setup,
-          confidence: sig.confidence,
-          risk: sig.risk,
-          reason: sig.reason,
-          pip: MARKETS[market].pip
+          no: nextNo(), key: market, style: style, signal: o.signal,
+          mode: 'LIMIT', orderType: 'LIMIT', entry: Number(o.entry), sl: Number(o.sl),
+          tp1: o.tp1 != null ? Number(o.tp1) : null, 
+          tp2: o.tp2 != null ? Number(o.tp2) : null, 
+          tp3: o.tp3 != null ? Number(o.tp3) : null,
+          status: 'PENDING', createdAt: Date.now(), expiresAt: Date.now() + 4 * 3600 * 1000,
+          zone: o.zone, zoneNote: o.zoneNote || o.setupLabel, setup: o.setupLabel || sig.setup, 
+          confidence: sig.confidence, risk: sig.risk,
+          reason: sig.reason, pip: MARKETS[market]?.pip || 0.1
         };
-        
         trades.push(newTrade);
         activeId = newTrade.id;
         savedCount++;
       });
-
       saveTrades();
       renderAll();
-      
-      alert(`Berhasil membuat ${savedCount} Sinyal OCO (Buy Limit & Sell Limit).\nCek tab History untuk melihat kedua sinyal.`);
+      alert(`Berhasil membuat ${savedCount} Sinyal OCO.`);
       return;
     }
 
-    // ==========================================
-    // 2. PENANGANAN SINYAL NORMAL (1 ARAH)
-    // ==========================================
-    if (!sig.entry || !sig.sl) {
-      alert('Sinyal belum lengkap (Entry/SL kosong).');
-      return;
-    }
-
+    // AMAN: Penanganan Sinyal Normal (Single) dengan pengaman != null
     const newTrade = {
       id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-      no: nextNo(),
-      key: market,
-      style: style,
-      signal: sig.signal, // BUY / SELL
+      no: nextNo(), key: market, style: style, signal: sig.signal,
       mode: sig.mode || (sig.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET'),
-      orderType: sig.orderType,
-      entry: Number(sig.entry),
+      orderType: sig.orderType, 
+      entry: Number(sig.entry), 
       sl: Number(sig.sl),
-      tp1: sig.tp1 ? Number(sig.tp1) : null,
-      tp2: sig.tp2 ? Number(sig.tp2) : null,
-      tp3: sig.tp3 ? Number(sig.tp3) : null,
+      tp1: sig.tp1 != null ? Number(sig.tp1) : null, 
+      tp2: sig.tp2 != null ? Number(sig.tp2) : null, 
+      tp3: sig.tp3 != null ? Number(sig.tp3) : null,
       status: sig.status === 'PENDING' ? 'PENDING' : 'RUNNING',
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 4 * 3600 * 1000,
-      zone: sig.zone,
-      zoneNote: sig.zoneNote,
-      setup: sig.setup,
-      confidence: sig.confidence,
+      createdAt: Date.now(), expiresAt: Date.now() + 4 * 3600 * 1000,
+      zone: sig.zone, 
+      zoneNote: sig.zoneNote, 
+      setup: sig.setup, 
+      confidence: sig.confidence, 
       risk: sig.risk,
-      reason: sig.reason,
-      pip: MARKETS[market].pip
+      reason: sig.reason, 
+      pip: MARKETS[market]?.pip || 0.1
     };
 
     trades.push(newTrade);
