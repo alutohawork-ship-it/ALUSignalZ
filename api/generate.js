@@ -1,1355 +1,2855 @@
-// api/generate.js
-// v92 (Fix Security, OCO 2-Arah, ERL/IRL TP1-3, Sanitize Limit, Refine M1)
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alu Signal Z</title>
+<script>
+function showErr(t){var b=document.getElementById('errBox');if(!b){b=document.createElement('div');b.id='errBox';b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:99999;background:#7f1d1d;color:#fff;font:11px monospace;padding:8px;white-space:pre-wrap;word-break:break-all;max-height:40vh;overflow:auto';(document.body||document.documentElement).appendChild(b);}b.textContent+=(b.textContent?'\n':'')+t;}
+window.addEventListener('error',function(e){showErr('JS ERROR: '+e.message+(e.lineno?' (baris '+e.lineno+')':''));});
+window.addEventListener('unhandledrejection',function(e){showErr('PROMISE ERROR: '+(e.reason&&e.reason.message?e.reason.message:e.reason));});
+</script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { colors: { darkbg: '#0b0e14', cardbg: '#151924', panelborder: '#232936', accentblue: '#2962ff' } } } };
+</script>
+<script src="https://s3.tradingview.com/tv.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+.lvl-box{position:relative;transition:all .25s ease}
+.tp-hit{background:rgba(16,185,129,.18)!important;border-color:#34d399!important;box-shadow:0 0 14px rgba(52,211,153,.35)}
+.sl-hit{background:rgba(239,68,68,.18)!important;border-color:#f87171!important;box-shadow:0 0 14px rgba(248,113,113,.35)}
+.hit-badge{position:absolute;top:-6px;right:-6px;width:16px;height:16px;border-radius:9999px;display:none;align-items:center;justify-content:center;font-size:9px;color:#0b0e14;z-index:5}
+.hit-badge.show{display:flex;animation:pop .45s ease-out}
+@keyframes pop{0%{transform:scale(0)}60%{transform:scale(1.4)}100%{transform:scale(1)}}
+.validation-overlay{position:absolute;inset:0;background:rgba(11,14,20,.88);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:100;border-radius:.75rem;opacity:0;transition:opacity .3s ease;pointer-events:none}
+.validation-overlay.active{opacity:1;pointer-events:auto}
+.validation-overlay.hidden{display:none}
+.validation-box{display:flex;flex-direction:column;align-items:center;padding:20px 16px;text-align:center;width:100%;max-width:300px}
+.hourglass-spin{width:56px;height:56px;animation:spin 2s linear infinite;filter:drop-shadow(0 0 12px rgba(245,158,11,.6));margin-bottom:14px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.validation-title{color:#fbbf24;font-size:12px;font-weight:700;letter-spacing:.5px;margin-bottom:12px;text-transform:uppercase}
+.validation-steps{width:100%;min-height:90px;text-align:left}
+.validation-step{display:flex;align-items:flex-start;gap:8px;font-size:10.5px;color:#94a3b8;line-height:1.5;padding:3px 0;opacity:0;animation:stepIn .35s ease forwards}
+.validation-step.done{color:#cbd5e1}
+.validation-step-icon{flex-shrink:0;width:14px;font-weight:700;text-align:center}
+.validation-step.done .validation-step-icon{color:#10b981}
+.validation-step.active .validation-step-icon{color:#fbbf24;animation:blink 1s ease-in-out infinite}
+@keyframes stepIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+.validation-progress{width:100%;height:3px;background:rgba(245,158,11,.15);border-radius:2px;overflow:hidden;margin-top:14px}
+.validation-progress-fill{height:100%;width:0%;background:linear-gradient(90deg,#f59e0b,#fbbf24);transition:width .3s ease}
 
-export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
+/* Styling tombol TF SMC */
+.smc-tf-btn { transition: all 0.2s; }
+.smc-tf-btn.active { background-color: #2962ff; color: white; border-color: #2962ff; }
 
-const KV_KEY = 'alu_clients';
-const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
+/* Mencegah scroll saat drag canvas */
+#smcCanvas { touch-action: none; cursor: grab; }
+#smcCanvas:active { cursor: grabbing; }
+</style>
+</head>
+<body class="bg-darkbg text-gray-200 font-sans min-h-screen flex flex-col justify-between p-2 sm:p-4">
 
-// ── AI CONFIG ──
-const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1';
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const AI_MODEL = process.env.AI_MODEL || 'qwen-3.8-max';
-const AI_VISION_MODEL = process.env.AI_VISION_MODEL || 'gpt-6-luna';
+<!-- SIMBOL LOGO -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="gGold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fef08a"/><stop offset="50%" stop-color="#facc15"/><stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+  </defs>
+  <symbol id="goldSym" viewBox="0 26 64 28">
+    <g stroke="#78350f" stroke-width="1" stroke-linejoin="round" fill="url(#gGold)">
+      <polygon points="0,52 5,40 25,40 30,52"/><polygon points="34,52 39,40 59,40 64,52"/><polygon points="17,40 22,28 42,28 47,40"/>
+    </g>
+    <g fill="#fffbeb" opacity="0.55">
+      <polygon points="5,40 25,40 23,43 7,43"/><polygon points="39,40 59,40 57,43 41,43"/><polygon points="22,28 42,28 40,31 24,31"/>
+    </g>
+  </symbol>
+  <symbol id="btcSym" viewBox="0 0 64 64">
+    <circle cx="32" cy="32" r="32" fill="#f7931a"/>
+    <text x="32" y="46" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="900" font-size="40" fill="#fff">B</text>
+    <path d="M26 8v8M34 8v8M26 48v8M34 48v8" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+  </symbol>
+</svg>
 
-// Urutan tetap: utama dulu, lalu cadangan
-const API_KEYS = [
-  process.env.TICKERLAYER_API_KEY,
-  process.env.TICKERLAYER_API_KEY_1,
-  process.env.TICKERLAYER_API_KEY_2,
-  process.env.TICKERLAYER_API_KEY_3,
-  process.env.TICKERLAYER_API_KEY_4,
-].filter(Boolean);
+<!-- LOGIN -->
+<div id="authScreen" class="fixed inset-0 z-50 bg-darkbg/95 backdrop-blur-md flex items-center justify-center p-4">
+  <div class="bg-cardbg border border-panelborder rounded-2xl p-6 max-w-sm w-full space-y-5 shadow-2xl">
+    <div class="text-center space-y-2">
+      <div class="flex items-center justify-center gap-3">
+        <div class="bg-darkbg border border-panelborder w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg shadow-yellow-500/10"><svg class="w-12 h-12"><use href="#goldSym"/></svg></div>
+        <div class="bg-darkbg border border-panelborder w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg shadow-orange-500/20"><svg class="w-12 h-12"><use href="#btcSym"/></svg></div>
+      </div>
+      <h1 class="text-xl font-extrabold text-white pt-2 tracking-tight">Welcome, Alu Signal Z</h1>
+      <p data-i18n="loginSub" class="text-[11px] text-gray-400"></p>
+    </div>
+    <form id="authForm" class="space-y-4 pt-2">
+      <div>
+        <label data-i18n="lblAccess" class="text-[10px] font-bold text-gray-400 block mb-1 tracking-wider"></label>
+        <input type="text" id="authInput" required placeholder="nama@email.com / Kode Admin" class="w-full bg-darkbg border border-panelborder rounded-xl p-3 text-xs font-mono text-white focus:outline-none focus:border-accentblue">
+      </div>
+      <button type="submit" class="w-full bg-yellow-500 hover:bg-yellow-400 text-darkbg font-bold py-3 rounded-xl text-xs transition shadow-lg shadow-yellow-500/20 flex items-center justify-center gap-2"><i class="fa-solid fa-right-to-bracket"></i> <span data-i18n="btnLogin"></span></button>
+    </form>
+    <p id="loginStatus" class="text-[10px] text-center font-mono min-h-[14px] text-gray-400"></p>
+    <a href="https://wa.me/6282317895931?text=Hallo%20admin%2C%20saya%20ingin%20daftar%20akses%20App" target="_blank" rel="noopener noreferrer" class="flex items-center justify-center gap-2 w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-lg shadow-emerald-600/20"><i class="fa-brands fa-whatsapp text-base"></i> CHAT ADMIN VIA WHATSAPP</a>
+  </div>
+</div>
 
-const DECIMALS = {
-  DXY: 2, EURUSD: 5, GBPUSD: 5, USDJPY: 3, AUDUSD: 5, USDCAD: 5, USDCHF: 5, NZDUSD: 5,
-  EURGBP: 5, EURJPY: 3, GBPJPY: 3, AUDJPY: 3, EURAUD: 5, GBPAUD: 5, AUDNZD: 5, CADJPY: 3, CHFJPY: 3, EURNZD: 5,
-  XAUUSD: 2, XAGUSD: 3, XPTUSD: 2, XPDUSD: 2, XAUEUR: 2, XAGEUR: 3,
-  BRENT: 2, WTI: 2, NATGAS: 3, COPPER: 4, COFFEE: 2, SUGAR: 2,
-  US30: 2, NAS100: 2, SPX500: 2, GER40: 2, UK100: 2, JPN225: 0, FRA40: 2, AUS200: 2,
-  BTCUSD: 2, ETHUSD: 2, SOLUSD: 2, XRPUSD: 4, BNBUSD: 2, ADAUSD: 4, DOGEUSD: 5, AVAXUSD: 3, LINKUSD: 3, DOTUSD: 4, MATICUSD: 4, UNIUSD: 3,
-  BTCXAU: 2, ETHBTC: 5, SOLBTC: 5, US30BTC: 2, XAUUSDX: 2,
+<!-- DASHBOARD ADMIN -->
+<div id="registerDashboard" class="hidden fixed inset-0 z-40 bg-darkbg overflow-y-auto p-4">
+  <div class="max-w-md md:max-w-lg mx-auto w-full space-y-4 pt-6">
+    <div class="flex justify-between items-center border-b border-panelborder pb-3">
+      <div class="flex items-center gap-2">
+        <div class="bg-yellow-500 w-8 h-8 rounded-lg flex items-center justify-center text-darkbg font-bold"><i class="fa-solid fa-user-plus"></i></div>
+        <div><h2 class="text-sm font-extrabold text-white">Dashboard Pendaftaran Klien</h2><p class="text-[9px] text-yellow-400">Akses Khusus Admin</p></div>
+      </div>
+      <button onclick="logout()" class="text-[9px] font-mono font-bold px-2.5 py-1 rounded bg-red-500/20 text-red-400 border border-red-500/40">KELUAR</button>
+    </div>
+    <div class="bg-cardbg border border-panelborder rounded-xl p-4 space-y-3 shadow-lg">
+      <h3 class="text-xs font-bold text-white flex items-center gap-1.5"><i class="fa-solid fa-id-card text-accentblue"></i> Daftarkan Email Klien Baru</h3>
+      <div>
+        <label class="text-[9px] font-bold text-gray-400 block mb-1">EMAIL KLIEN</label>
+        <input type="email" id="newClientEmail" placeholder="klien@email.com" class="w-full bg-darkbg border border-panelborder rounded-lg p-2.5 text-xs font-mono text-white focus:outline-none focus:border-accentblue">
+      </div>
+      <div>
+        <label class="text-[9px] font-bold text-gray-400 block mb-1">PAKET / STATUS</label>
+        <select id="newClientStatus" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2.5 rounded-lg focus:outline-none">
+          <option value="trial">Trial 3 Hari</option>
+          <option value="monthly">Langganan Bulanan (Monthly)</option>
+          <option value="lifetime">Akses Selamanya (Lifetime)</option>
+        </select>
+      </div>
+      <button onclick="registerClient()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg text-xs transition shadow-md">+ SIMPAN & DAFTARKAN KLIEN</button>
+    </div>
+    <div class="bg-cardbg border border-panelborder rounded-xl p-4 space-y-2 shadow-lg">
+      <div class="flex justify-between items-center border-b border-panelborder pb-2">
+        <span class="text-xs font-bold text-gray-300">Daftar Klien Terdaftar</span>
+        <button onclick="loadClients()" class="text-[9px] text-accentblue hover:underline"><i class="fa-solid fa-rotate"></i> Refresh</button>
+      </div>
+      <div id="adminClientTableList" class="space-y-1.5 max-h-[300px] overflow-y-auto pr-1"></div>
+    </div>
+  </div>
+</div>
+
+<!-- TERMINAL UTAMA -->
+<div id="mainApp" class="hidden flex-col min-h-screen">
+  <header class="flex flex-wrap items-center justify-between pb-2 border-b border-panelborder max-w-md md:max-w-6xl mx-auto w-full gap-2">
+    <div class="flex items-center gap-2 min-w-0">
+      <div class="flex items-center gap-1 bg-darkbg border border-panelborder rounded-lg px-1.5 py-1 shrink-0">
+        <svg class="w-6 h-6"><use href="#goldSym"/></svg>
+        <svg class="w-5 h-5"><use href="#btcSym"/></svg>
+      </div>
+      <div class="min-w-0">
+        <h1 class="font-bold text-xs text-white">Alu <span class="text-yellow-500">Signal Z</span></h1>
+        <p data-i18n="subHeader" class="text-[8px] text-gray-400 truncate"></p>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-1.5 flex-wrap justify-end">
+
+      <!-- BADGE STATUS CLIENT -->
+      <div id="userStatusBadge" class="hidden text-[9px] font-bold font-mono px-2 py-0.5 rounded border bg-darkbg text-gray-300 border-panelborder flex items-center gap-1.5 shadow-sm">
+        <span id="statusType">TRIAL</span>
+        <span id="statusTimer" class="text-yellow-400">--d --h left</span>
+        <span id="statusUsage" class="text-emerald-400 border-l border-panelborder pl-1.5">0/5 req</span>
+      </div>
+      <!-- END BADGE -->
+
+      <button onclick="logout()" data-i18n="btnLogout" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40"></button>
+      <button onclick="toggleLang()" id="langBtn" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-panelborder text-gray-300 border border-panelborder hover:border-accentblue">ID 🌐</button>
+      <span id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">WS: OFF</span>
+    </div>
+  </header>
+
+  <main class="max-w-md md:max-w-6xl mx-auto w-full flex-1 grid grid-cols-1 lg:grid-cols-2 gap-2 pt-2 items-start">
+
+    <!-- KOLOM KIRI -->
+    <div class="flex flex-col gap-2 min-w-0">
+
+      <!-- 1. LIVE MARKET STREAM -->
+      <div id="streamPanel" class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-1">
+        <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-tower-broadcast text-accentblue"></i> <span data-i18n="lblStream"></span></span>
+        <div id="tickerList" class="grid grid-cols-1 gap-1"></div>
+      </div>
+
+      <!-- 2. PAIR & STYLE -->
+      <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
+        <div class="flex justify-between items-center">
+          <span data-i18n="lblMarket" class="text-[9px] font-bold text-gray-400"></span>
+          <span id="selectedPairBadge" class="text-[9px] font-mono text-yellow-400 font-bold">XAUUSD</span>
+        </div>
+        <select id="marketSelect" onchange="syncMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
+          <option value="XAUUSD">XAUUSD / Gold</option>
+          <option value="BTCUSD">BTCUSD / Bitcoin</option>
+          <option value="VISION">Vision Chart (Upload)</option>
+        </select>
+        <div>
+          <div class="flex justify-between items-center mb-1">
+            <span data-i18n="lblStyle" class="text-[8px] font-bold text-gray-400"></span>
+            <button onclick="toggleStyleInfo()" class="text-[9px] text-accentblue hover:text-blue-400"><i class="fa-solid fa-circle-info"></i></button>
+          </div>
+          <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
+            <option value="Scalping" data-i18n="optScalp"></option>
+            <option value="Day Trading" data-i18n="optDay"></option>
+            <option value="Intraday" data-i18n="optIntra"></option>
+            <option value="Swing" data-i18n="optSwing"></option>
+          </select>
+          <div id="styleInfoBox" class="hidden mt-2 bg-darkbg border border-panelborder rounded-lg p-2 text-[9px] text-gray-300 space-y-2 leading-relaxed">
+            <div><span class="font-bold text-accentblue">1. Scalping Agresif (High Risk)</span><br><span data-i18n="infoScalp"></span></div>
+            <div><span class="font-bold text-accentblue">2. Scalping Konservatif</span><br><span data-i18n="infoDay"></span></div>
+            <div><span class="font-bold text-accentblue">3. Intraday / Day Trade</span><br><span data-i18n="infoIntra"></span></div>
+            <div><span class="font-bold text-accentblue">4. Swing</span><br><span data-i18n="infoSwing"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PANEL UPLOAD GAMBAR (Khusus Vision) -->
+      <div id="visionPanel" class="hidden bg-cardbg rounded-xl border border-panelborder p-3 shadow-md space-y-3">
+        <div class="text-center">
+          <label class="cursor-pointer inline-flex items-center gap-2 bg-panelborder hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition text-xs">
+            <i class="fa-solid fa-cloud-arrow-up"></i> <span data-i18n="visionUpload"></span>
+            <input type="file" id="visionInput" accept="image/*" multiple class="hidden" onchange="handleImageUpload(event)">
+          </label>
+          <p data-i18n="visionFmt" class="text-[8px] text-gray-500 mt-1"></p>
+        </div>
+        <!-- Preview Area -->
+        <div id="visionPreview" class="grid grid-cols-3 gap-2">
+          <!-- Preview akan muncul di sini -->
+        </div>
+      </div>
+
+      <!-- 3. BIAS (Hanya Live) -->
+      <div id="biasPanel" class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
+        <div class="flex justify-between items-center border-b border-panelborder pb-1">
+          <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-compass text-accentblue"></i> <span data-i18n="lblBias"></span></span>
+          <button onclick="refreshBias(true)" class="text-[9px] text-accentblue hover:underline"><i class="fa-solid fa-rotate"></i> Refresh</button>
+        </div>
+        <div id="biasGrid" class="grid grid-cols-3 sm:grid-cols-6 gap-1.5"></div>
+        <p id="biasInfo" class="text-[8px] font-mono text-gray-500">memuat...</p>
+      </div>
+
+      <!-- 4. GENERATE BUTTON -->
+      <button id="signalBtn" onclick="generateSignal()" class="w-full bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 text-darkbg font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20 transition active:scale-95"><i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnText"></span></button>
+
+      <!-- 5. SIGNAL CARD -->
+      <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2 relative">
+        <!-- Daftar setup pair aktif (chip) -->
+        <div id="setupChips" class="hidden flex-wrap gap-1 justify-center"></div>
+
+        <div id="standbyView" class="py-3 text-center text-xs text-gray-400" data-i18n="standby1"></div>
+
+        <div id="activeCard" class="hidden space-y-3">
+          <div class="bg-darkbg/80 border border-panelborder rounded-xl p-3 text-center space-y-1">
+            <div class="flex justify-center items-center gap-2">
+                <span id="sigBadge" class="bg-sky-500 text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg">BUY</span>
+                <button onclick="copySignal()" class="text-gray-400 hover:text-white transition" title="Copy Signal"><i class="fa-solid fa-copy"></i></button>
+            </div>
+            <p id="cardSub" class="text-[9px] text-gray-400 pt-1">--</p>
+            <p data-i18n="entryZone" class="text-[9px] font-bold text-gray-400 tracking-widest pt-1"></p>
+            <h2 id="cardZone" class="text-xl font-black text-white font-mono tracking-tight">-- - --</h2>
+            <p id="cardZoneNote" class="text-[8px] text-gray-400 font-mono"></p>
+            <div class="flex justify-center gap-1.5 flex-wrap pt-1">
+              <span id="badgeSetup" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-darkbg text-gray-300 border-panelborder">--</span>
+              <span id="badgeConf" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-darkbg text-gray-300 border-panelborder">CONFIDENCE --</span>
+              <span id="badgeRisk" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-darkbg text-gray-300 border-panelborder">RISK --</span>
+            </div>
+            <div class="pt-1">
+              <span class="inline-flex items-center gap-1.5 bg-darkbg border border-panelborder px-2.5 py-0.5 rounded-full text-[9px] text-gray-300 font-mono">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> LIVE <span id="cardLive" class="font-bold text-white">--.--</span>
+              </span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+            <div id="lb-sl" class="lvl-box bg-darkbg/70 border border-red-500/30 rounded-lg p-2 text-center">
+              <span id="chk-sl" class="hit-badge bg-red-400"><i class="fa-solid fa-xmark"></i></span>
+              <p class="text-[8px] font-bold text-red-400">SL</p><p id="lv-sl" class="text-[10px] font-extrabold text-red-400 font-mono">--</p><p id="pp-sl" class="text-[7px] text-red-400/80 font-mono">--</p>
+            </div>
+            <div id="lb-tp1" class="lvl-box bg-darkbg/70 border border-emerald-500/30 rounded-lg p-2 text-center">
+              <span id="chk-tp1" class="hit-badge bg-emerald-400"><i class="fa-solid fa-check"></i></span>
+              <p class="text-[8px] font-bold text-emerald-400">TP1</p><p id="lv-tp1" class="text-[10px] font-extrabold text-emerald-400 font-mono">--</p><p id="pp-tp1" class="text-[7px] text-emerald-400/80 font-mono">--</p>
+            </div>
+            <div id="lb-tp2" class="lvl-box bg-darkbg/70 border border-emerald-500/30 rounded-lg p-2 text-center">
+              <span id="chk-tp2" class="hit-badge bg-emerald-400"><i class="fa-solid fa-check"></i></span>
+              <p class="text-[8px] font-bold text-emerald-400">TP2</p><p id="lv-tp2" class="text-[10px] font-extrabold text-emerald-400 font-mono">--</p><p id="pp-tp2" class="text-[7px] text-emerald-400/80 font-mono">--</p>
+            </div>
+            <div id="lb-tp3" class="lvl-box bg-darkbg/70 border border-sky-500/30 rounded-lg p-2 text-center">
+              <span id="chk-tp3" class="hit-badge bg-emerald-400"><i class="fa-solid fa-check"></i></span>
+              <p class="text-[8px] font-bold text-sky-400">TP3</p><p id="lv-tp3" class="text-[10px] font-extrabold text-sky-400 font-mono">--</p><p id="pp-tp3" class="text-[7px] text-sky-400/80 font-mono">--</p>
+            </div>
+          </div>
+
+          <div class="bg-darkbg border border-panelborder rounded-lg p-2.5 text-[10px] text-gray-300 leading-relaxed">
+            <p data-i18n="lblReason" class="font-bold text-gray-400 mb-1"></p>
+            <span id="cardReason" class="whitespace-pre-line">---</span>
+          </div>
+        </div>
+
+        <!-- OVERLAY LOADING -->
+        <div id="validationOverlay" class="validation-overlay hidden">
+          <div class="validation-box">
+            <svg class="hourglass-spin" viewBox="0 0 64 96">
+              <defs><linearGradient id="sandGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#fbbf24"/><stop offset="100%" stop-color="#d97706"/></linearGradient></defs>
+              <rect x="4" y="2" width="56" height="6" rx="3" fill="#f59e0b"/>
+              <path d="M 12 10 L 52 10 L 32 48 Z" fill="url(#sandGrad)" opacity="0.9"/>
+              <path d="M 12 86 L 52 86 L 32 48 Z" fill="url(#sandGrad)" opacity="0.55"/>
+              <rect x="4" y="88" width="56" height="6" rx="3" fill="#f59e0b"/>
+            </svg>
+            <div data-i18n="valTitle" class="validation-title"></div>
+            <div class="validation-steps" id="validationSteps"></div>
+            <div class="validation-progress"><div class="validation-progress-fill" id="validationProgress"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 6. LIVE CHART (Hanya Live) -->
+      <div id="chartPanel" class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
+        <div class="flex flex-wrap justify-between items-start gap-1">
+          <div class="flex items-center gap-2">
+            <p data-i18n="lblMap" class="text-[9px] font-bold text-gray-400 tracking-wider"></p>
+            <div class="flex items-center gap-1">
+              <button id="btnTvToggle" onclick="toggleTV()" class="text-[10px] text-gray-500 hover:text-accentblue flex items-center gap-1 bg-darkbg border border-panelborder px-1.5 py-0.5 rounded transition"><i class="fa-solid fa-chart-candlestick"></i> <span id="btnTvText" class="font-mono font-bold text-[8px]">TV</span></button>
+            </div>
+          </div>
+          <span id="tradeStatus" class="hidden text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40 whitespace-nowrap">RUNNING</span>
+        </div>
+        <p id="tradePnl" class="text-[10px] font-mono font-bold text-gray-400"></p>
+        <p id="tradeLive" class="text-[8px] font-mono text-gray-400"></p>
+
+        <div class="relative w-full h-[220px] sm:h-[280px] lg:h-[320px]">
+          <canvas id="priceChart" class="absolute inset-0 w-full h-full"></canvas>
+        </div>
+
+        <div id="tvBox" class="hidden w-full h-[300px] mt-2 rounded-lg overflow-hidden border border-panelborder bg-darkbg"><div id="tvWidget" class="w-full h-full"></div></div>
+      </div>
+
+      <!-- 7. SMC MAP (Hanya Live) -->
+      <div id="smcPanel" class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
+        <p id="smcInfo" class="text-[8px] font-mono text-gray-400 break-words"></p>
+        <div id="smcBox" class="w-full rounded-lg overflow-hidden border border-panelborder bg-darkbg p-1 space-y-1">
+          <!-- TOMBOL TIMEFRAME & ZOOM SMC -->
+          <div class="flex justify-between items-center mb-1 mt-0.5 px-1 gap-1">
+            <div class="flex gap-1">
+              <button onclick="setSmcTf('1m')" class="smc-tf-btn text-[9px] font-bold px-2 py-0.5 rounded border border-panelborder text-gray-400" data-tf="1m">1m</button>
+              <button onclick="setSmcTf('5m')" class="smc-tf-btn text-[9px] font-bold px-2 py-0.5 rounded border border-panelborder text-gray-400" data-tf="5m">5m</button>
+              <button onclick="setSmcTf('15m')" class="smc-tf-btn text-[9px] font-bold px-2 py-0.5 rounded border border-panelborder text-gray-400" data-tf="15m">15m</button>
+              <button onclick="setSmcTf('1h')" class="smc-tf-btn text-[9px] font-bold px-2 py-0.5 rounded border border-panelborder text-gray-400" data-tf="1h">1H</button>
+              <button onclick="setSmcTf('4h')" class="smc-tf-btn text-[9px] font-bold px-2 py-0.5 rounded border border-panelborder text-gray-400" data-tf="4h">4H</button>
+            </div>
+            <div class="flex gap-1">
+              <button onclick="zoomSMC(-1)" class="bg-panelborder text-white rounded w-5 h-5 flex items-center justify-center text-[10px] font-bold hover:bg-gray-600">-</button>
+              <button onclick="zoomSMC(1)" class="bg-panelborder text-white rounded w-5 h-5 flex items-center justify-center text-[10px] font-bold hover:bg-gray-600">+</button>
+              <button onclick="resetSMC()" class="bg-panelborder text-white rounded px-1.5 h-5 flex items-center justify-center text-[8px] font-bold hover:bg-gray-600" title="Reset Zoom">↺</button>
+            </div>
+          </div>
+
+          <div class="relative w-full h-[320px] sm:h-[400px] lg:h-[480px]">
+            <canvas id="smcCanvas" class="absolute inset-0 w-full h-full"></canvas>
+          </div>
+          <div class="flex flex-wrap gap-x-2.5 gap-y-0.5 text-[7px] font-mono text-gray-400 px-1 pb-0.5">
+            <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(59,130,246,.6)"></i> FVG ▲</span>
+            <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(168,85,247,.6)"></i> FVG ▼</span>
+            <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(16,185,129,.6)"></i> Demand</span>
+            <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(239,68,68,.6)"></i> Supply</span>
+            <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(34,211,238,.6)"></i> BB ▲</span>
+            <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(244,114,182,.6)"></i> BB ▼</span>
+            <span class="text-amber-400">┄ BSL/SSL · EQH/EQL</span>
+            <span class="text-yellow-300">SW sweep</span>
+            <span class="text-sky-300">BOS / CHoCH</span>
+            <span class="text-fuchsia-300">┈ CISD</span>
+            <span class="text-teal-300">Asia</span>
+            <span class="text-red-400">London KZ</span>
+            <span class="text-blue-400">London</span>
+            <span class="text-red-400">NY KZ</span>
+            <span class="text-sky-400">New York</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 8. MARKET SESSION (Hanya Live) -->
+      <div id="sessionPanel" class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
+        <div class="flex justify-between items-center border-b border-panelborder pb-2">
+          <span id="lblSession" class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-clock text-accentblue"></i> MARKET SESSIONS</span>
+          <span id="currentSessionBadge" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-gray-500/20 text-gray-400 border-gray-500/40">--</span>
+        </div>
+        <div id="sessionList" class="space-y-1.5 text-[9px] font-mono"></div>
+      </div>
+
+    </div>
+
+    <!-- KOLOM KANAN -->
+    <div class="flex flex-col gap-2 min-w-0">
+
+      <div id="highlightList" class="flex flex-col gap-2"></div>
+
+      <div id="calCard" class="hidden bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
+        <div class="flex justify-between items-center gap-2">
+          <div class="flex items-center gap-1">
+            <button onclick="calShift(-1)" class="text-[10px] px-2 py-0.5 rounded bg-darkbg border border-panelborder text-gray-300">◀</button>
+            <span id="calTitle" class="text-[10px] font-bold text-white min-w-[110px] text-center">--</span>
+            <button onclick="calShift(1)" class="text-[10px] px-2 py-0.5 rounded bg-darkbg border border-panelborder text-gray-300">▶</button>
+          </div>
+          <div class="text-right">
+            <p data-i18n="calMonthLbl" class="text-[7px] font-bold text-gray-500 tracking-wider"></p>
+            <p id="calMonthPnl" class="text-[11px] font-extrabold font-mono text-white">0 pip</p>
+          </div>
+        </div>
+        <div id="calWeekdays" class="grid grid-cols-7 gap-0.5 text-center"></div>
+        <div id="calGrid" class="grid grid-cols-7 gap-0.5"></div>
+        <div class="grid grid-cols-2 gap-1.5 text-center">
+          <div class="bg-darkbg/70 border border-emerald-500/30 rounded-lg p-1.5">
+            <p data-i18n="calWinLbl" class="text-[8px] font-bold text-emerald-400"></p>
+            <p id="calWin" class="text-[11px] font-extrabold text-emerald-400 font-mono">+0 pip</p>
+            <p id="calWinCount" class="text-[7px] text-gray-500 font-mono">0 W</p>
+          </div>
+          <div class="bg-darkbg/70 border border-red-500/30 rounded-lg p-1.5">
+            <p data-i18n="calLoseLbl" class="text-[8px] font-bold text-red-400"></p>
+            <p id="calLose" class="text-[11px] font-extrabold text-red-400 font-mono">0 pip</p>
+            <p id="calLoseCount" class="text-[7px] text-gray-500 font-mono">0 L</p>
+          </div>
+          <div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5">
+            <p data-i18n="calNetLbl" class="text-[8px] font-bold text-gray-400"></p>
+            <p id="calNet" class="text-[11px] font-extrabold text-white font-mono">0 pip</p>
+            <p id="calOpen" class="text-[7px] text-gray-500 font-mono">0 berjalan</p>
+          </div>
+          <div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5">
+            <p data-i18n="calWRLbl" class="text-[8px] font-bold text-gray-400"></p>
+            <p id="calWR" class="text-[11px] font-extrabold text-accentblue font-mono">0%</p>
+            <p id="calWRSub" class="text-[7px] text-gray-500 font-mono">0W / 0L</p>
+          </div>
+        </div>
+        <div class="flex justify-between items-center gap-2">
+          <p id="calAllTime" class="text-[7px] text-gray-500 font-mono leading-snug">Semua waktu: 0 pip</p>
+          <button onclick="calReset()" data-i18n="calResetBtn" class="text-[8px] font-bold px-2 py-1 rounded bg-red-500/20 text-red-400 border border-red-500/40 whitespace-nowrap"></button>
+        </div>
+      </div>
+
+      <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
+        <div class="flex justify-between items-center">
+          <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-clock-rotate-left text-accentblue"></i> <span data-i18n="lblHistory"></span></span>
+          <div class="flex items-center gap-1.5">
+            <button id="calToggleBtn" onclick="calToggle()" class="text-[9px] font-bold px-2 py-0.5 rounded bg-accentblue/20 text-accentblue border border-accentblue/40">📅 PNL</button>
+            <select id="histFilter" onchange="renderHistory()" class="bg-darkbg border border-panelborder text-[9px] font-bold text-white px-1.5 py-0.5 rounded focus:outline-none">
+              <option value="today" data-i18n="histToday"></option>
+              <option value="all" data-i18n="histAll"></option>
+            </select>
+            <button onclick="clearHistory()" title="Hapus history" class="text-[10px] text-gray-500 hover:text-red-400 px-1"><i class="fa-solid fa-trash"></i></button>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-1.5 text-center">
+          <div class="bg-darkbg/70 border border-emerald-500/30 rounded-lg p-1.5">
+            <p data-i18n="winLbl" class="text-[8px] font-bold text-emerald-400"></p>
+            <p id="sumWin" class="text-[11px] font-extrabold text-emerald-400 font-mono">+0 pip</p>
+            <p id="sumWinCount" class="text-[7px] text-gray-500 font-mono">0 trade</p>
+          </div>
+          <div class="bg-darkbg/70 border border-red-500/30 rounded-lg p-1.5">
+            <p data-i18n="loseLbl" class="text-[8px] font-bold text-red-400"></p>
+            <p id="sumLose" class="text-[11px] font-extrabold text-red-400 font-mono">0 pip</p>
+            <p id="sumLoseCount" class="text-[7px] text-gray-500 font-mono">0 trade</p>
+          </div>
+          <div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5">
+            <p data-i18n="totalLbl" class="text-[8px] font-bold text-gray-400"></p>
+            <p id="sumTotal" class="text-[11px] font-extrabold text-white font-mono">0 pip</p>
+            <p id="sumOpen" class="text-[7px] text-gray-500 font-mono">0 berjalan</p>
+          </div>
+          <div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5">
+            <p data-i18n="ratioLbl" class="text-[8px] font-bold text-gray-400"></p>
+            <p id="sumRatio" class="text-[11px] font-extrabold text-accentblue font-mono">0%</p>
+            <p id="sumRatioSub" class="text-[7px] text-gray-500 font-mono">0W / 0L</p>
+          </div>
+        </div>
+        <div id="historyList" class="space-y-1 max-h-[320px] overflow-y-auto pr-1"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- DISCLAIMER (2 bahasa) -->
+  <footer class="mt-6 pb-4 text-center">
+    <p class="text-[9px] text-gray-500 font-mono leading-relaxed px-4">
+      <strong data-i18n="disclaimerLbl"></strong> <span data-i18n="disclaimerTxt"></span>
+    </p>
+  </footer>
+</div>
+
+<script>
+/* ================= KONFIG ================= */
+const MARKETS = {
+  XAUUSD: { aliases: ['XAUUSD', 'GOLD'], min: 1000, max: 5000, pip: 0.1, tv: 'OANDA:XAUUSD', h24: false },
+  BTCUSD: { aliases: ['BTCUSD', 'BTCUSDT', 'BTC'], min: 1000, max: 1000000, pip: 1, tv: 'BITSTAMP:BTCUSD', h24: true },
+  VISION: { aliases: ['VISION', 'IMAGE'], min: 0, max: 0, pip: 1, tv: '', h24: true } // Dummy config
 };
-
-const CRYPTO_LIST = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'BNBUSD', 'ADAUSD', 'DOGEUSD', 'AVAXUSD', 'LINKUSD', 'DOTUSD', 'MATICUSD', 'UNIUSD'];
-const GOLD_SYMBOLS = ['XAUUSD', 'XAUUSDX'];
-const isGold = symbol => GOLD_SYMBOLS.includes(symbol);
-const MAX_SRC_DEVIATION = 0.05;
-
-const pairClassOf = symbol => {
-  if (isGold(symbol)) return 'gold';
-  if (symbol === 'XAGUSD' || symbol === 'XAGEUR') return 'silver';
-  if (['XPTUSD', 'XPDUSD'].includes(symbol)) return 'metal';
-  if (CRYPTO_LIST.includes(symbol) || symbol.endsWith('BTC') || symbol.endsWith('USDT')) return 'crypto';
-  if (['US30', 'NAS100', 'SPX500', 'GER40', 'UK100', 'JPN225', 'FRA40', 'AUS200'].includes(symbol)) return 'index';
-  if (['BRENT', 'WTI', 'NATGAS', 'COPPER', 'COFFEE', 'SUGAR'].includes(symbol)) return 'commodity';
-  if (symbol.includes('JPY')) return 'fx_jpy';
-  return 'fx';
+const KEYS = Object.keys(MARKETS);
+const WS_URL = 'wss://ws.xbtfx.com/v1/ws';
+const STORE_KEY = 'aluGold_history_v1';
+const CAL_KEY = 'aluGold_calendar_v1';
+const CAL_SINCE_KEY = 'aluGold_calendar_since';
+const LIVE_KEY = 'aluLive_v1';
+const K = { type: 'alu_session_type', email: 'alu_user_email', admin: 'alu_admin_code' };
+const JSON_H = { 'Content-Type': 'application/json' };
+const HISTORY_MS = 600000, STALE_MS = 30000, CHART_GUT = 80, CH_PAD = 4;
+const TFS = [1, 5, 15, 30, 60, 240, 1440];
+const HL_TF = [[1, 'M1'], [5, 'M5'], [15, 'M15'], [60, 'H1'], [240, 'H4'], [1440, 'D1']];
+const TF_MIN = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 };
+const TP_KEYS = ['tp1', 'tp2', 'tp3'];
+const STYLE_CFG = {
+  'Scalping': { htf: '15m', mtf: '5m', ltf: '1m', ema: [5, 9], opt: 'optScalp' },
+  'Day Trading': { htf: '1h', mtf: '30m', ltf: '5m', ema: [14, 20], opt: 'optDay' },
+  'Intraday': { htf: '4h', mtf: '1h', ltf: '15m', ema: [20, 50, 100], opt: 'optIntra' },
+  'Swing': { htf: '1d', mtf: '4h', ltf: '1h', ema: [20, 200], opt: 'optSwing' }
 };
-
-const PAIR_CLASS_PROFILE = {
-  gold:      { label: 'Emas',      structTf: 'M1', zoneTf: 'M5', zoneDisp: 0.8, nearAtr: 0.5, slMul: 1.0, bufAtr: 0.2,  range: [100, 50000] },
-  silver:    { label: 'Perak',     structTf: 'M5', zoneTf: 'M5', zoneDisp: 0.9, nearAtr: 0.6, slMul: 1.1, bufAtr: 0.25, range: [5, 300] },
-  metal:     { label: 'Logam',     structTf: 'M5', zoneTf: 'M5', zoneDisp: 0.9, nearAtr: 0.6, slMul: 1.1, bufAtr: 0.25, range: [0.5, 50000] },
-  fx:        { label: 'Forex',     structTf: 'M5', zoneTf: 'M5', zoneDisp: 0.8, nearAtr: 0.6, slMul: 1.0, bufAtr: 0.2,  range: [0.00001, 50000] },
-  fx_jpy:    { label: 'Forex JPY', structTf: 'M5', zoneTf: 'M5', zoneDisp: 0.8, nearAtr: 0.6, slMul: 1.0, bufAtr: 0.2,  range: [0.01, 100000] },
-  index:     { label: 'Indeks',    structTf: 'M5', zoneTf: 'M5', zoneDisp: 0.9, nearAtr: 0.6, slMul: 1.1, bufAtr: 0.25, range: [100, 500000] },
-  commodity: { label: 'Komoditas', structTf: 'M5', zoneTf: 'M5', zoneDisp: 0.9, nearAtr: 0.7, slMul: 1.2, bufAtr: 0.25, range: [0.1, 100000] },
-  crypto:    { label: 'Kripto',    structTf: 'M5', zoneTf: 'M5', zoneDisp: 1.0, nearAtr: 0.8, slMul: 1.3, bufAtr: 0.3,  range: [0.00000001, 5000000] },
+const SMC_TF_MAP = {
+  'Scalping': '1m',
+  'Day Trading': '5m',
+  'Intraday': '5m',
+  'Swing': '15m'
 };
-
-const PAIR_OVERRIDE = {};
-const pairProfile = symbol => {
-  const cls = pairClassOf(symbol);
-  return { cls, ...PAIR_CLASS_PROFILE[cls], ...(PAIR_OVERRIDE[symbol] || {}) };
+const BIAS_TF = [{ label: 'M5', iv: '5m' }, { label: 'M15', iv: '15m' }, { label: 'M30', iv: '30m' }, { label: 'H1', iv: '1h' }, { label: 'H4', iv: '4h' }, { label: 'Daily', iv: '1d' }];
+const CANDLE_TTL = { '1m': 30000, '5m': 60000, '15m': 120000, '30m': 180000, '1h': 300000, '4h': 600000, '1d': 900000 };
+const PRIO_IV = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
+const CANDLE_LIMIT = 200;
+const SWING_L = 2;
+const BIN_SYM = { BTCUSD: 'BTCUSDT' };
+const BIN_HOSTS = ['https://api.binance.com', 'https://data-api.binance.vision'];
+const SESS = [
+  { name: 'Asia', h1: 0, h2: 8, col: '45,212,191' },
+  { name: 'London KZ', h1: 7, h2: 10, col: '239,68,68' },
+  { name: 'London', h1: 8, h2: 17, col: '59,130,246' },
+  { name: 'NY KZ', h1: 12, h2: 15, col: '239,68,68' },
+  { name: 'New York', h1: 13, h2: 21, col: '56,189,248' }
+];
+const PILL = {
+  green: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40',
+  yellow: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40',
+  red: 'bg-red-500/20 text-red-400 border-red-500/40',
+  blue: 'bg-blue-500/20 text-blue-400 border-blue-500/40',
+  gray: 'bg-gray-500/20 text-gray-400 border-gray-500/40'
 };
+const TXT = { green: 'text-emerald-400', yellow: 'text-yellow-400', red: 'text-red-400', blue: 'text-blue-400', gray: 'text-gray-400' };
+const CONF_CLS = { HIGH: PILL.green, MEDIUM: PILL.yellow, LOW: PILL.red };
+const RISK_CLS = { LOW: PILL.green, MEDIUM: PILL.yellow, HIGH: PILL.red };
+const BIAS_CLS = { BULLISH: PILL.green, BEARISH: PILL.red, NETRAL: PILL.yellow, WAIT: PILL.gray };
+const BIAS_TXT = { BULLISH: 'Bullish', BEARISH: 'Bearish', NETRAL: 'Netral', WAIT: 'Loading' };
 
-const PIP_OVERRIDE = {
-  XAUUSD: 0.1, XAUUSDX: 0.1, DXY: 0.01, ETHUSD: 0.1,
-  US30: 1, NAS100: 1, SPX500: 1, GER40: 1, UK100: 1, JPN225: 1, FRA40: 1, AUS200: 1, BTCUSD: 1,
-};
-const pipSizeOf = (symbol, dec) => PIP_OVERRIDE[symbol] ?? Math.pow(10, -(dec - 1));
-
-// ── MINIMUM SL (PIPS) UNTUK MENCEGAH KENA SPREAD ──
-const MIN_SL_PIPS = { fx: 5, fx_jpy: 5, gold: 25, silver: 8, metal: 8, crypto: 20, index: 10, commodity: 10 };
-const slFloor = (kind, ctx) => {
-  const base = MIN_SL_PIPS[ctx.prof.cls] || 5;
-  const mult = { scalp: 1, day: 1, intraday: 1.5, swing: 2 }[kind] || 1;
-  return base * mult * ctx.pip;
-};
-
-const STYLES = {
-  'Scalping': {
-    label: 'Scalping Agresif · OCO / Market NOW (M1 Structure)',
-    labelEn: 'Aggressive Scalping · OCO / Market NOW (M1 Structure)',
-    entryStyle: 'Agresif', entryStyleEn: 'Aggressive', mode: 'MIXED', kind: 'scalp', rr: [1.0, 2.0, 3.0],
-  },
-  'Day Trading': {
-    label: 'Scalping Konservatif · OCO M5 / Refine M1',
-    labelEn: 'Conservative Scalping · M5 OCO / M1 Refine',
-    entryStyle: 'Konservatif', entryStyleEn: 'Conservative', mode: 'LIMIT', kind: 'day', rr: [1.0, 1.5, 2.0],
-  },
-  'Intraday': {
-    label: 'Day Trading / Intraday · OCO M5 (HTF Ranging) / Trend Follow',
-    labelEn: 'Day Trading / Intraday · M5 OCO (HTF Ranging) / Trend Follow',
-    entryStyle: 'Moderat', entryStyleEn: 'Moderate', mode: 'LIMIT', kind: 'intraday', rr: [1.0, 2.0, 3.0],
-  },
-  'Swing': {
-    label: 'Swing · Strict Trend Following (Bias D1+H4+H1, Zona M15)',
-    labelEn: 'Swing · Strict Trend Following (D1+H4+H1 Bias, M15 Zone)',
-    entryStyle: 'Positioning', entryStyleEn: 'Positioning', mode: 'LIMIT', kind: 'swing', rr: [3.0],
-  },
-};
-
-const NEED = { m1: 160, m5: 120, m15: 480 };
-const MIN_BARS = { m1: 100, m5: 40, m15: 120, m15Swing: 400 };
-
-const SCALP_PIVOT = 2;
-const DAY_PIVOT = 3;
-
-const ZONE_ATR_PERIOD = 14;
-const ZONE_DISP_ATR = 1.2;
-const ZONE_MAX_ATR = 2.5;
-const ZONE_FRESH_ONLY = true;
-
-const GOLD_SL_PIPS = { scalp: [25, 30], day: [50, 120], intraday: [80, 200], swing: [150, 300] };
-const SL_BUFFER_PIPS = { scalp: 3, day: 5, intraday: 10, swing: 15 };
-const ATR_SL_MULT = { scalp: [0.5, 2.5], day: [1, 3], intraday: [1, 3], swing: [0.5, 2] };
-
-const orderLabel = (dir, orderType) => `${dir === 1 ? 'BUY' : 'SELL'} ${orderType === 'LIMIT' ? 'LIMIT' : 'NOW'}`;
-const isoDate = d => d.toISOString().slice(0, 10);
-const lastClosePrice = arr => (arr && arr.length ? arr[arr.length - 1].c : 0);
-
-// ── KILLZONE & FILTERS ──
-function isWithinKillzone() {
-  const now = new Date();
-  const utcHour = now.getUTCHours();
-  return (utcHour >= 7 && utcHour <= 10) || (utcHour >= 12 && utcHour <= 15);
-}
-
-// ── PREMIUM / DISCOUNT & LIQUIDITY HELPERS ──
-function getRangeInfo(candles, lookback = 50) {
-  const s = candles.slice(-lookback);
-  if (s.length < 10) return null;
-  const high = Math.max(...s.map(c => c.h));
-  const low = Math.min(...s.map(c => c.l));
-  const eq = (high + low) / 2;
-  return { high, low, eq };
-}
-
-function liquidityInsideZone(candles, zone, lookback = 30) {
-  const s = candles.slice(-lookback);
-  const lows = s.map(c => c.l).filter(l => l > zone.bottom && l < zone.top);
-  const highs = s.map(c => c.h).filter(h => h > zone.bottom && h < zone.top);
-  return { insideLows: lows, insideHighs: highs };
-}
-
-// ── SANITIZE ENTRY ──
-function sanitizeEntry({ dir, entry, price, orderType, pip }) {
-  if (orderType !== 'LIMIT') return { entry, orderType };
-  const minGap = 2 * pip;
-  if (dir === 1 && entry >= price - minGap) return { entry: price, orderType: 'NOW' };
-  if (dir === -1 && entry <= price + minGap) return { entry: price, orderType: 'NOW' };
-  return { entry, orderType };
-}
-
-// ── KV & AUTH ──
-async function kv(command) {
-  if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) return null;
-  const r = await fetch(process.env.KV_REST_API_URL, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.KV_REST_API_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(command),
-  });
-  const data = await r.json();
-  if (!r.ok || data.error) throw new Error(data.error || `KV HTTP ${r.status}`);
-  return data.result;
-}
-
-async function kvGetJSON(key) {
-  try { const raw = await kv(['GET', key]); return raw ? JSON.parse(raw) : null; } catch { return null; }
-}
-async function kvSetJSON(key, value, ttl) {
-  try { await kv(['SET', key, JSON.stringify(value), 'EX', ttl]); } catch (e) {}
-}
-
-async function checkAccess(email) {
-  if (!email) return { ok: false, key: 'noEmail' };
-  try {
-    const raw = await kv(['GET', KV_KEY]);
-    if (!raw) return { ok: true, status: 'admin' };
-    const clients = JSON.parse(raw);
-    const c = clients.find(x => x.email === email);
-    if (!c) return { ok: false, key: 'notRegistered' };
-    if (new Date(c.expires_at) <= new Date()) return { ok: false, key: 'expired' };
-    return { ok: true, status: c.status };
-  } catch (e) {
-    console.error('checkAccess error', e);
-    return { ok: false, key: 'notRegistered' }; // Fail-closed
-  }
-}
-
-async function checkTrialLimit(email, status) {
-  if (status !== 'trial') return { ok: true };
-  const today = new Date().toISOString().slice(0, 10);
-  const dailyKey = `trial_daily:${email}:${today}`;
-  const totalKey = `trial_total:${email}`;
-  try {
-    const dailyRaw = await kv(['GET', dailyKey]);
-    const totalRaw = await kv(['GET', totalKey]);
-    const dailyCount = parseInt(dailyRaw || '0', 10);
-    const totalCount = parseInt(totalRaw || '0', 10);
-    if (totalCount >= 15) return { ok: false, msg: 'Batas maksimal 15 kali request untuk masa trial telah habis.' };
-    if (dailyCount >= 5) return { ok: false, msg: 'Batas harian 5 kali request untuk masa trial telah habis. Coba lagi besok.' };
-    await kv(['INCR', dailyKey]);
-    if (dailyCount === 0) await kv(['EXPIRE', dailyKey, 172800]);
-    await kv(['INCR', totalKey]);
-    return { ok: true };
-  } catch (e) { return { ok: true }; } // Tetap fail-open untuk trial demi kenyamanan user jika KV error
-}
-
-// ── TRANSLATIONS ──
-const pickLang = (body, query) => {
-  const raw = String(body?.lang ?? body?.language ?? body?.locale ?? query?.lang ?? '').toLowerCase();
-  return raw.startsWith('en') ? 'en' : 'id';
-};
-
-const TX = {
+const I18N = {
   id: {
-    pip: 'pip',
-    title: { scalp: 'Scalping', day: 'Scalping Konservatif', intraday: 'Day Trading / Intraday', swing: 'Swing' },
-    kind: { scalp: 'Scalping (Agresif)', day: 'Scalping (Konservatif)', intraday: 'Day Trading (Intraday)', swing: 'Swing (Positioning)' },
-    classLabel: { gold: 'Emas', silver: 'Perak', metal: 'Logam', fx: 'Forex', fx_jpy: 'Forex JPY', index: 'Indeks', commodity: 'Komoditas', crypto: 'Kripto' },
-    headLine: (title, dir, ot, sym) => `${title} ${dir} ${ot} pada ${sym}`,
-    entryLine: (e, pips, sl) => `Entry ${e}, SL (${pips} pip) di ${sl}`,
-    slCapped: (max, raw) => `SL dibatasi ${max} pip, struktur lebih lebar (${raw} pip)`,
-    aiPrompt: (d) => `
-Anda adalah "Alu Signal Z", trader institusional SMC/ICT. Tulis analisa eksekusi (maks 600 karakter, bahasa Indonesia) berdasarkan data di bawah.
-WAJIB jelaskan narasi:
-1. **Konteks State Machine**: Jelaskan alur dari Sweep -> MSS -> POI -> Signal.
-2. **Konteks Premium/Discount**: Sebutkan apakah harga saat ini di area Premium (Mahal) atau Discount (Murah).
-3. **Analisa Struktur & Zona**: Sebutkan zona kunci (Supply/Demand/FVG/OB) dan konfirmasi Liquidity Sweep (SSL/BSL).
-4. **Alasan & Tipe Entry**: Apakah ini setup Reversal, Continuity, OCO, atau Retest?
-5. **Invalidasi**: Sebutkan alasan SL diletakkan di level tersebut.
-
-=== DATA ===
-- Pair/Aset: ${d.symbol}
-- Timeframe: ${d.tfs}
-- Sinyal: ${d.sideW} | Order: ${d.orderType}
-- Entry: ${d.entry} | SL: ${d.sl} (${d.riskPips} pip)
-- TP: ${d.tps}
-- Setup Type: ${d.setup}
-- Chart Context: ${d.chartContext}
-- Range Info: ${d.rangeInfo || '-'}
-- Detail Zona/Struktur: ${d.raw}
-`,
-    aiSystem: 'Anda adalah AI analis trading SMC/ICT yang objektif, dingin, dan presisi.',
-    noEmail: 'Email tidak ditemukan. Silakan login ulang.',
-    notRegistered: 'Email ini belum terdaftar sebagai klien.',
-    expired: 'Masa akses sudah berakhir. Hubungi admin.',
-    noSource: 'tidak ada sumber candle',
-    emptyBody: 'body kosong',
-    noPrice: 'Harga live belum tersedia. Tunggu stream terhubung.',
-    noSetup: 'Belum ada setup valid.',
-    notProcessed: 'Analisa belum diproses.',
-    noPair: (keys) => `Simbol tidak dikenali. Field yang diterima: ${keys}`,
-    range: (price, symbol, lo, hi) => `Harga ${price} di luar rentang wajar untuk ${symbol} (${lo} - ${hi}).`,
-    candle: (symbol, price, detail) => `Candle ${symbol} belum tersedia (harga live ${price}). Detail: ${detail}`,
+    subHeader: 'SMC x ICT x Alchemist (XAUUSD & BTCUSD)', loginSub: 'Silakan masukkan email terdaftar atau kode admin',
+    lblAccess: 'ACCESS LOGIN', btnLogin: 'MASUK SISTEM', btnLogout: 'LOGOUT', loginNeed: 'Isi email atau kode admin dulu.', checking: 'Mengecek...', denied: 'Login ditolak: ',
+    lblMarket: 'TARGET ASET AKTIF', lblStyle: 'GAYA TRADING / STRATEGI', optScalp: 'Scalping Agresif (High Risk)', optDay: 'Scalping Konservatif', optIntra: 'Intraday / Day Trade', optSwing: 'Swing',
+    infoScalp: 'Buy Now / Sell Now sesuai arah pasar. Jika ada di area pantulan, fokus ambil pantulan (tanpa limit order).',
+    infoDay: 'Fokus menunggu Limit Order di zona pantulan / FVG.', infoIntra: 'Konsep Day Trade (H1/M15), menunggu retest zona yang lebih lebar.', infoSwing: 'Positioning di H4, menahan posisi lebih lama.',
+    btnGen: 'Analisa Signal', btnGenVision: 'Analisa Gambar', btnGenBusy: 'Menganalisa Gambar...',
+    lblBias: 'BIAS MULTI-TIMEFRAME', lblStream: 'LIVE MARKET STREAM', lblSession: 'MARKET SESSIONS',
+    standby1: 'Chart di bawah sudah aktif. Tekan Analisa Signal untuk membuat sinyal.', entryZone: 'ENTRY ZONE', lblMap: 'LIVE MAP CHART', lblReason: 'ANALYSIS REASON (CONFLUENCE SCORE):',
+    modeLimit: 'Entry zona', modeMarket: 'Entry market',
+    reasonOtherLang: '(Alasan ini dibuat dalam bahasa Inggris. Buat sinyal baru untuk versi Indonesia.)',
+    visionUpload: 'Upload Gambar Chart (Max 3)', visionFmt: 'Format: JPG, PNG. Maks 5MB per gambar.',
+    disclaimerLbl: 'DISCLAIMER:',
+    disclaimerTxt: 'Sinyal dan analisa ini hanya untuk tujuan edukasi. Bukan merupakan saran keuangan (Financial Advisor). Trading memiliki risiko kehilangan modal. Selalu lakukan riset Anda sendiri (DYOR).',
+    valTitle: 'Validasi Analisa Structure', steps: ['Menganalisa struktur pasar...', 'Mencari zona supply & demand fresh...', 'Memeriksa bias M15 & H1...', 'Cek FVG & displacement...', 'Validasi rejection candle...', 'Menghitung entry, SL, TP...'],
+    lblHistory: 'TRADING HISTORY', histToday: 'Hari ini', histAll: 'Semua',
+    winLbl: 'WIN', loseLbl: 'LOSE', totalLbl: 'TOTAL PNL (WIN − LOSE)', ratioLbl: 'WIN RATIO',
+    calMonthLbl: 'PNL BULAN INI', calWinLbl: 'TOTAL WIN', calLoseLbl: 'TOTAL LOSE', calNetLbl: 'NET', calWRLbl: 'WIN RATIO', calResetBtn: 'RESET KALENDER',
+    noHistory: 'Belum ada history.', running: 'berjalan', waitEntry: 'WAITING ENTRY', waitTick: 'Menunggu data candle / live tick...',
+    batal: 'BATAL', dibatal: 'dibatalkan', weekend: 'Market sedang tutup (Weekend).', signalWait: 'Belum ada setup valid.'
   },
   en: {
-    pip: 'pips',
-    title: { scalp: 'Scalping', day: 'Conservative Scalping', intraday: 'Day Trading / Intraday', swing: 'Swing' },
-    kind: { scalp: 'Scalping (Aggressive)', day: 'Scalping (Conservative)', intraday: 'Day Trading (Intraday)', swing: 'Swing (Positioning)' },
-    classLabel: { gold: 'Gold', silver: 'Silver', metal: 'Metal', fx: 'Forex', fx_jpy: 'JPY Forex', index: 'Index', commodity: 'Commodity', crypto: 'Crypto' },
-    headLine: (title, dir, ot, sym) => `${title} ${dir} ${ot} on ${sym}`,
-    entryLine: (e, pips, sl) => `Entry ${e}, SL (${pips} pips) at ${sl}`,
-    slCapped: (max, raw) => `SL capped at ${max} pips, structure is wider (${raw} pips)`,
-    aiPrompt: (d) => `
-You are "Alu Signal Z", an institutional SMC/ICT trader. Write an execution analysis (max 600 characters, in English) based on the data below.
-MUST explain the narrative:
-1. **State Machine Context**: Explain the flow from Sweep -> MSS -> POI -> Signal.
-2. **Premium/Discount Context**: State whether the current price is in Premium or Discount.
-3. **Structure & Zone Analysis**: State the key zones used (Supply/Demand/FVG/OB) and confirm Liquidity Sweep (SSL/BSL).
-4. **Reason & Entry Type**: Is this a Reversal, Continuity, OCO, or Retest setup?
-5. **Invalidation**: Explain the reasoning behind the SL placement.
-
-=== DATA ===
-- Pair/Asset: ${d.symbol}
-- Timeframe: ${d.tfs}
-- Signal: ${d.sideW} | Order: ${d.orderType}
-- Entry: ${d.entry} | SL: ${d.sl} (${d.riskPips} pips)
-- TP: ${d.tps}
-- Setup Type: ${d.setup}
-- Chart Context: ${d.chartContext}
-- Range Info: ${d.rangeInfo || '-'}
-- Zone/Structure Details: ${d.raw}
-`,
-    aiSystem: 'You are an objective, calm, and precise SMC/ICT trading analyst.',
-    noEmail: 'Email not found. Please log in again.',
-    notRegistered: 'This email is not registered as a client.',
-    expired: 'Access has expired. Please contact the admin.',
-    noSource: 'no candle source',
-    emptyBody: 'empty body',
-    noPrice: 'Live price is not available yet. Wait for the stream to connect.',
-    noSetup: 'No valid setup yet.',
-    notProcessed: 'Analysis not processed yet.',
-    noPair: (keys) => `Symbol not recognized. Fields received: ${keys}`,
-    range: (price, symbol, lo, hi) => `Price ${price} is outside the expected range for ${symbol} (${lo} - ${hi}).`,
-    candle: (symbol, price, detail) => `Candles for ${symbol} are not available (live price ${price}). Detail: ${detail}`,
-  },
-};
-const tx = ctx => TX[ctx.lang] || TX.id;
-
-const SRC_EN = { 'BOS Bullish': 'BOS Bullish', 'BOS Bearish': 'BOS Bearish', 'Struktur HH + HL': 'HH + HL', 'Struktur LH + LL': 'LH + LL', 'Mitigasi FVG / Inducement': 'FVG mitigation', 'Sweep FVG / OB': 'Sweep', 'Default': 'Default' };
-const srcName = (src, lang) => (lang === 'en' ? (SRC_EN[src] || src) : src);
-
-// ── TICKERLAYER ──
-const TL_ROUTE = {
-  XAUUSD: ['commodities', 'XAUUSD'], XAUUSDX: ['commodities', 'XAUUSD'],
-  XAGUSD: ['commodities', 'XAGUSD'], XPTUSD: ['commodities', 'XPTUSD'], XPDUSD: ['commodities', 'XPDUSD'],
-  BRENT: ['commodities', 'BRENTUSD'], WTI: ['commodities', 'WTIUSD'],
-  NATGAS: ['commodities', 'NGASUSD'], COPPER: ['commodities', 'COPPERUSD'],
-  US30: ['indices', 'US30'], SPX500: ['indices', 'US500'], NAS100: ['indices', 'US100'],
-  GER40: ['indices', 'DE40'], JPN225: ['indices', 'JP225'],
+    subHeader: 'SMC x ICT x Alchemist (XAUUSD & BTCUSD)', loginSub: 'Enter your registered email or admin code',
+    lblAccess: 'ACCESS LOGIN', btnLogin: 'LOG IN', btnLogout: 'LOGOUT', loginNeed: 'Enter your email or admin code first.', checking: 'Checking...', denied: 'Login denied: ',
+    lblMarket: 'ACTIVE TARGET ASSET', lblStyle: 'TRADING STYLE / STRATEGY', optScalp: 'Aggressive Scalping (High Risk)', optDay: 'Conservative Scalping', optIntra: 'Intraday / Day Trade', optSwing: 'Swing',
+    infoScalp: 'Buy Now / Sell Now following market direction. If in a bounce zone, focus on the bounce (no limit orders).',
+    infoDay: 'Wait for Limit Orders at retracement zones / FVG.', infoIntra: 'Day Trade concept (H1/M15), waiting for retest of wider zones.', infoSwing: 'Positioning on H4, holding positions longer.',
+    btnGen: 'Analyze Signal', btnGenVision: 'Analyze Image', btnGenBusy: 'Analyzing Image...',
+    lblBias: 'MULTI-TIMEFRAME BIAS', lblStream: 'LIVE MARKET STREAM', lblSession: 'MARKET SESSIONS',
+    standby1: 'The chart below is active. Press Analyze Signal to create a signal.', entryZone: 'ENTRY ZONE', lblMap: 'LIVE MAP CHART', lblReason: 'ANALYSIS REASON (CONFLUENCE SCORE):',
+    modeLimit: 'Zone entry', modeMarket: 'Market entry',
+    reasonOtherLang: '(This reasoning was generated in Indonesian. Create a new signal for the English version.)',
+    visionUpload: 'Upload Chart Images (Max 3)', visionFmt: 'Format: JPG, PNG. Max 5MB per image.',
+    disclaimerLbl: 'DISCLAIMER:',
+    disclaimerTxt: 'These signals and analyses are for educational purposes only. They are not financial advice. Trading carries the risk of losing your capital. Always do your own research (DYOR).',
+    valTitle: 'Validating Market Structure', steps: ['Analyzing market structure...', 'Finding fresh supply & demand zones...', 'Checking M15 & H1 bias...', 'Checking FVG & displacement...', 'Validating rejection candles...', 'Calculating entry, SL, TP...'],
+    lblHistory: 'TRADING HISTORY', histToday: 'Today', histAll: 'All',
+    winLbl: 'WIN', loseLbl: 'LOSE', totalLbl: 'TOTAL PNL (WIN − LOSE)', ratioLbl: 'WIN RATIO',
+    calMonthLbl: 'MONTHLY PNL', calWinLbl: 'TOTAL WIN', calLoseLbl: 'TOTAL LOSE', calNetLbl: 'NET', calWRLbl: 'WIN RATIO', calResetBtn: 'RESET CALENDAR',
+    noHistory: 'No trading history yet.', running: 'running', waitEntry: 'WAITING ENTRY', waitTick: 'Waiting for candle / live tick data...',
+    batal: 'CANCELLED', dibatal: 'cancelled', weekend: 'Market is closed (Weekend).', signalWait: 'No valid setup yet.'
+  }
 };
 
-const TL_SPAN = { '1m': { mult: 1, span: 'minute', minutes: 1 }, '5m': { mult: 5, span: 'minute', minutes: 5 }, '15m': { mult: 15, span: 'minute', minutes: 15 } };
-const CACHE_TTL = { '1m': 120, '5m': 300, '15m': 600 };
-const CACHE_BARS = { '1m': 500, '5m': 500, '15m': 2000 };
-const TL_MIN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+/* ================= HELPER ================= */
+const $ = id => document.getElementById(id);
+const setTxt = (id, v) => { const e = $(id); if (e) e.textContent = v; };
+const setHTML = (id, v) => { const e = $(id); if (e) e.innerHTML = v; };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const norm = s => String(s ?? '').toUpperCase().replace(/^XYZ:/, '').replace(/\.[A-Z]+$/, '').replace(/[^A-Z0-9]/g, '');
+const ALIAS_MAP = new Map();
+KEYS.forEach(k => MARKETS[k].aliases.forEach(a => ALIAS_MAP.set(norm(a), k)));
 
-function tlCandidates(symbol) {
-  const s = symbol.toUpperCase().trim();
-  if (TL_ROUTE[s]) {
-    const [asset, sym] = TL_ROUTE[s];
-    return [{ asset, symbol: sym }];
-  }
-  if (CRYPTO_LIST.includes(s)) return [{ asset: 'crypto', symbol: s }];
-  return [{ asset: 'forex', symbol: s }];
-}
-
-const TL_CD_SEC = { quota: 600, rate: 5, invalid: 6 * 3600 };
-const tlCdMem = new Map();
-
-function tlCooldownFor(status, body, retryAfter) {
-  if (status === 401) return TL_CD_SEC.invalid;
-  if (status === 429) {
-    if (body && body.code === 'REST_QUOTA_EXCEEDED') return TL_CD_SEC.quota;
-    const ra = Number((body && body.retry_after) || retryAfter);
-    return Number.isFinite(ra) && ra > 0 ? Math.ceil(ra) : TL_CD_SEC.rate;
-  }
-  return 0;
-}
-
-async function tlUsableKeys() {
-  const names = API_KEYS.map((_, i) => `tl_cd_${i}`);
-  let vals = names.map(() => null);
-  try {
-    const raw = await kv(['MGET', ...names]);
-    if (Array.isArray(raw)) vals = raw;
-  } catch {}
-  const now = Date.now();
-  return API_KEYS.map((_, i) => i).filter(i => !vals[i] && (tlCdMem.get(names[i]) || 0) <= now);
-}
-
-async function tlSetCooldown(idx, sec) {
-  if (sec <= 0) return;
-  const name = `tl_cd_${idx}`;
-  tlCdMem.set(name, Date.now() + sec * 1000);
-  try { await kv(['SET', name, '1', 'EX', sec]); } catch {}
-}
-
-async function tlFetch(url) {
-  if (!API_KEYS.length) return { response: null, status: 500, detail: 'Tidak ada TICKERLAYER_API_KEY di env' };
-  const order = await tlUsableKeys();
-  if (!order.length) return { response: null, status: 429, detail: 'Semua key TickerLayer sedang cooldown' };
-
-  let last = { status: 500, detail: '' };
-  for (const idx of order) {
-    const r = await fetch(url, { headers: { 'x-api-key': API_KEYS[idx] } });
-    if (r.ok) return { response: r, keyNo: idx + 1 };
-
-    const text = await r.text().catch(() => '');
-    let body = {};
-    try { body = JSON.parse(text); } catch {}
-    last = { status: r.status, detail: text.slice(0, 300) };
-
-    if (r.status === 429 || r.status === 401) {
-      await tlSetCooldown(idx, tlCooldownFor(r.status, body, r.headers.get('retry-after')));
-      continue;
-    }
-    if (r.status === 403) continue;
-    break;
-  }
-  return { response: null, status: last.status, detail: last.detail };
-}
-
-function toEpochMs(v) {
-  if (typeof v === 'string' && v.trim() !== '' && Number.isNaN(Number(v))) return Date.parse(v) || 0;
+// Format harga: desimal mengikuti besar harga (PEPE 0.00000403 tetap tampil penuh)
+const fmt = p => {
+  const n = Number(p);
+  if (!Number.isFinite(n)) return '--';
+  if (n === 0) return '0.00';
+  const a = Math.abs(n);
+  const d = a >= 100 ? 2 : a >= 1 ? 4 : Math.min(10, Math.max(2, -Math.floor(Math.log10(a)) + 2));
+  return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+};
+const fmtPips = p => `${p > 0 ? '+' : p < 0 ? '−' : ''}${Number(Math.abs(p).toFixed(1))} pip`;
+const pipColor = p => (p > 0 ? TXT.green : p < 0 ? TXT.red : TXT.gray);
+const pipsOf = (t, p) => (p - t.entry) * t.dir / (t.pip || MARKETS[t.key].pip);
+const send = (s, o) => { if (s && s.readyState === 1) s.send(JSON.stringify(o)); };
+const hitKeys = t => TP_KEYS.filter(k => t.hits && t.hits[k]);
+const maxHit = t => TP_KEYS.reduce((m, k, i) => (t.hits && t.hits[k] ? i + 1 : m), 0);
+const nextNo = () => trades.reduce((m, t) => Math.max(m, t.no || 0), 0) + 1;
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const marketOpen = k => MARKETS[k].h24 || ![0, 6].includes(new Date().getUTCDay());
+const T = k => I18N[lang][k];
+const optOf = s => T((STYLE_CFG[s] || STYLE_CFG.Scalping).opt);
+const symOf = k => workingSym[k] || MARKETS[k].aliases[aliasIdx[k] || 0];
+// Kartu sinyal: untuk VISION pakai hasil analisa gambar, untuk pair pakai setup yang dipilih
+const activeTrade = () => (market === 'VISION' ? visionTrade : (trades.find(t => t.id === activeId && t.key === market) || null));
+const toMs = v => {
   const n = Number(v);
-  if (!Number.isFinite(n) || n <= 0) return 0;
-  return n < 1e11 ? n * 1000 : n;
-}
-
-async function fetchTickerLayerRows(cand, interval, need) {
-  const info = { cand: `${cand.asset}/${cand.symbol}`, status: null, rows: [], error: null };
-  const tf = TL_SPAN[interval];
-  if (!tf) return info;
-  const now = Date.now();
-  const startMs = now - Math.max(Math.ceil(need * 1.2 * tf.minutes * 60000), TL_MIN_WINDOW_MS) - 86400000;
-  const url = `${TICKERLAYER_BASE_URL}/${cand.asset}/agg/${cand.symbol}/${tf.mult}/${tf.span}/${isoDate(new Date(startMs))}/${isoDate(new Date(now + 86400000))}?sort=desc&limit=5000`;
-  try {
-    const { response, status, detail } = await tlFetch(url);
-    if (!response) {
-      info.status = status;
-      info.error = detail || `HTTP ${status}`;
-      return info;
-    }
-    info.status = response.status;
-    const data = await response.json();
-    const raw = Array.isArray(data) ? data : (data.results || []);
-    const byT = new Map();
-    for (const bar of raw) {
-      const t = toEpochMs(bar.t ?? bar.timestamp ?? bar.time);
-      const o = Number(bar.o ?? bar.open), h = Number(bar.h ?? bar.high), l = Number(bar.l ?? bar.low), c = Number(bar.c ?? bar.close);
-      if (t > 0 && [o, h, l, c].every(Number.isFinite)) byT.set(t, { t, o, h, l, c });
-    }
-    info.rows = [...byT.values()].sort((a, b) => a.t - b.t).slice(-Math.max(1, Math.ceil(need)));
-  } catch (err) { info.error = err.message; }
-  return info;
-}
-
-function cleanCandles(rows) {
-  if (!Array.isArray(rows) || rows.length === 0) return [];
-  return rows.map(c => ({ t: Number(c?.t), o: Number(c?.o), h: Number(c?.h), l: Number(c?.l), c: Number(c?.c) }))
-    .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite)).sort((a, b) => a.t - b.t);
-}
-
-function mergeLiveBar(candles, price, tfMin) {
-  if (!candles.length || !(price > 0)) return candles;
-  const ms = tfMin * 60000;
-  const bucket = Math.floor(Date.now() / ms) * ms;
-  const last = candles[candles.length - 1];
-  if (last.t === bucket) { last.h = Math.max(last.h, price); last.l = Math.min(last.l, price); last.c = price; }
-  else if (last.t < bucket) { const o = last.c; candles.push({ t: bucket, o, h: Math.max(o, price), l: Math.min(o, price), c: price }); }
-  return candles;
-}
-
-const CANDLE_CACHE_VER = 'v6';
-const matchesRef = (arr, ref) => arr.length > 0 && ref > 0 && Math.abs(arr[arr.length - 1].c - ref) / ref <= MAX_SRC_DEVIATION;
-
-async function getCandles(symbol, tf, need, ref) {
-  const cacheKey = `candles_${CANDLE_CACHE_VER}_${symbol}_${tf}`;
-  const cached = await kvGetJSON(cacheKey);
-  if (Array.isArray(cached) && cached.length >= need && matchesRef(cached, ref)) return { candles: cached, source: 'cache', tried: [] };
-  const tried = [];
-  const minBars = Math.min(need, 60);
-  for (const cand of tlCandidates(symbol)) {
-    const info = await fetchTickerLayerRows(cand, tf, need);
-    tried.push(info);
-    if (info.rows.length >= minBars && matchesRef(info.rows, ref)) {
-      await kvSetJSON(cacheKey, info.rows.slice(-CACHE_BARS[tf]), CACHE_TTL[tf]);
-      return { candles: info.rows, source: `tickerlayer ${info.cand}`, tried };
-    }
-  }
-  return { candles: [], source: 'none', tried };
-}
-
-function describeTried(tried, ref, lang) {
-  if (!tried || !tried.length) return TX[lang].noSource;
-  return tried.map(t => {
-    const last = t.rows.length ? `, close ${t.rows[t.rows.length - 1].c} vs live ${ref}` : '';
-    const err = t.error ? `, error ${t.error}` : '';
-    return `${t.cand} HTTP ${t.status ?? '-'}, ${t.rows.length} bar${last}${err}`;
-  }).join('; ');
-}
-
-// ── INDIKATOR & STRUKTUR ──
-function atr(candles, period = 14) {
-  if (!candles || candles.length < 2) return 15;
-  const trs = [];
-  for (let i = 1; i < candles.length; i++) {
-    const c = candles[i], p = candles[i - 1];
-    trs.push(Math.max(c.h - c.l, Math.abs(c.h - p.c), Math.abs(c.l - p.c)));
-  }
-  const s = trs.slice(-period);
-  return s.length ? s.reduce((a, b) => a + b, 0) / s.length : 15;
-}
-const atrOf = (candles, pip) => (candles && candles.length >= 15 ? atr(candles, ZONE_ATR_PERIOD) : 10 * pip);
-
-function findPivots(candles, L) {
-  const highs = [], lows = [];
-  for (let i = L; i < candles.length - L; i++) {
-    let isH = true, isL = true;
-    for (let j = 1; j <= L && (isH || isL); j++) {
-      if (candles[i].h <= candles[i - j].h || candles[i].h <= candles[i + j].h) isH = false;
-      if (candles[i].l >= candles[i - j].l || candles[i].l >= candles[i + j].l) isL = false;
-    }
-    if (isH) highs.push({ i, p: candles[i].h });
-    if (isL) lows.push({ i, p: candles[i].l });
-  }
-  return { highs, lows };
-}
-
-function analyzePureSMCStructure(candles) {
-  if (!candles || candles.length < 15) return { dir: 0, src: 'Default' };
-  const { highs, lows } = findPivots(candles, SCALP_PIVOT);
-  if (highs.length < 2 || lows.length < 2) {
-    const last = candles[candles.length - 1], prev = candles[candles.length - 2];
-    return { dir: last.c >= prev.c ? 1 : -1, src: 'Sweep FVG / OB' };
-  }
-  const [h1, h2] = highs.slice(-2);
-  const [l1, l2] = lows.slice(-2);
-  const lastC = candles[candles.length - 1].c;
-  if (lastC > h2.p) return { dir: 1, src: 'BOS Bullish' };
-  if (lastC < l2.p) return { dir: -1, src: 'BOS Bearish' };
-  if (h2.p > h1.p && l2.p > l1.p) return { dir: 1, src: 'Struktur HH + HL' };
-  if (h2.p < h1.p && l2.p < l1.p) return { dir: -1, src: 'Struktur LH + LL' };
-  return { dir: 0, src: 'Ranging / Inducement' };
-}
-
-function aggregateCandles(candles, tfMin) {
-  const ms = tfMin * 60000;
-  const map = new Map();
-  for (const c of candles) {
-    const key = Math.floor(c.t / ms) * ms;
-    const b = map.get(key);
-    if (!b) map.set(key, { t: key, o: c.o, h: c.h, l: c.l, c: c.c });
-    else { b.h = Math.max(b.h, c.h); b.l = Math.min(b.l, c.l); b.c = c.c; }
-  }
-  return [...map.values()].sort((a, b) => a.t - b.t);
-}
-
-function isBOSAfter(candles, base, k, dir) {
-  const window = candles.slice(Math.max(0, base - 10), base);
-  if (!window.length) return false;
-  const ext = dir === 1 ? Math.max(...window.map(c => c.h)) : Math.min(...window.map(c => c.l));
-  const after = candles.slice(k, Math.min(k + 3, candles.length - 1));
-  return after.some(c => (dir === 1 ? c.c > ext : c.c < ext));
-}
-
-function findSDZones(candles, dir, price, opts = {}) {
-  const dispAtr = opts.dispAtr ?? ZONE_DISP_ATR;
-  const freshOnly = opts.freshOnly ?? ZONE_FRESH_ONLY;
-  const n = candles.length;
-  if (n < 20) return [];
-  const a = atr(candles, ZONE_ATR_PERIOD);
-  const zones = [];
-  for (let k = 2; k < n - 1; k++) {
-    const d = candles[k];
-    if (dir === 1 && d.c <= d.o) continue;
-    if (dir === -1 && d.c >= d.o) continue;
-    if (Math.abs(d.c - d.o) < dispAtr * a) continue;
-    let base = -1;
-    for (let b = k - 1; b >= Math.max(0, k - 3); b--) {
-      const c = candles[b];
-      if ((dir === 1 && c.c < c.o) || (dir === -1 && c.c > c.o)) { base = b; break; }
-    }
-    if (base < 0) continue;
-    const bc = candles[base];
-    const top = Math.max(bc.o, bc.c), bottom = Math.min(bc.o, bc.c);
-    const sl = dir === 1 ? bc.l : bc.h;
-    if (Math.abs(top - sl) > ZONE_MAX_ATR * a) continue;
-    if (!isBOSAfter(candles, base, k, dir)) continue;
-    const after = candles.slice(k + 1, n - 1);
-    if (after.some(x => (dir === 1 ? x.c < sl : x.c > sl))) continue;
-    const fresh = !after.some(x => (dir === 1 ? x.l <= top : x.h >= bottom));
-    if (freshOnly && !fresh) continue;
-    if (dir === 1 && (bottom > price || price < sl)) continue;
-    if (dir === -1 && (top < price || price > sl)) continue;
-    const dist = dir === 1 ? Math.max(0, price - top) : Math.max(0, bottom - price);
-    zones.push({ top, bottom, sl, idx: base, dispIdx: k, dist, fresh });
-  }
-  return zones.sort((x, y) => x.dist - y.dist);
-}
-
-function recentExtreme(candles, dir, bars) {
-  const s = candles.slice(-(bars + 1));
-  return dir === 1 ? Math.min(...s.map(c => c.l)) : Math.max(...s.map(c => c.h));
-}
-
-// ── TARGET PROFIT (ERL / IRL) ──
-function getStructuralTPs(candles, dir, entry, sl, minRR = 1.0) {
-  const risk = Math.abs(entry - sl);
-  const { highs, lows } = findPivots(candles, 2);
-  const fvgs = findRecentFVGs(candles, 40);
-
-  let erlTargets = [];
-  if (dir === 1) {
-    erlTargets = highs.filter(h => h.p > entry + risk * minRR).map(h => h.p).sort((a, b) => a - b);
-  } else {
-    erlTargets = lows.filter(l => l.p < entry - risk * minRR).map(l => l.p).sort((a, b) => b - a);
-  }
-
-  let irlTarget = null;
-  if (dir === 1) {
-    const bearFVG = fvgs.filter(f => f.dir === -1 && f.lo > entry + risk * 0.5).sort((a, b) => a.lo - b.lo)[0];
-    if (bearFVG) irlTarget = bearFVG.lo;
-  } else {
-    const bullFVG = fvgs.filter(f => f.dir === 1 && f.hi < entry - risk * 0.5).sort((a, b) => b.hi - a.hi)[0];
-    if (bullFVG) irlTarget = bullFVG.hi;
-  }
-
-  let tps = [];
-
-  if (irlTarget && Math.abs(irlTarget - entry) >= risk * minRR) {
-    tps.push(irlTarget);
-  } else if (erlTargets.length > 0) {
-    tps.push(erlTargets[0]);
-  } else {
-    tps.push(entry + dir * risk * 1.0);
-  }
-
-  for (let i = 0; i < erlTargets.length; i++) {
-    const target = erlTargets[i];
-    if (Math.abs(target - entry) > Math.abs(tps[tps.length - 1] - entry) + (risk * 0.1)) {
-      tps.push(target);
-    }
-    if (tps.length >= 3) break;
-  }
-
-  while (tps.length < 3) {
-    const lastTpDist = Math.abs(tps[tps.length - 1] - entry);
-    const nextRR = (lastTpDist / risk) + 0.5;
-    tps.push(entry + dir * risk * nextRR);
-  }
-
-  return tps.slice(0, 3);
-}
-
-function findRecentFVGs(candles, lookback) {
-  const n = candles.length;
-  const fvgs = [];
-  const start = Math.max(1, n - lookback);
-  for (let i = start; i < n - 1; i++) {
-    const prev = candles[i - 1], next = candles[i + 1];
-    if (prev.h < next.l) fvgs.push({ dir: 1,  lo: prev.h, hi: next.l, idx: i });
-    if (prev.l > next.h) fvgs.push({ dir: -1, lo: next.h, hi: prev.l, idx: i });
-  }
-  return fvgs.filter(f => {
-    for (let i = f.idx + 2; i < n; i++) {
-      if (candles[i].l <= f.hi && candles[i].h >= f.lo) return false;
-    }
-    return true;
-  });
-}
-
-function slBounds(kind, ctx, atrVal) {
-  if (ctx.gold) { const [a, b] = GOLD_SL_PIPS[kind]; return { min: a * ctx.pip, max: b * ctx.pip }; }
-  const [a, b] = ATR_SL_MULT[kind];
-  return { min: a * ctx.prof.slMul * atrVal, max: b * ctx.prof.slMul * atrVal };
-}
-
-// ── AI REASONING ──
-async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup, rawReason, riskPips, zoneLine, timeframes, rangeInfo, chartContext }) {
-  if (!OPENAI_API_KEY) return null;
-  const { symbol, dec, prof, lang } = ctx;
-  const t = TX[lang] || TX.id;
-  const p = v => {
-    if (v === 0) return "0";
-    if (v < 0.001) return Number(v).toFixed(8);
-    return Number(v).toFixed(dec);
-  };
-
-  const prompt = t.aiPrompt({
-    symbol, classLabel: t.classLabel[prof.cls] || prof.label, sideW: dir === 1 ? 'BUY' : 'SELL',
-    kind: t.kind[kind] || kind, orderType, entry: p(entry), sl: p(sl),
-    riskPips: riskPips.toFixed(1), tps: tps.map(p).join(', '), setup, zone: zoneLine || '', raw: rawReason,
-    tfs: timeframes || 'Chart', rangeInfo: rangeInfo || '-', chartContext: chartContext || '-'
-  });
-
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
-
-    const resp = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: AI_MODEL, messages: [{ role: 'system', content: t.aiSystem }, { role: 'user', content: prompt }], max_tokens: 500, temperature: 0.2 }),
-      signal: controller.signal
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    return data.choices?.[0]?.message?.content?.trim() || null;
-  } catch (err) {
-    console.error('AI Reasoning Exception/Timeout:', err.message);
-    return null;
-  }
-}
-
-// ── VISION AI ──
-async function getVisionSignal(images, lang) {
-  if (!OPENAI_API_KEY) return { plan: null, reason: 'API Key AI tidak ada.' };
-
-  const prompt = `
-Anda adalah trader institusional SMC/ICT profesional. Anda menerima ${images.length} gambar chart TradingView (Multi-Timeframe).
-TIDAK ADA gaya trading. Berikan REKOMENDASI murni berdasarkan arsitektur SMC State Machine.
-
-LANGKAH WAJIB (Analisa Top-Down + State Machine):
-1. **Baca TF**: Semua TF di tiap gambar. Kumpulkan ke ARRAY (misal ["H4", "M15", "M5"]).
-2. **Baca Pair**: Pojok kiri atas ("PEPE / TetherUS" -> "PEPEUSDT"). Jika tidak ada, "UNKNOWN".
-3. **IDLE (Dealing Range)**: Tentukan range harga saat ini (High-Low). Apakah harga berada di Premium (>50%) atau Discount (<50%)?
-4. **SWEEP DETECTED**: Apakah ada likuiditas (BSL/SSL) yang baru saja disapu?
-5. **MSS CONFIRMED**: Apakah ada Market Structure Shift / CHoCH di LTF?
-6. **POI_REACHED**: Cari zona kunci (FVG, Order Block, Breaker). Apakah harga sudah menyentuh zona ini?
-7. **SIGNAL FIRED (Entry & SL)**:
-   - Tentukan Entry (NOW jika di POI, LIMIT jika menunggu retest).
-   - **SL ANTI-SWEEP**: Letakkan SL di LUAR zona pelindung (buffer 1.5 ATR).
-   - Tentukan TP1, TP2, TP3 berdasarkan likuiditas berikutnya.
-8. **chartContext**: Tuliskan alur state machine secara eksplisit (contoh: "HTF H4 Bullish -> Sweep SSL M15 -> MSS M5 -> POI FVG -> SIGNAL BUY").
-
-KEMBALIKAN HANYA DALAM FORMAT JSON:
-{
-  "symbol": "BTCUSDT",
-  "timeframes": ["H4", "M15", "M5"],
-  "signal": "BUY",
-  "orderType": "LIMIT",
-  "entry": 65276.37,
-  "sl": 64800.00,
-  "tp1": 65800.00,
-  "tp2": 66500.00,
-  "tp3": 67000.00,
-  "setup": "M15 Demand Retest (Continuity)",
-  "range_info": "H4 Premium (70%), M15 Discount (30%)",
-  "chartContext": "IDLE at Premium -> Sweep SSL M15 -> MSS M5 -> POI FVG -> SIGNAL FIRED",
-  "reason": "Harga menyapu SSL di M15 (Sweep Detected), lalu terjadi MSS Bullish di M5. Entry Limit di FVG M5 yang berada di area Discount. SL aman di bawah swing low dengan buffer."
-}`;
-
-  const userContent = [
-    { type: "text", text: prompt },
-    ...images.map(imgBase64 => ({ type: "image_url", image_url: { url: imgBase64 } }))
-  ];
-
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8500);
-
-    const resp = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: AI_VISION_MODEL, messages: [{ role: 'user', content: userContent }], max_tokens: 1500, temperature: 0.1 }),
-      signal: controller.signal
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!resp.ok) return { plan: null, reason: `Server AI menolak (HTTP ${resp.status}).` };
-    const data = await resp.json();
-    let content = data.choices?.[0]?.message?.content?.trim() || '';
-    if (!content) return { plan: null, reason: `AI gagal membaca gambar.` };
-
-    content = content.replace(/```json/g, '').replace(/```/g, '').trim();
-    const startIdx = content.indexOf('{');
-    const endIdx = content.lastIndexOf('}');
-    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-      const jsonString = content.substring(startIdx, endIdx + 1);
-      try {
-        const parsed = JSON.parse(jsonString);
-        return { plan: parsed, reason: parsed.reason || 'Vision Analysis' };
-      } catch (parseError) { return { plan: null, reason: 'Format JSON AI rusak.' }; }
-    }
-    return { plan: null, reason: `AI tidak mengembalikan JSON.` };
-  } catch (err) {
-    console.error('Vision AI Exception:', err.message);
-    return { plan: null, reason: err.message };
-  }
-}
-
-// ── FINALIZE PLAN ──
-async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, rrList, confidence, setup, zoneNote, zoneRange, head, lines, zoneLine, timeframes, rangeInfo, chartContext, customTPs = null }) {
-  const { f, pip, gold, prof } = ctx;
-  const t = tx(ctx);
-
-  let risk, slNote = '';
-  const fixedRisk = kind === 'day' && gold ? 50 * pip : null;
-  
-  if (fixedRisk) {
-    risk = fixedRisk;
-    slNote = ctx.lang === 'en' ? `SL fixed 50 pips` : `SL fixed 50 pip`;
-  } else {
-    const b = slBounds(kind, ctx, atrVal);
-    const buf = gold ? SL_BUFFER_PIPS[kind] * pip : prof.bufAtr * atrVal;
-    let raw = Math.abs(entry - baseSL) + buf;
-    if ((dir === 1 && baseSL >= entry) || (dir === -1 && baseSL <= entry)) raw = b.min;
-    
-    // Tambahkan slFloor untuk mencegah SL kena spread
-    risk = Math.min(Math.max(raw, b.min, slFloor(kind, ctx)), b.max);
-    if (raw > b.max) slNote = t.slCapped((b.max / pip).toFixed(0), (raw / pip).toFixed(0));
-  }
-
-  const sl = entry - dir * risk;
-  const tps = (customTPs && customTPs.length > 0) ? customTPs : rrList.map(x => entry + dir * x * risk);
-
-  const minDist = atrVal * 0.5;
-  if (Math.abs(tps[0] - entry) < minDist) {
-     return { plan: null, reason: 'Dibatalkan: Target TP terlalu dekat dengan Entry (terkena noise volatilitas).' };
-  }
-
-  const parts = [head, ...lines, slNote, t.entryLine(f(entry), (risk / pip).toFixed(0), f(sl)), tps.map((val, i) => `TP${i + 1}: ${f(val)}`).join(', ')].filter(Boolean);
-  const manualReason = parts.map(s => s.replace(/\.?$/, '.')).join(' • ');
-
-  const aiReason = await getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup, rawReason: manualReason, riskPips: risk / pip, zoneLine, timeframes, rangeInfo, chartContext });
-
-  return {
-    dir,
-    plan: { kind, orderType, status: orderType === 'LIMIT' ? 'PENDING' : 'RUNNING', entry, bufferEnd: entry, sl, tps, zone: zoneRange || null, expireMs: 0, zoneNote, chartContext },
-    meta: { confidence, riskLabel: 'MEDIUM', setup, reason: aiReason || manualReason },
-  };
-}
-
-// ═══════════════════════════ WORKFLOW MTF ═══════════════════════════
-
-async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
-  const { pip } = ctx;
-  const t = tx(ctx);
-  const atrM1 = atrOf(m1, pip);
-
-  const biasM15 = analyzePureSMCStructure(m15);
-  const rangeM15 = getRangeInfo(m15, 50);
-  let rangeInfoStr = '-', isPremium = false, isDiscount = false;
-  if (rangeM15 && rangeM15.high > rangeM15.low) {
-    const diff = rangeM15.high - rangeM15.low;
-    const pricePos = (price - rangeM15.low) / diff;
-    isPremium = pricePos > 0.5;
-    isDiscount = pricePos <= 0.5;
-    rangeInfoStr = `M15 Range: ${isPremium ? 'PREMIUM' : 'DISCOUNT'} (Pos: ${(pricePos*100).toFixed(1)}%)`;
-  }
-
-  const structM5 = analyzePureSMCStructure(m5);
-  const structM1 = analyzePureSMCStructure(m1);
-
-  // ── DETEKSI MOMENTUM VS RANGING ──
-  const rangeM5 = getRangeInfo(m5, 50);
-  const lastM1 = m1[m1.length - 1];
-  const bodyM1 = Math.abs(lastM1.c - lastM1.o);
-  const isMomentumStrong = structM1.dir !== 0 && bodyM1 > 1.2 * atrM1;
-
-  const fvgs = findRecentFVGs(m1, 20);
-
-  // ── SKENARIO 1: RANGING (OCO ZONA M1) ──
-  const demandBelow = findSDZones(m1, 1, price, { dispAtr: 0.8, freshOnly: true }).filter(z => z.top < price - 0.2 * atrM1 && z.dist > 0).sort((a, b) => a.dist - b.dist)[0] || null;
-  const fvgBullBelow = fvgs.filter(f => f.dir === 1 && f.hi < price - 0.2 * atrM1 && (price - f.hi) < 2.5 * atrM1).sort((a, b) => b.hi - a.hi)[0] || null;
-
-  const supplyAbove = findSDZones(m1, -1, price, { dispAtr: 0.8, freshOnly: true }).filter(z => z.bottom > price + 0.2 * atrM1 && z.dist > 0).sort((a, b) => a.dist - b.dist)[0] || null;
-  const fvgBearAbove = fvgs.filter(f => f.dir === -1 && f.lo > price + 0.2 * atrM1 && (f.lo - price) < 2.5 * atrM1).sort((a, b) => a.lo - b.lo)[0] || null;
-
-  let buyOrder = null, sellOrder = null;
-
-  if (demandBelow) {
-    const entry = demandBelow.top; const sl = demandBelow.sl - 0.3 * atrM1; const risk = entry - sl;
-    if (risk > 0) buyOrder = { dir: 1, entry, sl, tps: rrList.map(m => entry + risk * m), type: 'BUY LIMIT', label: 'Buy Limit · Demand M1', zone: { min: demandBelow.bottom, max: demandBelow.top } };
-  } else if (fvgBullBelow) {
-    const entry = fvgBullBelow.hi; const sl = fvgBullBelow.lo - 0.3 * atrM1; const risk = entry - sl;
-    if (risk > 0) buyOrder = { dir: 1, entry, sl, tps: rrList.map(m => entry + risk * m), type: 'BUY LIMIT', label: 'Buy Limit · FVG M1', zone: { min: fvgBullBelow.lo, max: fvgBullBelow.hi } };
-  }
-
-  if (supplyAbove) {
-    const entry = supplyAbove.bottom; const sl = supplyAbove.sl + 0.3 * atrM1; const risk = sl - entry;
-    if (risk > 0) sellOrder = { dir: -1, entry, sl, tps: rrList.map(m => entry - risk * m), type: 'SELL LIMIT', label: 'Sell Limit · Supply M1', zone: { min: supplyAbove.bottom, max: supplyAbove.top } };
-  } else if (fvgBearAbove) {
-    const entry = fvgBearAbove.lo; const sl = fvgBearAbove.hi + 0.3 * atrM1; const risk = sl - entry;
-    if (risk > 0) sellOrder = { dir: -1, entry, sl, tps: rrList.map(m => entry - risk * m), type: 'SELL LIMIT', label: 'Sell Limit · FVG M1', zone: { min: fvgBearAbove.lo, max: fvgBearAbove.hi } };
-  }
-
-  if (!isMomentumStrong && buyOrder && sellOrder) {
-    return {
-      plan: { isOCO: true, orders: [buyOrder, sellOrder], setup: 'Ranging OCO (2 Arah Zona M1)', chartContext: `M15 ${biasM15.src} -> M5 Ranging -> OCO M1` },
-      meta: { confidence: 'HIGH', riskLabel: 'MEDIUM', reason: `Pasar ranging. Pasang OCO: BUY @ ${buyOrder.entry.toFixed(2)}, SELL @ ${sellOrder.entry.toFixed(2)}. Jika tersentuh, batalkan yang lain.` }
-    };
-  }
-
-  // ── SKENARIO 2: MOMENTUM KUAT ──
-  const inFvgBull = fvgs.find(f => f.dir === 1 && price >= f.lo && price <= f.hi);
-  const inFvgBear = fvgs.find(f => f.dir === -1 && price >= f.lo && price <= f.hi);
-
-  let dir = structM1.dir;
-  if (inFvgBull) dir = 1;
-  if (inFvgBear) dir = -1;
-  if (dir === 0) return { plan: null, reason: 'M1 ranging, tidak ada momentum atau FVG.' };
-
-  if (biasM15.dir !== 0 && biasM15.dir !== dir) return { plan: null, reason: `Konflik bias M15.` };
-
-  let orderType = 'NOW', entry = price, baseSL, setup, zoneRange, lines = [];
-  const maxChaseDist = 1.5 * atrM1;
-
-  if (dir === 1) {
-    if (inFvgBull) { setup = 'M1 Bullish FVG (Market NOW)'; baseSL = inFvgBull.lo - 0.25 * atrM1; zoneRange = { min: inFvgBull.lo, max: inFvgBull.hi }; lines.push('Harga di FVG M1.'); }
-    else if (fvgBullBelow && (price - fvgBullBelow.hi) <= maxChaseDist) { orderType = 'LIMIT'; entry = fvgBullBelow.hi; baseSL = fvgBullBelow.lo - 0.25 * atrM1; zoneRange = { min: fvgBullBelow.lo, max: fvgBullBelow.hi }; setup = 'M1 Bullish FVG (Tight Limit)'; lines.push('Pending di FVG M1.'); }
-    else {
-      if (price > recentExtreme(m1, 1, 20) + (2 * atrM1)) return { plan: null, reason: 'Overextended. Hindari FOMO.' };
-      setup = 'M1 Momentum (Market NOW)'; baseSL = recentExtreme(m1, 1, 5); zoneRange = { min: price, max: price }; lines.push('Momentum kencang. Eksekusi NOW.');
-    }
-  } else {
-    if (inFvgBear) { setup = 'M1 Bearish FVG (Market NOW)'; baseSL = inFvgBear.hi + 0.25 * atrM1; zoneRange = { min: inFvgBear.lo, max: inFvgBear.hi }; lines.push('Harga di FVG M1.'); }
-    else if (fvgBearAbove && (fvgBearAbove.lo - price) <= maxChaseDist) { orderType = 'LIMIT'; entry = fvgBearAbove.lo; baseSL = fvgBearAbove.hi + 0.25 * atrM1; zoneRange = { min: fvgBearAbove.lo, max: fvgBearAbove.hi }; setup = 'M1 Bearish FVG (Tight Limit)'; lines.push('Pending di FVG M1.'); }
-    else {
-      if (price < recentExtreme(m1, -1, 20) - (2 * atrM1)) return { plan: null, reason: 'Overextended. Hindari FOMO.' };
-      setup = 'M1 Momentum (Market NOW)'; baseSL = recentExtreme(m1, -1, 5); zoneRange = { min: price, max: price }; lines.push('Momentum kencang. Eksekusi NOW.');
-    }
-  }
-
-  if (dir === 1 && isPremium) return { plan: null, reason: 'BUY di Premium M15. Rawan fakeout.' };
-  if (dir === -1 && isDiscount) return { plan: null, reason: 'SELL di Discount M15. Rawan fakeout.' };
-
-  return await finalizePlan({
-    dir, entry, orderType, baseSL, kind: 'scalp', atrVal: atrM1, ctx, rrList,
-    confidence: 'HIGH', setup, zoneNote: setup, zoneRange, timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
-    chartContext: `M15 ${biasM15.src} -> M1 ${orderType}`,
-    head: t.headLine(t.title.scalp, dir === 1 ? 'BUY' : 'SELL', orderType, ctx.symbol), lines
-  });
-}
-
-async function buildDayPlan({ m1, m5, m15, price, rrList, ctx }) {
-  const t = tx(ctx);
-  const { f, pip } = ctx;
-  const atrM5 = atrOf(m5, pip);
-
-  const biasM15 = analyzePureSMCStructure(m15);
-  const rangeM5 = getRangeInfo(m5, 50);
-  let rangeInfoStr = rangeM5 ? `M5 Range Pos: ${(((price - rangeM5.low) / (rangeM5.high - rangeM5.low))*100).toFixed(1)}%` : '-';
-
-  const demand = findSDZones(m5, 1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
-  const supply = findSDZones(m5, -1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
-
-  let buyOrder = null, sellOrder = null;
-
-  if (demand) {
-    const entry = demand.top; const sl = demand.sl; const tps = getStructuralTPs(m5, 1, entry, sl, 1.0);
-    if (tps[0] > entry) buyOrder = { dir: 1, entry, sl, tps, type: 'BUY LIMIT', label: 'Buy Limit · M5 Demand', zone: { min: demand.bottom, max: demand.top } };
-  }
-  if (supply) {
-    const entry = supply.bottom; const sl = supply.sl; const tps = getStructuralTPs(m5, -1, entry, sl, 1.0);
-    if (tps[0] < entry) sellOrder = { dir: -1, entry, sl, tps, type: 'SELL LIMIT', label: 'Sell Limit · M5 Supply', zone: { min: supply.bottom, max: supply.top } };
-  }
-
-  if (biasM15.dir === 0 && buyOrder && sellOrder) {
-    return {
-      plan: { isOCO: true, orders: [buyOrder, sellOrder], setup: 'M5 OCO Ranging (2 Arah)', chartContext: `M15 Netral -> M5 Ranging -> OCO` },
-      meta: { confidence: 'HIGH', riskLabel: 'MEDIUM', reason: `HTF (M15) Netral. Pasang OCO: BUY @ ${f(buyOrder.entry)}, SELL @ ${f(sellOrder.entry)}. TP mengikuti ERL/IRL M5.` }
-    };
-  }
-
-  let finalOrder = null, reason = '';
-  if (biasM15.dir === 1 && buyOrder) { finalOrder = buyOrder; reason = 'M15 Bullish. Fokus Buy Limit.'; }
-  else if (biasM15.dir === -1 && sellOrder) { finalOrder = sellOrder; reason = 'M15 Bearish. Fokus Sell Limit.'; }
-  else if (biasM15.dir === 0 && (buyOrder || sellOrder)) { finalOrder = buyOrder || sellOrder; reason = `M15 Netral, hanya ada 1 zona valid.`; }
-
-  if (!finalOrder) return { plan: null, reason: 'Tidak ada setup valid. Zona M5 tidak fresh atau bertentangan dengan bias M15.' };
-
-  const inZone = price >= finalOrder.zone.min && price <= finalOrder.zone.max;
-  let orderType = 'LIMIT', entry = finalOrder.entry;
-
-  if (inZone) {
-    const lastM1 = m1[m1.length - 1];
-    const counter = (finalOrder.dir === 1 && lastM1.c < lastM1.o) || (finalOrder.dir === -1 && lastM1.c > lastM1.o);
-    if (counter) return { plan: null, reason: 'Harga di zona tapi candle M1 counter-trend.' };
-    entry = price; orderType = 'NOW';
-  } else {
-    const san = sanitizeEntry({ dir: finalOrder.dir, entry, price, orderType: 'LIMIT', pip });
-    entry = san.entry; orderType = san.orderType;
-  }
-
-  return await finalizePlan({
-    dir: finalOrder.dir, entry, orderType, baseSL: finalOrder.sl, kind: 'day', atrVal: atrM5, ctx, rrList,
-    confidence: 'HIGH', setup: finalOrder.label, zoneNote: finalOrder.label, zoneRange: finalOrder.zone,
-    timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr, chartContext: `M15 ${biasM15.dir === 0 ? 'Netral' : biasM15.dir === 1 ? 'Bullish' : 'Bearish'} -> M5 POI`,
-    head: t.headLine(t.title.day, finalOrder.dir === 1 ? 'BUY' : 'SELL', orderType, ctx.symbol),
-    lines: [reason, `Area Eksekusi: ${f(finalOrder.zone.min)} - ${f(finalOrder.zone.max)}`],
-    customTPs: finalOrder.tps
-  });
-}
-
-async function buildIntradayPlan({ m5, m15, price, rrList, ctx }) {
-  const t = tx(ctx);
-  const { f, pip } = ctx;
-  const h1 = aggregateCandles(m15, 60);
-  const atrM5 = atrOf(m5, pip);
-
-  const biasH1 = analyzePureSMCStructure(h1);
-  const biasM15 = analyzePureSMCStructure(m15);
-  
-  const rangeH1 = getRangeInfo(h1, 50);
-  let rangeInfoStr = rangeH1 ? `H1 Range Pos: ${(((price - rangeH1.low) / (rangeH1.high - rangeH1.low))*100).toFixed(1)}%` : '-';
-
-  const demand = findSDZones(m5, 1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
-  const supply = findSDZones(m5, -1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
-
-  let buyOrder = null, sellOrder = null;
-
-  if (demand) {
-    const entry = demand.top; const sl = demand.sl; const tps = getStructuralTPs(m15, 1, entry, sl, 1.0);
-    if (tps[0] > entry) buyOrder = { dir: 1, entry, sl, tps, type: 'BUY LIMIT', label: 'Buy Limit · M5 Demand', zone: { min: demand.bottom, max: demand.top } };
-  }
-  if (supply) {
-    const entry = supply.bottom; const sl = supply.sl; const tps = getStructuralTPs(m15, -1, entry, sl, 1.0);
-    if (tps[0] < entry) sellOrder = { dir: -1, entry, sl, tps, type: 'SELL LIMIT', label: 'Sell Limit · M5 Supply', zone: { min: supply.bottom, max: supply.top } };
-  }
-
-  if (biasH1.dir === 0 && biasM15.dir === 0 && buyOrder && sellOrder) {
-    return {
-      plan: { isOCO: true, orders: [buyOrder, sellOrder], setup: 'Intraday OCO (HTF Ranging)', chartContext: `H1 Netral -> M15 Netral -> OCO M5` },
-      meta: { confidence: 'HIGH', riskLabel: 'MEDIUM', reason: `HTF (H1 & M15) Ranging. Pasang OCO: BUY @ ${f(buyOrder.entry)}, SELL @ ${f(sellOrder.entry)}. TP ERL/IRL M15.` }
-    };
-  }
-
-  let htfBias = 0;
-  if (biasH1.dir === 1 && biasM15.dir === 1) htfBias = 1;
-  if (biasH1.dir === -1 && biasM15.dir === -1) htfBias = -1;
-
-  if (htfBias === 0) return { plan: null, reason: 'Bias H1 & M15 tidak searah / konflik.' };
-
-  let finalOrder = null, reason = '';
-  if (htfBias === 1 && buyOrder) { finalOrder = buyOrder; reason = `H1 & M15 Bullish. Fokus Buy Limit.`; }
-  else if (htfBias === -1 && sellOrder) { finalOrder = sellOrder; reason = `H1 & M15 Bearish. Fokus Sell Limit.`; }
-
-  if (!finalOrder) return { plan: null, reason: 'Tidak ada zona M5 fresh searah tren HTF.' };
-
-  const inZone = price >= finalOrder.zone.min && price <= finalOrder.zone.max;
-  let orderType = 'LIMIT', entry = finalOrder.entry;
-
-  if (inZone) {
-    entry = price; orderType = 'NOW';
-  } else {
-    const san = sanitizeEntry({ dir: finalOrder.dir, entry, price, orderType: 'LIMIT', pip });
-    entry = san.entry; orderType = san.orderType;
-  }
-
-  return await finalizePlan({
-    dir: finalOrder.dir, entry, orderType, baseSL: finalOrder.sl, kind: 'intraday', atrVal: atrM5, ctx, rrList,
-    confidence: 'HIGH', setup: finalOrder.label, zoneNote: finalOrder.label, zoneRange: finalOrder.zone,
-    timeframes: 'M5, M15, H1', rangeInfo: rangeInfoStr, chartContext: `HTF H1/M15 ${htfBias === 1 ? 'Bullish' : 'Bearish'} -> M5 POI`,
-    head: t.headLine(t.title.intraday, finalOrder.dir === 1 ? 'BUY' : 'SELL', orderType, ctx.symbol),
-    lines: [reason, `Area Eksekusi: ${f(finalOrder.zone.min)} - ${f(finalOrder.zone.max)}`],
-    customTPs: finalOrder.tps
-  });
-}
-
-async function buildSwingPlan({ m15, price, rrList, ctx }) {
-  const t = tx(ctx);
-  const { f, pip } = ctx;
-  const h1 = aggregateCandles(m15, 60);
-  const h4 = aggregateCandles(m15, 240);
-  const d1 = aggregateCandles(m15, 1440);
-  const atrM15 = atrOf(m15, pip);
-
-  const biasD1 = analyzePureSMCStructure(d1);
-  const biasH4 = analyzePureSMCStructure(h4);
-  const biasH1 = analyzePureSMCStructure(h1);
-
-  let bullCount = [biasD1, biasH4, biasH1].filter(x => x.dir === 1).length;
-  let bearCount = [biasD1, biasH4, biasH1].filter(x => x.dir === -1).length;
-
-  let htfBias = 0;
-  if (bullCount >= 2) htfBias = 1;
-  if (bearCount >= 2) htfBias = -1;
-
-  if (htfBias === 0) return { plan: null, reason: 'Bias D1/H4/H1 tidak searah. Menunggu tren makro.' };
-
-  const demand = findSDZones(m15, 1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
-  const supply = findSDZones(m15, -1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
-
-  let finalOrder = null, reason = '';
-
-  if (htfBias === 1 && demand) {
-    const entry = demand.top; const sl = demand.sl; const tps = getStructuralTPs(m15, 1, entry, sl, 1.0);
-    if (tps[0] > entry) { finalOrder = { dir: 1, entry, sl, tps, label: 'M15 Demand Limit' }; reason = 'Tren Makro Bullish. Buy Limit di M15 Demand.'; }
-  } else if (htfBias === -1 && supply) {
-    const entry = supply.bottom; const sl = supply.sl; const tps = getStructuralTPs(m15, -1, entry, sl, 1.0);
-    if (tps[0] < entry) { finalOrder = { dir: -1, entry, sl, tps, label: 'M15 Supply Limit' }; reason = 'Tren Makro Bearish. Sell Limit di M15 Supply.'; }
-  }
-
-  if (!finalOrder) return { plan: null, reason: 'Tidak ada zona M15 fresh searah tren makro.' };
-
-  const inZone = price >= demand?.bottom && price <= demand?.top || price >= supply?.bottom && price <= supply?.top;
-  let orderType = 'LIMIT', entry = finalOrder.entry;
-
-  if (inZone) { entry = price; orderType = 'NOW'; }
-  else {
-    const san = sanitizeEntry({ dir: finalOrder.dir, entry, price, orderType: 'LIMIT', pip });
-    entry = san.entry; orderType = san.orderType;
-  }
-
-  return await finalizePlan({
-    dir: finalOrder.dir, entry, orderType, baseSL: finalOrder.sl, kind: 'swing', atrVal: atrM15, ctx, rrList,
-    confidence: 'HIGH', setup: finalOrder.label, zoneNote: finalOrder.label, zoneRange: { min: demand?.bottom || supply?.bottom, max: demand?.top || supply?.top },
-    timeframes: 'M15, H1, H4, D1', rangeInfo: '-', chartContext: `HTF ${htfBias === 1 ? 'Bullish' : 'Bearish'} -> POI M15`,
-    head: t.headLine(t.title.swing, finalOrder.dir === 1 ? 'BUY' : 'SELL', orderType, ctx.symbol),
-    lines: [reason, `Area Eksekusi M15`],
-    customTPs: finalOrder.tps
-  });
-}
-
-// ═══════════════════════════ OUTPUT ═══════════════════════════
-function toSignal(result, style, ctx) {
-  const { dir, plan, meta } = result;
-  const r = v => {
-    if (v === 0) return 0;
-    if (v < 0.001) return Number(v).toFixed(8);
-    return Number(Number(v).toFixed(ctx.dec));
-  };
-  
-  const en = ctx.lang === 'en';
-
-  if (plan && plan.isOCO) {
-    const [buy, sell] = plan.orders;
-    return {
-      signal: 'OCO',
-      mode: 'OCO_PENDING',
-      orderType: 'OCO',
-      orderLabel: `OCO ${r(buy.entry)} / ${r(sell.entry)}`,
-      status: 'PENDING',
-      statusLabel: `OCO ${r(buy.entry)} / ${r(sell.entry)}`,
-      pendingEntries: [r(buy.entry), r(sell.entry)],
-      setup: plan.setup,
-      confidence: meta.confidence,
-      risk: meta.riskLabel,
-      reason: meta.reason,
-      chartContext: plan.chartContext,
-      orders: plan.orders.map(o => ({
-        signal: o.dir === 1 ? 'BUY' : 'SELL',
-        orderType: 'LIMIT',
-        entry: r(o.entry),
-        sl: r(o.sl),
-        tp1: o.tps[0] != null ? r(o.tps[0]) : null,
-        tp2: o.tps[1] != null ? r(o.tps[1]) : null,
-        tp3: o.tps[2] != null ? r(o.tps[2]) : null,
-        zone: o.zone ? { min: r(o.zone.min), max: r(o.zone.max) } : null,
-        entryStyle: en ? style.entryStyleEn : style.entryStyle,
-        setupLabel: style.label,
-        zoneLabel: o.label,
-        zoneNote: o.label,
-      })),
-    };
-  }
-
-  const tps = plan.tps;
-  const isLimit = plan.orderType === 'LIMIT';
-  const mode = isLimit ? 'LIMIT' : 'MARKET';
-
-  return {
-    signal: dir === 1 ? 'BUY' : 'SELL',
-    mode: mode,
-    orderType: plan.orderType,
-    orderLabel: orderLabel(dir, plan.orderType),
-    status: plan.status,
-    statusLabel: plan.status,
-    entry: r(plan.entry),
-    bufferEnd: r(plan.entry),
-    sl: r(plan.sl),
-    tp1: tps[0] != null ? r(tps[0]) : null,
-    tp2: tps[1] != null ? r(tps[1]) : null,
-    tp3: tps[2] != null ? r(tps[2]) : null,
-    tpCount: tps.length,
-    zone: plan.zone ? { min: r(plan.zone.min), max: r(plan.zone.max) } : null,
-    expireMs: 0,
-    confidence: meta.confidence,
-    risk: meta.riskLabel,
-    setup: meta.setup,
-    entryStyle: en ? style.entryStyleEn : style.entryStyle,
-    setupLabel: en ? style.labelEn : style.label,
-    zoneLabel: isLimit ? 'Limit Entry Zone' : 'Market Execution Zone',
-    zoneNote: plan.zoneNote,
-    reason: meta.reason,
-    chartContext: plan.chartContext,
-  };
-}
-
-// ── REQUEST RESOLVER ──
-const isKnownSymbol = s => Object.prototype.hasOwnProperty.call(DECIMALS, s);
-const normalizeSymbol = raw => {
-  let s = String(raw ?? '').toUpperCase().trim();
-  s = s.replace(/TETHERUS/g, 'USDT').replace(/TETHER/g, 'USDT');
-  s = s.split(/[|:]/).pop();
-  s = s.replace(/[\s\/_\-]/g, '').trim();
-  return s;
+  if (Number.isFinite(n) && n > 0) return n < 1e11 ? n * 1000 : n;
+  const d = Date.parse(v);
+  return Number.isFinite(d) ? d : NaN;
 };
 
-const SYMBOL_KEYS = ['symbol', 'pair', 'instrument', 'asset', 'target', 'pairName', 'ticker', 'market', 'code', 'sym'];
-function findPairString(obj, depth = 0) {
-  if (!obj || typeof obj !== 'object' || Array.isArray(obj) || depth > 2) return null;
-  for (const v of Object.values(obj)) { if (typeof v === 'string') { const s = normalizeSymbol(v); if (isKnownSymbol(s)) return s; } }
-  for (const v of Object.values(obj)) { if (v && typeof v === 'object' && !Array.isArray(v)) { const s = findPairString(v, depth + 1); if (s) return s; } }
-  return null;
+/* ================= REASONING 2 BAHASA ================= */
+// Ambil alasan dalam ID dan EN dari respons server (jika server mengirim keduanya).
+// Format yang dikenali: s.reasons {id,en} | s.reason_id / s.reason_en | s.reasonId / s.reasonEn.
+// Jika hanya ada satu s.reason, dianggap berbahasa sesuai permintaan (lang saat generate).
+function pickReasons(s, curLang) {
+  const out = {};
+  const obj = s.reasons || s.reason_i18n || {};
+  ['id', 'en'].forEach(l => {
+    const cap = l === 'id' ? 'Id' : 'En';
+    const v = obj[l] || s['reason_' + l] || s['reason' + cap];
+    if (v) out[l] = String(v);
+  });
+  if (!out[curLang] && s.reason) out[curLang] = String(s.reason);
+  return out;
 }
-function resolveSymbol(body, query) {
-  for (const src of [body, query]) {
-    if (!src || typeof src !== 'object') continue;
-    for (const key of SYMBOL_KEYS) { const s = normalizeSymbol(src[key]); if (isKnownSymbol(s)) return s; }
-  }
-  return findPairString(body) || findPairString(query) || null;
+function reasonFor(t) {
+  const c = t && t.card;
+  if (!c) return '---';
+  const r = c.reasons || {};
+  if (r[lang]) return r[lang];
+  const any = r.id || r.en || c.reason;
+  if (!any) return '---';
+  const from = c.reasonLang || (r.id ? 'id' : r.en ? 'en' : null);
+  return from && from !== lang ? any + '\n\n' + T('reasonOtherLang') : any;
 }
 
-// ═══════════════════════════ MAIN HANDLER ═══════════════════════════
-export default async function handler(req, res) {
+/* ================= STATE ================= */
+let lang = 'id', market = 'XAUUSD', ws = null, connId = 0, reconT = null, pingT = null, authFailed = false, streamStarted = false;
+let trades = [], activeId = null, tvOn = false, showSMC = true;
+let visionTrade = null; // hasil analisa gambar, terpisah dari history dan rekap
+let smcTfOverride = null;
+let smcZoom = 1;
+let smcPan = 0;
+let statusInterval = null;
+let visionImages = []; // State untuk upload gambar
+let calView = { y: new Date().getFullYear(), m: new Date().getMonth() };
+const prices = {}, hist = {}, candles = {}, workingSym = {}, aliasIdx = {}, subAt = {};
+const SER = {}, CSYM = {}, dispCache = {};
+let pumping = false;
+const cv = $('priceChart');
+const cx = cv.getContext('2d');
+const scv = $('smcCanvas');
+const sx = scv.getContext('2d');
+
+/* ================= LOG (Hanya ke Console) ================= */
+function log(msg, type) {
+  console.log(`[${type || 'info'}] ${msg}`);
+}
+
+/* ================= FUNGSI STATUS CLIENT ================= */
+async function fetchUserStatus() {
+  const email = localStorage.getItem(K.email);
+  if (!email) return;
   try {
-    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    const res = await fetch('/api/user-info', {
+      method: 'POST',
+      headers: JSON_H,
+      body: JSON.stringify({ value: email })
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    startStatusTimer(data);
+  } catch(e) {
+    console.log('Gagal memuat status user', e);
+  }
+}
 
-    let body = req.body || {};
-    if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
+function startStatusTimer(data) {
+  if (statusInterval) clearInterval(statusInterval);
 
-    const lang = pickLang(body, req.query);
-    const t = TX[lang];
+  const badge = $('userStatusBadge');
+  const elType = $('statusType');
+  const elTimer = $('statusTimer');
+  const elUsage = $('statusUsage');
 
-    const inSession = isWithinKillzone();
-    const sessionNote = inSession ? '' : '(Di luar sesi London/NY, volatilitas mungkin rendah)';
+  if (!badge || !elType || !elTimer) return;
+  badge.classList.remove('hidden');
 
-    // =====================================================================
-    // LOGIKA 1: JIKA REQUEST DARI VISION (ADA GAMBAR)
-    // =====================================================================
-    if (body.images && Array.isArray(body.images) && body.images.length > 0) {
-      const access = await checkAccess(body.email);
-      if (!access.ok) return res.status(403).json({ error: t[access.key] });
+  // Lifetime / Admin
+  if (data.status === 'lifetime' || data.status === 'admin') {
+    elType.textContent = 'LIFETIME';
+    elType.className = 'text-yellow-400';
+    elTimer.innerHTML = '<span class="text-sm font-black">∞</span>';
+    elTimer.className = 'text-yellow-400 leading-none';
+    elUsage.classList.add('hidden');
+    return;
+  }
 
-      const trial = await checkTrialLimit(body.email, access.status);
-      if (!trial.ok) return res.status(403).json({ error: trial.msg });
+  // Monthly / Trial
+  if (data.status === 'trial') {
+    elType.textContent = 'TRIAL';
+    elType.className = 'text-yellow-400';
+    elUsage.classList.remove('hidden');
+    elUsage.textContent = `${data.requests_today || 0}/5 req`;
+    // Warnai merah jika limit harian tercapai
+    if ((data.requests_today || 0) >= 5) {
+      elUsage.className = 'text-red-400 border-l border-panelborder pl-1.5 font-bold';
+    } else {
+      elUsage.className = 'text-emerald-400 border-l border-panelborder pl-1.5';
+    }
+  } else if (data.status === 'monthly') {
+    elType.textContent = 'MONTHLY';
+    elType.className = 'text-emerald-400';
+    elUsage.classList.add('hidden');
+  }
 
-      const visionRes = await getVisionSignal(body.images, lang);
+  const expires = new Date(data.expires_at).getTime();
 
-      if (!visionRes.plan) {
-         return res.status(400).json({ error: visionRes.reason });
-      }
+  const tick = () => {
+    const now = Date.now();
+    const diff = expires - now;
 
-      const p = visionRes.plan;
-      const entry = Number(p.entry);
-      const sl = Number(p.sl);
-      const tps = [p.tp1, p.tp2, p.tp3].filter(v => v != null).map(Number);
-      const orderType = p.orderType === 'LIMIT' ? 'LIMIT' : 'NOW';
-
-      if (!['BUY', 'SELL'].includes(p.signal?.toUpperCase())) return res.status(400).json({ error: 'AI gagal menentukan arah BUY/SELL.' });
-      if (entry <= 0 || sl <= 0 || tps.some(v => v <= 0)) return res.status(400).json({ error: 'AI mengembalikan harga 0.0. Pastikan chart jelas.' });
-
-      const dir = p.signal.toUpperCase() === 'BUY' ? 1 : -1;
-      let symbol = resolveSymbol(body, req.query) || (p.symbol && p.symbol !== 'UNKNOWN' ? normalizeSymbol(p.symbol) : null);
-      if (!symbol) symbol = 'UNKNOWN_PAIR';
-
-      let dec = 2, pip = 0.01, gold = false, prof = PAIR_CLASS_PROFILE.fx;
-      if (isKnownSymbol(symbol)) {
-        dec = DECIMALS[symbol] || 2; pip = pipSizeOf(symbol, dec); gold = isGold(symbol); prof = pairProfile(symbol);
-      } else {
-         if (entry > 1000) { dec = 2; pip = 0.1; } else if (entry > 100) { dec = 2; pip = 0.01; } else if (entry > 1) { dec = 4; pip = 0.0001; } else if (entry > 0.01) { dec = 5; pip = 0.00001; } else if (entry > 0.0001) { dec = 6; pip = 0.000001; } else if (entry > 0.00001) { dec = 7; pip = 0.0000001; } else { dec = 8; pip = 0.00000001; }
-         if (symbol.includes('XAU')) { gold = true; dec = 2; pip = 0.1; }
-         const cls = symbol.includes('XAU') ? 'gold' : (symbol.includes('BTC') ? 'crypto' : 'fx');
-         prof = { cls, ...PAIR_CLASS_PROFILE[cls] };
-      }
-
-      const ctx = { symbol, dec, pip, gold, prof, lang };
-      const f = v => { if (v === 0) return 0; if (v < 0.001) return Number(v).toFixed(8); return Number(Number(v).toFixed(dec)); };
-      const riskPips = Math.abs(entry - sl) / pip;
-
-      let tfText = 'Chart';
-      if (Array.isArray(p.timeframes)) tfText = p.timeframes.join(', ');
-      else if (typeof p.timeframes === 'string') tfText = p.timeframes;
-
-      const aiReason = await getAIReasoning({
-        ctx, dir, kind: 'vision', orderType, entry, sl, tps, setup: p.setup || 'SMC Top-Down', rawReason: p.reason, riskPips, zoneLine: `MTF: ${tfText}`, timeframes: tfText, rangeInfo: p.range_info || '-', chartContext: p.chartContext || '-'
-      });
-
-      return res.status(200).json({
-        ok: true,
-        analysis_steps: [`Analisa Top-Down (${tfText})`, `Identifikasi Likuiditas & Trend HTF`, `Konfirmasi Zona LTF`, `Penentuan Entry & Anti-Sweep SL`],
-        signal: {
-          symbol, decimals: dec, pipSize: pip, signal: p.signal.toUpperCase(), mode: orderType === 'LIMIT' ? 'LIMIT' : 'MARKET', orderType, orderLabel: `${p.signal.toUpperCase()} ${orderType}`, status: orderType === 'LIMIT' ? 'PENDING' : 'RUNNING',
-          entry: f(entry), sl: f(sl), tp1: tps[0] != null ? f(tps[0]) : null, tp2: tps[1] != null ? f(tps[1]) : null, tp3: tps[2] != null ? f(tps[2]) : null, tpCount: tps.length,
-          zone: null, expireMs: 0, confidence: 'HIGH', risk: 'MEDIUM', setup: p.setup || `SMC MTF (${tfText})`, entryStyle: 'Rekomendasi AI', setupLabel: 'SMC Top-Down', zoneLabel: orderType === 'LIMIT' ? 'Limit Entry Zone' : 'Market Execution Zone', zoneNote: `Timeframes: ${tfText}`,
-          reason: (aiReason || p.reason) + sessionNote,
-          chartContext: p.chartContext || '-'
-        }
-      });
+    if (diff <= 0) {
+      elTimer.textContent = 'EXPIRED';
+      elTimer.className = 'text-red-400';
+      clearInterval(statusInterval);
+      return;
     }
 
-    // =====================================================================
-    // LOGIKA 2: JIKA REQUEST DARI LIVE SMC (TIDAK ADA GAMBAR)
-    // =====================================================================
-    const symbol = resolveSymbol(body, req.query);
-    if (!symbol) return res.status(400).json({ error: t.noPair(Object.keys(body).join(', ') || t.emptyBody) });
+    const d = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const h = Math.floor((diff / (1000 * 60 * 60)) % 24);
+    const m = Math.floor((diff / 1000 / 60) % 60);
+    const s = Math.floor((diff / 1000) % 60);
 
-    const styleKey = String(body.style || body.tradingStyle || 'Scalping').trim();
-    const style = STYLES[styleKey] ? styleKey : 'Scalping';
-    const styleCfg = STYLES[style];
+    let parts = [];
+    if (d > 0) parts.push(`${d}d`);
+    if (h > 0) parts.push(`${h}h`);
+    if (d === 0 && m > 0) parts.push(`${m}m`);
+    if (d === 0 && h === 0) parts.push(`${s}s`);
 
-    const access = await checkAccess(body.email);
-    if (!access.ok) return res.status(403).json({ error: t[access.key] });
+    elTimer.textContent = parts.join(' ') + ' left';
+    elTimer.className = 'text-yellow-400';
+  };
 
-    const trial = await checkTrialLimit(body.email, access.status);
-    if (!trial.ok) return res.status(403).json({ error: trial.msg });
+  tick();
+  statusInterval = setInterval(tick, 1000);
+}
 
-    const dec = DECIMALS[symbol];
-    const pip = pipSizeOf(symbol, dec);
-    const gold = isGold(symbol);
-    const prof = pairProfile(symbol);
-    const f = v => { if (v === 0) return 0; if (v < 0.001) return Number(v).toFixed(8); return Number(Number(v).toFixed(dec)); };
-    const ctx = { symbol, dec, pip, gold, f, prof, lang };
+/* ================= COPY SIGNAL ================= */
+function copySignal() {
+    const t = activeTrade();
+    if (!t) return;
+    const dirText = t.signal === 'BUY' ? 'BUY' : 'SELL';
+    const orderText = t.mode === 'LIMIT' ? 'LIMIT' : 'NOW';
+    const styleText = optOf(t.style);
+    const entry = fmt(t.entry);
+    const sl = fmt(t.sl);
+    const tp1 = t.tp1 ? fmt(t.tp1) : '-';
+    const tp2 = t.tp2 ? fmt(t.tp2) : '-';
+    const tp3 = t.tp3 ? fmt(t.tp3) : '-';
 
-    let m1 = cleanCandles(body.candles?.m1);
-    let m5 = cleanCandles(body.candles?.m5);
-    let m15 = cleanCandles(body.candles?.m15);
+    const text = `${t.key}
+${styleText}
+${dirText} ${orderText}
+Entry: ${entry}
+SL: ${sl}
+TP1: ${tp1}
+TP2: ${tp2}
+TP3: ${tp3}`;
 
-    let price = Number(body.currentPrice);
-    if (!(price > 0)) price = lastClosePrice(m5) || lastClosePrice(m15) || lastClosePrice(m1);
-    if (!(price > 0)) return res.status(400).json({ error: t.noPrice });
+    navigator.clipboard.writeText(text).then(() => {
+        alert('Signal copied to clipboard!');
+    }).catch(err => {
+        console.error('Copy failed', err);
+        alert('Gagal copy signal.');
+    });
+}
 
-    const [lo, hi] = prof.range;
-    if (price < lo || price > hi) return res.status(400).json({ error: t.range(price, symbol, lo, hi) });
+/* ================= API & SESI ================= */
+async function api(path, opts) {
+  try {
+    const res = await fetch(path, opts || {});
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch (e) { data = { msg: 'Server error (HTTP ' + res.status + ')' }; }
+    return { ok: res.ok, status: res.status, data };
+  } catch (e) {
+    return { ok: false, status: 0, network: true, data: { msg: 'Koneksi terputus.' } };
+  }
+}
+const post = (path, body, extra) => api(path, { method: 'POST', headers: Object.assign({}, JSON_H, extra || {}), body: JSON.stringify(body) });
+const adminH = () => ({ 'x-admin-code': localStorage.getItem(K.admin) || '' });
+const errOf = (r, fb) => (r.data && (r.data.msg || r.data.error)) || fb;
+function say(t, cls) { const s = $('loginStatus'); s.textContent = t; s.className = 'text-[10px] text-center font-mono min-h-[14px] ' + (cls || TXT.gray); }
+function clearSession() { Object.values(K).forEach(k => localStorage.removeItem(k)); }
+function logout() { clearSession(); location.reload(); }
 
-    const needM1 = (style === 'Scalping' || style === 'Day Trading') ? NEED.m1 : 0;
-    const needM5 = (style === 'Scalping' || style === 'Day Trading' || style === 'Intraday') ? NEED.m5 : 0;
-    const needM15 = (style === 'Intraday' || style === 'Swing' || style === 'Day Trading') ? NEED.m15 : 0;
+async function handleLogin(e) {
+  e.preventDefault();
+  const val = $('authInput').value.trim();
+  if (!val) return say(T('loginNeed'), TXT.yellow);
+  say(T('checking'), TXT.gray);
+  const r = await post('/api/login', { value: val });
+  if (!r.ok || !r.data || !r.data.ok) return say(T('denied') + errOf(r, 'HTTP ' + r.status), TXT.red);
+  if (r.data.role === 'admin') {
+    localStorage.setItem(K.type, 'admin_reg');
+    localStorage.setItem(K.admin, val);
+    return showAdmin();
+  }
+  localStorage.setItem(K.type, 'terminal');
+  localStorage.setItem(K.email, r.data.email);
+  showApp();
+  log('Login berhasil: ' + r.data.email, 'system');
+}
 
-    const pick = async (arr, tf, need) => {
-      if (!need) return { candles: [], source: 'none', tried: [] };
-      const frontOk = arr.length >= Math.min(need, 60) && matchesRef(arr, price);
-      if (frontOk && arr.length >= need) return { candles: arr, source: 'frontend', tried: [] };
-      const r = await getCandles(symbol, tf, need, price);
-      if (!r.candles.length && frontOk) return { candles: arr, source: 'frontend (parsial)', tried: r.tried };
-      return r;
+async function checkSession() {
+  const type = localStorage.getItem(K.type);
+  if (type !== 'admin_reg' && type !== 'terminal') return;
+  const cred = type === 'admin_reg' ? localStorage.getItem(K.admin) : localStorage.getItem(K.email);
+  const r = await post('/api/login', { value: cred || '' });
+  if (r.network) return alert(r.data.msg);
+  const role = r.data && r.data.role;
+  if (type === 'admin_reg' ? role !== 'admin' : role !== 'client') { clearSession(); return alert('Sesi berakhir.'); }
+  if (type === 'admin_reg') showAdmin(); else showApp();
+}
+
+function showApp() {
+  $('authScreen').classList.add('hidden');
+  $('registerDashboard').classList.add('hidden');
+  $('mainApp').classList.remove('hidden');
+  $('mainApp').classList.add('flex');
+  if (!streamStarted) { streamStarted = true; connect(); }
+  fetchUserStatus(); // <--- Panggil Status User
+  pump();
+}
+function showAdmin() {
+  $('authScreen').classList.add('hidden');
+  $('mainApp').classList.add('hidden');
+  $('registerDashboard').classList.remove('hidden');
+  loadClients();
+}
+async function registerClient() {
+  const email = $('newClientEmail').value.trim().toLowerCase();
+  if (!email) return alert('Masukkan email klien.');
+  const r = await post('/api/clients', { email, status: $('newClientStatus').value }, adminH());
+  if (!r.ok) return alert(errOf(r, 'Gagal mendaftarkan klien.'));
+  alert('Berhasil mendaftarkan klien: ' + email);
+  $('newClientEmail').value = '';
+  loadClients();
+}
+async function loadClients() {
+  const box = $('adminClientTableList');
+  if(!box) return;
+  box.innerHTML = '<p class="text-[10px] text-gray-500 text-center py-2">Memuat data...</p>';
+  const r = await api('/api/clients', { headers: adminH() });
+  if (!r.ok) { box.innerHTML = `<p class="text-[10px] text-red-400 text-center">${esc(errOf(r, 'Gagal memuat.'))}</p>`; return; }
+  const list = Array.isArray(r.data) ? r.data : [];
+  if (!list.length) { box.innerHTML = '<p class="text-[10px] text-gray-500 text-center py-2">Belum ada klien.</p>'; return; }
+  box.innerHTML = list.map(d => {
+    const exp = new Date(d.expires_at) < new Date();
+    return `<div class="bg-darkbg border border-panelborder p-2 rounded flex justify-between items-center text-xs">
+      <div><p class="font-bold text-white font-mono">${esc(d.email)}</p>
+      <p class="text-[9px] uppercase ${exp ? 'text-red-400' : 'text-yellow-400'}">Status: ${esc(d.status)}${exp ? ' (exp)' : ''} · s/d ${new Date(d.expires_at).toLocaleDateString('id-ID')}</p></div>
+      <button onclick="delClient('${esc(d.id)}')" class="text-red-400 hover:text-red-300 text-[10px] px-2 py-1"><i class="fa-solid fa-trash"></i></button>
+    </div>`;
+  }).join('');
+}
+async function delClient(id) {
+  if (!confirm('Hapus klien ini?')) return;
+  const r = await api('/api/clients?id=' + encodeURIComponent(id), { method: 'DELETE', headers: adminH() });
+  if (!r.ok) alert(errOf(r, 'Gagal menghapus klien.'));
+  loadClients();
+}
+
+/* ================= BAHASA & UI ================= */
+function toggleLang() { lang = lang === 'id' ? 'en' : 'id'; applyLang(); }
+function applyLang() {
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const v = I18N[lang][el.dataset.i18n];
+    if (typeof v === 'string') el.textContent = v;
+  });
+  document.documentElement.lang = lang;
+  setTxt('langBtn', lang.toUpperCase() + ' 🌐');
+  setTxt('btnText', market === 'VISION' ? T('btnGenVision') : T('btnGen'));
+  renderAll();
+  if (market === 'VISION') refreshCard(); // renderAll() berhenti lebih awal untuk VISION
+}
+function toggleStyleInfo() { $('styleInfoBox').classList.toggle('hidden'); }
+function wsBadge(text, color) {
+  const e = $('wsStatus');
+  e.textContent = 'WS: ' + text;
+  e.className = 'text-[8px] font-mono px-2 py-0.5 rounded border ' + PILL[color];
+}
+
+/* ================= PILIH PAIR & SETUP ================= */
+function openOf(k) { return trades.filter(x => x.key === k && x.status !== 'CLOSED'); }
+
+// Pilih setup untuk pair k: prioritas yang diminta, lalu yang sedang tampil, lalu setup berjalan terbaru
+function pickTradeFor(k, preferId) {
+  const list = trades.filter(x => x.key === k);
+  if (preferId) { const hit = list.find(x => x.id === preferId); if (hit) return hit.id; }
+  if (list.some(x => x.id === activeId)) return activeId;
+  const open = openOf(k);
+  const pool = open.length ? open : list;
+  return pool.length ? pool[pool.length - 1].id : null;
+}
+
+function syncMarket(tradeId) {
+  market = $('marketSelect').value;
+  setTxt('selectedPairBadge', market);
+
+  // LOGIKA VISIBILITY PANEL
+  const isVision = market === 'VISION';
+  $('visionPanel').classList.toggle('hidden', !isVision);
+  $('streamPanel').classList.toggle('hidden', isVision);
+  $('biasPanel').classList.toggle('hidden', isVision);
+  $('chartPanel').classList.toggle('hidden', isVision);
+  $('smcPanel').classList.toggle('hidden', isVision);
+  $('sessionPanel').classList.toggle('hidden', isVision);
+
+  // Update tombol text
+  setTxt('btnText', isVision ? T('btnGenVision') : T('btnGen'));
+
+  activeId = isVision ? null : pickTradeFor(market, tradeId);
+  refreshCard();
+  renderHistory();
+
+  if (!isVision) {
+    pump();
+    renderAll();
+  }
+}
+
+function pickMarket(k, tradeId) {
+  $('marketSelect').value = k;
+  syncMarket(tradeId);
+}
+
+// Tap pair yang sudah aktif dengan lebih dari satu setup berjalan: pindah ke setup berikutnya
+function tapTicker(k) {
+  const open = openOf(k);
+  if (k === market && open.length > 1) {
+    const i = open.findIndex(x => x.id === activeId);
+    return pickMarket(k, open[(i + 1) % open.length].id);
+  }
+  pickMarket(k);
+}
+
+function viewTrade(id) {
+  const t = trades.find(x => x.id === id);
+  if (!t) return;
+  pickMarket(t.key, id);
+}
+
+// Tap lewat pointerdown/pointerup pada container yang tetap, supaya tidak hilang saat list dirender ulang
+function bindTap(el, handler) {
+  if (!el) return;
+  let start = null;
+  el.addEventListener('pointerdown', e => {
+    const node = e.target.closest('[data-tap]');
+    start = node ? { x: e.clientX, y: e.clientY, v: node.dataset.tap } : null;
+  });
+  el.addEventListener('pointerup', e => {
+    if (!start) return;
+    const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8;
+    const v = start.v;
+    start = null;
+    if (!moved) handler(v);
+  });
+  el.addEventListener('pointercancel', () => { start = null; });
+}
+
+/* ================= FITUR VISION (UPLOAD) ================= */
+function handleImageUpload(e) {
+  const files = e.target.files;
+  if (!files.length) return;
+
+  Array.from(files).forEach(file => {
+    if (visionImages.length >= 3) return alert('Maksimal 3 gambar.');
+    if (file.size > 5 * 1024 * 1024) return alert('Ukuran gambar maksimal 5MB.');
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      visionImages.push(ev.target.result);
+      renderVisionPreview();
+    };
+    reader.readAsDataURL(file);
+  });
+
+  e.target.value = ''; // Reset input
+}
+
+function renderVisionPreview() {
+  const box = $('visionPreview');
+  box.innerHTML = visionImages.map((src, idx) => `
+    <div class="relative group rounded-lg overflow-hidden border border-panelborder aspect-video bg-black flex items-center justify-center">
+      <img src="${src}" class="object-contain w-full h-full">
+      <button onclick="removeVisionImage(${idx})" class="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] opacity-80 hover:opacity-100 transition">
+        <i class="fa-solid fa-times"></i>
+      </button>
+    </div>
+  `).join('');
+}
+
+function removeVisionImage(idx) {
+  visionImages.splice(idx, 1);
+  renderVisionPreview();
+}
+
+/* ================= STREAM (XBTFX WEBSOCKET) ================= */
+async function connect() {
+  clearTimeout(reconT);
+  clearInterval(pingT);
+  if (ws) { const o = ws; ws = null; o.onclose = null; o.close(); }
+  const my = ++connId;
+  authFailed = false;
+  wsBadge('XBTFX TOKEN...', 'yellow');
+  const email = localStorage.getItem(K.email);
+  if (!email) { wsBadge('LOGIN DULU', 'gray'); reconT = setTimeout(connect, 2000); return; }
+
+  const r = await post('/api/stream-token', { value: email });
+  if (my !== connId) return;
+
+  if (!(r.ok && r.data && r.data.token)) {
+    if (r.status === 401) { authFailed = true; wsBadge('SESI INVALID', 'red'); return; }
+    log('[WS] Gagal dapat token backend, mencoba koneksi publik XBTFX...', 'system');
+    openSocket(null);
+    return;
+  }
+  openSocket(r.data.token);
+}
+
+function openSocket(token) {
+  wsBadge('XBTFX CONNECTING...', 'yellow');
+  const sock = new WebSocket(WS_URL);
+  ws = sock;
+
+  sock.onopen = () => {
+    if (token) {
+      send(sock, { action: 'auth', token });
+    } else {
+      wsBadge('XBTFX PUB', 'green');
+      KEYS.forEach(k => { subAt[k] = Date.now(); });
+      // Hanya subscribe jika bukan VISION
+      const activeKeys = KEYS.filter(k => k !== 'VISION');
+      send(sock, { action: 'subscribe', channel: 'quotes', symbols: activeKeys.map(symOf) });
+    }
+  };
+
+  sock.onmessage = e => {
+    let m;
+    try { m = JSON.parse(e.data); } catch (err) { return; }
+    if (m.action === 'auth_ok') {
+      wsBadge('XBTFX LIVE', 'green');
+      KEYS.forEach(k => { subAt[k] = Date.now(); });
+      const activeKeys = KEYS.filter(k => k !== 'VISION');
+      send(sock, { action: 'subscribe', channel: 'quotes', symbols: activeKeys.map(symOf) });
+      clearInterval(pingT);
+      pingT = setInterval(() => send(sock, { action: 'ping' }), 30000);
+      return;
+    }
+    if (m.channel === 'quote') onQuote(m);
+  };
+
+  sock.onclose = () => {
+    wsBadge('CLOSED', 'red');
+    if (ws === sock && !authFailed) reconT = setTimeout(connect, 4000);
+  };
+}
+
+function onQuote(m) {
+  const p = [m.bid, m.mid, m.price, m.ask].map(parseFloat).find(n => n > 0);
+  if (!p) return;
+  const k = ALIAS_MAP.get(norm(m.symbol));
+  if (!k) return;
+  const cfg = MARKETS[k];
+  if (p < cfg.min || p > cfg.max) return;
+  const last = prices[k] ? prices[k].price : null;
+  if (last && Math.abs(p - last) / last > 0.15) return;
+  workingSym[k] = m.symbol;
+  prices[k] = { price: p, dir: last == null ? 0 : p > last ? 1 : p < last ? -1 : prices[k].dir, recv: Date.now() };
+  addTick(k, p);
+}
+
+function watchdog() {
+  const now = Date.now();
+  for (const k of KEYS) {
+    if (k === 'VISION' || prices[k] || !subAt[k]) continue;
+    const idx = aliasIdx[k] || 0;
+    if (now - subAt[k] > 15000 && !workingSym[k] && idx < MARKETS[k].aliases.length - 1 && ws && ws.readyState === 1) {
+      aliasIdx[k] = idx + 1;
+      subAt[k] = now;
+      send(ws, { action: 'subscribe', channel: 'quotes', symbols: [symOf(k)] });
+      log('[WS] XBTFX mencoba simbol ' + symOf(k), 'system');
+    }
+  }
+}
+
+/* ================= TICK & CANDLE LIVE (LOKAL, DISIMPAN) ================= */
+function addTick(k, p) {
+  if (k === 'VISION') return;
+  const now = Date.now();
+  const h = (hist[k] = hist[k] || []);
+  if (!h.length || h[h.length - 1].p !== p || now - h[h.length - 1].t > 1000) {
+    h.push({ t: now, p });
+    while (h.length && now - h[0].t > HISTORY_MS) h.shift();
+  }
+  const c = (candles[k] = candles[k] || {});
+  for (const tf of TFS) {
+    const arr = (c[tf] = c[tf] || []);
+    const bt = Math.floor(now / (tf * 60000)) * tf * 60000;
+    const cur = arr[arr.length - 1];
+    if (!cur || cur.time !== bt) {
+      arr.push({ time: bt, open: p, high: p, low: p, close: p });
+      if (arr.length > 200) arr.shift();
+    } else {
+      cur.high = Math.max(cur.high, p);
+      cur.low = Math.min(cur.low, p);
+      cur.close = p;
+    }
+  }
+  checkTrades(k, p);
+}
+function loadLive() {
+  try {
+    const o = JSON.parse(localStorage.getItem(LIVE_KEY) || '{}');
+    for (const k of KEYS) if (o[k] && k !== 'VISION') candles[k] = o[k];
+  } catch (e) {}
+}
+function saveLive() {
+  try {
+    const o = {};
+    for (const k of KEYS) {
+      if (k === 'VISION') continue;
+      o[k] = {};
+      for (const tf of TFS) o[k][tf] = ((candles[k] && candles[k][tf]) || []).slice(-200);
+    }
+    localStorage.setItem(LIVE_KEY, JSON.stringify(o));
+  } catch (e) {}
+}
+
+/* ================= SERI CANDLE (SERVER → BINANCE → LIVE) ================= */
+const ser = (k, iv) => {
+  const ck = k + '|' + iv;
+  return SER[ck] || (SER[ck] = {
+    rows: [], ext: [], extSym: '', extErr: '', extErrLog: '', extOk: false, xp: null, xAt: 0,
+    at: 0, ver: 0, err: '', errLog: '', p: null, retryAt: 0, smc: null, smcAt: 0
+  });
+};
+
+function parseCandles(r) {
+  if (!(r.ok && r.data && Array.isArray(r.data.candles))) return [];
+  return r.data.candles
+    .map(c => ({
+      t: toMs(c.openTime ?? c.time ?? c.t),
+      o: Number(c.open ?? c.o), h: Number(c.high ?? c.h), l: Number(c.low ?? c.l), c: Number(c.close ?? c.c)
+    }))
+    .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite))
+    .sort((a, b) => a.t - b.t);
+}
+
+function fetchSeries(k, iv, force) {
+  if (k === 'VISION') return Promise.resolve();
+  const s = ser(k, iv);
+  if (s.p) return s.p;
+  const now = Date.now();
+  const ttl = CANDLE_TTL[iv] * (k === market ? 1 : 3);
+  if (!force && s.at && now - s.at < ttl) return Promise.resolve();
+  if (!force && now < s.retryAt) return Promise.resolve();
+  const email = localStorage.getItem(K.email);
+  if (!email) return Promise.resolve();
+
+  s.p = (async () => {
+    const syms = CSYM[k] ? [CSYM[k]] : [...new Set([workingSym[k], ...MARKETS[k].aliases.slice(0, 2)].filter(Boolean))];
+    let got = null, why = '';
+    for (const sym of syms) {
+      const r = await post('/api/candles', { value: email, symbol: sym, interval: iv, limit: CANDLE_LIMIT });
+      const rows = parseCandles(r);
+      if (rows.length >= 10) { got = rows; CSYM[k] = sym; break; }
+      why = r.network ? 'koneksi gagal' : `HTTP ${r.status || 0}, ${rows.length} candle`;
+    }
+    if (got) {
+      s.rows = got; s.at = Date.now(); s.ver++; s.err = ''; s.errLog = ''; s.retryAt = 0;
+    } else {
+      s.err = 'XBTFX REST: ' + (why || 'data kosong');
+      s.retryAt = Date.now() + 30000;
+      await fetchExt(k, iv);
+    }
+  })().finally(() => { s.p = null; });
+  return s.p;
+}
+
+function fetchExt(k, iv) {
+  if (k === 'VISION') return Promise.resolve();
+  const s = ser(k, iv), now = Date.now();
+  if (s.xp) return s.xp;
+  const sym = BIN_SYM[k];
+  if (!sym || (s.xAt && now - s.xAt < 60000)) return Promise.resolve();
+  s.xAt = now;
+  s.xp = (async () => {
+    let why = '';
+    for (const host of BIN_HOSTS) {
+      try {
+        const res = await fetch(`${host}/api/v3/klines?symbol=${sym}&interval=${iv}&limit=${CANDLE_LIMIT}`);
+        const arr = await res.json();
+        if (Array.isArray(arr) && arr.length) {
+          s.ext = arr.map(x => ({ t: +x[0], o: +x[1], h: +x[2], l: +x[3], c: +x[4] }))
+            .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite));
+          s.extSym = sym; s.extErr = ''; s.extErrLog = '';
+          if (!s.extOk) { s.extOk = true; log(`[REST] XBTFX ${k} ${iv} kosong, fallback Binance`, 'system'); }
+          return;
+        }
+        why = `HTTP ${res.status}`;
+      } catch (e) { why = 'tidak bisa diakses'; }
+    }
+    s.extErr = `Binance ${sym}: ${why || 'tidak ada data'}`;
+    if (s.extErr !== s.extErrLog) { s.extErrLog = s.extErr; log(`[REST] Candle ${k} ${iv} — XBTFX gagal | ${s.extErr}`, 'error'); }
+  })().finally(() => { s.xp = null; });
+  return s.xp;
+}
+
+function baseRows(k, iv) {
+  if (k === 'VISION') return [];
+  const s = ser(k, iv);
+  const useSrv = s.rows.length >= 10 || !s.ext.length;
+  return useSrv ? s.rows : s.ext;
+}
+function srcOf(k, iv) {
+  if (k === 'VISION') return 'Vision AI';
+  const s = ser(k, iv);
+  const useSrv = s.rows.length >= 10 || !s.ext.length;
+  if (!s.rows.length && !s.ext.length) return 'lokal (XBTFX WS)';
+  return useSrv ? 'server XBTFX' : 'Binance ' + s.extSym;
+}
+
+function seriesRows(k, iv) {
+  if (k === 'VISION') return [];
+  const out = baseRows(k, iv).map(r => ({ ...r }));
+  const local = (candles[k] && candles[k][TF_MIN[iv]]) || [];
+  for (const c of local) {
+    const last = out[out.length - 1];
+    if (last && c.time === last.t) {
+      last.h = Math.max(last.h, c.high);
+      last.l = Math.min(last.l, c.low);
+      last.c = c.close;
+    } else if (!last || c.time > last.t) {
+      out.push({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close });
+    }
+  }
+
+  if (out.length > 1) {
+    const last = out[out.length - 1];
+    const prev = out[out.length - 2];
+    if (Math.abs(last.c - prev.c) / prev.c > 0.02) {
+       return [last];
+    }
+  }
+  return out;
+}
+function displayRows(k, iv) {
+  if (k === 'VISION') return [];
+  const ck = k + '|' + iv, now = Date.now(), c = dispCache[ck];
+  if (c && now - c.at < 250) return c.rows;
+  const rows = seriesRows(k, iv);
+  dispCache[ck] = { at: now, rows };
+  return rows;
+}
+
+function pump() {
+  if (pumping || !localStorage.getItem(K.email) || market === 'VISION') return;
+  const now = Date.now();
+  const order = [market, ...KEYS.filter(k => k !== market && k !== 'VISION')];
+  let pick = null;
+  for (const k of order) {
+    for (const iv of PRIO_IV) {
+      const s = ser(k, iv);
+      if (s.p || now < s.retryAt) continue;
+      const ttl = CANDLE_TTL[iv] * (k === market ? 1 : 3);
+      if (!s.at || now - s.at >= ttl) { pick = { k, iv }; break; }
+    }
+    if (pick) break;
+  }
+  if (!pick) return;
+  pumping = true;
+  fetchSeries(pick.k, pick.iv, false).finally(() => { pumping = false; });
+}
+
+/* ================= TRADE ================= */
+function loadTrades() {
+  try {
+    return (JSON.parse(localStorage.getItem(STORE_KEY)) || [])
+      .filter(t => MARKETS[t.key] && t.key !== 'VISION')
+      .map(normalize);
+  } catch (e) { return []; }
+}
+function normalize(t) {
+  t.hits = t.hits || {};
+  for (const k of TP_KEYS) if (typeof t.hits[k] === 'number') t.hits[k] = { at: t.hits[k], price: t[k] };
+  if (t.status === 'CLOSED') {
+    t.maxTp = maxHit(t);
+    t.pips = pipsOf(t, recapPrice(t) ?? t.exitPrice ?? t.entry);
+  }
+  return t;
+}
+function saveTrades() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(trades)); } catch (e) {}
+  calSync();
+}
+function recapPrice(t) {
+  if (t.status === 'CLOSED' && t.result === 'SL') return t.exitPrice;
+  const hk = hitKeys(t);
+  if (hk.length) return t[hk[hk.length - 1]];
+  return t.status === 'CLOSED' ? t.exitPrice : null;
+}
+function resLabel(t) {
+  if (t.result === 'SL') return 'SL';
+  if (t.result === 'TP') return `TP${t.maxTp} MAX`;
+  if (t.result === 'BE') return t.maxTp ? `TP${t.maxTp} → BE` : 'BE';
+  return '';
+}
+function statusOf(t) {
+  if (t.status === 'CLOSED') {
+    if (t.result === 'CANCEL') return { text: T('batal'), color: 'gray' };
+    return { text: resLabel(t), color: t.pips > 0 ? 'green' : t.pips < 0 ? 'red' : 'gray' };
+  }
+  if (t.status === 'PENDING') return { text: T('waitEntry'), color: 'yellow' };
+  return { text: maxHit(t) ? `TP${maxHit(t)} HIT` : 'RUNNING', color: 'blue' };
+}
+function tradeFlow(t) {
+  if (t.key === 'VISION') return { main: `Entry ${fmt(t.entry)} · ${t.signal}`, sub: t.last ? 'last ' + fmt(t.last) : '', pips: 0 };
+  const live = prices[t.key] ? prices[t.key].price : null;
+  if (t.status === 'PENDING') {
+    const z = t.zone ? fmt(t.zone.min) + ' – ' + fmt(t.zone.max) : '--';
+    return { main: `ZONA ${z} · entry ${fmt(t.entry)}`, sub: live != null ? 'live ' + fmt(live) : '', pips: 0 };
+  }
+  if (t.status === 'CLOSED' && t.result === 'CANCEL') return { main: `${fmt(t.entry)} > ${T('dibatal')}`, sub: t.cancelReason || '', pips: 0 };
+  const entry = fmt(t.entry), closed = t.status === 'CLOSED';
+  const lastK = hitKeys(t).slice(-1)[0];
+  const lkP = closed ? recapPrice(t) : (lastK ? t[lastK] : null);
+  const lkL = closed ? resLabel(t) : (lastK ? lastK.toUpperCase() : '');
+  const line = (p, lab) => `${entry} > ${fmt(p)} ${fmtPips(pipsOf(t, p))} ${lab}`;
+  if (lkP != null) {
+    const sub = !closed && live != null ? `live ${entry} > ${fmt(live)} ${fmtPips(pipsOf(t, live))}` : '';
+    return { main: line(lkP, lkL), sub, pips: pipsOf(t, lkP) };
+  }
+  if (live == null) return { main: `${entry} > --`, sub: '', pips: 0 };
+  return { main: line(live, 'RUNNING'), sub: '', pips: pipsOf(t, live) };
+}
+function checkTrades(k, p) {
+  if (k === 'VISION') return;
+  let ch = false;
+  for (const t of trades) if (t.key === k && t.status !== 'CLOSED' && evalTrade(t, p)) ch = true;
+  if (ch) { saveTrades(); renderHistory(); }
+}
+
+// ================= LOGIKA ENTRY =================
+function evalTrade(t, p) {
+  if (t.key === 'VISION') return false;
+  const d = t.dir;
+
+  if (t.status === 'PENDING') {
+    if (t.expiresAt && Date.now() > t.expiresAt) {
+      cancelTrade(t, 'Zona tidak tersentuh (Expired)');
+      return true;
+    }
+    if (d > 0 ? p <= t.sl : p >= t.sl) {
+      cancelTrade(t, 'SL tersentuh sebelum entry');
+      return true;
+    }
+    const isStop = t.fill === 'STOP';
+    const fillCond = isStop
+      ? (d > 0 ? p >= t.entry : p <= t.entry)
+      : (d > 0 ? p <= t.entry : p >= t.entry);
+
+    if (fillCond) {
+      t.status = 'RUNNING';
+      t.filledAt = Date.now();
+      log(`Trade #${t.no} ${t.key} TERISI di ${fmt(t.entry)} (${t.signal})`, t.signal === 'BUY' ? 'buy' : 'sell');
+      return true;
+    }
+    return false;
+  }
+
+  const reached = v => v != null && (d > 0 ? p >= v : p <= v);
+  const lost = v => v != null && (d > 0 ? p <= v : p >= v);
+  let changed = false;
+
+  for (const k of TP_KEYS) {
+    if (t[k] != null && !t.hits[k] && reached(t[k])) {
+      t.hits[k] = { at: Date.now(), price: t[k] };
+      changed = true;
+      log(`Trade #${t.no} ${t.key} hit ${k.toUpperCase()}!`, 'buy');
+    }
+  }
+
+  if (hitKeys(t).length && t.status !== 'BE') {
+    t.status = 'BE';
+    changed = true;
+  }
+
+  const defined = TP_KEYS.filter(k => t[k] != null);
+  if (defined.length && defined.every(k => t.hits[k])) {
+    closeTrade(t, 'TP', t[defined[defined.length - 1]]);
+    return true;
+  }
+
+  const stop = hitKeys(t).length ? t.entry : t.sl;
+  if (lost(stop)) {
+    closeTrade(t, hitKeys(t).length ? 'BE' : 'SL', stop);
+    return true;
+  }
+
+  return changed;
+}
+// ==================================================================
+
+function closeTrade(t, result, exitPrice) {
+  Object.assign(t, { status: 'CLOSED', result, exitPrice, closedAt: Date.now() });
+  t.maxTp = maxHit(t);
+  t.pips = pipsOf(t, recapPrice(t) ?? exitPrice);
+  log(`Trade #${t.no} ${t.key} ditutup (${resLabel(t)}) | ${fmtPips(t.pips)}`, t.pips > 0 ? 'buy' : 'sell');
+}
+function cancelTrade(t, reason) {
+  Object.assign(t, { status: 'CLOSED', result: 'CANCEL', closedAt: Date.now(), pips: 0, maxTp: 0, cancelReason: reason });
+  log(`Trade #${t.no} ${t.key}: ${reason}`, 'error');
+}
+function expirePending() {
+  let ch = false;
+  for (const t of trades) {
+    if (t.status === 'PENDING' && t.expiresAt && Date.now() > t.expiresAt) { cancelTrade(t, 'Zona tidak tersentuh'); ch = true; }
+  }
+  if (ch) { saveTrades(); renderAll(); }
+}
+function clearHistory() {
+  if (!confirm('Hapus semua history?')) return;
+  trades = [];
+  activeId = null;
+  saveTrades();
+  renderAll();
+}
+
+/* ================= RENDER ================= */
+function renderAll() {
+  if (market === 'VISION') return; // Jangan render live data jika Vision
+  renderTickers(); renderHighlights(); renderBias(); renderHistory(); refreshCard(); renderCalendar(); renderSmcInfo(); updateSessionCard();
+}
+
+function renderTickers() {
+  const el = $('tickerList');
+  if (!el) return;
+  el.innerHTML = KEYS.filter(k => k !== 'VISION').map(k => {
+    const p = prices[k];
+    const fresh = !!p && Date.now() - p.recv < STALE_MS;
+    const st = p ? (fresh ? 'LIVE' : 'SEPI') : (subAt[k] ? 'SUB' : 'MENUNGGU');
+    const pc = !p ? TXT.gray : p.dir > 0 ? TXT.green : p.dir < 0 ? TXT.red : 'text-white';
+    const run = openOf(k).length;
+    const runBadge = run ? `<span class="text-[7px] font-mono font-bold px-1 rounded bg-blue-500/20 text-blue-400 border border-blue-500/40">${run} RUN</span>` : '';
+    return `<div data-tap="${k}" class="bg-darkbg hover:bg-panelborder/60 border ${k === market ? 'border-accentblue' : 'border-panelborder'} px-2 py-1 rounded flex items-center justify-between cursor-pointer select-none">
+      <span class="flex items-center gap-1.5 font-bold text-[10px] text-white">${k} ${runBadge} <span class="text-[7px] text-gray-500 font-normal">${esc(symOf(k))}</span></span>
+      <span class="flex items-center gap-1.5"><span class="text-[7px] font-mono ${fresh ? TXT.green : TXT.gray}">${st}</span>
+      <span class="text-[11px] font-mono font-bold ${pc}">${p ? fmt(p.price) : '--.--'}</span></span>
+    </div>`;
+  }).join('');
+}
+
+function renderHighlights() {
+  const el = $('highlightList');
+  if (!el) return;
+  el.innerHTML = KEYS.filter(k => k !== 'VISION').map(k => {
+    const p = prices[k];
+    const cells = HL_TF.map(([tf, lab]) => {
+      const arr = candles[k] && candles[k][tf];
+      let pct = null;
+      if (p && arr && arr.length) { const o = arr[arr.length - 1].open; pct = (p.price - o) / o * 100; }
+      const cls = pct == null || pct === 0 ? TXT.gray : pct > 0 ? TXT.green : TXT.red;
+      const txt = pct == null ? '0.00%' : (pct > 0 ? '+' : '') + pct.toFixed(2) + '%';
+      return `<div class="bg-darkbg/50 rounded p-1"><p class="text-[7px] text-gray-500 font-bold">${lab}</p><p class="text-[9px] font-mono font-bold ${cls}">${txt}</p></div>`;
+    }).join('');
+    return `<div class="bg-cardbg border ${k === market ? 'border-accentblue' : 'border-panelborder'} rounded-xl p-2.5 shadow-md">
+      <div class="flex justify-between items-center mb-2"><span class="text-[10px] font-bold text-white">${k}</span>
+      <span class="text-[11px] font-mono font-bold text-yellow-400">${p ? fmt(p.price) : '--.--'}</span></div>
+      <div class="grid grid-cols-6 gap-1 text-center">${cells}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderHistory() {
+  const filterEl = $('histFilter');
+  if (!filterEl) return;
+  const filter = filterEl.value;
+  const today = new Date().toDateString();
+  const closed = trades.filter(t => t.status === 'CLOSED' && t.key !== 'VISION' && (filter === 'all' || new Date(t.closedAt).toDateString() === today));
+  const wins = closed.filter(t => t.pips > 0);
+  const losses = closed.filter(t => t.pips < 0);
+  const wp = wins.reduce((s, t) => s + t.pips, 0);
+  const lp = losses.reduce((s, t) => s + t.pips, 0);
+  const ratio = wins.length + losses.length ? wins.length / (wins.length + losses.length) * 100 : 0;
+  const running = trades.filter(t => t.status !== 'CLOSED' && t.key !== 'VISION').length;
+  setTxt('sumWin', fmtPips(wp));
+  setTxt('sumWinCount', wins.length + ' trade');
+  setTxt('sumLose', fmtPips(lp));
+  setTxt('sumLoseCount', losses.length + ' trade');
+  setTxt('sumTotal', fmtPips(wp + lp));
+  setTxt('sumOpen', running + ' ' + T('running'));
+  setTxt('sumRatio', ratio.toFixed(1) + '%');
+  setTxt('sumRatioSub', wins.length + 'W / ' + losses.length + 'L');
+  const box = $('historyList');
+  if (!box) return;
+  if (!trades.length) { box.innerHTML = `<p class="text-center text-[10px] text-gray-500 py-3">${T('noHistory')}</p>`; return; }
+  box.innerHTML = trades.slice().reverse().filter(t => t.key !== 'VISION').map(t => {
+    const f = tradeFlow(t), s = statusOf(t);
+    const hits = hitKeys(t).map(k => '✓' + k.toUpperCase()).join(' ');
+    return `<div data-tap="${esc(t.id)}" class="bg-darkbg hover:bg-panelborder/60 border ${t.id === activeId ? 'border-accentblue' : 'border-panelborder'} px-2 py-1.5 rounded cursor-pointer select-none space-y-0.5">
+      <div class="flex justify-between items-center gap-2 text-[9px] font-bold">
+        <span class="text-white truncate">${t.no}. ${esc(t.key)} <span class="text-[8px] text-gray-400">${esc(optOf(t.style))} · ${esc(t.signal)}</span></span>
+        <span class="font-mono whitespace-nowrap ${TXT[s.color]}">${esc(s.text)}</span>
+      </div>
+      <div class="font-mono text-[10px] font-bold ${pipColor(f.pips)}">${esc(f.main)}</div>
+      ${f.sub ? `<div class="font-mono text-[8px] text-gray-400">${esc(f.sub)}</div>` : ''}
+      ${hits ? `<div class="font-mono text-[8px] text-emerald-400">${hits}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+// Chip setup untuk pair aktif: tampil jika pair punya lebih dari satu setup
+function renderChips() {
+  const el = $('setupChips');
+  if (!el) return;
+  const list = market === 'VISION' ? [] : trades.filter(x => x.key === market).slice(-8).reverse();
+  if (list.length < 2) {
+    el.classList.add('hidden');
+    el.classList.remove('flex');
+    el.innerHTML = '';
+    return;
+  }
+  el.classList.remove('hidden');
+  el.classList.add('flex');
+  el.innerHTML = list.map(x => {
+    const act = x.id === activeId;
+    const s = statusOf(x);
+    const cls = act
+      ? 'bg-accentblue border-accentblue text-white'
+      : `bg-darkbg border-panelborder ${TXT[s.color]}`;
+    return `<button data-tap="${esc(x.id)}" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border ${cls}">#${esc(x.no)} ${esc(x.signal)} · ${esc(s.text)}</button>`;
+  }).join('');
+}
+
+const BADGE = 'text-[8px] font-mono font-bold px-2 py-0.5 rounded border ';
+function refreshCard() {
+  const t = activeTrade();
+  const isVision = market === 'VISION';
+  const p = prices[market];
+  const priceTxt = isVision
+    ? (t && t.last ? fmt(t.last) : '--')
+    : (p ? fmt(p.price) : '--.--');
+  renderChips();
+  $('standbyView').classList.toggle('hidden', !!t);
+  $('activeCard').classList.toggle('hidden', !t);
+  $('tradeStatus').classList.toggle('hidden', !t);
+
+  if (!t) { setTxt('tradePnl', ''); setTxt('tradeLive', ''); return; }
+
+  const sig = $('sigBadge');
+  sig.textContent = t.signal;
+  sig.className = `${t.signal === 'BUY' ? 'bg-sky-500' : 'bg-red-500'} text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg`;
+  setTxt('cardSub', `${optOf(t.style)} · ${t.mode === 'LIMIT' ? T('modeLimit') : T('modeMarket')} / ${new Date(t.createdAt).toLocaleTimeString(lang === 'id' ? 'id-ID' : 'en-US', { hour12: false })}`);
+  setTxt('cardZone', t.zone ? fmt(t.zone.min) + ' - ' + fmt(t.zone.max) : fmt(t.entry));
+  setTxt('cardZoneNote', [t.zoneLabel, t.zoneNote].filter(Boolean).join(' · '));
+  const bs = $('badgeSetup');
+  bs.textContent = t.setup || '--';
+  bs.className = BADGE + 'bg-darkbg text-gray-300 border-panelborder';
+  const bc = $('badgeConf');
+  bc.textContent = 'CONFIDENCE ' + (t.confidence || '--');
+  bc.className = BADGE + (CONF_CLS[t.confidence] || 'bg-darkbg text-gray-300 border-panelborder');
+  const br = $('badgeRisk');
+  br.textContent = 'RISK ' + (t.risk || '--');
+  br.className = BADGE + (RISK_CLS[t.risk] || 'bg-darkbg text-gray-300 border-panelborder');
+  setTxt('cardLive', priceTxt);
+  setTxt('cardReason', reasonFor(t));
+
+  const lv = { sl: t.sl, tp1: t.tp1, tp2: t.tp2, tp3: t.tp3 };
+  const hit = { sl: t.result === 'SL', tp1: !!t.hits.tp1, tp2: !!t.hits.tp2, tp3: !!t.hits.tp3 };
+  for (const n of ['sl', 'tp1', 'tp2', 'tp3']) {
+    const has = lv[n] != null;
+    setTxt('lv-' + n, has ? fmt(lv[n]) : '--');
+    setTxt('pp-' + n, has ? fmtPips(pipsOf(t, lv[n])) : '--');
+    const box = $('lb-' + n), chk = $('chk-' + n);
+    box.classList.remove('tp-hit', 'sl-hit');
+    chk.classList.remove('show');
+    if (hit[n]) { box.classList.add(n === 'sl' ? 'sl-hit' : 'tp-hit'); chk.classList.add('show'); }
+  }
+
+  const f = tradeFlow(t), s = statusOf(t);
+  const st = $('tradeStatus');
+  st.textContent = s.text;
+  st.className = `text-[8px] font-mono font-bold px-2 py-0.5 rounded border whitespace-nowrap ${PILL[s.color]}`;
+  const pnl = $('tradePnl');
+  pnl.textContent = f.main;
+  pnl.className = `text-[10px] font-mono font-bold ${pipColor(f.pips)}`;
+  setTxt('tradeLive', f.sub);
+}
+
+/* ================= BIAS ================= */
+async function refreshBias(force) {
+  if (market === 'VISION') return;
+  await Promise.all(BIAS_TF.map(tf => fetchSeries(market, tf.iv, !!force)));
+  renderBias();
+}
+function renderBias() {
+  if (market === 'VISION') return;
+  const el = $('biasGrid');
+  if (!el) return;
+  const list = BIAS_TF.map(tf => calcBias(seriesRows(market, tf.iv)));
+  el.innerHTML = BIAS_TF.map((tf, i) => {
+    const b = list[i];
+    const sc = b.bias !== 'WAIT' ? `skor ${b.score > 0 ? '+' : ''}${b.score}` : '';
+    return `<div class="bg-darkbg border border-panelborder rounded-lg p-1.5 text-center space-y-0.5">
+      <p class="text-[8px] font-bold text-gray-400">${tf.label}</p>
+      <span class="inline-block text-[9px] font-black px-2 py-0.5 rounded border ${BIAS_CLS[b.bias]}">${BIAS_TXT[b.bias]}</span>
+      <p class="text-[7px] text-gray-500 font-mono">${sc}</p></div>`;
+  }).join('');
+  const cnt = v => list.filter(b => b.bias === v).length;
+  setTxt('biasInfo', `${cnt('BULLISH')} Bullish · ${cnt('BEARISH')} Bearish · ${cnt('NETRAL')} Netral · ${cnt('WAIT')} Loading · update ${new Date().toLocaleTimeString('id-ID', { hour12: false })}`);
+}
+
+/* ================= KALENDER PNL ================= */
+const WEEKDAYS = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+const calLoad = () => { try { return JSON.parse(localStorage.getItem(CAL_KEY)) || {}; } catch (e) { return {}; } };
+const calSave = o => { try { localStorage.setItem(CAL_KEY, JSON.stringify(o)); } catch (e) {} };
+function calEntry(t) {
+  if (t.key === 'VISION') return null; // Jangan rekap vision
+  let res = 'OPEN', pips = 0;
+  if (t.status === 'CLOSED') {
+    if (t.result === 'CANCEL') res = 'CANCEL';
+    else { pips = Math.round((Number(t.pips) || 0) * 10) / 10; res = pips > 0 ? 'W' : pips < 0 ? 'L' : 'BE'; }
+  }
+  return { id: t.id, date: ymd(new Date(t.createdAt || Date.now())), key: t.key, res, pips };
+}
+function calSync() {
+  const since = Number(localStorage.getItem(CAL_SINCE_KEY)) || 0;
+  const cal = calLoad();
+  let ch = false;
+  for (const t of trades) {
+    if ((t.createdAt || 0) < since || t.key === 'VISION') continue;
+    const e = calEntry(t), o = cal[t.id];
+    if (!o || o.res !== e.res || o.pips !== e.pips || o.date !== e.date || o.key !== e.key) { cal[t.id] = e; ch = true; }
+  }
+  if (ch) calSave(cal);
+  renderCalendar();
+}
+function calStats(list) {
+  let win = 0, lose = 0, wc = 0, lc = 0;
+  for (const e of list) {
+    if (e.res === 'W') { win += e.pips; wc++; }
+    else if (e.res === 'L') { lose += e.pips; lc++; }
+  }
+  return { win, lose, wc, lc, net: win + lose, wr: wc + lc ? wc / (wc + lc) * 100 : 0 };
+}
+function renderCalendar() {
+  if (!$('calGrid')) return;
+  const all = Object.values(calLoad());
+  const ym = calView.y + '-' + String(calView.m + 1).padStart(2, '0');
+  const mEntries = all.filter(e => e.date && e.date.startsWith(ym));
+  const byDay = {};
+  for (const e of mEntries) {
+    const d = byDay[e.date] = byDay[e.date] || { pips: 0, w: 0, l: 0, open: 0 };
+    if (e.res === 'W') { d.w++; d.pips += e.pips; }
+    else if (e.res === 'L') { d.l++; d.pips += e.pips; }
+    else if (e.res === 'BE') d.pips += e.pips;
+    else if (e.res === 'OPEN') d.open++;
+  }
+  setTxt('calTitle', new Date(calView.y, calView.m, 1).toLocaleDateString(lang === 'id' ? 'id-ID' : 'en-US', { month: 'long', year: 'numeric' }));
+  $('calWeekdays').innerHTML = WEEKDAYS.map(d => `<div class="text-[7px] text-gray-500 font-bold">${d}</div>`).join('');
+  const offset = (new Date(calView.y, calView.m, 1).getDay() + 6) % 7;
+  const days = new Date(calView.y, calView.m + 1, 0).getDate();
+  const todayKey = ymd(new Date());
+  let html = '';
+  for (let i = 0; i < offset; i++) html += '<div></div>';
+  for (let d = 1; d <= days; d++) {
+    const key = ym + '-' + String(d).padStart(2, '0');
+    const v = byDay[key];
+    let cls = 'border-panelborder bg-darkbg', body = '';
+    if (v && (v.w || v.l)) {
+      const p = Math.round(v.pips * 10) / 10;
+      cls = p > 0 ? 'border-emerald-500/40 bg-emerald-500/10' : p < 0 ? 'border-red-500/40 bg-red-500/10' : 'border-panelborder bg-darkbg';
+      body = `<p class="font-mono font-bold text-[9px] ${pipColor(p)}">${p > 0 ? '+' : ''}${p}</p><p class="font-mono text-[6px] text-gray-400">${v.w}W ${v.l}L</p>`;
+    } else if (v && v.open) {
+      body = `<p class="font-mono text-[7px] text-blue-400">${v.open} run</p>`;
+    }
+    const ring = key === todayKey ? ' ring-1 ring-accentblue' : '';
+    html += `<div class="rounded border ${cls}${ring} min-h-[44px] p-0.5 text-center"><p class="text-[8px] text-gray-400 font-bold">${d}</p>${body}</div>`;
+  }
+  $('calGrid').innerHTML = html;
+
+  const m1 = calStats(mEntries), a1 = calStats(all);
+  const openM = mEntries.filter(e => e.res === 'OPEN').length;
+  const openA = all.filter(e => e.res === 'OPEN').length;
+  const mEl = $('calMonthPnl');
+  mEl.textContent = fmtPips(m1.net);
+  mEl.className = `text-[11px] font-extrabold font-mono ${pipColor(m1.net)}`;
+  setTxt('calWin', fmtPips(m1.win));
+  setTxt('calWinCount', m1.wc + ' W');
+  setTxt('calLose', fmtPips(m1.lose));
+  setTxt('calLoseCount', m1.lc + ' L');
+  setTxt('calNet', fmtPips(m1.net));
+  setTxt('calOpen', openM + ' berjalan');
+  setTxt('calWR', m1.wr.toFixed(1) + '%');
+  setTxt('calWRSub', m1.wc + 'W / ' + m1.lc + 'L');
+  setTxt('calAllTime', `Semua waktu: ${fmtPips(a1.net)} · ${a1.wc} W · ${a1.lc} L · ${openA} berjalan`);
+}
+function calShift(n) {
+  let m = calView.m + n, y = calView.y;
+  while (m < 0) { m += 12; y--; }
+  while (m > 11) { m -= 12; y++; }
+  calView = { y, m };
+  renderCalendar();
+}
+function calToggle() {
+  const hiddenNow = $('calCard').classList.toggle('hidden');
+  $('calToggleBtn').classList.toggle('bg-accentblue/40', !hiddenNow);
+  if (!hiddenNow) renderCalendar();
+}
+function calReset() {
+  if (!confirm('Reset kalender PNL?')) return;
+  calSave({});
+  localStorage.setItem(CAL_SINCE_KEY, String(Date.now()));
+  renderCalendar();
+}
+
+/* ================= SESSION UI ================= */
+function updateSessionCard() {
+    if (market === 'VISION') return;
+    const now = new Date();
+    const currentUTCSeconds = now.getUTCHours() * 3600 + now.getUTCMinutes() * 60 + now.getUTCSeconds();
+    let activeName = 'No Session', activeColor = 'text-gray-400', activeBorder = 'border-gray-500/40', html = '';
+
+    const SESSION_UI = [
+        { name: 'Asia Session', startUTC: 0, endUTC: 9, color: 'text-yellow-400', border: 'border-yellow-500/50' },
+        { name: 'London Kill Zone', startUTC: 7, endUTC: 10, color: 'text-red-400', border: 'border-red-500/50' },
+        { name: 'London Session', startUTC: 8, endUTC: 17, color: 'text-blue-400', border: 'border-blue-500/50' },
+        { name: 'NY Kill Zone', startUTC: 12, endUTC: 15, color: 'text-red-400', border: 'border-red-500/50' },
+        { name: 'NY Session', startUTC: 13, endUTC: 22, color: 'text-emerald-400', border: 'border-emerald-500/50' }
+    ];
+
+    const sorted = [...SESSION_UI].sort((a, b) => a.startUTC - b.startUTC);
+
+    sorted.forEach(s => {
+        const startSec = s.startUTC * 3600;
+        const endSec = s.endUTC * 3600;
+        let isActive = currentUTCSeconds >= startSec && currentUTCSeconds < endSec;
+        if (endSec < startSec) isActive = currentUTCSeconds >= startSec || currentUTCSeconds < endSec;
+
+        const d1 = new Date(); d1.setUTCHours(s.startUTC, 0, 0, 0);
+        const d2 = new Date(); d2.setUTCHours(s.endUTC, 0, 0, 0);
+
+        const formatOpt = { hour: '2-digit', minute: '2-digit', hour12: true };
+        const localStart = d1.toLocaleTimeString('en-US', formatOpt).toLowerCase().replace(' ', '');
+        const localEnd = d2.toLocaleTimeString('en-US', formatOpt).toLowerCase().replace(' ', '');
+
+        let statusHtml = '';
+
+        if (isActive) {
+            activeName = s.name;
+            activeColor = s.color;
+            activeBorder = s.border;
+            statusHtml = `<span class="text-emerald-400 font-bold animate-pulse">Open</span>`;
+        } else if (currentUTCSeconds < startSec) {
+            statusHtml = `<span class="text-gray-500">Closed</span>`;
+        } else {
+            statusHtml = `<span class="text-gray-600">Closed</span>`;
+        }
+
+        html += `
+            <div class="flex justify-between items-center bg-darkbg border ${isActive ? s.border : 'border-panelborder'} px-2 py-1.5 rounded transition-all">
+                <div class="flex flex-col">
+                    <span class="${s.color} font-bold text-[9px]">${s.name}</span>
+                    <span class="text-gray-400 text-[8px]">${localStart} - ${localEnd}</span>
+                </div>
+                <div class="text-[8px] text-right font-mono">${statusHtml}</div>
+            </div>
+        `;
+    });
+
+    const badge = $('currentSessionBadge');
+    if (badge) {
+        badge.textContent = activeName;
+        badge.className = `text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-darkbg ${activeColor} ${activeBorder}`;
+    }
+    const list = $('sessionList');
+    if (list) list.innerHTML = html;
+}
+
+/* ================= SMC: DETEKSI ================= */
+function setSmcTf(tf) {
+  if (market === 'VISION') return;
+  smcTfOverride = tf;
+  smcPan = 0; // Reset posisi geser saat ganti TF
+  document.querySelectorAll('.smc-tf-btn').forEach(btn => {
+    if (btn.dataset.tf === tf) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  });
+  fetchSeries(market, tf, false);
+  renderSmcInfo();
+}
+
+/* ================= FITUR ZOOM & PAN SMC ================= */
+function zoomSMC(dir) {
+  if (market === 'VISION') return;
+  if (dir > 0) smcZoom = Math.min(5, smcZoom + 0.2); // Max zoom 5x
+  else smcZoom = Math.max(0.5, smcZoom - 0.2);       // Min zoom 0.5x
+  renderSmcInfo();
+}
+function resetSMC() {
+  if (market === 'VISION') return;
+  smcZoom = 1;
+  smcPan = 0;
+  renderSmcInfo();
+}
+
+// Event listener untuk Drag/Pan di Canvas SMC
+let isDragging = false;
+let lastX = 0;
+scv.addEventListener('pointerdown', e => {
+  if (market === 'VISION') return;
+  isDragging = true;
+  lastX = e.clientX;
+  scv.setPointerCapture(e.pointerId);
+});
+scv.addEventListener('pointermove', e => {
+  if (market === 'VISION' || !isDragging) return;
+  const dx = e.clientX - lastX;
+  // Konversi pixel ke jumlah candle (asumsi 5px per candle slot)
+  const candlesMoved = dx / 5;
+  smcPan += candlesMoved * smcZoom;
+  lastX = e.clientX;
+  renderSmcInfo();
+});
+scv.addEventListener('pointerup', e => {
+  if (market === 'VISION') return;
+  isDragging = false;
+  scv.releasePointerCapture(e.pointerId);
+});
+
+
+function invalidZone(rows, from, dir, bottom, top) {
+  for (let j = from; j < rows.length; j++) {
+    if (dir > 0 && rows[j].l < bottom) return true;
+    if (dir < 0 && rows[j].h > top) return true;
+  }
+  return false;
+}
+
+function swings(rows) {
+  const sh = [], sl = [];
+  for (let i = SWING_L; i < rows.length - SWING_L; i++) {
+    let isH = true, isL = true;
+    for (let j = 1; j <= SWING_L; j++) {
+      if (rows[i].h <= rows[i - j].h || rows[i].h <= rows[i + j].h) isH = false;
+      if (rows[i].l >= rows[i - j].l || rows[i].l >= rows[i + j].l) isL = false;
+    }
+    if (isH) sh.push({ i, p: rows[i].h, t: rows[i].t });
+    if (isL) sl.push({ i, p: rows[i].l, t: rows[i].t });
+  }
+  return { sh, sl };
+}
+
+function structure(rows, sw) {
+  const ev = [];
+  let trend = 0, lastH = null, lastL = null;
+  const shMap = new Map(sw.sh.map(x => [x.i, x]));
+  const slMap = new Map(sw.sl.map(x => [x.i, x]));
+  for (let i = 0; i < rows.length; i++) {
+    const ci = i - SWING_L;
+    if (ci >= 0) {
+      if (shMap.has(ci)) lastH = shMap.get(ci);
+      if (slMap.has(ci)) lastL = slMap.get(ci);
+    }
+    const c = rows[i];
+    if (lastH && c.c > lastH.p) {
+      ev.push({ type: trend === -1 ? 'CHoCH' : 'BOS', dir: 1, p: lastH.p, fromT: lastH.t, toT: c.t });
+      trend = 1; lastH = null;
+    } else if (lastL && c.c < lastL.p) {
+      ev.push({ type: trend === 1 ? 'CHoCH' : 'BOS', dir: -1, p: lastL.p, fromT: lastL.t, toT: c.t });
+      trend = -1; lastL = null;
+    }
+  }
+  return { ev: ev.slice(-6), trend };
+}
+
+function liquidity(rows, sw) {
+  const pools = [], sweeps = [];
+  const last = rows[rows.length - 1];
+  const check = (arr, high) => {
+    for (const s of arr.slice(-8)) {
+      let hit = null;
+      for (let j = s.i + SWING_L + 1; j < rows.length; j++) {
+        const c = rows[j];
+        if (high ? c.h > s.p : c.l < s.p) { hit = { j, closeBack: high ? c.c < s.p : c.c > s.p }; break; }
+      }
+      if (!hit) pools.push({ high, p: s.p, t: s.t, toT: last.t, label: high ? 'BSL' : 'SSL' });
+      else if (hit.closeBack) sweeps.push({ high, p: s.p, t: rows[hit.j].t });
+    }
+  };
+  check(sw.sh, true);
+  check(sw.sl, false);
+  for (let a = 0; a < pools.length; a++) {
+    for (let b = 0; b < a; b++) {
+      if (pools[a].high === pools[b].high && Math.abs(pools[a].p - pools[b].p) / pools[b].p < 0.0005) {
+        pools[a].label = pools[a].high ? 'EQH' : 'EQL';
+      }
+    }
+  }
+  return { pools: pools.slice(-6), sweeps: sweeps.slice(-4) };
+}
+
+function cisdOf(rows) {
+  const out = [];
+  let lastK = -1;
+  for (let i = 16; i < rows.length; i++) {
+    const c = rows[i];
+    let avg = 0;
+    for (let j = i - 10; j < i; j++) avg += Math.abs(rows[j].c - rows[j].o);
+    avg /= 10;
+    const body = Math.abs(c.c - c.o);
+    if (avg === 0 || body < avg * 1.2) continue;
+    const up = c.c > c.o;
+    let k = -1;
+    for (let j = i - 1; j >= i - 6 && j >= 0; j--) {
+      const r = rows[j];
+      if (up ? r.c < r.o : r.c > r.o) { k = j; break; }
+    }
+    if (k < 0 || k === lastK) continue;
+    const kr = rows[k];
+    const seg = rows.slice(Math.max(0, i - 16), i - 5);
+    const recent = rows.slice(i - 6, i);
+    let sweep = false;
+    if (up) sweep = recent.some(x => x.l < Math.min(...seg.map(y => y.l)));
+    else sweep = recent.some(x => x.h > Math.max(...seg.map(y => y.h)));
+    if (!sweep) continue;
+    if ((up && c.c > kr.o) || (!up && c.c < kr.o)) {
+      out.push({ dir: up ? 1 : -1, p: kr.o, t: kr.t, toT: c.t });
+      lastK = k;
+    }
+  }
+  return out.slice(-3);
+}
+
+function detectSMC(rows) {
+  const fvgs = [], obs = [], breakers = [];
+
+  for (let i = 1; i < rows.length - 1; i++) {
+    const a = rows[i - 1], b = rows[i], c = rows[i + 1];
+    if (a.h < c.l && !invalidZone(rows, i + 2, 1, a.h, c.l)) fvgs.push({ dir: 1, bottom: a.h, top: c.l, t: b.t });
+    if (a.l > c.h && !invalidZone(rows, i + 2, -1, c.h, a.l)) fvgs.push({ dir: -1, bottom: c.h, top: a.l, t: b.t });
+    if (b.c < b.o && c.c > b.h && !invalidZone(rows, i + 2, 1, b.c, b.o)) obs.push({ dir: 1, bottom: b.c, top: b.o, t: b.t });
+    if (b.c > b.o && c.c < b.l && !invalidZone(rows, i + 2, -1, b.o, b.c)) obs.push({ dir: -1, bottom: b.o, top: b.c, t: b.t });
+  }
+
+  // Deteksi Breaker Block
+  for (const ob of obs) {
+    const startIndex = rows.findIndex(r => r.t === ob.t);
+    if (startIndex === -1) continue;
+
+    for (let j = startIndex + 1; j < rows.length; j++) {
+      const c = rows[j];
+      if (ob.dir === -1 && c.c > ob.top) {
+        breakers.push({ dir: 1, bottom: ob.bottom, top: ob.top, t: c.t });
+        break;
+      }
+      if (ob.dir === 1 && c.c < ob.bottom) {
+        breakers.push({ dir: -1, bottom: ob.bottom, top: ob.top, t: c.t });
+        break;
+      }
+    }
+  }
+
+  const sw = swings(rows);
+  const st = structure(rows, sw);
+  return {
+    fvgs: fvgs.slice(-4),
+    obs: obs.slice(-4),
+    breakers: breakers.slice(-4),
+    liq: liquidity(rows, sw),
+    ev: st.ev,
+    cisd: cisdOf(rows)
+  };
+}
+
+function getSmc(k, iv) {
+  if (k === 'VISION') return { status: 'loading' };
+  const s = ser(k, iv), now = Date.now();
+  if (s.smc && now - s.smcAt < 1000) return s.smc;
+  const rows = displayRows(k, iv);
+  const res = rows.length >= 20
+    ? { ...detectSMC(rows), status: 'ok' }
+    : { status: 'loading', fvgs: [], obs: [], breakers: [], liq: { pools: [], sweeps: [] }, ev: [], cisd: [] };
+  res.n = rows.length;
+  res.err = (!s.rows.length && !s.ext.length) ? (s.err || s.extErr || '') : '';
+  s.smc = res;
+  s.smcAt = now;
+  return res;
+}
+
+function renderSmcInfo() {
+  if (market === 'VISION') return;
+  const t = activeTrade();
+  const k = t ? t.key : market;
+  const style = t ? t.style : $('tradingStyleSelect').value;
+  const iv = smcTfOverride || SMC_TF_MAP[style] || '5m';
+
+  document.querySelectorAll('.smc-tf-btn').forEach(btn => {
+    if (btn.dataset.tf === iv) btn.classList.add('active');
+    else btn.classList.remove('active');
+  });
+
+  const s = getSmc(k, iv);
+  const head = `${k} ${iv} · ${srcOf(k, iv)} · ${s.n || 0} candle`;
+  if (s.status !== 'ok') return setTxt('smcInfo', head + (s.err ? ' · ' + s.err : ' · memuat candle (min 20)...'));
+  setTxt('smcInfo', `${head} · ${s.fvgs.length} FVG · ${s.obs.length} S/D · ${s.breakers.length} BB · ${s.liq.pools.length} BSL/SSL · ${s.ev.length} BOS/CHoCH · ${s.cisd.length} CISD · ${s.liq.sweeps.length} SW`);
+}
+
+function sessionBoxes(rows, now) {
+  const out = [];
+  if (!rows.length) return out;
+  const d = new Date(now);
+  const day0 = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  for (const s of SESS) {
+    let a = day0 + s.h1 * 3600000, b = day0 + s.h2 * 3600000;
+    if (now < a) { a -= 86400000; b -= 86400000; }
+    const inS = rows.filter(c => c.t >= a && c.t < b);
+    if (!inS.length) continue;
+    out.push({
+      name: s.name, col: s.col, a, b: Math.min(b, now),
+      hi: Math.max(...inS.map(c => c.h)), lo: Math.min(...inS.map(c => c.l))
+    });
+  }
+  return out;
+}
+
+/* ================= UTIL CANVAS ================= */
+function fitCv(el, c) {
+  const r = el.getBoundingClientRect();
+  if (!r.width || !r.height) return null;
+  const dpr = window.devicePixelRatio || 1;
+  const W = Math.round(r.width * dpr), H = Math.round(r.height * dpr);
+  if (el.width !== W || el.height !== H) { el.width = W; el.height = H; }
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, r.width, r.height);
+  return { w: r.width, h: r.height };
+}
+function rr(c, x, y, w, h, r) {
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
+}
+
+// FIX WEEKEND GAP: posisi X berdasarkan URUTAN candle (bukan selisih waktu),
+// jadi jeda market tutup (Jumat malam -> Senin pagi) tidak menyisakan ruang kosong.
+// tm yang jatuh di antara dua candle dipetakan ke candle sebelumnya.
+function timeToX(vis, plotL, slot) {
+  return tm => {
+    if (!vis.length) return plotL;
+    let lo = 0, hi = vis.length - 1, idx = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (vis[mid].t <= tm) { idx = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    return plotL + (idx + 0.5) * slot;
+  };
+}
+function layoutX(rows, plotL, plotR, tfMs) {
+  const plotW = plotR - plotL;
+  const nWant = Math.max(12, Math.floor(plotW / 5) - CH_PAD);
+  const N = Math.min(rows.length, nWant);
+  const vis = N ? rows.slice(rows.length - N) : [];
+  const slot = plotW / (Math.max(N, 12) + CH_PAD);
+  const t0 = vis.length ? vis[0].t : Date.now() - tfMs * 12;
+  const xOfT = timeToX(vis, plotL, slot);
+  return { vis, slot, t0, xOfT };
+}
+function srcLabel(k, iv) { return `${k} · ${iv} · WIB · ${srcOf(k, iv)}`; }
+
+/* ================= CHART UTAMA (CANDLESTICK + FULL FRAME LINES) ================= */
+function drawChart() {
+  const d = fitCv(cv, cx);
+  if (!d || market === 'VISION') return;
+  const CW = d.w, CH = d.h;
+  const t = activeTrade();
+  const k = market;
+
+  const iv = '1m';
+  const tfMs = TF_MIN[iv] * 60000;
+  const rows = displayRows(k, iv);
+  const live = prices[k] ? prices[k].price : null;
+  const liveDir = prices[k] ? prices[k].dir : 0;
+  const plotL = 6, plotT = 20, plotB = CH - 14, plotR = CW - CHART_GUT;
+  const plotH = plotB - plotT;
+
+  cx.font = '8px ui-monospace, monospace';
+  cx.textAlign = 'left';
+  cx.textBaseline = 'top';
+  cx.fillStyle = 'rgba(148,163,184,.9)';
+  cx.fillText(srcLabel(k, iv), plotL + 2, 3);
+
+  if (!rows.length && live == null) {
+    cx.font = 'bold 11px ui-monospace, monospace';
+    cx.fillStyle = '#94a3b8';
+    cx.textAlign = 'center';
+    cx.textBaseline = 'middle';
+    cx.fillText(T('waitTick'), CW / 2, CH / 2);
+    cx.textAlign = 'left';
+    return;
+  }
+
+  const { vis, slot, xOfT } = layoutX(rows, plotL, plotR, tfMs);
+  const clampX = x => Math.max(plotL, Math.min(plotR, x));
+
+  const L = t ? [
+    { label: 'ENTRY', v: t.entry, c: '#93c5fd', bg: 'rgba(147,197,253,.14)', dash: [] },
+    { label: 'SL', v: t.sl, c: '#f87171', bg: 'rgba(248,113,113,.14)', dash: [4, 4], hit: t.result === 'SL' },
+    { label: 'TP1', v: t.tp1, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp1 },
+    { label: 'TP2', v: t.tp2, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp2 },
+    { label: 'TP3', v: t.tp3, c: '#38bdf8', bg: 'rgba(56,189,248,.14)', dash: [4, 4], hit: !!t.hits.tp3 }
+  ].filter(l => Number.isFinite(l.v)) : [];
+
+  let lo = Infinity, hi = -Infinity;
+
+  const isRunning = t && (t.status === 'RUNNING' || (t.hits && Object.keys(t.hits).length > 0));
+  const hitEntry = t && live != null && (t.dir > 0 ? live <= t.entry : live >= t.entry);
+  const isZoomed = t && (isRunning || hitEntry);
+
+  if (isZoomed) {
+    const levels = [t.sl, t.entry, t.tp1, t.tp2, t.tp3, live].filter(v => v != null && Number.isFinite(v));
+    lo = Math.min(...levels);
+    hi = Math.max(...levels);
+  } else {
+    vis.forEach(c => {
+      if (c.h < lo) lo = c.h;
+      if (c.h > hi) hi = c.h;
+      if (c.l < lo) lo = c.l;
+      if (c.l > hi) hi = c.l;
+    });
+    if (live != null) {
+      if (live < lo) lo = live;
+      if (live > hi) hi = live;
+    }
+    if (t) {
+      L.forEach(l => {
+        if (l.v < lo) lo = l.v;
+        if (l.v > hi) hi = l.v;
+      });
+      if (t.zone) {
+        if (t.zone.min < lo) lo = t.zone.min;
+        if (t.zone.max > hi) hi = t.zone.max;
+      }
+    }
+  }
+
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
+  if (!(hi - lo > 0)) { const dd = Math.abs(hi) * 0.001 || 1; lo -= dd; hi += dd; }
+
+  const pad = (hi - lo) * (isZoomed ? 0.05 : 0.12);
+  lo -= pad;
+  hi += pad;
+
+  const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * plotH;
+
+  cx.lineWidth = 1;
+  cx.strokeStyle = 'rgba(148,163,184,.08)';
+  for (let i = 1; i < 4; i++) {
+    const y = plotT + plotH * i / 4;
+    cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
+  }
+
+  if (t && t.zone && t.mode === 'LIMIT') {
+    const x0 = plotL;
+    const y1 = yOf(t.zone.max), y2 = yOf(t.zone.min);
+    cx.save();
+    cx.fillStyle = 'rgba(41,98,255,.16)';
+    cx.fillRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
+    cx.strokeStyle = 'rgba(41,98,255,.5)';
+    cx.lineWidth = 1;
+    cx.setLineDash([2, 2]);
+    cx.strokeRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
+    cx.restore();
+  }
+
+  const bodyW = Math.max(1.5, slot * 0.62);
+  cx.lineWidth = 1;
+  for (const c of vis) {
+    const x = xOfT(c.t);
+    if (x < plotL || x > plotR) continue;
+
+    const up = c.c >= c.o;
+    const col = up ? '#34d399' : '#f87171';
+    const yH = yOf(c.h), yL = yOf(c.l), yO = yOf(c.o), yC = yOf(c.c);
+
+    cx.strokeStyle = col;
+    cx.beginPath(); cx.moveTo(x, yH); cx.lineTo(x, yL); cx.stroke();
+
+    cx.fillStyle = col;
+    const bY = Math.min(yO, yC);
+    const bH = Math.max(1, Math.abs(yC - yO));
+    cx.fillRect(x - bodyW / 2, bY, bodyW, bH);
+  }
+
+  // ================== GARIS FULL FRAME ==================
+  if (t) {
+    L.forEach(l => {
+      const y = yOf(l.v);
+      cx.save();
+      cx.strokeStyle = l.c;
+      cx.globalAlpha = l.label === 'ENTRY' ? .95 : .8;
+      cx.lineWidth = l.label === 'ENTRY' ? 1.4 : 1;
+      cx.setLineDash(l.dash);
+      cx.beginPath();
+      cx.moveTo(plotL, y);
+      cx.lineTo(plotR, y);
+      cx.stroke();
+      cx.restore();
+    });
+  }
+  // ======================================================
+
+  if (live != null) {
+    const y = yOf(live);
+    const lc = liveDir < 0 ? '#f87171' : '#34d399';
+    cx.save();
+    cx.strokeStyle = lc;
+    cx.globalAlpha = .6;
+    cx.lineWidth = 1;
+    cx.setLineDash([1, 3]);
+    cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
+    cx.restore();
+    if (vis.length) {
+      const hx = xOfT(vis[vis.length - 1].t);
+      const pr = 3 + Math.sin(Date.now() / 150) * 1.5;
+      cx.save();
+      cx.beginPath(); cx.arc(hx, y, pr + 2.5, 0, Math.PI * 2); cx.fillStyle = 'rgba(41,98,255,.35)'; cx.fill();
+      cx.beginPath(); cx.arc(hx, y, 3, 0, Math.PI * 2); cx.fillStyle = '#fff'; cx.shadowColor = '#2962ff'; cx.shadowBlur = 8; cx.fill();
+      cx.restore();
+    }
+  }
+
+  if (vis.length) {
+    const step = Math.max(1, Math.round(vis.length / 5));
+    cx.font = '8px ui-monospace, monospace';
+    cx.fillStyle = 'rgba(148,163,184,.85)';
+    cx.textAlign = 'center';
+    cx.textBaseline = 'bottom';
+    for (let i = 0; i < vis.length; i += step) {
+      const c = vis[i];
+      const hm = new Date(c.t + 7 * 3600000).toISOString().slice(11, 16);
+      cx.fillText(hm, xOfT(c.t), CH - 1);
+    }
+  }
+
+  const tags = L.map(l => ({ text: (l.hit ? '✓ ' : '') + l.label + ' ' + fmt(l.v), c: l.c, bg: l.bg, y: yOf(l.v) }));
+  if (live != null) {
+    tags.push({
+      text: fmt(live),
+      c: liveDir < 0 ? '#fca5a5' : '#86efac',
+      bg: liveDir < 0 ? 'rgba(239,68,68,.25)' : 'rgba(16,185,129,.25)',
+      y: yOf(live)
+    });
+  }
+  tags.sort((a, b) => a.y - b.y);
+
+  const GAP = 16, capT = plotT + 6, capB = plotB - 6;
+  tags.forEach(g => { g.y = Math.max(capT, Math.min(capB, g.y)); });
+  for (let i = 1; i < tags.length; i++) if (tags[i].y < tags[i - 1].y + GAP) tags[i].y = tags[i - 1].y + GAP;
+  if (tags.length && tags[tags.length - 1].y > capB) {
+    tags[tags.length - 1].y = capB;
+    for (let i = tags.length - 2; i >= 0; i--) if (tags[i].y > tags[i + 1].y - GAP) tags[i].y = tags[i + 1].y - GAP;
+  }
+
+  cx.font = 'bold 8px ui-monospace, monospace';
+  cx.textAlign = 'left';
+  cx.textBaseline = 'middle';
+  for (const g of tags) {
+    const x = plotR + 6, w = CHART_GUT - 12, h = 15, y = g.y - h / 2;
+    rr(cx, x, y, w, h, 3);
+    cx.fillStyle = g.bg; cx.fill();
+    cx.strokeStyle = g.c; cx.lineWidth = .8; cx.stroke();
+    cx.fillStyle = g.c;
+    cx.fillText(g.text, x + 4, g.y + .5);
+  }
+}
+
+/* ================= PANEL SMC (CANDLESTICK + ZONA) ================= */
+function drawSMC() {
+  const d = fitCv(scv, sx);
+  if (!d || market === 'VISION') return;
+  const CW = d.w, CH = d.h;
+  const k = market;
+  const t = activeTrade();
+  const style = t ? t.style : $('tradingStyleSelect').value;
+
+  const iv = smcTfOverride || SMC_TF_MAP[style] || '5m';
+
+  const tfMs = TF_MIN[iv] * 60000;
+  const rows = displayRows(k, iv);
+  const live = prices[k] ? prices[k].price : null;
+  const plotL = 6, plotT = 18, plotB = CH - 14, plotR = CW - CHART_GUT;
+  const plotH = plotB - plotT;
+
+  sx.font = '8px ui-monospace, monospace';
+  sx.textAlign = 'left';
+  sx.textBaseline = 'top';
+  sx.fillStyle = 'rgba(148,163,184,.9)';
+  sx.fillText('SMC · ' + srcLabel(k, iv), plotL + 2, 3);
+
+  const s = getSmc(k, iv);
+  if (s.status !== 'ok') {
+    sx.font = 'bold 10px ui-monospace, monospace';
+    sx.fillStyle = '#94a3b8';
+    sx.textAlign = 'center';
+    sx.textBaseline = 'middle';
+    sx.fillText(s.err ? 'Candle belum tersedia: ' + s.err : `Memuat candle (${s.n || 0}/20)...`, CW / 2, CH / 2);
+    sx.textAlign = 'left';
+    return;
+  }
+
+  // --- LOGIKA ZOOM & PAN ---
+  const plotW = plotR - plotL;
+  const baseN = Math.max(12, Math.floor(plotW / 5) - CH_PAD);
+  const nWant = Math.floor(baseN / smcZoom);
+  const slot = plotW / (Math.max(nWant, 5) + CH_PAD);
+
+  // Hitung batas pan
+  const maxPan = Math.max(0, rows.length - nWant);
+  smcPan = Math.max(0, Math.min(smcPan, maxPan));
+
+  const startIdx = Math.max(0, rows.length - nWant - Math.floor(smcPan));
+  const endIdx = Math.min(rows.length, startIdx + nWant);
+  const vis = rows.slice(startIdx, endIdx);
+
+  // FIX WEEKEND GAP: posisi X berdasarkan urutan candle
+  const t0 = vis.length ? vis[0].t : 0;
+  const xOfT = timeToX(vis, plotL, slot);
+
+  const clampX = x => Math.max(plotL, Math.min(plotR, x));
+  const ref = live != null ? live : (vis.length ? vis[vis.length - 1].c : 0);
+  const near = p => Math.abs(p - ref) / ref < 0.03;
+  const inBand = (a, b) => b >= ref * 0.97 && a <= ref * 1.03;
+
+  const fvgs = s.fvgs.filter(z => inBand(z.bottom, z.top));
+  const obs = s.obs.filter(z => inBand(z.bottom, z.top));
+  const breakers = s.breakers.filter(z => inBand(z.bottom, z.top));
+  const pools = s.liq.pools.filter(p => near(p.p));
+  const sweeps = s.liq.sweeps.filter(p => near(p.p));
+  const ev = s.ev.filter(e => near(e.p) && e.toT >= t0);
+  const cis = s.cisd.filter(c => near(c.p) && c.toT >= t0);
+  const sess = sessionBoxes(rows, Date.now()).filter(se => se.b > t0);
+
+  let lo = Infinity, hi = -Infinity;
+  const grow = v => { if (Number.isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; } };
+  vis.forEach(c => { grow(c.h); grow(c.l); });
+  if (live != null) grow(live);
+  fvgs.concat(obs).concat(breakers).forEach(z => { grow(z.bottom); grow(z.top); });
+  pools.forEach(p => grow(p.p));
+  sess.forEach(se => { grow(se.hi); grow(se.lo); });
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
+  if (!(hi - lo > 0)) { const dd = Math.abs(hi) * 0.001 || 1; lo -= dd; hi += dd; }
+  const pad = (hi - lo) * 0.1;
+  lo -= pad;
+  hi += pad;
+  const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * plotH;
+
+  // grid
+  sx.lineWidth = 1;
+  sx.strokeStyle = 'rgba(148,163,184,.08)';
+  for (let i = 1; i < 4; i++) {
+    const y = plotT + plotH * i / 4;
+    sx.beginPath(); sx.moveTo(plotL, y); sx.lineTo(plotR, y); sx.stroke();
+  }
+
+  // session box
+  sess.forEach(se => {
+    const x0 = clampX(xOfT(se.a)), x1 = clampX(xOfT(se.b));
+    if (x1 <= x0) return;
+    const yh = yOf(se.hi), yl = yOf(se.lo);
+    sx.save();
+    sx.fillStyle = `rgba(${se.col},.07)`;
+    sx.fillRect(x0, Math.min(yh, yl), x1 - x0, Math.abs(yl - yh));
+    sx.strokeStyle = `rgba(${se.col},.85)`;
+    sx.lineWidth = 1;
+    sx.beginPath();
+    sx.moveTo(x0, yh); sx.lineTo(x1, yh);
+    sx.moveTo(x0, yl); sx.lineTo(x1, yl);
+    sx.stroke();
+    sx.setLineDash([2, 3]);
+    sx.strokeStyle = 'rgba(250,204,21,.6)';
+    sx.beginPath();
+    sx.moveTo(x1, yh); sx.lineTo(plotR, yh);
+    sx.moveTo(x1, yl); sx.lineTo(plotR, yl);
+    sx.stroke();
+    sx.setLineDash([]);
+    sx.font = 'bold 8px ui-monospace, monospace';
+    sx.fillStyle = `rgba(${se.col},1)`;
+    sx.textAlign = 'left';
+    sx.textBaseline = 'top';
+    sx.fillText(se.name, x0 + 3, Math.min(yh, yl) + 2);
+    sx.restore();
+  });
+
+  // FVG & OB/SND (Supply/Demand)
+  const zone = (z, label, rgb) => {
+    const x0 = clampX(xOfT(z.t));
+    if (plotR - x0 < 2) return;
+    const y1 = yOf(z.top), y2 = yOf(z.bottom);
+    const y = Math.min(y1, y2), h = Math.abs(y2 - y1);
+    sx.save();
+    sx.fillStyle = `rgba(${rgb},.18)`;
+    sx.fillRect(x0, y, plotR - x0, h);
+    sx.strokeStyle = `rgba(${rgb},.6)`;
+    sx.lineWidth = 1;
+    sx.strokeRect(x0, y, plotR - x0, h);
+    sx.font = 'bold 8px ui-monospace, monospace';
+    sx.fillStyle = `rgba(${rgb},1)`;
+    sx.textAlign = 'left';
+    sx.textBaseline = 'top';
+    sx.fillText(label, x0 + 3, y + 2);
+    sx.restore();
+  };
+  fvgs.forEach(z => zone(z, z.dir > 0 ? 'FVG ▲' : 'FVG ▼', z.dir > 0 ? '59,130,246' : '168,85,247'));
+  obs.forEach(z => zone(z, z.dir > 0 ? 'Demand' : 'Supply', z.dir > 0 ? '16,185,129' : '239,68,68'));
+  breakers.forEach(z => zone(z, z.dir > 0 ? 'BB ▲' : 'BB ▼', z.dir > 0 ? '34,211,238' : '244,114,182'));
+
+  // BSL / SSL / EQH / EQL
+  pools.forEach(p => {
+    const y = yOf(p.p), x0 = clampX(xOfT(p.t));
+    sx.save();
+    sx.strokeStyle = 'rgba(245,158,11,.85)';
+    sx.lineWidth = 1;
+    sx.setLineDash([3, 3]);
+    sx.beginPath(); sx.moveTo(x0, y); sx.lineTo(plotR, y); sx.stroke();
+    sx.setLineDash([]);
+    sx.font = 'bold 8px ui-monospace, monospace';
+    sx.fillStyle = 'rgba(245,158,11,1)';
+    sx.textAlign = 'right';
+    sx.textBaseline = p.high ? 'bottom' : 'top';
+    sx.fillText(p.label, plotR - 4, y + (p.high ? -2 : 2));
+    sx.restore();
+  });
+
+  // Sweep (SW)
+  sweeps.forEach(w => {
+    const x = clampX(xOfT(w.t)), y = yOf(w.p);
+    sx.save();
+    sx.fillStyle = '#fbbf24';
+    sx.beginPath(); sx.arc(x, y, 2.5, 0, Math.PI * 2); sx.fill();
+    sx.font = 'bold 8px ui-monospace, monospace';
+    sx.textAlign = 'center';
+    sx.textBaseline = w.high ? 'bottom' : 'top';
+    sx.fillText('SW', x, y + (w.high ? -4 : 4));
+    sx.restore();
+  });
+
+  // BOS / CHoCH
+  ev.forEach(e => {
+    const x0 = clampX(xOfT(e.fromT)), x1 = clampX(xOfT(e.toT)), y = yOf(e.p);
+    const col = e.dir > 0 ? '125,211,252' : '251,146,60';
+    sx.save();
+    sx.strokeStyle = `rgba(${col},.95)`;
+    sx.lineWidth = 1;
+    sx.beginPath(); sx.moveTo(x0, y); sx.lineTo(x1, y); sx.stroke();
+    sx.font = 'bold 8px ui-monospace, monospace';
+    sx.fillStyle = `rgba(${col},1)`;
+    sx.textAlign = 'right';
+    sx.textBaseline = e.dir > 0 ? 'bottom' : 'top';
+    sx.fillText(`${e.type} ${e.dir > 0 ? '▲' : '▼'}`, x1, y + (e.dir > 0 ? -2 : 2));
+    sx.restore();
+  });
+
+  // CISD
+  cis.forEach(c => {
+    const x0 = clampX(xOfT(c.t)), x1 = clampX(xOfT(c.toT)), y = yOf(c.p);
+    sx.save();
+    sx.strokeStyle = 'rgba(232,121,249,.95)';
+    sx.lineWidth = 1;
+    sx.setLineDash([1, 2]);
+    sx.beginPath(); sx.moveTo(x0, y); sx.lineTo(x1, y); sx.stroke();
+    sx.setLineDash([]);
+    sx.font = 'bold 8px ui-monospace, monospace';
+    sx.fillStyle = 'rgba(232,121,249,1)';
+    sx.textAlign = 'left';
+    sx.textBaseline = 'middle';
+    sx.fillText('CISD', x1 + 3, y);
+    sx.restore();
+  });
+
+  // candle (sebagai referensi harga)
+  const bodyW = Math.max(1.5, slot * 0.62);
+  sx.lineWidth = 1;
+  sx.globalAlpha = .9;
+  for (const c of vis) {
+    const x = xOfT(c.t);
+    const up = c.c >= c.o;
+    const col = up ? '#34d399' : '#f87171';
+    const yH = yOf(c.h), yL = yOf(c.l), yO = yOf(c.o), yC = yOf(c.c);
+    sx.strokeStyle = col;
+    sx.fillStyle = col;
+    sx.beginPath(); sx.moveTo(x, yH); sx.lineTo(x, yL); sx.stroke();
+    sx.fillRect(x - bodyW / 2, Math.min(yO, yC), bodyW, Math.max(1, Math.abs(yC - yO)));
+  }
+  sx.globalAlpha = 1;
+
+  // harga live
+  if (live != null && vis.length) {
+    const y = yOf(live);
+    const hx = xOfT(vis[vis.length - 1].t);
+    const pr = 3 + Math.sin(Date.now() / 150) * 1.5;
+    sx.save();
+    sx.strokeStyle = 'rgba(41,98,255,.6)';
+    sx.lineWidth = 1;
+    sx.setLineDash([1, 3]);
+    sx.beginPath(); sx.moveTo(plotL, y); sx.lineTo(plotR, y); sx.stroke();
+    sx.setLineDash([]);
+    sx.beginPath(); sx.arc(hx, y, pr + 2.5, 0, Math.PI * 2); sx.fillStyle = 'rgba(41,98,255,.35)'; sx.fill();
+    sx.beginPath(); sx.arc(hx, y, 3, 0, Math.PI * 2); sx.fillStyle = '#fff'; sx.fill();
+    sx.restore();
+    sx.save();
+    sx.font = 'bold 8px ui-monospace, monospace';
+    sx.textAlign = 'left';
+    sx.textBaseline = 'middle';
+    rr(sx, plotR + 6, y - 7.5, CHART_GUT - 12, 15, 3);
+    sx.fillStyle = 'rgba(41,98,255,.25)'; sx.fill();
+    sx.strokeStyle = '#2962ff'; sx.lineWidth = .8; sx.stroke();
+    sx.fillStyle = '#93c5fd';
+    sx.fillText(fmt(live), plotR + 10, y + .5);
+    sx.restore();
+  }
+
+  // label waktu WIB
+  if (vis.length) {
+    const step = Math.max(1, Math.round(vis.length / 5));
+    sx.font = '8px ui-monospace, monospace';
+    sx.fillStyle = 'rgba(148,163,184,.85)';
+    sx.textAlign = 'center';
+    sx.textBaseline = 'bottom';
+    for (let i = 0; i < vis.length; i += step) {
+      const c = vis[i];
+      sx.fillText(new Date(c.t + 7 * 3600000).toISOString().slice(11, 16), xOfT(c.t), CH - 1);
+    }
+  }
+}
+
+function frame() {
+  drawChart();
+  if (showSMC) drawSMC();
+  requestAnimationFrame(frame);
+}
+
+/* ================= TRADINGVIEW ================= */
+function toggleTV() {
+  if (market === 'VISION') return;
+  tvOn = !tvOn;
+  $('tvBox').classList.toggle('hidden', !tvOn);
+  $('btnTvToggle').classList.toggle('bg-accentblue', tvOn);
+  $('btnTvToggle').classList.toggle('text-white', tvOn);
+  $('btnTvToggle').classList.toggle('border-accentblue', tvOn);
+  $('btnTvToggle').classList.toggle('text-gray-500', !tvOn);
+  setTxt('btnTvText', tvOn ? 'CLOSE' : 'TV');
+  $('tvWidget').innerHTML = '';
+  if (tvOn && window.TradingView) {
+    new TradingView.widget({
+      autosize: true, symbol: MARKETS[market].tv, interval: '5', timezone: 'Asia/Jakarta',
+      theme: 'dark', style: '1', locale: lang === 'id' ? 'id' : 'en', hide_side_toolbar: true, allow_symbol_change: false,
+      container_id: 'tvWidget', backgroundColor: '#151924', gridColor: 'rgba(35,41,54,.5)'
+    });
+  }
+}
+
+/* ================= OVERLAY ANALISA ================= */
+function showOverlay() {
+  const o = $('validationOverlay');
+  if (!o) return;
+  const steps = $('validationSteps');
+  const bar = $('validationProgress');
+  if (steps) steps.innerHTML = '';
+  if (bar) bar.style.width = '0%';
+  o.classList.remove('hidden');
+  void o.offsetWidth;
+  o.classList.add('active');
+}
+function hideOverlay() {
+  const o = $('validationOverlay');
+  if (!o) return;
+  o.classList.remove('active');
+  setTimeout(() => o.classList.add('hidden'), 320);
+}
+async function runSteps(ms) {
+  const steps = T('steps'), box = $('validationSteps'), bar = $('validationProgress');
+  if (!box || !bar) return; // Guard clause
+  const start = Date.now(), per = Math.max(400, ms / steps.length);
+  for (let i = 0; i < steps.length; i++) {
+    const el = document.createElement('div');
+    el.className = 'validation-step active';
+    el.innerHTML = `<span class="validation-step-icon">●</span><span>${esc(steps[i])}</span>`;
+    box.appendChild(el);
+    bar.style.width = ((i + 1) / steps.length * 85) + '%';
+    await sleep(per);
+    el.classList.remove('active');
+    el.classList.add('done');
+    el.querySelector('.validation-step-icon').textContent = '✓';
+  }
+  const left = ms - (Date.now() - start);
+  if (left > 0) await sleep(left);
+  bar.style.width = '100%';
+}
+
+/* ================= INDIKATOR ================= */
+function calcEMA(c, p) {
+  if (!c || !c.length) return [];
+  const k = 2 / (p + 1), out = [];
+  let prev = c[0].c;
+  out.push(prev);
+  for (let i = 1; i < c.length; i++) { prev = c[i].c * k + prev * (1 - k); out.push(prev); }
+  return out;
+}
+function calcBB(c, p = 20, m = 2) {
+  if (!c || c.length < p) return { upper: 0, middle: 0, lower: 0 };
+  const cl = c.slice(-p).map(x => x.c);
+  const mid = cl.reduce((a, b) => a + b, 0) / p;
+  const sd = Math.sqrt(cl.reduce((a, b) => a + (b - mid) ** 2, 0) / p);
+  return { middle: +mid.toFixed(5), upper: +(mid + m * sd).toFixed(5), lower: +(mid - m * sd).toFixed(5) };
+}
+function calcBias(c) {
+  if (!c || c.length < 10) return { bias: 'WAIT', score: 0 };
+  const closes = c.map(x => x.c);
+  const period = Math.min(20, Math.max(2, Math.floor(closes.length / 2)));
+  const e = calcEMA(c, period);
+  const i = closes.length - 1;
+  const score = (closes[i] >= e[i] ? 1 : -1) + (closes[i] >= closes[0] ? 1 : -1);
+  return { bias: score > 0 ? 'BULLISH' : score < 0 ? 'BEARISH' : 'NETRAL', score };
+}
+
+/* ================= GENERATE SINYAL ================= */
+async function generateSignal() {
+  if (market === 'VISION') {
+    // Logika Vision (Upload Gambar) biarkan sama seperti sebelumnya
+    if (visionImages.length === 0) return alert('Silakan upload minimal 1 gambar chart terlebih dahulu.');
+
+    const style = $('tradingStyleSelect').value;
+    const btn = $('signalBtn'), bt = $('btnText');
+    btn.disabled = true;
+    bt.textContent = T('btnGenBusy');
+    showOverlay();
+    const anim = runSteps(3500);
+    let data = null, err = null;
+
+    try {
+        const email = localStorage.getItem(K.email);
+        const res = await fetch('/api/generate', {
+            method: 'POST',
+            headers: JSON_H,
+            body: JSON.stringify({
+                email, images: visionImages, tradingStyle: style, lang, langs: ['id', 'en']
+            })
+        });
+        const txt = await res.text();
+        try { data = JSON.parse(txt); } catch (e) { throw new Error('Server tidak kirim JSON (HTTP ' + res.status + ')'); }
+        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    } catch (e) { err = e.message; }
+
+    await anim;
+    hideOverlay();
+    await sleep(350);
+    btn.disabled = false;
+    bt.textContent = T('btnGenVision');
+
+    if (err) return alert('Gagal: ' + err);
+    const s = data && data.signal;
+    if (!s) return alert('AI tidak menemukan setup valid dari gambar tersebut.');
+
+    // Hasil vision disimpan terpisah (tidak masuk history dan rekap)
+    visionTrade = {
+        id: 'vision_' + Date.now(), key: 'VISION', style, signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
+        mode: s.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET', status: 'RUNNING', fill: 'NOW',
+        entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
+        zone: null, expiresAt: null,
+        confidence: s.confidence || 'MEDIUM', risk: s.risk || 'HIGH', setup: s.setup || 'Vision AI',
+        zoneLabel: 'AI Vision', zoneNote: lang === 'id' ? 'Berdasarkan gambar' : 'Based on image',
+        pip: s.pipSize, last: s.lastPrice,
+        createdAt: Date.now(), hits: {},
+        card: { reason: s.reason, reasons: pickReasons(s, lang), reasonLang: lang }, no: '-'
+    };
+    refreshCard();
+    return;
+  }
+
+  const btn = $('signalBtn');
+  const btnText = $('btnText');
+  const originalText = btnText.textContent;
+  
+  btnText.textContent = 'Menganalisa...';
+  btn.disabled = true;
+
+  try {
+    const style = $('tradingStyleSelect').value;
+    
+    // Ambil data candle dari memori lokal
+    const payload = {
+      email: localStorage.getItem(K.email),
+      symbol: market,
+      style: style,
+      currentPrice: prices[market]?.price || 0,
+      candles: {
+        m1: candles[market]?.[1] || [],
+        m5: candles[market]?.[5] || [],
+        m15: candles[market]?.[15] || []
+      },
+      lang: lang
     };
 
-    const [r1, r5, r15] = await Promise.all([
-      pick(m1, '1m', needM1), pick(m5, '5m', needM5), pick(m15, '15m', needM15),
-    ]);
+    const res = await post('/api/generate', payload);
+    const data = res.data;
 
-    if (needM1) m1 = r1.candles;
-    if (needM5) m5 = r5.candles;
-    if (needM15) m15 = r15.candles;
-
-    const failed = [['m1', r1, needM1], ['m5', r5, needM5], ['m15', r15, needM15]].filter(([, r, need]) => need && r.candles.length === 0);
-    if (failed.length) {
-      const detail = failed.map(([k, r]) => `${k}: ${describeTried(r.tried, price, lang)}`).join(' | ');
-      return res.status(502).json({ error: t.candle(symbol, price, detail) });
+    if (!res.ok || !data || !data.ok) {
+      alert(data?.reason || data?.error || 'Belum ada setup valid.');
+      return;
     }
 
-    if (needM1) m1 = mergeLiveBar(m1, price, 1);
-    if (needM5) m5 = mergeLiveBar(m5, price, 5);
-    if (needM15) m15 = mergeLiveBar(m15, price, 15);
+    const sig = data.signal;
 
-    const rrList = styleCfg.rr;
-    let result = { plan: null, reason: t.notProcessed };
-    let liveSteps = [];
+    // ==========================================
+    // 1. PENANGANAN SINYAL OCO (2 ARAH)
+    // ==========================================
+    if (sig.signal === 'OCO') {
+      let savedCount = 0;
+      
+      sig.orders.forEach(o => {
+        const newTrade = {
+          id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+          no: nextNo(),
+          key: market,
+          style: style,
+          signal: o.signal, // BUY / SELL
+          mode: 'LIMIT',
+          orderType: 'LIMIT',
+          entry: Number(o.entry),
+          sl: Number(o.sl),
+          tp1: o.tp1 ? Number(o.tp1) : null,
+          tp2: o.tp2 ? Number(o.tp2) : null,
+          tp3: o.tp3 ? Number(o.tp3) : null,
+          status: 'PENDING', // Wajib Pending karena limit
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 4 * 3600 * 1000, // Expire 4 jam
+          zone: o.zone,
+          zoneNote: o.zoneNote,
+          setup: o.setup,
+          confidence: sig.confidence,
+          risk: sig.risk,
+          reason: sig.reason,
+          pip: MARKETS[market].pip
+        };
+        
+        trades.push(newTrade);
+        activeId = newTrade.id;
+        savedCount++;
+      });
 
-    if (style === 'Scalping') {
-      liveSteps = [`Cek Premium/Discount Range (M15)`, `Analisa Struktur M5`, `Validasi Trigger M1`, `Entry Market NOW / OCO`];
-      result = await buildScalpPlan({ m1, m5, m15, price, rrList, ctx });
-    } else if (style === 'Day Trading') {
-      liveSteps = [`Cek Zona / FVG M5`, `Validasi Likuiditas (SSL/BSL)`, `Menghitung Limit Entry`, `Cek OCO / Refine M1`];
-      result = await buildDayPlan({ m1, m5, m15, price, rrList, ctx });
-    } else if (style === 'Intraday') {
-      liveSteps = [`Memeriksa bias M15 & H1`, `Mencari Zona M5`, `Cek OCO / Trend Follow`, `Validasi ERL/IRL`];
-      result = await buildIntradayPlan({ m5, m15, price, rrList, ctx });
-    } else if (style === 'Swing') {
-      liveSteps = [`Memeriksa bias D1, H4 & H1`, `Mencari Zona M15`, `Cek Trend Follow`, `Validasi ERL/IRL`];
-      result = await buildSwingPlan({ m15, price, rrList, ctx });
+      saveTrades();
+      renderAll();
+      
+      alert(`Berhasil membuat ${savedCount} Sinyal OCO (Buy Limit & Sell Limit).\nCek tab History untuk melihat kedua sinyal.`);
+      return;
     }
 
-    if (!result.plan) return res.status(200).json({ ok: false, reason: result.reason || t.noSetup, analysis_steps: liveSteps });
+    // ==========================================
+    // 2. PENANGANAN SINYAL NORMAL (1 ARAH)
+    // ==========================================
+    if (!sig.entry || !sig.sl) {
+      alert('Sinyal belum lengkap (Entry/SL kosong).');
+      return;
+    }
 
-    const payload = toSignal(result, styleCfg, ctx);
-    return res.status(200).json({ ok: true, analysis_steps: liveSteps, signal: payload });
+    const newTrade = {
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+      no: nextNo(),
+      key: market,
+      style: style,
+      signal: sig.signal, // BUY / SELL
+      mode: sig.mode || (sig.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET'),
+      orderType: sig.orderType,
+      entry: Number(sig.entry),
+      sl: Number(sig.sl),
+      tp1: sig.tp1 ? Number(sig.tp1) : null,
+      tp2: sig.tp2 ? Number(sig.tp2) : null,
+      tp3: sig.tp3 ? Number(sig.tp3) : null,
+      status: sig.status === 'PENDING' ? 'PENDING' : 'RUNNING',
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 4 * 3600 * 1000,
+      zone: sig.zone,
+      zoneNote: sig.zoneNote,
+      setup: sig.setup,
+      confidence: sig.confidence,
+      risk: sig.risk,
+      reason: sig.reason,
+      pip: MARKETS[market].pip
+    };
 
-  } catch (globalError) {
-    console.error('Global Handler Error:', globalError);
-    return res.status(500).json({ error: `Internal Server Error: ${globalError.message}` });
+    trades.push(newTrade);
+    activeId = newTrade.id;
+    saveTrades();
+    renderAll();
+
+  } catch (e) {
+    console.error(e);
+    alert('Gagal generate sinyal: ' + e.message);
+  } finally {
+    btnText.textContent = originalText;
+    btn.disabled = false;
   }
 }
+
+/* ================= BOOT ================= */
+$('authForm').addEventListener('submit', handleLogin);
+bindTap($('tickerList'), tapTicker);
+bindTap($('historyList'), viewTrade);
+bindTap($('setupChips'), viewTrade);
+loadLive();
+trades = loadTrades();
+applyLang();
+calSync();
+updateSessionCard();
+checkSession();
+requestAnimationFrame(frame);
+setInterval(() => { watchdog(); expirePending(); }, 1000);
+setInterval(() => { renderTickers(); renderHighlights(); renderHistory(); refreshCard(); renderSmcInfo(); updateSessionCard(); }, 500);
+setInterval(pump, 1200);
+setInterval(renderBias, 5000);
+setInterval(saveLive, 15000);
+window.addEventListener('beforeunload', saveLive);
+pump();
+log(lang === 'id' ? 'Sistem siap.' : 'System ready.', 'system');
+</script>
+</body>
+</html>
