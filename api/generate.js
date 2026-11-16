@@ -1,5 +1,5 @@
 // api/generate.js
-// v96 (Prioritas Momentum NOW untuk Scalp Agresif, Anti random entry, Konservatif OCO/LIMIT valid)
+// v97 (Scalp Agresif Wajib OCO 2 Arah jika bukan NOW, Swing Bounce Fallback, Konservatif fleksibel)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
@@ -80,8 +80,8 @@ const slFloor = (kind, ctx) => {
 
 const STYLES = {
   'Scalping': {
-    label: 'Scalping Agresif · Momentum NOW / OCO 2 Zona / LIMIT',
-    labelEn: 'Aggressive Scalping · Momentum NOW / OCO 2 Zones / LIMIT',
+    label: 'Scalping Agresif · Momentum NOW / OCO Wajib',
+    labelEn: 'Aggressive Scalping · Momentum NOW / OCO Mandatory',
     entryStyle: 'Agresif', entryStyleEn: 'Aggressive', mode: 'MIXED', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
   'Day Trading': {
@@ -506,6 +506,27 @@ function findPivots(candles, L) {
   return { highs, lows };
 }
 
+// Helper untuk mencari Swing High/Low terdekat dari harga saat ini
+function findNearestSwings(candles, price, minDist, maxDist) {
+  const { highs, lows } = findPivots(candles, 2);
+  let nearestHigh = null;
+  let nearestLow = null;
+
+  for (let i = highs.length - 1; i >= 0; i--) {
+    const h = highs[i].p;
+    if (h > price + minDist && h <= price + maxDist) {
+      if (!nearestHigh || h < nearestHigh) nearestHigh = h;
+    }
+  }
+  for (let i = lows.length - 1; i >= 0; i--) {
+    const l = lows[i].p;
+    if (l < price - minDist && l >= price - maxDist) {
+      if (!nearestLow || l > nearestLow) nearestLow = l;
+    }
+  }
+  return { nearestHigh, nearestLow };
+}
+
 function analyzePureSMCStructure(candles) {
   if (!candles || candles.length < 15) return { dir: 0, src: 'Default' };
   const { highs, lows } = findPivots(candles, SCALP_PIVOT);
@@ -854,7 +875,7 @@ async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, 
 
 // ═══════════════════════════ WORKFLOW MTF ═══════════════════════════
 
-// ── SCALPING AGRESIF: Momentum/FVG NOW → OCO (2 zona valid) → LIMIT (1 zona valid) → NULL ──
+// ── SCALPING AGRESIF: Momentum/FVG NOW → OCO (2 zona valid / Swing / Probable) WAJIB 2 ARAH ──
 async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
   const { pip } = ctx;
   const t = tx(ctx);
@@ -881,10 +902,8 @@ async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
   // ── 1. MARKET KENCENG (MOMENTUM) -> NOW ──
   if (isMomentumStrong) {
     const dir = structM1.dir;
-    // Guard against extreme FOMO (jarak > 3x ATR dari swing terdekat)
     const isOverextended = dir === 1 ? (price > recentExtreme(m1, -1, 10) + 3 * atrM1) : (price < recentExtreme(m1, 1, 10) - 3 * atrM1);
     
-    // Untuk agresif, jika kencang, abaikan konflik M15, langsung NOW
     if (!isOverextended) {
       return await finalizePlan({
         dir, entry: price, orderType: 'NOW', baseSL: recentExtreme(m1, dir, 5),
@@ -925,7 +944,7 @@ async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
     });
   }
 
-  // ── 3. AREA VALID (OCO 2 Arah / 1 Arah) ──
+  // ── 3. AREA VALID (WAJIB OCO 2 ARAH KARENA TIDAK ADA MOMENTUM) ──
   const demandBelow = findSDZones(m1, 1, price, { dispAtr: 0.8, freshOnly: true })
     .filter(z => z.top < price - 0.2 * atrM1 && z.dist > 0 && z.dist <= maxZoneDist)
     .sort((a, b) => a.dist - b.dist)[0] || null;
@@ -964,42 +983,73 @@ async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
     if (risk > 0) sellOrder = { dir: -1, entry, sl, tps: rrList.map(m => entry - risk * m), type: 'SELL LIMIT', label: 'Sell Limit · FVG M1', zone: { min: fvgBearAbove.lo, max: fvgBearAbove.hi } };
   }
 
-  // Jika ada 2 zona valid → OCO
-  if (buyOrder && sellOrder) {
-    return {
-      plan: {
-        isOCO: true,
-        orders: [buyOrder, sellOrder],
-        setup: 'OCO M1 (Zona Valid 2 Arah)',
-        chartContext: `M15 ${biasM15.src} -> M1 OCO`,
-      },
-      meta: {
-        confidence: 'HIGH',
-        riskLabel: 'MEDIUM',
-        reason: `Pasar ranging dengan 2 zona probabilitas tinggi. Pasang OCO untuk tangkap pantulan: BUY @ ${buyOrder.entry.toFixed(ctx.dec)}, SELL @ ${sellOrder.entry.toFixed(ctx.dec)}. Jika salah satu tersentuh, order lawannya otomatis dibatalkan.`,
-      },
-    };
+  // ✅ JIKA SALAH SATU KOSONG: Pakai Swing High/Low terdekat (Wajib OCO)
+  if (!buyOrder || !sellOrder) {
+    const minGap = 0.8 * atrM1;
+    const swings = findNearestSwings(m1, price, minGap, maxZoneDist);
+
+    if (!buyOrder && swings.nearestLow) {
+      const entry = swings.nearestLow;
+      const sl = clampSL(1, entry, entry - 0.3 * atrM1, 'scalp', ctx, atrM1);
+      const risk = entry - sl;
+      if (risk > 0) {
+        buyOrder = {
+          dir: 1, entry, sl, tps: rrList.map(m => entry + risk * m),
+          type: 'BUY LIMIT', label: 'Buy Limit · Swing Low Bounce',
+          zone: { min: entry - 0.1*atrM1, max: entry + 0.1*atrM1 }
+        };
+      }
+    }
+
+    if (!sellOrder && swings.nearestHigh) {
+      const entry = swings.nearestHigh;
+      const sl = clampSL(-1, entry, entry + 0.3 * atrM1, 'scalp', ctx, atrM1);
+      const risk = sl - entry;
+      if (risk > 0) {
+        sellOrder = {
+          dir: -1, entry, sl, tps: rrList.map(m => entry - risk * m),
+          type: 'SELL LIMIT', label: 'Sell Limit · Swing High Bounce',
+          zone: { min: entry - 0.1*atrM1, max: entry + 0.1*atrM1 }
+        };
+      }
+    }
   }
 
-  // Jika hanya 1 zona valid → LIMIT 1 Arah
-  const singleOrder = buyOrder || sellOrder;
-  if (singleOrder) {
-    return await finalizePlan({
-      dir: singleOrder.dir, entry: singleOrder.entry, orderType: 'LIMIT', baseSL: singleOrder.sl,
-      kind: 'scalp', atrVal: atrM1, ctx, rrList,
-      confidence: 'MEDIUM', setup: singleOrder.label, zoneNote: singleOrder.label, zoneRange: singleOrder.zone,
-      timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
-      chartContext: `M15 ${biasM15.src} -> M1 1 Arah LIMIT`,
-      head: t.headLine(t.title.scalp, singleOrder.dir === 1 ? 'BUY' : 'SELL', 'LIMIT', ctx.symbol),
-      lines: [`Hanya ada 1 zona valid. Menunggu pullback ke ${singleOrder.label}.`],
-    });
+  // ✅ Fallback Terakhir jika Swing tidak ada: Paksa jarak 1.5 ATR (Probable Bounce)
+  if (!buyOrder) {
+    const entry = price - (1.5 * atrM1);
+    const sl = clampSL(1, entry, entry - 0.3 * atrM1, 'scalp', ctx, atrM1);
+    const risk = entry - sl;
+    if (risk > 0) {
+       buyOrder = { dir: 1, entry, sl, tps: rrList.map(m => entry + risk * m), type: 'BUY LIMIT', label: 'Buy Limit · Probable Bounce', zone: { min: entry - 0.1*atrM1, max: entry + 0.1*atrM1 } };
+    }
+  }
+  if (!sellOrder) {
+    const entry = price + (1.5 * atrM1);
+    const sl = clampSL(-1, entry, entry + 0.3 * atrM1, 'scalp', ctx, atrM1);
+    const risk = sl - entry;
+    if (risk > 0) {
+       sellOrder = { dir: -1, entry, sl, tps: rrList.map(m => entry - risk * m), type: 'SELL LIMIT', label: 'Sell Limit · Probable Bounce', zone: { min: entry - 0.1*atrM1, max: entry + 0.1*atrM1 } };
+    }
   }
 
-  // Tidak ada zona probabilitas tinggi
-  return { plan: null, reason: 'Tidak ada zona valid (FVG/OB) di M1 saat ini. Menghindari entry acak.' };
+  // Scalping Agresif WAJIB OCO jika bukan NOW
+  return {
+    plan: {
+      isOCO: true,
+      orders: [buyOrder, sellOrder],
+      setup: 'OCO M1 (Agresif 2 Arah)',
+      chartContext: `M15 ${biasM15.src} -> M1 OCO Wajib`,
+    },
+    meta: {
+      confidence: 'HIGH',
+      riskLabel: 'MEDIUM',
+      reason: `Tidak ada momentum untuk NOW. Karena SL/TP tipis, dipasang OCO 2 arah untuk probabilitas pantulan lebih tinggi: BUY @ ${buyOrder.entry.toFixed(ctx.dec)}, SELL @ ${sellOrder.entry.toFixed(ctx.dec)}. Jika salah satu tersentuh, order lawannya otomatis dibatalkan.`,
+    },
+  };
 }
 
-// ── SCALPING KONSERVATIF: OCO (2 zona valid) → LIMIT (1 zona valid) → NULL ──
+// ── SCALPING KONSERVATIF: OCO (2 zona valid) → LIMIT (1 zona valid) ──
 async function buildDayPlan({ m1, m5, m15, price, rrList, ctx }) {
   const t = tx(ctx);
   const { f, pip } = ctx;
