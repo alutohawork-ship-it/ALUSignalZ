@@ -366,20 +366,29 @@ async function tlFetch(url) {
 
   let last = { status: 500, detail: '' };
   for (const idx of order) {
-    const r = await fetch(url, { headers: { 'x-api-key': API_KEYS[idx] } });
-    if (r.ok) return { response: r, keyNo: idx + 1 };
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000); // Max 4 detik
+    try {
+      const r = await fetch(url, { headers: { 'x-api-key': API_KEYS[idx] }, signal: controller.signal });
+      clearTimeout(timeoutId);
+      
+      if (r.ok) return { response: r, keyNo: idx + 1 };
 
-    const text = await r.text().catch(() => '');
-    let body = {};
-    try { body = JSON.parse(text); } catch {}
-    last = { status: r.status, detail: text.slice(0, 300) };
+      const text = await r.text().catch(() => '');
+      let body = {};
+      try { body = JSON.parse(text); } catch {}
+      last = { status: r.status, detail: text.slice(0, 300) };
 
-    if (r.status === 429 || r.status === 401) {
-      await tlSetCooldown(idx, tlCooldownFor(r.status, body, r.headers.get('retry-after')));
-      continue;
+      if (r.status === 429 || r.status === 401) {
+        await tlSetCooldown(idx, tlCooldownFor(r.status, body, r.headers.get('retry-after')));
+        continue;
+      }
+      if (r.status === 403) continue;
+      break;
+    } catch(e) {
+      clearTimeout(timeoutId);
+      last = { status: 500, detail: e.message };
     }
-    if (r.status === 403) continue;
-    break;
   }
   return { response: null, status: last.status, detail: last.detail };
 }
@@ -421,8 +430,14 @@ async function fetchTickerLayerRows(cand, interval, need) {
 
 function cleanCandles(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return [];
-  return rows.map(c => ({ t: Number(c?.t), o: Number(c?.o), h: Number(c?.h), l: Number(c?.l), c: Number(c?.c) }))
-    .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite)).sort((a, b) => a.t - b.t);
+  return rows.map(c => ({ 
+    t: Number(c?.t ?? c?.time), 
+    o: Number(c?.o ?? c?.open), 
+    h: Number(c?.h ?? c?.high), 
+    l: Number(c?.l ?? c?.low), 
+    c: Number(c?.c ?? c?.close) 
+  }))
+  .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite)).sort((a, b) => a.t - b.t);
 }
 
 function mergeLiveBar(candles, price, tfMin) {
@@ -660,7 +675,7 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const timeoutId = setTimeout(() => controller.abort(), 3500); // Diubah dari 6000 ke 3500
 
     const resp = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
       method: 'POST',
@@ -834,7 +849,7 @@ async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
   const fvgBullBelow = fvgs.filter(f => f.dir === 1 && f.hi < price - 0.2 * atrM1 && (price - f.hi) < 2.5 * atrM1).sort((a, b) => b.hi - a.hi)[0] || null;
 
   const supplyAbove = findSDZones(m1, -1, price, { dispAtr: 0.8, freshOnly: true }).filter(z => z.bottom > price + 0.2 * atrM1 && z.dist > 0).sort((a, b) => a.dist - b.dist)[0] || null;
-  const fvgBearAbove = fvgs.filter(f => f.dir === -1 && f.lo > price + 0.2 * atrM1 && (f.lo - price) < 2.5 * atrM1).sort((a, b) => a.lo - b.lo)[0] || null;
+  const fvgBearAbove = fvgs.filter(f => f.dir === -1 && f.lo > price + 0.2 * atrM1 && (f.lo - price) < 2.5 * atrM1).sort((a, b) => b.lo - a.lo)[0] || null;
 
   let buyOrder = null, sellOrder = null;
 
