@@ -1,7 +1,8 @@
 // api/generate.js
-// v102 (Scalping agresif: NOW prioritas; OCO optional dan wajib strong zone.
-//       SL selalu di balik likuiditas (EQL/EQH/swing), tidak dipotong paksa.
-//       Scalping konservatif memakai aturan yang sama. Vision tetap.)
+// v103 (Agresif: NOW dari event struktur M1 (BOS/CHoCH/CISD), flip ke LIMIT jika zona lawan
+//       strong dekat (30 pip), ranging -> OCO. SL selalu di balik likuiditas, scalp gold 25-30 pip.
+//       Konservatif: selalu menghasilkan sinyal, memilih strong zone fresh terdekat M5/M1.
+//       Vision tetap.)
 
 export const config = {
   api: { bodyParser: { sizeLimit: '15mb' } },
@@ -89,13 +90,13 @@ const slFloor = (kind, ctx) => {
 
 const STYLES = {
   'Scalping': {
-    label: 'Scalping Agresif · Momentum NOW / OCO Optional (Strong Zone)',
-    labelEn: 'Aggressive Scalping · Momentum NOW / Optional OCO (Strong Zone)',
+    label: 'Scalping Agresif · NOW dari Struktur M1 / LIMIT / OCO (Ranging)',
+    labelEn: 'Aggressive Scalping · NOW from M1 Structure / LIMIT / OCO (Ranging)',
     entryStyle: 'Agresif', entryStyleEn: 'Aggressive', mode: 'MIXED', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
   'Day Trading': {
-    label: 'Scalping Konservatif · LIMIT / OCO Optional (Strong Zone, SL di balik likuiditas)',
-    labelEn: 'Conservative Scalping · LIMIT / Optional OCO (Strong Zone, SL behind liquidity)',
+    label: 'Scalping Konservatif · Strong Zone Terdekat (wajib sinyal) · LIMIT / OCO',
+    labelEn: 'Conservative Scalping · Nearest Strong Zone (always signal) · LIMIT / OCO',
     entryStyle: 'Konservatif', entryStyleEn: 'Conservative', mode: 'LIMIT', kind: 'day',
     rr: [1.0, 2.0, 3.0],
   },
@@ -157,13 +158,6 @@ function getRangeInfo(candles, lookback = 50) {
   const low = Math.min(...s.map(c => c.l));
   const eq = (high + low) / 2;
   return { high, low, eq };
-}
-
-function liquidityInsideZone(candles, zone, lookback = 30) {
-  const s = candles.slice(-lookback);
-  const lows = s.map(c => c.l).filter(l => l > zone.bottom && l < zone.top);
-  const highs = s.map(c => c.h).filter(h => h > zone.bottom && h < zone.top);
-  return { insideLows: lows, insideHighs: highs };
 }
 
 function sanitizeEntry({ dir, entry, price, orderType, pip }) {
@@ -320,9 +314,6 @@ MUST explain the narrative:
   },
 };
 const tx = ctx => TX[ctx.lang] || TX.id;
-
-const SRC_EN = { 'BOS Bullish': 'BOS Bullish', 'BOS Bearish': 'BOS Bearish', 'Struktur HH + HL': 'HH + HL', 'Struktur LH + LL': 'LH + LL', 'Mitigasi FVG / Inducement': 'FVG mitigation', 'Sweep FVG / OB': 'Sweep', 'Default': 'Default' };
-const srcName = (src, lang) => (lang === 'en' ? (SRC_EN[src] || src) : src);
 
 const TL_ROUTE = {
   XAUUSD: ['commodities', 'XAUUSD'], XAUUSDX: ['commodities', 'XAUUSD'],
@@ -972,12 +963,25 @@ function validateVisionPlan({ dir, entry, sl, tps, ctx }) {
   return { ok: true, sl, tps: finalTps, riskPips, note };
 }
 
-// ═══════════════════════════ STRONG ZONE & LIKUIDITAS (v102) ═══════════════════════════
-const STRONG_DISP_ATR = 1.5;   // displacement minimal (kelipatan ATR) agar zona dianggap kuat
-const STRONG_SWEEP_BARS = 12;  // lookback likuiditas yang harus disapu sebelum base candle
-const LIQ_BUF_ATR = 0.3;       // buffer SL di balik likuiditas (kelipatan ATR)
-const SCALP_MAX_RISK_ATR = 5;  // SL scalp maksimal (kelipatan ATR M1); lebih lebar = setup ditolak
-const DAY_MAX_RISK_ATR = 6;    // SL konservatif maksimal (kelipatan ATR M5); lebih lebar = setup ditolak
+// ═══════════════════════════ STRONG ZONE, LIKUIDITAS & STRUKTUR M1 (v103) ═══════════════════════════
+const STRONG_DISP_ATR = 1.5;    // displacement minimal (kelipatan ATR) agar zona dianggap kuat
+const STRONG_SWEEP_BARS = 12;   // lookback likuiditas yang harus disapu sebelum base candle
+const LIQ_BUF_ATR = 0.3;        // buffer SL di balik likuiditas (kelipatan ATR)
+const SCALP_MAX_RISK_ATR = 5;   // SL scalp maksimal (kelipatan ATR M1); lebih lebar = setup ditolak
+const DAY_MAX_RISK_ATR = 6;     // SL konservatif maksimal (kelipatan ATR M5); lebih lebar = dibatasi
+
+// Struktur M1 (event BOS/CHoCH/CISD)
+const SCALP_STRUCT_BARS = 60;    // jendela struktur (candle M1)
+const SCALP_EVENT_FRESH = 12;    // event harus terjadi dalam N candle terakhir
+const SCALP_RECLAIM_ATR = 0.15;  // toleransi reclaim (kelipatan ATR M1)
+const SCALP_CISD_LOOK = 6;       // candle lawan terakhir yang dicari sebelum displacement
+const SCALP_DISP_ATR = 1.2;      // displacement minimal untuk CISD (kelipatan ATR M1)
+const SCALP_MAX_CHASE_ATR = 1.5; // harga tidak boleh lebih dari ini dari level event
+
+// Arah flip dan ranging
+const SCALP_OPP_NEAR_PIPS = 30;  // zona lawan strong dalam jarak ini (pip) -> LIMIT, bukan NOW
+const SCALP_RANGE_BARS = 20;     // jendela cek ranging (candle M1)
+const SCALP_RANGE_ATR = 2.5;     // rentang < nilai ini (kelipatan ATR) = ranging/sideways
 
 // Kelompokkan pivot yang harganya berdekatan (EQH/EQL)
 function clusterPivots(pivots, tol) {
@@ -1019,7 +1023,7 @@ function strongZoneList(candles, dir, price, atrVal, maxDist) {
       ? base.l < Math.min(...prior.map(c => c.l))
       : base.h > Math.max(...prior.map(c => c.h));
     if (!swept) continue;
-    out.push({ bottom: z.bottom, top: z.top, dist: z.dist, tag: dir === 1 ? 'Demand' : 'Supply' });
+    out.push({ bottom: z.bottom, top: z.top, dist: z.dist, tag: dir === 1 ? 'Demand' : 'Supply', strong: true });
   }
 
   for (const f of findRecentFVGs(candles, 30)) {
@@ -1028,7 +1032,7 @@ function strongZoneList(candles, dir, price, atrVal, maxDist) {
     if (!mid || Math.abs(mid.c - mid.o) < STRONG_DISP_ATR * atrVal) continue;
     const dist = dir === 1 ? price - f.hi : f.lo - price;
     if (dist < 0 || dist > maxDist) continue;
-    out.push({ bottom: f.lo, top: f.hi, dist, tag: 'FVG' });
+    out.push({ bottom: f.lo, top: f.hi, dist, tag: 'FVG', strong: true });
   }
 
   return out.sort((a, b) => a.dist - b.dist);
@@ -1115,8 +1119,8 @@ function buildOcoResult(buy, sell, { ctx, setup, chartContext, confidence }) {
   };
 }
 
-// Pilih OCO jika kedua sisi valid. Jika satu sisi saja, LIMIT searah bias. Jika tidak ada, tunggu.
-function pickLimitSetup({ buyO, sellO, bias, ctx, setupPrefix, chartContext, confidence, timeframes, rangeInfo, kind, orderTypeLabel }) {
+// Pilih OCO jika kedua sisi valid. Jika satu sisi saja, LIMIT searah bias. Jika tidak ada, null.
+function pickLimitSetup({ buyO, sellO, bias, ctx, setupPrefix, chartContext, confidence = 'HIGH' }) {
   if (buyO && sellO) {
     return buildOcoResult(buyO, sellO, {
       ctx, setup: `${setupPrefix} OCO (Strong Zone)`, chartContext, confidence,
@@ -1127,19 +1131,99 @@ function pickLimitSetup({ buyO, sellO, bias, ctx, setupPrefix, chartContext, con
   return null;
 }
 
+// Event struktur M1 yang masih valid (BOS, CHoCH, CISD), urut dari yang paling baru
+function scalpStructureEvents(m1, atrM1) {
+  const s = m1.slice(-SCALP_STRUCT_BARS);
+  const n = s.length;
+  if (n < 20 || !(atrM1 > 0)) return { events: [], trend: 0, current: null };
+
+  const tol = SCALP_RECLAIM_ATR * atrM1;
+  const { highs, lows } = findPivots(s, 2);
+  const events = [];
+
+  // Trend dari dua swing terakhir
+  let trend = 0;
+  if (highs.length >= 2 && lows.length >= 2) {
+    const [h1, h2] = highs.slice(-2);
+    const [l1, l2] = lows.slice(-2);
+    if (h2.p > h1.p && l2.p > l1.p) trend = 1;
+    else if (h2.p < h1.p && l2.p < l1.p) trend = -1;
+  }
+
+  // BOS / CHoCH: candle pertama yang close menembus swing high/low terakhir
+  const lastH = highs[highs.length - 1];
+  const lastL = lows[lows.length - 1];
+  if (lastH) {
+    for (let i = lastH.i + 1; i < n; i++) {
+      if (s[i].c > lastH.p) {
+        events.push({ idx: i, dir: 1, type: trend === -1 ? 'CHoCH Bullish' : 'BOS Bullish', level: lastH.p });
+        break;
+      }
+    }
+  }
+  if (lastL) {
+    for (let i = lastL.i + 1; i < n; i++) {
+      if (s[i].c < lastL.p) {
+        events.push({ idx: i, dir: -1, type: trend === 1 ? 'CHoCH Bearish' : 'BOS Bearish', level: lastL.p });
+        break;
+      }
+    }
+  }
+
+  // CISD: displacement searah yang close melewati open candle lawan terakhir sebelumnya
+  for (let i = Math.max(SCALP_CISD_LOOK, n - SCALP_EVENT_FRESH); i < n; i++) {
+    const c = s[i];
+    const body = c.c - c.o;
+    if (Math.abs(body) < SCALP_DISP_ATR * atrM1) continue;
+    const up = body > 0;
+    let k = -1;
+    for (let j = i - 1; j >= Math.max(0, i - SCALP_CISD_LOOK); j--) {
+      if (up ? s[j].c < s[j].o : s[j].c > s[j].o) { k = j; break; }
+    }
+    if (k < 0) continue;
+    if ((up && c.c > s[k].o) || (!up && c.c < s[k].o)) {
+      events.push({ idx: i, dir: up ? 1 : -1, type: up ? 'CISD Bullish' : 'CISD Bearish', level: s[k].o });
+    }
+  }
+
+  // Hanya event yang masih fresh dan belum direclaim (close kembali melewati level)
+  const valid = events.filter(e => {
+    if (e.idx < n - SCALP_EVENT_FRESH) return false;
+    const after = s.slice(e.idx + 1);
+    if (e.dir === 1) return !after.some(c => c.c < e.level - tol);
+    return !after.some(c => c.c > e.level + tol);
+  });
+  valid.sort((a, b) => b.idx - a.idx);
+
+  return { events: valid, trend, current: valid[0] || null };
+}
+
+// Ranging: rentang harga 20 candle M1 terakhir masih sempit
+function isRangingM1(m1, atrM1) {
+  const s = m1.slice(-SCALP_RANGE_BARS);
+  if (s.length < SCALP_RANGE_BARS || !(atrM1 > 0)) return false;
+  const hi = Math.max(...s.map(c => c.h));
+  const lo = Math.min(...s.map(c => c.l));
+  return (hi - lo) < SCALP_RANGE_ATR * atrM1;
+}
+
 // ═══════════════════════════ WORKFLOW MTF ═══════════════════════════
 
 // ── SCALPING AGRESIF ──
-// Prioritas: 1) Momentum NOW  2) FVG NOW  3) NOW di dalam strong zone searah bias
-// 4) LIMIT / OCO hanya di strong zone dengan SL di balik likuiditas (OCO optional)
+// 1) Ranging -> OCO / LIMIT dari strong zone
+// 2) Event struktur / FVG searah -> NOW, kecuali ada zona lawan strong dalam 30 pip -> LIMIT di zona itu
+// 3) NOW di dalam strong zone searah bias
+// 4) Tidak ada NOW -> OCO / LIMIT dari strong zone
 async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
   const { pip } = ctx;
   const t = tx(ctx);
+  const fx = v => Number(Number(v).toFixed(ctx.dec));
   const atrM1 = atrOf(m1, pip);
   const maxZoneDist = SCALP_MAX_DIST_ATR * atrM1;
+  const maxNearDist = SCALP_OPP_NEAR_PIPS * pip;
+  const tol = SCALP_RECLAIM_ATR * atrM1;
 
   const biasM15 = analyzePureSMCStructure(m15);
-  const structM1 = analyzePureSMCStructure(m1);
   const rangeM15 = getRangeInfo(m15, 50);
   let rangeInfoStr = '-';
   if (rangeM15 && rangeM15.high > rangeM15.low) {
@@ -1148,94 +1232,111 @@ async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
     rangeInfoStr = `M15 Range: ${pricePos > 0.5 ? 'PREMIUM' : 'DISCOUNT'} (Pos: ${(pricePos * 100).toFixed(1)}%)`;
   }
 
-  const lastM1 = m1[m1.length - 1];
-  const bodyM1 = Math.abs(lastM1.c - lastM1.o);
-  const isMomentumStrong = structM1.dir !== 0 && bodyM1 > 1.2 * atrM1;
+  const ranging = isRangingM1(m1, atrM1);
   const fvgs = findRecentFVGs(m1, 20);
-
-  // ── 1. MOMENTUM -> NOW (prioritas utama) ──
-  if (isMomentumStrong) {
-    const dir = structM1.dir;
-    const isOverextended = dir === 1 ? (price > recentExtreme(m1, -1, 10) + 3 * atrM1) : (price < recentExtreme(m1, 1, 10) - 3 * atrM1);
-
-    if (!isOverextended) {
-      return await finalizePlan({
-        dir, entry: price, orderType: 'NOW', baseSL: recentExtreme(m1, dir, 5),
-        kind: 'scalp', atrVal: atrM1, ctx, rrList,
-        confidence: 'HIGH', setup: 'M1 Momentum (Market NOW)', zoneNote: 'M1 Momentum', zoneRange: { min: price, max: price },
-        timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
-        chartContext: `M1 Momentum Kuat -> NOW ${dir === 1 ? 'BUY' : 'SELL'}`,
-        head: t.headLine(t.title.scalp, dir === 1 ? 'BUY' : 'SELL', 'NOW', ctx.symbol),
-        lines: [`Market kencang terdeteksi. Eksekusi Market NOW searah momentum M1.`],
-      });
-    }
-  }
-
-  // ── 2. FVG -> NOW (harga di dalam FVG M1 searah bias) ──
-  const inFvgBull = fvgs.find(f => f.dir === 1 && price >= f.lo && price <= f.hi);
-  const inFvgBear = fvgs.find(f => f.dir === -1 && price >= f.lo && price <= f.hi);
-
-  if (inFvgBull && biasM15.dir >= 0) {
-    return await finalizePlan({
-      dir: 1, entry: price, orderType: 'NOW', baseSL: inFvgBull.lo - 0.25 * atrM1,
-      kind: 'scalp', atrVal: atrM1, ctx, rrList,
-      confidence: 'HIGH', setup: 'M1 Bullish FVG (Market NOW)', zoneNote: 'M1 Bullish FVG', zoneRange: { min: inFvgBull.lo, max: inFvgBull.hi },
-      timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
-      chartContext: `M15 ${biasM15.src} -> M1 FVG NOW BUY`,
-      head: t.headLine(t.title.scalp, 'BUY', 'NOW', ctx.symbol),
-      lines: [`Harga berada di zona FVG Bullish M1. Eksekusi NOW.`],
-    });
-  }
-  if (inFvgBear && biasM15.dir <= 0) {
-    return await finalizePlan({
-      dir: -1, entry: price, orderType: 'NOW', baseSL: inFvgBear.hi + 0.25 * atrM1,
-      kind: 'scalp', atrVal: atrM1, ctx, rrList,
-      confidence: 'HIGH', setup: 'M1 Bearish FVG (Market NOW)', zoneNote: 'M1 Bearish FVG', zoneRange: { min: inFvgBear.lo, max: inFvgBear.hi },
-      timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
-      chartContext: `M15 ${biasM15.src} -> M1 FVG NOW SELL`,
-      head: t.headLine(t.title.scalp, 'SELL', 'NOW', ctx.symbol),
-      lines: [`Harga berada di zona FVG Bearish M1. Eksekusi NOW.`],
-    });
-  }
-
-  // Strong zone M1 dan level likuiditas (dipakai NOW dan LIMIT)
   const liq = liquidityLevels(m1.slice(-100), atrM1);
   const demandZ = strongZoneList(m1, 1, price, atrM1, maxZoneDist);
   const supplyZ = strongZoneList(m1, -1, price, atrM1, maxZoneDist);
 
-  // ── 3. NOW di dalam strong zone searah bias (entry di harga live, SL di balik likuiditas) ──
-  const inDemand = demandZ.find(z => price >= z.bottom && price <= z.top);
-  const inSupply = supplyZ.find(z => price >= z.bottom && price <= z.top);
+  // ── 1 & 2. KANDIDAT NOW (dilewati jika ranging) ──
+  if (!ranging) {
+    const cands = [];
 
-  if (inDemand && biasM15.dir >= 0) {
-    const o = buildLiquidityOrder({ dir: 1, zone: inDemand, liq, atrVal: atrM1, ctx, kind: 'scalp', maxRiskAtr: SCALP_MAX_RISK_ATR, rrList, entryOverride: price });
-    if (o) return await planFromOrder(o, {
-      ctx, kind: 'scalp', orderType: 'NOW', setup: 'M1 Strong Demand (Market NOW)',
-      chartContext: `M15 ${biasM15.src} -> M1 Strong Demand NOW BUY`, timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
-      head: t.headLine(t.title.scalp, 'BUY', 'NOW', ctx.symbol),
-      lines: ['Harga di dalam strong demand M1. Eksekusi NOW dengan SL di balik likuiditas.'],
-      confidence: 'HIGH',
-    });
-  }
-  if (inSupply && biasM15.dir <= 0) {
-    const o = buildLiquidityOrder({ dir: -1, zone: inSupply, liq, atrVal: atrM1, ctx, kind: 'scalp', maxRiskAtr: SCALP_MAX_RISK_ATR, rrList, entryOverride: price });
-    if (o) return await planFromOrder(o, {
-      ctx, kind: 'scalp', orderType: 'NOW', setup: 'M1 Strong Supply (Market NOW)',
-      chartContext: `M15 ${biasM15.src} -> M1 Strong Supply NOW SELL`, timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
-      head: t.headLine(t.title.scalp, 'SELL', 'NOW', ctx.symbol),
-      lines: ['Harga di dalam strong supply M1. Eksekusi NOW dengan SL di balik likuiditas.'],
-      confidence: 'HIGH',
-    });
+    // Event struktur M1 yang masih valid
+    const ev = scalpStructureEvents(m1, atrM1).current;
+    if (ev) {
+      const sideOk = ev.dir === 1 ? price > ev.level - tol : price < ev.level + tol;
+      const chased = Math.abs(price - ev.level) > SCALP_MAX_CHASE_ATR * atrM1;
+      const overextended = ev.dir === 1
+        ? price > recentExtreme(m1, -1, 10) + 3 * atrM1
+        : price < recentExtreme(m1, 1, 10) - 3 * atrM1;
+      if (sideOk && !chased && !overextended) {
+        const baseSL = ev.dir === 1
+          ? Math.min(ev.level, recentExtreme(m1, 1, 5))
+          : Math.max(ev.level, recentExtreme(m1, -1, 5));
+        cands.push({ dir: ev.dir, type: ev.type, baseSL, zone: null, level: ev.level });
+      }
+    }
+
+    // FVG M1 tempat harga berada, searah bias M15
+    const inFvgBull = fvgs.find(f => f.dir === 1 && price >= f.lo && price <= f.hi);
+    const inFvgBear = fvgs.find(f => f.dir === -1 && price >= f.lo && price <= f.hi);
+    if (inFvgBull && biasM15.dir >= 0) {
+      cands.push({ dir: 1, type: 'M1 Bullish FVG', baseSL: inFvgBull.lo - 0.25 * atrM1, zone: { min: inFvgBull.lo, max: inFvgBull.hi }, level: inFvgBull.lo });
+    }
+    if (inFvgBear && biasM15.dir <= 0) {
+      cands.push({ dir: -1, type: 'M1 Bearish FVG', baseSL: inFvgBear.hi + 0.25 * atrM1, zone: { min: inFvgBear.lo, max: inFvgBear.hi }, level: inFvgBear.hi });
+    }
+
+    for (const c of cands) {
+      // Zona lawan strong dalam jarak dekat? Pasang LIMIT di zona itu.
+      const opp = strongZoneList(m1, -c.dir, price, atrM1, maxNearDist)
+        .filter(z => (c.dir === 1 ? z.bottom > price : z.top < price))[0];
+
+      if (opp) {
+        const o = buildLiquidityOrder({ dir: -c.dir, zone: opp, liq, atrVal: atrM1, ctx, kind: 'scalp', maxRiskAtr: SCALP_MAX_RISK_ATR, rrList });
+        if (o) {
+          const pips = Math.round(opp.dist / pip);
+          return await planFromOrder(o, {
+            ctx, kind: 'scalp', orderType: 'LIMIT',
+            setup: `${o.dir === 1 ? 'BUY' : 'SELL'} LIMIT (flip ${c.type}, zona lawan ${pips} pip)`,
+            chartContext: `${c.type} ${c.dir === 1 ? 'naik' : 'turun'}, zona ${opp.tag} ${pips} pip -> LIMIT`,
+            timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
+            head: t.headLine(t.title.scalp, o.dir === 1 ? 'BUY' : 'SELL', 'LIMIT', ctx.symbol),
+            lines: [`${c.type} searah ${c.dir === 1 ? 'naik' : 'turun'}, tetapi zona ${c.dir === 1 ? 'SELL' : 'BUY'} strong ada ${pips} pip di depan. Entry dipasang LIMIT di zona itu, bukan NOW.`],
+            confidence: 'HIGH',
+          });
+        }
+      }
+
+      // Tidak ada zona lawan dekat: NOW
+      const r = await finalizePlan({
+        dir: c.dir, entry: price, orderType: 'NOW', baseSL: c.baseSL,
+        kind: 'scalp', atrVal: atrM1, ctx, rrList,
+        confidence: 'HIGH', setup: `${c.type} (Market NOW)`, zoneNote: c.type,
+        zoneRange: c.zone || { min: price, max: price },
+        timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
+        chartContext: `${c.type} -> NOW ${c.dir === 1 ? 'BUY' : 'SELL'}`,
+        head: t.headLine(t.title.scalp, c.dir === 1 ? 'BUY' : 'SELL', 'NOW', ctx.symbol),
+        lines: [`${c.type} searah ${c.dir === 1 ? 'naik' : 'turun'}, tidak ada zona lawan strong dalam ${SCALP_OPP_NEAR_PIPS} pip. Eksekusi NOW.`],
+      });
+      if (r.plan) return r;
+    }
+
+    // NOW di dalam strong zone searah bias
+    const inDemand = demandZ.find(z => price >= z.bottom && price <= z.top);
+    const inSupply = supplyZ.find(z => price >= z.bottom && price <= z.top);
+    if (inDemand && biasM15.dir >= 0) {
+      const o = buildLiquidityOrder({ dir: 1, zone: inDemand, liq, atrVal: atrM1, ctx, kind: 'scalp', maxRiskAtr: SCALP_MAX_RISK_ATR, rrList, entryOverride: price });
+      if (o) return await planFromOrder(o, {
+        ctx, kind: 'scalp', orderType: 'NOW', setup: 'M1 Strong Demand (Market NOW)',
+        chartContext: `M15 ${biasM15.src} -> M1 Strong Demand NOW BUY`, timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
+        head: t.headLine(t.title.scalp, 'BUY', 'NOW', ctx.symbol),
+        lines: ['Harga di dalam strong demand M1. Eksekusi NOW dengan SL di balik likuiditas.'],
+        confidence: 'HIGH',
+      });
+    }
+    if (inSupply && biasM15.dir <= 0) {
+      const o = buildLiquidityOrder({ dir: -1, zone: inSupply, liq, atrVal: atrM1, ctx, kind: 'scalp', maxRiskAtr: SCALP_MAX_RISK_ATR, rrList, entryOverride: price });
+      if (o) return await planFromOrder(o, {
+        ctx, kind: 'scalp', orderType: 'NOW', setup: 'M1 Strong Supply (Market NOW)',
+        chartContext: `M15 ${biasM15.src} -> M1 Strong Supply NOW SELL`, timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
+        head: t.headLine(t.title.scalp, 'SELL', 'NOW', ctx.symbol),
+        lines: ['Harga di dalam strong supply M1. Eksekusi NOW dengan SL di balik likuiditas.'],
+        confidence: 'HIGH',
+      });
+    }
   }
 
-  // ── 4. LIMIT / OCO (optional): hanya strong zone di bawah/atas harga, SL di balik likuiditas ──
+  // ── 3. RANGING / SIDEWAYS / TIDAK ADA NOW: OCO dari strong zone ──
   const minGap = 0.1 * atrM1;
-  const buyO = demandZ.filter(z => z.top < price - minGap)[0];
-  const sellO = supplyZ.filter(z => z.bottom > price + minGap)[0];
-  const buyOrder = buyO ? buildLiquidityOrder({ dir: 1, zone: buyO, liq, atrVal: atrM1, ctx, kind: 'scalp', maxRiskAtr: SCALP_MAX_RISK_ATR, rrList }) : null;
-  const sellOrder = sellO ? buildLiquidityOrder({ dir: -1, zone: sellO, liq, atrVal: atrM1, ctx, kind: 'scalp', maxRiskAtr: SCALP_MAX_RISK_ATR, rrList }) : null;
+  const buyZ = demandZ.filter(z => z.top < price - minGap)[0];
+  const sellZ = supplyZ.filter(z => z.bottom > price + minGap)[0];
+  const buyOrder = buyZ ? buildLiquidityOrder({ dir: 1, zone: buyZ, liq, atrVal: atrM1, ctx, kind: 'scalp', maxRiskAtr: SCALP_MAX_RISK_ATR, rrList }) : null;
+  const sellOrder = sellZ ? buildLiquidityOrder({ dir: -1, zone: sellZ, liq, atrVal: atrM1, ctx, kind: 'scalp', maxRiskAtr: SCALP_MAX_RISK_ATR, rrList }) : null;
 
-  const pick = pickLimitSetup({ buyO: buyOrder, sellO: sellOrder, bias: biasM15.dir, ctx, setupPrefix: 'M1', chartContext: `M15 ${biasM15.src} -> M1 Strong Zone LIMIT` });
+  const setupPrefix = ranging ? 'M1 Ranging' : 'M1 Sideways';
+  const pick = pickLimitSetup({ buyO: buyOrder, sellO: sellOrder, bias: biasM15.dir, ctx, setupPrefix, chartContext: `M15 ${biasM15.src} -> M1 ${ranging ? 'Ranging' : 'Sideways'} OCO` });
 
   if (pick && pick.plan) {
     return { dir: 0, plan: pick.plan, meta: pick.meta };
@@ -1244,25 +1345,54 @@ async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
     const o = pick.single;
     return await planFromOrder(o, {
       ctx, kind: 'scalp', orderType: 'LIMIT', setup: pick.setup,
-      chartContext: `M15 ${biasM15.src} -> M1 Strong Zone LIMIT`, timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
+      chartContext: `M15 ${biasM15.src} -> M1 ${ranging ? 'Ranging' : 'Sideways'} LIMIT`, timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
       head: t.headLine(t.title.scalp, o.dir === 1 ? 'BUY' : 'SELL', 'LIMIT', ctx.symbol),
-      lines: [`Hanya satu sisi strong zone yang aman. Entry LIMIT searah bias M15.`],
+      lines: [`${ranging ? 'Pasar ranging' : 'Tidak ada event struktur valid'}. Hanya satu sisi strong zone yang aman, searah bias M15.`],
       confidence: 'MEDIUM',
     });
   }
 
   return {
     plan: null,
-    reason: `Belum ada setup aman. Tidak ada strong zone M1 dengan likuiditas (EQL/EQH/swing) di luar zona dan SL dalam ${SCALP_MAX_RISK_ATR} ATR. NOW belum terpenuhi. Menunggu momentum atau strong zone.`,
+    reason: `${ranging ? 'Pasar ranging' : 'Tidak ada event struktur M1 yang valid'}, dan tidak ada strong zone aman dalam ${SCALP_MAX_RISK_ATR} ATR. Menunggu setup.`,
   };
 }
 
-// ── SCALPING KONSERVATIF ──
-// Aturan sama dengan agresif: strong zone wajib, SL di balik likuiditas, OCO optional.
-// Zona M5 diutamakan, M1 sebagai cadangan. Tidak ada mode NOW.
+// ── ORDER KONSERVATIF: SL di balik likuiditas, dibatasi jika terlalu jauh ──
+function buildDayOrder(dir, zone, liq, atrVal, ctx, rrList) {
+  const entry = dir === 1 ? zone.top : zone.bottom;
+  const edge = dir === 1 ? zone.bottom : zone.top;
+  const buf = LIQ_BUF_ATR * atrVal;
+
+  const pick = nearestLiquidity(dir, liq, edge, atrVal);
+  const liqLevel = pick ? pick.p : edge;
+  const liqName = pick ? pick.name : 'Zona';
+  const slRaw = dir === 1 ? liqLevel - buf : liqLevel + buf;
+
+  let risk = Math.abs(entry - slRaw);
+  const maxRisk = DAY_MAX_RISK_ATR * atrVal;
+  const capped = risk > maxRisk;
+  if (capped) risk = maxRisk;
+  risk = Math.max(risk, slFloor('day', ctx));
+
+  const sl = entry - dir * risk;
+  const tps = rrList.map(m => entry + dir * risk * m);
+
+  return {
+    dir, entry, sl, risk, tps,
+    label: `${dir === 1 ? 'Buy' : 'Sell'} Limit · ${zone.tag} · SL di balik ${liqName}${capped ? ' (dibatasi)' : ''}`,
+    zone: { min: zone.bottom, max: zone.top },
+    liqLevel, liqName, tag: zone.tag,
+    capped, strong: !!zone.strong,
+  };
+}
+
+// ── SCALPING KONSERVATIF (WAJIB SIGNAL) ──
+// Prioritas: strong zone fresh TERDEKAT (M5 dan M1 dibandingkan jarak).
+// Jika tidak ada, zona biasa, lalu swing terdekat, lalu pullback 1 ATR.
 async function buildDayPlan({ m1, m5, m15, price, rrList, ctx }) {
   const t = tx(ctx);
-  const { f, pip } = ctx;
+  const { pip } = ctx;
   const atrM1 = atrOf(m1, pip);
   const atrM5 = atrOf(m5, pip);
   const maxDist = DAY_MAX_DIST_ATR * atrM5;
@@ -1277,46 +1407,82 @@ async function buildDayPlan({ m1, m5, m15, price, rrList, ctx }) {
 
   const liq = liquidityLevels(m5.slice(-120), atrM5);
 
-  // Kumpulkan strong zone M5 lalu M1, hanya yang berada di sisi yang benar terhadap harga
-  const candidates = dir => {
-    const out = [];
-    const sources = [['M5', m5, atrM5], ['M1', m1, atrM1]];
-    for (const [tf, arr, atrTf] of sources) {
-      for (const z of strongZoneList(arr, dir, price, atrTf, maxDist)) {
-        const onSide = dir === 1 ? z.top < price - gap : z.bottom > price + gap;
-        if (!onSide) continue;
-        out.push({ ...z, tag: `${tf} ${z.tag}` });
+  const pickSide = dir => {
+    const onSide = z => (dir === 1 ? z.top < price - gap : z.bottom > price + gap);
+
+    // 1. Strong zone fresh dari M5 dan M1, ambil yang paling dekat
+    const strong = [];
+    for (const [tf, arr, atrTf] of [['M5', m5, atrM5], ['M1', m1, atrM1]]) {
+      for (const s of strongZoneList(arr, dir, price, atrTf, maxDist).filter(onSide)) {
+        strong.push({ bottom: s.bottom, top: s.top, dist: s.dist, tag: `${tf} Strong ${s.tag}`, strong: true });
       }
     }
-    return out.sort((a, b) => a.dist - b.dist);
+    if (strong.length) return strong.sort((a, b) => a.dist - b.dist)[0];
+
+    // 2. Zona biasa (displacement 0,8 ATR), M5 lalu M1
+    for (const [tf, arr] of [['M5', m5], ['M1', m1]]) {
+      const z = findSDZones(arr, dir, price, { dispAtr: 0.8, freshOnly: true })
+        .filter(onSide)
+        .find(x => x.dist <= maxDist);
+      if (z) return { bottom: z.bottom, top: z.top, dist: z.dist, tag: `${tf} Zona`, strong: false };
+    }
+
+    // 3. Swing terdekat di sisi yang benar
+    const swingLvl = dir === 1
+      ? [...liq.eql, ...liq.swingLow].filter(p => p < price - gap).sort((a, b) => b - a)[0]
+      : [...liq.eqh, ...liq.swingHigh].filter(p => p > price + gap).sort((a, b) => a - b)[0];
+    if (swingLvl != null) {
+      return { bottom: swingLvl - 0.1 * atrM5, top: swingLvl + 0.1 * atrM5, dist: Math.abs(price - swingLvl), tag: 'Swing', strong: false };
+    }
+
+    // 4. Fallback terakhir: pullback 1 ATR
+    const lvl = dir === 1 ? price - atrM5 : price + atrM5;
+    return { bottom: lvl - 0.1 * atrM5, top: lvl + 0.1 * atrM5, dist: atrM5, tag: 'ATR Pullback', strong: false };
   };
 
-  const buyZ = candidates(1)[0];
-  const sellZ = candidates(-1)[0];
-  const buyOrder = buyZ ? buildLiquidityOrder({ dir: 1, zone: buyZ, liq, atrVal: atrM5, ctx, kind: 'day', maxRiskAtr: DAY_MAX_RISK_ATR, rrList }) : null;
-  const sellOrder = sellZ ? buildLiquidityOrder({ dir: -1, zone: sellZ, liq, atrVal: atrM5, ctx, kind: 'day', maxRiskAtr: DAY_MAX_RISK_ATR, rrList }) : null;
+  const buyZ = pickSide(1);
+  const sellZ = pickSide(-1);
+  const buyO = buildDayOrder(1, buyZ, liq, atrM5, ctx, rrList);
+  const sellO = buildDayOrder(-1, sellZ, liq, atrM5, ctx, rrList);
 
-  const confidence = rawM15.dir !== 0 ? 'HIGH' : 'MEDIUM';
-  const pick = pickLimitSetup({ buyO: buyOrder, sellO: sellOrder, bias: dirM15, ctx, setupPrefix: 'Konservatif', chartContext: `M15 ${dirLabel(dirM15)} -> Strong Zone LIMIT`, confidence });
+  const anyCapped = [buyO, sellO].some(o => o.capped);
+  const capNote = anyCapped ? `SL dibatasi ${DAY_MAX_RISK_ATR} ATR M5 karena likuiditas terlalu jauh.` : '';
 
-  if (pick && pick.plan) {
-    return { dir: 0, plan: pick.plan, meta: pick.meta };
-  }
-  if (pick && pick.single) {
-    const o = pick.single;
-    return await planFromOrder(o, {
-      ctx, kind: 'day', orderType: 'LIMIT', setup: pick.setup,
-      chartContext: `M15 ${dirLabel(dirM15)} -> Strong Zone LIMIT`, timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
-      head: t.headLine(t.title.day, o.dir === 1 ? 'BUY' : 'SELL', 'LIMIT', ctx.symbol),
-      lines: [`Hanya satu sisi strong zone yang aman dan searah bias M15. SL di balik likuiditas.`],
-      confidence,
-    });
+  // OCO hanya jika kedua sisi dari strong zone
+  if (buyZ.strong && sellZ.strong) {
+    const fx = v => Number(Number(v).toFixed(ctx.dec));
+    const manual = `OCO konservatif strong zone. BUY @ ${fx(buyO.entry)} (SL ${fx(buyO.sl)} di balik ${buyO.liqName} ${fx(buyO.liqLevel)}). SELL @ ${fx(sellO.entry)} (SL ${fx(sellO.sl)} di balik ${sellO.liqName} ${fx(sellO.liqLevel)}). Jika salah satu tersentuh, order lawannya dibatalkan.${capNote ? ' ' + capNote : ''}`;
+    return {
+      plan: { isOCO: true, orders: [buyO, sellO], setup: 'Konservatif OCO (Strong Zone)', chartContext: `M15 ${dirLabel(dirM15)} -> Strong Zone OCO` },
+      meta: { confidence: rawM15.dir !== 0 ? 'HIGH' : 'MEDIUM', riskLabel: 'MEDIUM', reason: withPair(ctx.symbol, manual) },
+    };
   }
 
-  return {
-    plan: null,
-    reason: `Belum ada strong zone M5/M1 dengan likuiditas aman dalam ${DAY_MAX_RISK_ATR} ATR dan searah bias M15. Menunggu setup.`,
-  };
+  // Satu sisi: searah bias M15. Jika bias netral, pilih strong, lalu yang paling dekat.
+  let pickBuy;
+  if (dirM15 > 0) pickBuy = true;
+  else if (dirM15 < 0) pickBuy = false;
+  else if (buyZ.strong !== sellZ.strong) pickBuy = buyZ.strong;
+  else pickBuy = buyZ.dist <= sellZ.dist;
+
+  const o = pickBuy ? buyO : sellO;
+  const isStrong = o.strong;
+  const confidence = isStrong ? (rawM15.dir !== 0 ? 'HIGH' : 'MEDIUM') : 'LOW';
+  const lines = [
+    `Satu sisi dipilih, searah bias M15 (${dirLabel(dirM15)}). SL di balik likuiditas.`,
+    isStrong ? '' : 'Tidak ada strong zone fresh. Memakai zona cadangan, risiko lebih tinggi.',
+    capNote,
+  ].filter(Boolean);
+
+  return await planFromOrder(o, {
+    ctx, kind: 'day', orderType: 'LIMIT',
+    setup: `${o.dir === 1 ? 'BUY' : 'SELL'} LIMIT (${isStrong ? 'Strong Zone' : 'Zona Cadangan'})`,
+    chartContext: `M15 ${dirLabel(dirM15)} -> ${o.tag} LIMIT`,
+    timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
+    head: t.headLine(t.title.day, o.dir === 1 ? 'BUY' : 'SELL', 'LIMIT', ctx.symbol),
+    lines,
+    confidence,
+  });
 }
 
 // ── INTRADAY: bias H1/M15 fleksibel (struktur → EMA), zona M5 lalu fallback M15 ──
@@ -1735,10 +1901,10 @@ export default async function handler(req, res) {
     let liveSteps = [];
 
     if (style === 'Scalping') {
-      liveSteps = [`Cek Momentum M1 (NOW)`, `Cek FVG & Strong Zone M1`, `Cek Likuiditas EQL/EQH untuk SL`, `OCO / LIMIT optional`];
+      liveSteps = [`Cek Event Struktur M1 (BOS/CHoCH/CISD)`, `Cek Flip ke Zona Lawan (30 pip)`, `Cek Ranging`, `NOW / LIMIT / OCO Strong Zone`];
       result = await buildScalpPlan({ m1, m5, m15, price, rrList, ctx });
     } else if (style === 'Day Trading') {
-      liveSteps = [`Cek Strong Zone M5 / M1`, `Validasi Bias M15`, `Cek Likuiditas EQL/EQH untuk SL`, `LIMIT / OCO optional`];
+      liveSteps = [`Cari Strong Zone Terdekat M5 / M1`, `Validasi Likuiditas SL`, `Cek Bias M15`, `LIMIT / OCO (wajib sinyal)`];
       result = await buildDayPlan({ m1, m5, m15, price, rrList, ctx });
     } else if (style === 'Intraday') {
       liveSteps = [`Memeriksa bias M15 & H1`, `Mencari Zona M5 / M15`, `Cek OCO / Trend Follow`, `Validasi ERL/IRL`];
