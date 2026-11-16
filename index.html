@@ -2653,128 +2653,181 @@ function calcBias(c) {
 
 /* ================= GENERATE SINYAL ================= */
 async function generateSignal() {
-  const k = market;
-  const style = $('tradingStyleSelect').value;
-  const cfg = STYLE_CFG[style];
+  if (market === 'VISION') {
+    // Logika Vision (Upload Gambar) biarkan sama seperti sebelumnya
+    if (visionImages.length === 0) return alert('Silakan upload minimal 1 gambar chart terlebih dahulu.');
 
-  // LOGIKA KHUSUS VISION
-  if (k === 'VISION') {
-      if (visionImages.length === 0) return alert('Silakan upload minimal 1 gambar chart terlebih dahulu.');
+    const style = $('tradingStyleSelect').value;
+    const btn = $('signalBtn'), bt = $('btnText');
+    btn.disabled = true;
+    bt.textContent = T('btnGenBusy');
+    showOverlay();
+    const anim = runSteps(3500);
+    let data = null, err = null;
 
-      const btn = $('signalBtn'), bt = $('btnText');
-      btn.disabled = true;
-      bt.textContent = T('btnGenBusy');
-      showOverlay();
-      const anim = runSteps(3500);
-      let data = null, err = null;
+    try {
+        const email = localStorage.getItem(K.email);
+        const res = await fetch('/api/generate', {
+            method: 'POST',
+            headers: JSON_H,
+            body: JSON.stringify({
+                email, images: visionImages, tradingStyle: style, lang, langs: ['id', 'en']
+            })
+        });
+        const txt = await res.text();
+        try { data = JSON.parse(txt); } catch (e) { throw new Error('Server tidak kirim JSON (HTTP ' + res.status + ')'); }
+        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    } catch (e) { err = e.message; }
 
-      try {
-          const email = localStorage.getItem(K.email);
-          const res = await fetch('/api/generate', {
-              method: 'POST',
-              headers: JSON_H,
-              body: JSON.stringify({
-                  email, images: visionImages, tradingStyle: style, lang, langs: ['id', 'en']
-              })
-          });
-          const txt = await res.text();
-          try { data = JSON.parse(txt); } catch (e) { throw new Error('Server tidak kirim JSON (HTTP ' + res.status + ')'); }
-          if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-      } catch (e) { err = e.message; }
+    await anim;
+    hideOverlay();
+    await sleep(350);
+    btn.disabled = false;
+    bt.textContent = T('btnGenVision');
 
-      await anim;
-      hideOverlay();
-      await sleep(350);
-      btn.disabled = false;
-      bt.textContent = T('btnGenVision');
+    if (err) return alert('Gagal: ' + err);
+    const s = data && data.signal;
+    if (!s) return alert('AI tidak menemukan setup valid dari gambar tersebut.');
 
-      if (err) return alert('Gagal: ' + err);
-      const s = data && data.signal;
-      if (!s) return alert('AI tidak menemukan setup valid dari gambar tersebut.');
-
-      // Hasil vision disimpan terpisah (tidak masuk history dan rekap)
-      visionTrade = {
-          id: 'vision_' + Date.now(), key: 'VISION', style, signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
-          mode: s.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET', status: 'RUNNING', fill: 'NOW',
-          entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
-          zone: null, expiresAt: null,
-          confidence: s.confidence || 'MEDIUM', risk: s.risk || 'HIGH', setup: s.setup || 'Vision AI',
-          zoneLabel: 'AI Vision', zoneNote: lang === 'id' ? 'Berdasarkan gambar' : 'Based on image',
-          pip: s.pipSize, last: s.lastPrice,
-          createdAt: Date.now(), hits: {},
-          card: { reason: s.reason, reasons: pickReasons(s, lang), reasonLang: lang }, no: '-'
-      };
-      refreshCard();
-      return;
+    // Hasil vision disimpan terpisah (tidak masuk history dan rekap)
+    visionTrade = {
+        id: 'vision_' + Date.now(), key: 'VISION', style, signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
+        mode: s.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET', status: 'RUNNING', fill: 'NOW',
+        entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
+        zone: null, expiresAt: null,
+        confidence: s.confidence || 'MEDIUM', risk: s.risk || 'HIGH', setup: s.setup || 'Vision AI',
+        zoneLabel: 'AI Vision', zoneNote: lang === 'id' ? 'Berdasarkan gambar' : 'Based on image',
+        pip: s.pipSize, last: s.lastPrice,
+        createdAt: Date.now(), hits: {},
+        card: { reason: s.reason, reasons: pickReasons(s, lang), reasonLang: lang }, no: '-'
+    };
+    refreshCard();
+    return;
   }
 
-  // --- LOGIKA LIVE SMC (XAUUSD / BTCUSD) ---
-  if (!marketOpen(k)) { log(T('weekend'), 'error'); return alert(T('weekend')); }
-  const live = prices[k];
-  if (!live || Date.now() - live.recv > STALE_MS) return alert(k + ' TIDAK TERSAMBUNG ke stream. Tunggu harga masuk.');
-  const email = localStorage.getItem(K.email);
-  if (!email) return alert('Sesi tidak ditemukan. Login ulang.');
-
-  const btn = $('signalBtn'), bt = $('btnText');
+  const btn = $('signalBtn');
+  const btnText = $('btnText');
+  const originalText = btnText.textContent;
+  
+  btnText.textContent = 'Menganalisa...';
   btn.disabled = true;
-  bt.textContent = T('valTitle') + '...';
-  log(lang === 'id' ? 'Meminta analisa sinyal...' : 'Requesting signal analysis...', 'system');
-  showOverlay();
-  const anim = runSteps(3500);
-  let data = null, err = null;
 
   try {
-    await Promise.all([cfg.htf, cfg.mtf, cfg.ltf].map(iv => fetchSeries(k, iv, false)));
-    const h = seriesRows(k, cfg.htf), m = seriesRows(k, cfg.mtf), l = seriesRows(k, cfg.ltf);
-    if (m.length < 10) {
-      const sr = ser(k, cfg.mtf);
-      const why = sr.err || sr.extErr;
-      throw new Error(`candle ${cfg.mtf} belum lengkap (${m.length}/10)${why ? ': ' + why : '. Coba lagi beberapa detik.'}`);
+    const style = $('tradingStyleSelect').value;
+    
+    // Ambil data candle dari memori lokal
+    const payload = {
+      email: localStorage.getItem(K.email),
+      symbol: market,
+      style: style,
+      currentPrice: prices[market]?.price || 0,
+      candles: {
+        m1: candles[market]?.[1] || [],
+        m5: candles[market]?.[5] || [],
+        m15: candles[market]?.[15] || []
+      },
+      lang: lang
+    };
+
+    const res = await post('/api/generate', payload);
+    const data = res.data;
+
+    if (!res.ok || !data || !data.ok) {
+      alert(data?.reason || data?.error || 'Belum ada setup valid.');
+      return;
     }
-    const ema = {};
-    cfg.ema.forEach(p => { const r = calcEMA(l, p); ema['EMA_' + p] = r.length ? Number(r[r.length - 1].toFixed(5)) : 0; });
-    const bb = calcBB(m.length ? m : l);
-    const res = await fetch('/api/generate', {
-      method: 'POST',
-      headers: JSON_H,
-      body: JSON.stringify({
-        email, marketId: 'xbtfx|' + k, tradingStyle: style, currentPrice: live.price, lang, langs: ['id', 'en'],
-        emaFilter: ema, bbFilter: bb,
-        candles: { htf: h.slice(-200), mtf: m.slice(-200), ltf: l.slice(-200) }
-      })
-    });
-    const txt = await res.text();
-    try { data = JSON.parse(txt); } catch (e) { throw new Error('Server tidak kirim JSON (HTTP ' + res.status + ')'); }
-    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-  } catch (e) { err = e.message; }
 
-  await anim;
-  hideOverlay();
-  await sleep(350);
-  btn.disabled = false;
-  bt.textContent = T('btnGen');
+    const sig = data.signal;
 
-  if (err) return alert('Gagal: ' + err);
-  const s = data && data.signal;
-  if (!s) return alert(T('signalWait') + '\n\n' + ((data && data.reason) || ''));
-  const valid = ['BUY', 'SELL'].includes(s.signal) && [s.entry, s.sl, s.tp1].every(v => v != null && Number.isFinite(Number(v)));
-  if (!valid) return alert('Sinyal belum lengkap.');
+    // ==========================================
+    // 1. PENANGANAN SINYAL OCO (2 ARAH)
+    // ==========================================
+    if (sig.signal === 'OCO') {
+      let savedCount = 0;
+      
+      sig.orders.forEach(o => {
+        const newTrade = {
+          id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+          no: nextNo(),
+          key: market,
+          style: style,
+          signal: o.signal, // BUY / SELL
+          mode: 'LIMIT',
+          orderType: 'LIMIT',
+          entry: Number(o.entry),
+          sl: Number(o.sl),
+          tp1: o.tp1 ? Number(o.tp1) : null,
+          tp2: o.tp2 ? Number(o.tp2) : null,
+          tp3: o.tp3 ? Number(o.tp3) : null,
+          status: 'PENDING', // Wajib Pending karena limit
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 4 * 3600 * 1000, // Expire 4 jam
+          zone: o.zone,
+          zoneNote: o.zoneNote,
+          setup: o.setup,
+          confidence: sig.confidence,
+          risk: sig.risk,
+          reason: sig.reason,
+          pip: MARKETS[market].pip
+        };
+        
+        trades.push(newTrade);
+        activeId = newTrade.id;
+        savedCount++;
+      });
 
-  const t = {
-    id: Date.now().toString(36), key: k, style, signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
-    mode: s.mode, status: s.status || 'RUNNING', fill: s.fill || null,
-    entry: s.entry, bufferEnd: s.bufferEnd, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
-    zone: s.zone, expiresAt: s.expireMs ? Date.now() + s.expireMs : null,
-    confidence: s.confidence, risk: s.risk, setup: s.setup, zoneLabel: s.zoneLabel, zoneNote: s.zoneNote,
-    createdAt: Date.now(), hits: {},
-    card: { reason: s.reason, reasons: pickReasons(s, lang), reasonLang: lang }, no: nextNo()
-  };
-  trades.push(t);
-  activeId = t.id;
-  saveTrades();
-  renderAll();
-  fetchUserStatus(); // Update status kuota setelah generate
-  log(`Signal ${s.signal} ${k} berhasil dibuat.`, s.signal === 'BUY' ? 'buy' : 'sell');
+      saveTrades();
+      renderAll();
+      
+      alert(`Berhasil membuat ${savedCount} Sinyal OCO (Buy Limit & Sell Limit).\nCek tab History untuk melihat kedua sinyal.`);
+      return;
+    }
+
+    // ==========================================
+    // 2. PENANGANAN SINYAL NORMAL (1 ARAH)
+    // ==========================================
+    if (!sig.entry || !sig.sl) {
+      alert('Sinyal belum lengkap (Entry/SL kosong).');
+      return;
+    }
+
+    const newTrade = {
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+      no: nextNo(),
+      key: market,
+      style: style,
+      signal: sig.signal, // BUY / SELL
+      mode: sig.mode || (sig.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET'),
+      orderType: sig.orderType,
+      entry: Number(sig.entry),
+      sl: Number(sig.sl),
+      tp1: sig.tp1 ? Number(sig.tp1) : null,
+      tp2: sig.tp2 ? Number(sig.tp2) : null,
+      tp3: sig.tp3 ? Number(sig.tp3) : null,
+      status: sig.status === 'PENDING' ? 'PENDING' : 'RUNNING',
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 4 * 3600 * 1000,
+      zone: sig.zone,
+      zoneNote: sig.zoneNote,
+      setup: sig.setup,
+      confidence: sig.confidence,
+      risk: sig.risk,
+      reason: sig.reason,
+      pip: MARKETS[market].pip
+    };
+
+    trades.push(newTrade);
+    activeId = newTrade.id;
+    saveTrades();
+    renderAll();
+
+  } catch (e) {
+    console.error(e);
+    alert('Gagal generate sinyal: ' + e.message);
+  } finally {
+    btnText.textContent = originalText;
+    btn.disabled = false;
+  }
 }
 
 /* ================= BOOT ================= */
