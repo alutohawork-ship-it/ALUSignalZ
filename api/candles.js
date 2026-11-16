@@ -1,14 +1,14 @@
 // api/candles.js
-// v5: TickerLayer + cache KV + rotasi key (utama lalu cadangan, urutan tetap).
-// Jendela waktu minimal 7 hari supaya awal pekan (Senin pagi) tetap dapat bar yang cukup.
+// v6: Semua interval di bawah 1 hari dibangun dari bar M1 (data M1 lengkap),
+// lalu digabung (aggregate) ke M5/M15/M30/H1/H4. M1 dan 1D tetap native.
+// Tetap: cache KV + rotasi key (utama lalu cadangan, urutan tetap).
 //
-// Env vars di Vercel (sudah ada):
+// Env vars di Vercel:
 //   TICKERLAYER_API_KEY, TICKERLAYER_API_KEY_1, _2, _3, _4
 //   KV_REST_API_URL, KV_REST_API_TOKEN (opsional: cache & cooldown bersama)
 
 const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
 
-// Urutan tetap: utama dulu, lalu cadangan
 const KEYS = [
   process.env.TICKERLAYER_API_KEY,
   process.env.TICKERLAYER_API_KEY_1,
@@ -17,8 +17,6 @@ const KEYS = [
   process.env.TICKERLAYER_API_KEY_4,
 ].filter(Boolean);
 
-// Mapping simbol app -> asset class dan simbol TickerLayer
-// XAUUSD termasuk commodities. Crypto memakai BTCUSD (bukan BTCUSDT)
 const SYMBOL_MAP = {
   XAUUSD:  { asset: 'commodities', sym: 'XAUUSD' },
   GOLD:    { asset: 'commodities', sym: 'XAUUSD' },
@@ -27,8 +25,9 @@ const SYMBOL_MAP = {
   BTC:     { asset: 'crypto', sym: 'BTCUSD' },
 };
 
-// TTL cache (detik), disamakan dengan CANDLE_TTL di client
-const TTL_MAP = { '1m': 60, '5m': 120, '15m': 300, '30m': 600, '1h': 900, '4h': 1800, '1d': 3600 };
+// TTL cache (detik). Dipendekkan karena sekarang dibangun dari M1.
+// Naikkan kalau kuota API terasa boros.
+const TTL_MAP = { '1m': 45, '5m': 60, '15m': 90, '30m': 120, '1h': 180, '4h': 300, '1d': 3600 };
 
 const UNIT = {
   m: { span: 'minute', ms: 60 * 1000 },
@@ -36,13 +35,15 @@ const UNIT = {
   d: { span: 'day', ms: 24 * 60 * 60 * 1000 },
 };
 
-// Jendela minimal untuk setiap permintaan (ms)
-const MIN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MIN_WINDOW_MS = 7 * DAY_MS;
 
-// Lama cooldown per key (detik)
+// Paging M1. Kalau API menolak limit sebesar ini, turunkan PAGE_LIMIT
+// (mis. 1000) dan naikkan MAX_PAGES.
+const PAGE_LIMIT = 5000;
+const MAX_PAGES = 6;
+
 const CD = { quota: 600, rate: 5, invalid: 6 * 3600 };
-
-// Cooldown di memori, dipakai jika KV tidak aktif (berlaku per instance)
 const memCooldown = new Map();
 
 // ── KV helper ──
@@ -79,16 +80,17 @@ async function kvMGet(keys) {
 
 const fmtDate = d => d.toISOString().slice(0, 10);
 
-// Rencana pengambilan bar untuk tiap interval
+// Rencana: interval < 1 hari (selain 1m) dibangun dari M1
 function planFor(interval) {
-  if (interval === '30m') return { mult: 5, span: 'minute', barMs: 5 * 60000, factor: 6 };
   const mult = parseInt(interval, 10);
-  const unit = UNIT[interval.slice(-1)];
+  const unit = UNIT[String(interval).slice(-1)];
   if (!mult || !unit) return null;
-  return { mult, span: unit.span, barMs: mult * unit.ms, factor: 1 };
+  const barMs = mult * unit.ms;
+  const fromM1 = barMs > 60000 && barMs < DAY_MS;
+  return { mult, span: unit.span, barMs, fromM1 };
 }
 
-// Gabungkan bar kecil menjadi bar lebih besar (30m dari 5m)
+// Gabungkan bar M1 (urut naik) ke bucket yang lebih besar
 function aggregate(rows, bucketMs) {
   const map = new Map();
   for (const r of rows) {
@@ -101,10 +103,9 @@ function aggregate(rows, bucketMs) {
       b.c = r.c;
     }
   }
-  return [...map.values()];
+  return [...map.values()].sort((a, b) => a.t - b.t);
 }
 
-// Cooldown per key: 429 kuota habis / rate limit, 401 key tidak valid
 function cooldownSeconds(status, body, retryAfterHeader) {
   if (status === 401) return CD.invalid;
   if (status === 429) {
@@ -122,7 +123,6 @@ async function setCooldown(idx, seconds) {
   try { await kv(['SET', name, '1', 'EX', seconds]); } catch (e) {}
 }
 
-// Index key yang tidak sedang cooldown, dalam urutan tetap (utama dulu)
 async function usableKeyOrder() {
   const names = KEYS.map((_, i) => `tl_cd_${i}`);
   const kvVals = await kvMGet(names);
@@ -132,12 +132,9 @@ async function usableKeyOrder() {
   );
 }
 
-// Satu panggilan ke TickerLayer dengan satu key
-async function requestBars(apiKey, target, plan, count) {
-  const now = new Date();
-  // Minimal 7 hari ke belakang, supaya Senin pagi tetap dapat bar yang cukup
-  const start = new Date(now.getTime() - Math.max(count * plan.barMs, MIN_WINDOW_MS));
-  const url = `${TICKERLAYER_BASE_URL}/${target.asset}/agg/${target.sym}/${plan.mult}/${plan.span}/${fmtDate(start)}/${fmtDate(now)}?sort=desc&limit=${count}`;
+// Satu panggilan ke TickerLayer. p = { mult, span, from, to, limit }
+async function requestBars(apiKey, target, p) {
+  const url = `${TICKERLAYER_BASE_URL}/${target.asset}/agg/${target.sym}/${p.mult}/${p.span}/${p.from}/${p.to}?sort=desc&limit=${p.limit}`;
 
   const response = await fetch(url, { headers: { 'x-api-key': apiKey } });
 
@@ -156,23 +153,25 @@ async function requestBars(apiKey, target, plan, count) {
 
   const raw = await response.json();
   const rows = (Array.isArray(raw) ? raw : raw.results || [])
-    .map(bar => ({
-      t: Number(bar.t ?? bar.timestamp ?? bar.time),
-      o: Number(bar.o ?? bar.open),
-      h: Number(bar.h ?? bar.high),
-      l: Number(bar.l ?? bar.low),
-      c: Number(bar.c ?? bar.close),
-    }))
+    .map(bar => {
+      let t = Number(bar.t ?? bar.timestamp ?? bar.time);
+      if (Number.isFinite(t) && t < 1e12) t *= 1000; // detik -> ms
+      return {
+        t,
+        o: Number(bar.o ?? bar.open),
+        h: Number(bar.h ?? bar.high),
+        l: Number(bar.l ?? bar.low),
+        c: Number(bar.c ?? bar.close),
+      };
+    })
     .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite))
     .sort((a, b) => a.t - b.t);
 
   return { ok: true, rows };
 }
 
-// Coba key berurutan. 429 dan 401 memicu cooldown lalu lanjut ke cadangan.
-// 403 (paket key tidak memuat data ini) juga lanjut ke cadangan.
-// 404, 400, 5xx langsung berhenti karena bukan masalah key.
-async function fetchBarsRotated(target, plan, count) {
+// Rotasi key: 429/401 -> cooldown lalu lanjut; 403 lanjut; lainnya berhenti.
+async function fetchBarsRotated(target, params) {
   if (!KEYS.length) {
     const e = new Error('Tidak ada TICKERLAYER_API_KEY di env');
     e.status = 500;
@@ -188,7 +187,7 @@ async function fetchBarsRotated(target, plan, count) {
 
   let last = null;
   for (const idx of order) {
-    const r = await requestBars(KEYS[idx], target, plan, count);
+    const r = await requestBars(KEYS[idx], target, params);
     if (r.ok) return { rows: r.rows, keyNo: idx + 1 };
 
     last = r;
@@ -206,13 +205,61 @@ async function fetchBarsRotated(target, plan, count) {
   throw e;
 }
 
+// Ambil M1 mundur (paging) sampai jumlah bucket hasil gabungan cukup
+async function fetchM1ForBuckets(target, barMs, lim) {
+  const now = new Date();
+  const spanMs = Math.max(lim * barMs * 1.6, MIN_WINDOW_MS);
+  const fromStr = fmtDate(new Date(now.getTime() - spanMs));
+
+  const all = new Map();
+  let to = now;
+  let keyNo = null;
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    let r;
+    try {
+      r = await fetchBarsRotated(target, {
+        mult: 1, span: 'minute', from: fromStr, to: fmtDate(to), limit: PAGE_LIMIT,
+      });
+    } catch (e) {
+      if (!all.size) throw e; // halaman pertama gagal -> error
+      break;                  // halaman lanjutan gagal -> pakai yang ada
+    }
+
+    keyNo = r.keyNo;
+    if (!r.rows.length) break;
+    for (const b of r.rows) all.set(b.t, b);
+
+    const buckets = new Set();
+    for (const t of all.keys()) buckets.add(Math.floor(t / barMs));
+    if (buckets.size > lim) break;           // sudah cukup
+    if (r.rows.length < PAGE_LIMIT) break;   // sudah sampai awal jendela
+
+    const oldest = r.rows[0].t;
+    let nextTo = new Date(oldest);
+    if (fmtDate(nextTo) >= fmtDate(to)) nextTo = new Date(oldest - DAY_MS);
+    if (fmtDate(nextTo) < fromStr) break;
+    to = nextTo;
+  }
+
+  return { rows: [...all.values()].sort((a, b) => a.t - b.t), keyNo };
+}
+
+// Native (1m dan 1d)
+async function fetchNative(target, plan, lim) {
+  const now = new Date();
+  const start = new Date(now.getTime() - Math.max(lim * plan.barMs * 1.6, MIN_WINDOW_MS));
+  return fetchBarsRotated(target, {
+    mult: plan.mult, span: plan.span, from: fmtDate(start), to: fmtDate(now), limit: lim,
+  });
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { symbol, interval, limit } = req.body || {};
   if (!symbol || !interval) return res.status(400).json({ error: 'Symbol & interval required' });
 
-  // Normalisasi simbol: buang prefix (OANDA:XAUUSD), slash (XAU/USD), dan huruf kecil
   const key = String(symbol).toUpperCase().replace(/^[A-Z]+:/, '').replace(/[^A-Z0-9]/g, '');
   const target = SYMBOL_MAP[key];
   if (!target) return res.status(400).json({ error: `Simbol tidak dikenal: ${symbol}` });
@@ -222,8 +269,8 @@ export default async function handler(req, res) {
 
   const lim = Math.min(Math.max(parseInt(limit, 10) || 200, 10), 1000);
   const ttl = TTL_MAP[interval] || 60;
-  // v4: cache dari versi sebelumnya (jendela pendek) tidak dipakai lagi
-  const cacheKey = `candles_v4_${target.asset}_${target.sym}_${interval}_${lim}`;
+  // v5: cache lama (bar native yang bolong) tidak dipakai lagi
+  const cacheKey = `candles_v5_${target.asset}_${target.sym}_${interval}_${lim}`;
 
   // 1. Cek cache
   const cachedData = await kvGetJSON(cacheKey);
@@ -231,14 +278,25 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, candles: cachedData, source: 'cache' });
   }
 
-  // 2. Ambil dari TickerLayer dengan rotasi key
+  // 2. Ambil dari TickerLayer
   try {
-    const { rows: raw, keyNo } = await fetchBarsRotated(target, plan, lim * plan.factor);
-    const rows = (plan.factor > 1 ? aggregate(raw, 30 * 60000) : raw).slice(-lim);
+    let rows, keyNo;
+    if (plan.fromM1) {
+      const m1 = await fetchM1ForBuckets(target, plan.barMs, lim);
+      keyNo = m1.keyNo;
+      rows = aggregate(m1.rows, plan.barMs).slice(-lim);
+    } else {
+      const n = await fetchNative(target, plan, lim);
+      keyNo = n.keyNo;
+      rows = n.rows.slice(-lim);
+    }
 
     if (rows.length > 0) {
       await kvSetJSON(cacheKey, rows, ttl);
-      return res.status(200).json({ ok: true, candles: rows, source: 'tickerlayer', keyNo });
+      return res.status(200).json({
+        ok: true, candles: rows,
+        source: plan.fromM1 ? 'tickerlayer-m1' : 'tickerlayer', keyNo,
+      });
     }
 
     return res.status(200).json({ ok: true, candles: [], source: 'empty' });
