@@ -1,5 +1,5 @@
 // api/generate.js
-// v98 (Fix Vision AI parsing: smart signal deduction + robust error handling)
+// v99 (Fix Vision Timeout & Better Error Handling)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
@@ -728,7 +728,7 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
 
     const resp = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
       method: 'POST',
@@ -793,7 +793,8 @@ KEMBALIKAN HANYA DALAM FORMAT JSON:
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8500);
+    // ✅ Naikkan timeout AI Vision ke 9500ms (9.5 detik) untuk mencegah "Operation aborted"
+    const timeoutId = setTimeout(() => controller.abort(), 9500);
 
     const resp = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
       method: 'POST',
@@ -817,12 +818,18 @@ KEMBALIKAN HANYA DALAM FORMAT JSON:
       try {
         const parsed = JSON.parse(jsonString);
         return { plan: parsed, reason: parsed.reason || 'Vision Analysis' };
-      } catch (parseError) { return { plan: null, reason: 'Format JSON AI rusak.' }; }
+      } catch (parseError) { 
+        return { plan: null, reason: 'Gagal memproses format JSON dari AI. Silakan coba lagi.' }; 
+      }
     }
-    return { plan: null, reason: `AI tidak mengembalikan JSON.` };
+    return { plan: null, reason: `AI tidak mengembalikan format JSON yang valid.` };
   } catch (err) {
     console.error('Vision AI Exception:', err.message);
-    return { plan: null, reason: err.message };
+    // ✅ Jika timeout, berikan pesan error yang jelas (bukan 'This operation was aborted')
+    if (err.name === 'AbortError') {
+      return { plan: null, reason: 'Waktu habis (Timeout): AI Vision memakan waktu terlalu lama. Pastikan gambar tidak terlalu besar/HD, atau coba lagi.' };
+    }
+    return { plan: null, reason: `Gagal memproses AI Vision: ${err.message}` };
   }
 }
 
@@ -856,7 +863,6 @@ async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, 
     tps = rrList.map(x => entry + dir * x * risk);
   }
 
-  // ✅ minDist tidak boleh memblok TP1 RR 1:1 → pakai nilai terkecil antara 0.5×ATR dan slFloor
   const minDist = Math.min(atrVal * 0.5, slFloor(kind, ctx));
   if (Math.abs(tps[0] - entry) < minDist) {
     return { plan: null, reason: 'Dibatalkan: Target TP terlalu dekat dengan Entry (terkena noise volatilitas).' };
