@@ -1,5 +1,6 @@
 // api/candles.js
-// TickerLayer + cache KV + rotasi key (utama lalu cadangan, urutan tetap).
+// v5: TickerLayer + cache KV + rotasi key (utama lalu cadangan, urutan tetap).
+// Jendela waktu minimal 7 hari supaya awal pekan (Senin pagi) tetap dapat bar yang cukup.
 //
 // Env vars di Vercel (sudah ada):
 //   TICKERLAYER_API_KEY, TICKERLAYER_API_KEY_1, _2, _3, _4
@@ -34,6 +35,9 @@ const UNIT = {
   h: { span: 'hour', ms: 60 * 60 * 1000 },
   d: { span: 'day', ms: 24 * 60 * 60 * 1000 },
 };
+
+// Jendela minimal untuk setiap permintaan (ms)
+const MIN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Lama cooldown per key (detik)
 const CD = { quota: 600, rate: 5, invalid: 6 * 3600 };
@@ -131,7 +135,8 @@ async function usableKeyOrder() {
 // Satu panggilan ke TickerLayer dengan satu key
 async function requestBars(apiKey, target, plan, count) {
   const now = new Date();
-  const start = new Date(now.getTime() - count * plan.barMs);
+  // Minimal 7 hari ke belakang, supaya Senin pagi tetap dapat bar yang cukup
+  const start = new Date(now.getTime() - Math.max(count * plan.barMs, MIN_WINDOW_MS));
   const url = `${TICKERLAYER_BASE_URL}/${target.asset}/agg/${target.sym}/${plan.mult}/${plan.span}/${fmtDate(start)}/${fmtDate(now)}?sort=desc&limit=${count}`;
 
   const response = await fetch(url, { headers: { 'x-api-key': apiKey } });
@@ -217,7 +222,8 @@ export default async function handler(req, res) {
 
   const lim = Math.min(Math.max(parseInt(limit, 10) || 200, 10), 1000);
   const ttl = TTL_MAP[interval] || 60;
-  const cacheKey = `candles_v3_${target.asset}_${target.sym}_${interval}_${lim}`;
+  // v4: cache dari versi sebelumnya (jendela pendek) tidak dipakai lagi
+  const cacheKey = `candles_v4_${target.asset}_${target.sym}_${interval}_${lim}`;
 
   // 1. Cek cache
   const cachedData = await kvGetJSON(cacheKey);
