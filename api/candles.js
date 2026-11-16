@@ -43,6 +43,11 @@ const MIN_WINDOW_MS = 7 * DAY_MS;
 const PAGE_LIMIT = 5000;
 const MAX_PAGES = 6;
 
+// Rentang tanggal M1 per permintaan dibatasi, karena TickerLayer menolak (HTTP 400)
+// rentang yang terlalu panjang. Kalau masih 400, otomatis turun ke FALLBACK_SPAN_DAYS.
+const MAX_SPAN_DAYS = 14;
+const FALLBACK_SPAN_DAYS = 7;
+
 const CD = { quota: 600, rate: 5, invalid: 6 * 3600 };
 const memCooldown = new Map();
 
@@ -208,8 +213,12 @@ async function fetchBarsRotated(target, params) {
 // Ambil M1 mundur (paging) sampai jumlah bucket hasil gabungan cukup
 async function fetchM1ForBuckets(target, barMs, lim) {
   const now = new Date();
-  const spanMs = Math.max(lim * barMs * 1.6, MIN_WINDOW_MS);
-  const fromStr = fmtDate(new Date(now.getTime() - spanMs));
+  const spanMs = Math.min(
+    Math.max(lim * barMs * 1.6, MIN_WINDOW_MS),
+    MAX_SPAN_DAYS * DAY_MS
+  );
+  let fromStr = fmtDate(new Date(now.getTime() - spanMs));
+  let retried = false;
 
   const all = new Map();
   let to = now;
@@ -222,6 +231,13 @@ async function fetchM1ForBuckets(target, barMs, lim) {
         mult: 1, span: 'minute', from: fromStr, to: fmtDate(to), limit: PAGE_LIMIT,
       });
     } catch (e) {
+      // 400 di halaman pertama: kemungkinan rentang terlalu panjang -> coba lebih pendek
+      if (!all.size && e.status === 400 && !retried) {
+        retried = true;
+        fromStr = fmtDate(new Date(now.getTime() - FALLBACK_SPAN_DAYS * DAY_MS));
+        page--;
+        continue;
+      }
       if (!all.size) throw e; // halaman pertama gagal -> error
       break;                  // halaman lanjutan gagal -> pakai yang ada
     }
