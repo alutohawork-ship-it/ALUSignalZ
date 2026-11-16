@@ -1,5 +1,5 @@
 // api/generate.js
-// v97 (Scalp Agresif Wajib OCO 2 Arah jika bukan NOW, Swing Bounce Fallback, Konservatif fleksibel)
+// v98 (Fix Vision AI parsing: smart signal deduction + robust error handling)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
@@ -766,6 +766,7 @@ LANGKAH WAJIB (Analisa Top-Down + State Machine):
    - Tentukan Entry (NOW jika di POI, LIMIT jika menunggu retest).
    - **SL ANTI-SWEEP**: Letakkan SL di LUAR zona pelindung (buffer 1.5 ATR).
    - Tentukan TP1, TP2, TP3 berdasarkan likuiditas berikutnya.
+   - **PENTING**: Field "signal" HANYA BOLEH berisi string "BUY" atau "SELL". Jangan isi dengan kata lain.
 8. **chartContext**: Tuliskan alur state machine secara eksplisit (contoh: "HTF H4 Bullish -> Sweep SSL M15 -> MSS M5 -> POI FVG -> SIGNAL BUY").
 
 KEMBALIKAN HANYA DALAM FORMAT JSON:
@@ -1413,10 +1414,21 @@ export default async function handler(req, res) {
       const tps = [p.tp1, p.tp2, p.tp3].filter(v => v != null).map(Number);
       const orderType = p.orderType === 'LIMIT' ? 'LIMIT' : 'NOW';
 
-      if (!['BUY', 'SELL'].includes(p.signal?.toUpperCase())) return res.status(400).json({ error: 'AI gagal menentukan arah BUY/SELL.' });
+      // ✅ SMART SIGNAL DEDUCTION
+      const rawSignal = String(p.signal || '').toUpperCase();
+      let dir = 0;
+      
+      if (rawSignal.includes('BUY') || rawSignal === 'LONG') dir = 1;
+      else if (rawSignal.includes('SELL') || rawSignal === 'SHORT') dir = -1;
+      else if (entry > 0 && sl > 0) {
+          // Deduksi dari Entry/SL jika AI lupa/lengah mengisi field signal
+          if (entry > sl) dir = 1;
+          else if (entry < sl) dir = -1;
+      }
+
+      if (dir === 0) return res.status(400).json({ error: 'AI gagal menentukan arah BUY/SELL. Silakan coba gambar yang lebih jelas atau tunggu tren valid.' });
       if (entry <= 0 || sl <= 0 || tps.some(v => v <= 0)) return res.status(400).json({ error: 'AI mengembalikan harga 0.0. Pastikan chart jelas.' });
 
-      const dir = p.signal.toUpperCase() === 'BUY' ? 1 : -1;
       let symbol = resolveSymbol(body, req.query) || (p.symbol && p.symbol !== 'UNKNOWN' ? normalizeSymbol(p.symbol) : null);
       if (!symbol) symbol = 'UNKNOWN_PAIR';
 
@@ -1446,7 +1458,7 @@ export default async function handler(req, res) {
         ok: true,
         analysis_steps: [`Analisa Top-Down (${tfText})`, `Identifikasi Likuiditas & Trend HTF`, `Konfirmasi Zona LTF`, `Penentuan Entry & Anti-Sweep SL`],
         signal: {
-          symbol, decimals: dec, pipSize: pip, signal: p.signal.toUpperCase(), mode: orderType === 'LIMIT' ? 'LIMIT' : 'MARKET', orderType, orderLabel: `${p.signal.toUpperCase()} ${orderType}`, status: orderType === 'LIMIT' ? 'PENDING' : 'RUNNING',
+          symbol, decimals: dec, pipSize: pip, signal: dir === 1 ? 'BUY' : 'SELL', mode: orderType === 'LIMIT' ? 'LIMIT' : 'MARKET', orderType, orderLabel: `${dir === 1 ? 'BUY' : 'SELL'} ${orderType}`, status: orderType === 'LIMIT' ? 'PENDING' : 'RUNNING',
           entry: f(entry), sl: f(sl), tp1: tps[0] != null ? f(tps[0]) : null, tp2: tps[1] != null ? f(tps[1]) : null, tp3: tps[2] != null ? f(tps[2]) : null, tpCount: tps.length,
           zone: null, expireMs: 0, confidence: 'HIGH', risk: 'MEDIUM', setup: p.setup || `SMC MTF (${tfText})`, entryStyle: 'Rekomendasi AI', setupLabel: 'SMC Top-Down', zoneLabel: orderType === 'LIMIT' ? 'Limit Entry Zone' : 'Market Execution Zone', zoneNote: `Timeframes: ${tfText}`,
           reason: (aiReason || p.reason) + sessionNote,
