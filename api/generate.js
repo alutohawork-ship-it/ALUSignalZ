@@ -1,5 +1,5 @@
 // api/generate.js
-// v94 (Scalp NOW→OCO fallback, Konservatif selalu OCO 2 zona + RR murni, minDist tidak blok RR)
+// v95 (Scalp NOW->OCO->LIMIT strict zones, Konservatif OCO->LIMIT RR pure, Anti random entry)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
@@ -80,15 +80,15 @@ const slFloor = (kind, ctx) => {
 
 const STYLES = {
   'Scalping': {
-    label: 'Scalping Agresif · OCO / Market NOW (M1 Structure)',
-    labelEn: 'Aggressive Scalping · OCO / Market NOW (M1 Structure)',
+    label: 'Scalping Agresif · NOW / OCO 2 Zona / LIMIT Valid',
+    labelEn: 'Aggressive Scalping · NOW / OCO 2 Zones / Valid LIMIT',
     entryStyle: 'Agresif', entryStyleEn: 'Aggressive', mode: 'MIXED', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
   'Day Trading': {
-    label: 'Scalping Konservatif · OCO 2 Zona M5 / Refine M1 (RR 1:1/1:2/1:3)',
-    labelEn: 'Conservative Scalping · 2-Zone OCO M5 / M1 Refine (RR 1:1/1:2/1:3)',
+    label: 'Scalping Konservatif · OCO 2 Zona / LIMIT (RR 1:1/1:2/1:3)',
+    labelEn: 'Conservative Scalping · OCO 2 Zones / LIMIT (RR 1:1/1:2/1:3)',
     entryStyle: 'Konservatif', entryStyleEn: 'Conservative', mode: 'LIMIT', kind: 'day',
-    rr: [1.0, 2.0, 3.0], // ✅ RR murni, TP tidak lagi struktural (yang terlalu jauh)
+    rr: [1.0, 2.0, 3.0], // TP murni RR
   },
   'Intraday': {
     label: 'Day Trading / Intraday · OCO (HTF Ranging) / Trend Follow M5-M15',
@@ -804,7 +804,6 @@ KEMBALIKAN HANYA DALAM FORMAT JSON:
   }
 }
 
-// ── FINALIZE PLAN ──
 async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, rrList, confidence, setup, zoneNote, zoneRange, head, lines, zoneLine, timeframes, rangeInfo, chartContext, customTPs = null }) {
   const { f, pip, gold, prof } = ctx;
   const t = tx(ctx);
@@ -855,7 +854,7 @@ async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, 
 
 // ═══════════════════════════ WORKFLOW MTF ═══════════════════════════
 
-// ── SCALPING AGRESIF: NOW kalau valid, kalau tidak OCO 2 zona (fallback ATR bounce) ──
+// ── SCALPING AGRESIF: NOW jika valid → OCO (2 zona valid) → LIMIT (1 zona valid) → NULL ──
 async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
   const { pip } = ctx;
   const t = tx(ctx);
@@ -879,7 +878,7 @@ async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
   const isMomentumStrong = structM1.dir !== 0 && bodyM1 > 1.2 * atrM1;
   const fvgs = findRecentFVGs(m1, 20);
 
-  // ── SKENARIO 1: NOW (jika memungkinkan) ──
+  // ── SKENARIO 1: NOW (Hanya jika struktur M1 & M15 mendukung) ──
   const inFvgBull = fvgs.find(f => f.dir === 1 && price >= f.lo && price <= f.hi);
   const inFvgBear = fvgs.find(f => f.dir === -1 && price >= f.lo && price <= f.hi);
 
@@ -921,7 +920,7 @@ async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
     });
   }
 
-  // ── SKENARIO 2: OCO (fallback wajib, cari pantulan) ──
+  // ── SKENARIO 2: AREA VALID (OCO 2 Arah / 1 Arah) ──
   const demandBelow = findSDZones(m1, 1, price, { dispAtr: 0.8, freshOnly: true })
     .filter(z => z.top < price - 0.2 * atrM1 && z.dist > 0 && z.dist <= maxZoneDist)
     .sort((a, b) => a.dist - b.dist)[0] || null;
@@ -960,38 +959,42 @@ async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
     if (risk > 0) sellOrder = { dir: -1, entry, sl, tps: rrList.map(m => entry - risk * m), type: 'SELL LIMIT', label: 'Sell Limit · FVG M1', zone: { min: fvgBearAbove.lo, max: fvgBearAbove.hi } };
   }
 
-  // ✅ FALLBACK: kalau zona tidak ada, pakai ATR bounce supaya TETAP keluar signal OCO
-  if (!buyOrder || !sellOrder) {
-    const fbDist = 1.2 * atrM1;
-    const fbRisk = Math.max(0.8 * atrM1, slFloor('scalp', ctx));
-    if (!buyOrder) {
-      const entry = price - fbDist;
-      const sl = entry - fbRisk;
-      buyOrder = { dir: 1, entry, sl, tps: rrList.map(m => entry + fbRisk * m), type: 'BUY LIMIT', label: 'Buy Limit · ATR Bounce', zone: null };
-    }
-    if (!sellOrder) {
-      const entry = price + fbDist;
-      const sl = entry + fbRisk;
-      sellOrder = { dir: -1, entry, sl, tps: rrList.map(m => entry - fbRisk * m), type: 'SELL LIMIT', label: 'Sell Limit · ATR Bounce', zone: null };
-    }
+  // Jika ada 2 zona valid → OCO
+  if (buyOrder && sellOrder) {
+    return {
+      plan: {
+        isOCO: true,
+        orders: [buyOrder, sellOrder],
+        setup: 'OCO M1 (Zona Valid 2 Arah)',
+        chartContext: `M15 ${biasM15.src} -> M1 OCO`,
+      },
+      meta: {
+        confidence: 'HIGH',
+        riskLabel: 'MEDIUM',
+        reason: `Pasar ranging dengan 2 zona probabilitas tinggi. Pasang OCO untuk tangkap pantulan: BUY @ ${buyOrder.entry.toFixed(ctx.dec)}, SELL @ ${sellOrder.entry.toFixed(ctx.dec)}. Jika salah satu tersentuh, order lawannya otomatis dibatalkan.`,
+      },
+    };
   }
 
-  return {
-    plan: {
-      isOCO: true,
-      orders: [buyOrder, sellOrder],
-      setup: 'OCO M1 (Bounce Catch)',
-      chartContext: `M15 ${biasM15.src} -> M1 OCO`,
-    },
-    meta: {
-      confidence: 'MEDIUM',
-      riskLabel: 'MEDIUM',
-      reason: `Tidak ada setup NOW valid. Pasang OCO untuk tangkap pantulan: BUY @ ${buyOrder.entry.toFixed(ctx.dec)}, SELL @ ${sellOrder.entry.toFixed(ctx.dec)}. Jika salah satu tersentuh, order lawannya otomatis dibatalkan.`,
-    },
-  };
+  // Jika hanya 1 zona valid → LIMIT 1 Arah
+  const singleOrder = buyOrder || sellOrder;
+  if (singleOrder) {
+    return await finalizePlan({
+      dir: singleOrder.dir, entry: singleOrder.entry, orderType: 'LIMIT', baseSL: singleOrder.sl,
+      kind: 'scalp', atrVal: atrM1, ctx, rrList,
+      confidence: 'MEDIUM', setup: singleOrder.label, zoneNote: singleOrder.label, zoneRange: singleOrder.zone,
+      timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
+      chartContext: `M15 ${biasM15.src} -> M1 1 Arah LIMIT`,
+      head: t.headLine(t.title.scalp, singleOrder.dir === 1 ? 'BUY' : 'SELL', 'LIMIT', ctx.symbol),
+      lines: [`Hanya ada 1 zona valid. Menunggu pullback ke ${singleOrder.label}.`],
+    });
+  }
+
+  // Tidak ada zona probabilitas tinggi
+  return { plan: null, reason: 'Tidak ada zona valid (FVG/OB) di M1 saat ini. Menghindari entry acak.' };
 }
 
-// ── SCALPING KONSERVATIF: SELALU OCO 2 zona (M5→M1, fallback ATR bounce), TP RR murni ──
+// ── SCALPING KONSERVATIF: OCO (2 zona valid) → LIMIT (1 zona valid) → NULL ──
 async function buildDayPlan({ m1, m5, m15, price, rrList, ctx }) {
   const t = tx(ctx);
   const { f, pip } = ctx;
@@ -1023,7 +1026,6 @@ async function buildDayPlan({ m1, m5, m15, price, rrList, ctx }) {
     const risk = Math.abs(entry - sl);
     if (risk <= 0) return null;
 
-    // ✅ TP murni RR (1:1 / 1:2 / 1:3), bukan struktural
     const tps = rrList.map(m => entry + dir * risk * m);
 
     return {
@@ -1037,55 +1039,43 @@ async function buildDayPlan({ m1, m5, m15, price, rrList, ctx }) {
   let buyOrder = mkOrder(1);
   let sellOrder = mkOrder(-1);
 
-  // Validasi arah: BUY wajib di bawah harga, SELL wajib di atas harga
   if (buyOrder && !(buyOrder.entry < price - gap)) buyOrder = null;
   if (sellOrder && !(sellOrder.entry > price + gap)) sellOrder = null;
 
-  // ✅ ATR bounce fallback → OCO 2 zona selalu bisa jalan
-  const fbDist = 1.2 * atrM5;
-  const fbRisk = Math.max(0.8 * atrM5, slFloor('day', ctx));
-  if (!buyOrder) {
-    const entry = price - fbDist;
-    const sl = entry - fbRisk;
-    buyOrder = {
-      dir: 1, entry, sl, dist: fbDist,
-      tps: rrList.map(m => entry + fbRisk * m),
-      type: 'BUY LIMIT', label: 'Buy Limit · ATR Bounce',
-      zone: null,
-    };
-  }
-  if (!sellOrder) {
-    const entry = price + fbDist;
-    const sl = entry + fbRisk;
-    sellOrder = {
-      dir: -1, entry, sl, dist: fbDist,
-      tps: rrList.map(m => entry - fbRisk * m),
-      type: 'SELL LIMIT', label: 'Sell Limit · ATR Bounce',
-      zone: null,
+  // Jika ada 2 zona valid → OCO
+  if (buyOrder && sellOrder) {
+    const biasLabel = dirM15 === 1 ? 'Bullish' : dirM15 === -1 ? 'Bearish' : 'Netral';
+    const confidence = rawM15.dir !== 0 ? 'HIGH' : 'MEDIUM';
+    return {
+      plan: {
+        isOCO: true,
+        orders: [buyOrder, sellOrder],
+        setup: 'Konservatif OCO 2 Zona (M5/M1)',
+        chartContext: `M15 ${biasLabel} -> M5/M1 OCO 2 arah`,
+      },
+      meta: {
+        confidence,
+        riskLabel: 'MEDIUM',
+        reason: `OCO 2 zona valid: BUY @ ${f(buyOrder.entry)} (${buyOrder.label}), SELL @ ${f(sellOrder.entry)} (${sellOrder.label}). TP ikut RR 1:1 / 1:2 / 1:3. Jika salah satu tersentuh, order lawannya otomatis dibatalkan.`,
+      },
     };
   }
 
-  const biasLabel = dirM15 === 1 ? 'Bullish' : dirM15 === -1 ? 'Bearish' : 'Netral';
-  const confidence = rawM15.dir !== 0 ? 'HIGH' : 'MEDIUM';
+  // Jika hanya 1 zona valid → LIMIT 1 Arah
+  const singleOrder = buyOrder || sellOrder;
+  if (singleOrder) {
+    return await finalizePlan({
+      dir: singleOrder.dir, entry: singleOrder.entry, orderType: 'LIMIT', baseSL: singleOrder.sl,
+      kind: 'day', atrVal: atrM5, ctx, rrList,
+      confidence: 'MEDIUM', setup: singleOrder.label, zoneNote: singleOrder.label, zoneRange: singleOrder.zone,
+      timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
+      chartContext: `M15 ${dirLabel(dirM15)} -> M5/M1 1 Arah`,
+      head: t.headLine(t.title.day, singleOrder.dir === 1 ? 'BUY' : 'SELL', 'LIMIT', ctx.symbol),
+      lines: [`Hanya ada 1 zona valid searah bias.`],
+    });
+  }
 
-  return {
-    plan: {
-      isOCO: true,
-      orders: [buyOrder, sellOrder],
-      setup: 'Konservatif OCO 2 Zona (M5/M1)',
-      chartContext: `M15 ${biasLabel} -> M5/M1 OCO 2 arah`,
-    },
-    meta: {
-      confidence,
-      riskLabel: 'MEDIUM',
-      reason:
-        `OCO 2 zona (refine M5→M1): ` +
-        `BUY @ ${f(buyOrder.entry)} (${buyOrder.label}), ` +
-        `SELL @ ${f(sellOrder.entry)} (${sellOrder.label}). ` +
-        `TP ikut RR 1:1 / 1:2 / 1:3. Jika salah satu tersentuh, order lawannya otomatis dibatalkan. ` +
-        `Bias M15: ${biasLabel}.`,
-    },
-  };
+  return { plan: null, reason: 'Tidak ada zona fresh M5/M1 yang valid dalam jarak maksimal. Menunggu setup probabilitas tinggi.' };
 }
 
 // ── INTRADAY: bias H1/M15 fleksibel (struktur → EMA), zona M5 lalu fallback M15 ──
@@ -1478,10 +1468,10 @@ export default async function handler(req, res) {
     let liveSteps = [];
 
     if (style === 'Scalping') {
-      liveSteps = [`Cek Premium/Discount Range (M15)`, `Analisa Struktur M1`, `Cek NOW di FVG/Momentum`, `Fallback OCO 2 Zona`];
+      liveSteps = [`Cek Premium/Discount Range (M15)`, `Validasi Struktur M1`, `Cari NOW / OCO / LIMIT`, `Anti Entry Acak`];
       result = await buildScalpPlan({ m1, m5, m15, price, rrList, ctx });
     } else if (style === 'Day Trading') {
-      liveSteps = [`Cek Zona M5 / M1 (refine)`, `Validasi Bias M15`, `Hitung SL / RR murni`, `OCO 2 Zona (fallback ATR)`];
+      liveSteps = [`Cek Zona M5 / M1 (refine)`, `Validasi Bias M15`, `Hitung SL / RR murni`, `OCO / LIMIT Valid`];
       result = await buildDayPlan({ m1, m5, m15, price, rrList, ctx });
     } else if (style === 'Intraday') {
       liveSteps = [`Memeriksa bias M15 & H1`, `Mencari Zona M5 / M15`, `Cek OCO / Trend Follow`, `Validasi ERL/IRL`];
