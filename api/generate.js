@@ -1,5 +1,6 @@
 // api/generate.js
-// v89 (Rotasi key TickerLayer utama lalu cadangan, routing simbol sesuai dokumen, sort desc)
+// v91 (Rotasi key TickerLayer utama lalu cadangan, routing simbol sesuai dokumen, sort desc,
+//      pesan error lengkap, jendela minimal 7 hari untuk candle)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
@@ -290,6 +291,19 @@ WAJIB jelaskan narasi:
 - Detail Zona/Struktur: ${d.raw}
 `,
     aiSystem: 'Anda adalah AI analis trading SMC/ICT yang objektif, dingin, dan presisi.',
+
+    // Pesan error yang dipakai handler
+    noEmail: 'Email tidak ditemukan. Silakan login ulang.',
+    notRegistered: 'Email ini belum terdaftar sebagai klien.',
+    expired: 'Masa akses sudah berakhir. Hubungi admin.',
+    noSource: 'tidak ada sumber candle',
+    emptyBody: 'body kosong',
+    noPrice: 'Harga live belum tersedia. Tunggu stream terhubung.',
+    noSetup: 'Belum ada setup valid.',
+    notProcessed: 'Analisa belum diproses.',
+    noPair: (keys) => `Simbol tidak dikenali. Field yang diterima: ${keys}`,
+    range: (price, symbol, lo, hi) => `Harga ${price} di luar rentang wajar untuk ${symbol} (${lo} - ${hi}).`,
+    candle: (symbol, price, detail) => `Candle ${symbol} belum tersedia (harga live ${price}). Detail: ${detail}`,
   },
   en: {
     pip: 'pips',
@@ -320,6 +334,19 @@ MUST explain the narrative:
 - Zone/Structure Details: ${d.raw}
 `,
     aiSystem: 'You are an objective, calm, and precise SMC/ICT trading analyst.',
+
+    // Error messages used by the handler
+    noEmail: 'Email not found. Please log in again.',
+    notRegistered: 'This email is not registered as a client.',
+    expired: 'Access has expired. Please contact the admin.',
+    noSource: 'no candle source',
+    emptyBody: 'empty body',
+    noPrice: 'Live price is not available yet. Wait for the stream to connect.',
+    noSetup: 'No valid setup yet.',
+    notProcessed: 'Analysis not processed yet.',
+    noPair: (keys) => `Symbol not recognized. Fields received: ${keys}`,
+    range: (price, symbol, lo, hi) => `Price ${price} is outside the expected range for ${symbol} (${lo} - ${hi}).`,
+    candle: (symbol, price, detail) => `Candles for ${symbol} are not available (live price ${price}). Detail: ${detail}`,
   },
 };
 const tx = ctx => TX[ctx.lang] || TX.id;
@@ -341,6 +368,9 @@ const TL_ROUTE = {
 const TL_SPAN = { '1m': { mult: 1, span: 'minute', minutes: 1 }, '5m': { mult: 5, span: 'minute', minutes: 5 }, '15m': { mult: 15, span: 'minute', minutes: 15 } };
 const CACHE_TTL = { '1m': 120, '5m': 300, '15m': 600 };
 const CACHE_BARS = { '1m': 500, '5m': 500, '15m': 2000 };
+
+// Jendela minimal untuk pengambilan candle (ms): awal pekan tetap dapat bar yang cukup
+const TL_MIN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 function tlCandidates(symbol) {
   const s = symbol.toUpperCase().trim();
@@ -421,7 +451,8 @@ async function fetchTickerLayerRows(cand, interval, need) {
   const tf = TL_SPAN[interval];
   if (!tf) return info;
   const now = Date.now();
-  const startMs = now - Math.ceil(need * 1.2 * tf.minutes * 60000) - 86400000;
+  // Jendela minimal 7 hari, lalu sort=desc: yang diambil tetap bar terbaru
+  const startMs = now - Math.max(Math.ceil(need * 1.2 * tf.minutes * 60000), TL_MIN_WINDOW_MS) - 86400000;
   const url = `${TICKERLAYER_BASE_URL}/${cand.asset}/agg/${cand.symbol}/${tf.mult}/${tf.span}/${isoDate(new Date(startMs))}/${isoDate(new Date(now + 86400000))}?sort=desc&limit=5000`;
   try {
     const { response, status, detail } = await tlFetch(url);
@@ -460,7 +491,8 @@ function mergeLiveBar(candles, price, tfMin) {
   return candles;
 }
 
-const CANDLE_CACHE_VER = 'v4';
+// v5: jendela minimal 7 hari, cache kandidat lama tidak dipakai lagi
+const CANDLE_CACHE_VER = 'v5';
 const matchesRef = (arr, ref) => arr.length > 0 && ref > 0 && Math.abs(arr[arr.length - 1].c - ref) / ref <= MAX_SRC_DEVIATION;
 
 async function getCandles(symbol, tf, need, ref) {
