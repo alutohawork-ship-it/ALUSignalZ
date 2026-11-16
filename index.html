@@ -606,7 +606,12 @@ const marketOpen = k => MARKETS[k].h24 || ![0, 6].includes(new Date().getUTCDay(
 const T = k => I18N[lang][k];
 const optOf = s => T((STYLE_CFG[s] || STYLE_CFG.Scalping).opt);
 const symOf = k => workingSym[k] || MARKETS[k].aliases[aliasIdx[k] || 0];
-const activeTrade = () => (market === 'VISION' ? visionTrade : (trades.find(t => t.id === activeId && t.key === market) || null));
+/* PERBAIKAN: pastikan trade selalu punya hits (mencegah error 'reading tp1') */
+const activeTrade = () => {
+  const t = market === 'VISION' ? visionTrade : (trades.find(x => x.id === activeId && x.key === market) || null);
+  if (t && !t.hits) t.hits = {};
+  return t;
+};
 const toMs = v => {
   const n = Number(v);
   if (Number.isFinite(n) && n > 0) return n < 1e11 ? n * 1000 : n;
@@ -1259,8 +1264,11 @@ function loadTrades() {
       .map(normalize);
   } catch (e) { return []; }
 }
+/* PERBAIKAN: trade lama dilengkapi hits, dir, dan card agar tidak error */
 function normalize(t) {
   t.hits = t.hits || {};
+  if (t.dir !== 1 && t.dir !== -1) t.dir = t.signal === 'BUY' ? 1 : -1;
+  if (!t.card && t.reason) t.card = { reason: t.reason, reasons: {}, reasonLang: lang };
   for (const k of TP_KEYS) if (typeof t.hits[k] === 'number') t.hits[k] = { at: t.hits[k], price: t[k] };
   if (t.status === 'CLOSED') {
     t.maxTp = maxHit(t);
@@ -1321,6 +1329,7 @@ function checkTrades(k, p) {
 
 function evalTrade(t, p) {
   if (t.key === 'VISION') return false;
+  if (!t.hits) t.hits = {};
   const d = t.dir;
 
   if (t.status === 'PENDING') {
@@ -2607,13 +2616,13 @@ async function generateSignal() {
   const btn = $('signalBtn');
   const btnText = $('btnText');
   const originalText = btnText.textContent;
-  
+
   btnText.textContent = 'Menganalisa...';
   btn.disabled = true;
 
   try {
     const style = $('tradingStyleSelect').value;
-    
+
     const formatCandles = (arr) => {
       return (arr || []).map(c => ({
         t: c.time,
@@ -2641,62 +2650,57 @@ async function generateSignal() {
     const data = res.data;
 
     if (!res.ok || !data || !data.ok) {
-      alert(data?.reason || data?.error || 'Belum ada setup valid.');
+      alert(data?.reason || data?.error || data?.msg || 'Belum ada setup valid.');
       return;
     }
 
     const sig = data.signal;
+    const num = v => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
 
-    // AMAN: Penanganan OCO dengan array orders
-    if (sig.signal === 'OCO' || (sig.orders && Array.isArray(sig.orders))) {
-      let savedCount = 0;
+    /* PERBAIKAN: satu pembuat trade untuk OCO dan sinyal tunggal.
+       Selalu menyertakan hits, dir, dan card supaya tidak error. */
+    const mkTrade = (o, forceLimit) => {
+      const isLimit = forceLimit || o.orderType === 'LIMIT' || o.mode === 'LIMIT';
+      return {
+        id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
+        no: nextNo(), key: market, style: style, signal: o.signal,
+        dir: o.signal === 'BUY' ? 1 : -1,
+        mode: isLimit ? 'LIMIT' : 'MARKET',
+        orderType: o.orderType || (isLimit ? 'LIMIT' : 'MARKET'),
+        fill: o.fill || 'LIMIT',
+        entry: Number(o.entry), sl: Number(o.sl),
+        tp1: num(o.tp1), tp2: num(o.tp2), tp3: num(o.tp3),
+        status: (isLimit || o.status === 'PENDING') ? 'PENDING' : 'RUNNING',
+        createdAt: Date.now(), expiresAt: Date.now() + 4 * 3600 * 1000,
+        zone: o.zone || null,
+        zoneLabel: o.zoneLabel || '',
+        zoneNote: o.zoneNote || o.setupLabel || '',
+        setup: o.setupLabel || o.setup || sig.setup,
+        confidence: o.confidence || sig.confidence,
+        risk: o.risk || sig.risk,
+        pip: MARKETS[market]?.pip || 0.1,
+        hits: {},
+        card: { reason: sig.reason, reasons: pickReasons(sig, lang), reasonLang: lang }
+      };
+    };
+
+    // Penanganan OCO (array orders)
+    if (Array.isArray(sig.orders) && sig.orders.length) {
       sig.orders.forEach(o => {
-        const newTrade = {
-          id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-          no: nextNo(), key: market, style: style, signal: o.signal,
-          mode: 'LIMIT', orderType: 'LIMIT', entry: Number(o.entry), sl: Number(o.sl),
-          tp1: o.tp1 != null ? Number(o.tp1) : null, 
-          tp2: o.tp2 != null ? Number(o.tp2) : null, 
-          tp3: o.tp3 != null ? Number(o.tp3) : null,
-          status: 'PENDING', createdAt: Date.now(), expiresAt: Date.now() + 4 * 3600 * 1000,
-          zone: o.zone, zoneNote: o.zoneNote || o.setupLabel, setup: o.setupLabel || sig.setup, 
-          confidence: sig.confidence, risk: sig.risk,
-          reason: sig.reason, pip: MARKETS[market]?.pip || 0.1
-        };
-        trades.push(newTrade);
-        activeId = newTrade.id;
-        savedCount++;
+        const tr = mkTrade(o, true);
+        trades.push(tr);
+        activeId = tr.id;
       });
       saveTrades();
       renderAll();
-      alert(`Berhasil membuat ${savedCount} Sinyal OCO.`);
+      alert(`Berhasil membuat ${sig.orders.length} Sinyal OCO.`);
       return;
     }
 
-    // AMAN: Penanganan Sinyal Normal (Single) dengan pengaman != null
-    const newTrade = {
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-      no: nextNo(), key: market, style: style, signal: sig.signal,
-      mode: sig.mode || (sig.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET'),
-      orderType: sig.orderType, 
-      entry: Number(sig.entry), 
-      sl: Number(sig.sl),
-      tp1: sig.tp1 != null ? Number(sig.tp1) : null, 
-      tp2: sig.tp2 != null ? Number(sig.tp2) : null, 
-      tp3: sig.tp3 != null ? Number(sig.tp3) : null,
-      status: sig.status === 'PENDING' ? 'PENDING' : 'RUNNING',
-      createdAt: Date.now(), expiresAt: Date.now() + 4 * 3600 * 1000,
-      zone: sig.zone, 
-      zoneNote: sig.zoneNote, 
-      setup: sig.setup, 
-      confidence: sig.confidence, 
-      risk: sig.risk,
-      reason: sig.reason, 
-      pip: MARKETS[market]?.pip || 0.1
-    };
-
-    trades.push(newTrade);
-    activeId = newTrade.id;
+    // Penanganan sinyal tunggal
+    const tr = mkTrade(sig, false);
+    trades.push(tr);
+    activeId = tr.id;
     saveTrades();
     renderAll();
 
