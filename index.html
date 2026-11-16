@@ -492,6 +492,8 @@ const TFS = [1, 5, 15, 30, 60, 240, 1440];
 const HL_TF = [[1, 'M1'], [5, 'M5'], [15, 'M15'], [60, 'H1'], [240, 'H4'], [1440, 'D1']];
 const TF_MIN = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 };
 const TP_KEYS = ['tp1', 'tp2', 'tp3'];
+/* Masa berlaku order pending (limit / OCO) per gaya trading */
+const EXPIRY_MS = { 'Scalping': 90 * 60000, 'Day Trading': 3 * 3600000, 'Intraday': 8 * 3600000, 'Swing': 48 * 3600000 };
 const STYLE_CFG = {
   'Scalping': { htf: '15m', mtf: '5m', ltf: '1m', ema: [5, 9], opt: 'optScalp' },
   'Day Trading': { htf: '1h', mtf: '30m', ltf: '5m', ema: [14, 20], opt: 'optDay' },
@@ -537,7 +539,7 @@ const I18N = {
     lblAccess: 'ACCESS LOGIN', btnLogin: 'MASUK SISTEM', btnLogout: 'LOGOUT', loginNeed: 'Isi email atau kode admin dulu.', checking: 'Mengecek...', denied: 'Login ditolak: ',
     lblMarket: 'TARGET ASET AKTIF', lblStyle: 'GAYA TRADING / STRATEGI', optScalp: 'Scalping Agresif (High Risk)', optDay: 'Scalping Konservatif', optIntra: 'Intraday / Day Trade', optSwing: 'Swing',
     infoScalp: 'Buy Now / Sell Now sesuai arah pasar. Jika ada di area pantulan, fokus ambil pantulan (tanpa limit order).',
-    infoDay: 'Fokus menunggu Limit Order di zona pantulan / FVG.', infoIntra: 'Konsep Day Trade (H1/M15), menunggu retest zona yang lebih lebar.', infoSwing: 'Positioning di H4, menahan posisi lebih lama.',
+    infoDay: 'Fokus menunggu Limit Order di zona pantulan / FVG yang dekat dengan harga (zona jauh otomatis diabaikan).', infoIntra: 'Konsep Day Trade (H1/M15), menunggu retest zona yang lebih lebar.', infoSwing: 'Positioning di H4, menahan posisi lebih lama.',
     btnGen: 'Analisa Signal', btnGenVision: 'Analisa Gambar', btnGenBusy: 'Menganalisa Gambar...',
     lblBias: 'BIAS MULTI-TIMEFRAME', lblStream: 'LIVE MARKET STREAM', lblSession: 'MARKET SESSIONS',
     standby1: 'Chart di bawah sudah aktif. Tekan Analisa Signal untuk membuat sinyal.', entryZone: 'ENTRY ZONE', lblMap: 'LIVE MAP CHART', lblReason: 'ANALYSIS REASON (CONFLUENCE SCORE):',
@@ -558,7 +560,7 @@ const I18N = {
     lblAccess: 'ACCESS LOGIN', btnLogin: 'LOG IN', btnLogout: 'LOGOUT', loginNeed: 'Enter your email or admin code first.', checking: 'Checking...', denied: 'Login denied: ',
     lblMarket: 'ACTIVE TARGET ASSET', lblStyle: 'TRADING STYLE / STRATEGY', optScalp: 'Aggressive Scalping (High Risk)', optDay: 'Conservative Scalping', optIntra: 'Intraday / Day Trade', optSwing: 'Swing',
     infoScalp: 'Buy Now / Sell Now following market direction. If in a bounce zone, focus on the bounce (no limit orders).',
-    infoDay: 'Wait for Limit Orders at retracement zones / FVG.', infoIntra: 'Day Trade concept (H1/M15), waiting for retest of wider zones.', infoSwing: 'Positioning on H4, holding positions longer.',
+    infoDay: 'Wait for Limit Orders at retracement zones / FVG close to price (far zones are ignored).', infoIntra: 'Day Trade concept (H1/M15), waiting for retest of wider zones.', infoSwing: 'Positioning on H4, holding positions longer.',
     btnGen: 'Analyze Signal', btnGenVision: 'Analyze Image', btnGenBusy: 'Analyzing Image...',
     lblBias: 'MULTI-TIMEFRAME BIAS', lblStream: 'LIVE MARKET STREAM', lblSession: 'MARKET SESSIONS',
     standby1: 'The chart below is active. Press Analyze Signal to create a signal.', entryZone: 'ENTRY ZONE', lblMap: 'LIVE MAP CHART', lblReason: 'ANALYSIS REASON (CONFLUENCE SCORE):',
@@ -1349,6 +1351,15 @@ function evalTrade(t, p) {
     if (fillCond) {
       t.status = 'RUNNING';
       t.filledAt = Date.now();
+      /* OCO: begitu satu order terisi, order lawannya otomatis dibatalkan */
+      if (t.ocoId) {
+        for (const s of trades) {
+          if (s.id !== t.id && s.ocoId === t.ocoId && s.status === 'PENDING') {
+            cancelTrade(s, 'OCO: order lawan sudah terisi');
+          }
+        }
+        activeId = t.id;
+      }
       return true;
     }
     return false;
@@ -1479,9 +1490,10 @@ function renderHistory() {
   box.innerHTML = trades.slice().reverse().filter(t => t.key !== 'VISION').map(t => {
     const f = tradeFlow(t), s = statusOf(t);
     const hits = hitKeys(t).map(k => '✓' + k.toUpperCase()).join(' ');
+    const ocoTag = t.ocoId ? ' · OCO' : '';
     return `<div data-tap="${esc(t.id)}" class="bg-darkbg hover:bg-panelborder/60 border ${t.id === activeId ? 'border-accentblue' : 'border-panelborder'} px-2 py-1.5 rounded cursor-pointer select-none space-y-0.5">
       <div class="flex justify-between items-center gap-2 text-[9px] font-bold">
-        <span class="text-white truncate">${t.no}. ${esc(t.key)} <span class="text-[8px] text-gray-400">${esc(optOf(t.style))} · ${esc(t.signal)}</span></span>
+        <span class="text-white truncate">${t.no}. ${esc(t.key)} <span class="text-[8px] text-gray-400">${esc(optOf(t.style))} · ${esc(t.signal)}${ocoTag}</span></span>
         <span class="font-mono whitespace-nowrap ${TXT[s.color]}">${esc(s.text)}</span>
       </div>
       <div class="font-mono text-[10px] font-bold ${pipColor(f.pips)}">${esc(f.main)}</div>
@@ -1509,7 +1521,7 @@ function renderChips() {
     const cls = act
       ? 'bg-accentblue border-accentblue text-white'
       : `bg-darkbg border-panelborder ${TXT[s.color]}`;
-    return `<button data-tap="${esc(x.id)}" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border ${cls}">#${esc(x.no)} ${esc(x.signal)} · ${esc(s.text)}</button>`;
+    return `<button data-tap="${esc(x.id)}" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border ${cls}">#${esc(x.no)} ${esc(x.signal)}${x.ocoId ? ' OCO' : ''} · ${esc(s.text)}</button>`;
   }).join('');
 }
 
@@ -1531,7 +1543,7 @@ function refreshCard() {
   const sig = $('sigBadge');
   sig.textContent = t.signal;
   sig.className = `${t.signal === 'BUY' ? 'bg-sky-500' : 'bg-red-500'} text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg`;
-  setTxt('cardSub', `${optOf(t.style)} · ${t.mode === 'LIMIT' ? T('modeLimit') : T('modeMarket')} / ${new Date(t.createdAt).toLocaleTimeString(lang === 'id' ? 'id-ID' : 'en-US', { hour12: false })}`);
+  setTxt('cardSub', `${optOf(t.style)}${t.ocoId ? ' · OCO' : ''} · ${t.mode === 'LIMIT' ? T('modeLimit') : T('modeMarket')} / ${new Date(t.createdAt).toLocaleTimeString(lang === 'id' ? 'id-ID' : 'en-US', { hour12: false })}`);
   setTxt('cardZone', t.zone ? fmt(t.zone.min) + ' - ' + fmt(t.zone.max) : fmt(t.entry));
   setTxt('cardZoneNote', [t.zoneLabel, t.zoneNote].filter(Boolean).join(' · '));
   const bs = $('badgeSetup');
@@ -2067,18 +2079,33 @@ function drawChart() {
   }
 
   const { vis, slot, xOfT } = layoutX(rows, plotL, plotR, tfMs);
+
+  /* Level trade aktif. Jika bagian dari OCO, beri awalan B/S dan tampilkan juga order pasangannya (yang masih PENDING). */
+  const pre = t && t.ocoId ? (t.signal === 'BUY' ? 'B ' : 'S ') : '';
   const L = t ? [
-    { label: 'ENTRY', v: t.entry, c: '#93c5fd', bg: 'rgba(147,197,253,.14)', dash: [] },
-    { label: 'SL', v: t.sl, c: '#f87171', bg: 'rgba(248,113,113,.14)', dash: [4, 4], hit: t.result === 'SL' },
-    { label: 'TP1', v: t.tp1, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp1 },
-    { label: 'TP2', v: t.tp2, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp2 },
-    { label: 'TP3', v: t.tp3, c: '#38bdf8', bg: 'rgba(56,189,248,.14)', dash: [4, 4], hit: !!t.hits.tp3 }
+    { label: pre + 'ENTRY', main: true, v: t.entry, c: '#93c5fd', bg: 'rgba(147,197,253,.14)', dash: [] },
+    { label: pre + 'SL', v: t.sl, c: '#f87171', bg: 'rgba(248,113,113,.14)', dash: [4, 4], hit: t.result === 'SL' },
+    { label: pre + 'TP1', v: t.tp1, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp1 },
+    { label: pre + 'TP2', v: t.tp2, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp2 },
+    { label: pre + 'TP3', v: t.tp3, c: '#38bdf8', bg: 'rgba(56,189,248,.14)', dash: [4, 4], hit: !!t.hits.tp3 }
   ].filter(l => Number.isFinite(l.v)) : [];
+
+  const sibs = t && t.ocoId ? trades.filter(x => x.ocoId === t.ocoId && x.id !== t.id && x.status === 'PENDING') : [];
+  const L2 = [];
+  sibs.forEach(s => {
+    const tag = s.signal === 'BUY' ? 'B' : 'S';
+    [
+      { label: tag + ' ENTRY', main: true, v: s.entry, c: '#c4b5fd', bg: 'rgba(196,181,253,.16)', dash: [] },
+      { label: tag + ' SL', v: s.sl, c: '#fca5a5', bg: 'rgba(252,165,165,.12)', dash: [4, 4] },
+      { label: tag + ' TP1', v: s.tp1, c: '#6ee7b7', bg: 'rgba(110,231,183,.12)', dash: [4, 4] }
+    ].forEach(x => { if (Number.isFinite(x.v)) L2.push(x); });
+  });
+  const ALL = L.concat(L2);
+  const zoneTrades = t ? [t].concat(sibs) : [];
 
   let lo = Infinity, hi = -Infinity;
   const isRunning = t && (t.status === 'RUNNING' || (t.hits && Object.keys(t.hits).length > 0));
-  const hitEntry = t && live != null && (t.dir > 0 ? live <= t.entry : live >= t.entry);
-  const isZoomed = t && (isRunning || hitEntry);
+  const isZoomed = !!(t && isRunning);
 
   if (isZoomed) {
     const levels = [t.sl, t.entry, t.tp1, t.tp2, t.tp3, live].filter(v => v != null && Number.isFinite(v));
@@ -2096,14 +2123,16 @@ function drawChart() {
       if (live > hi) hi = live;
     }
     if (t) {
-      L.forEach(l => {
+      ALL.forEach(l => {
         if (l.v < lo) lo = l.v;
         if (l.v > hi) hi = l.v;
       });
-      if (t.zone) {
-        if (t.zone.min < lo) lo = t.zone.min;
-        if (t.zone.max > hi) hi = t.zone.max;
-      }
+      zoneTrades.forEach(zt => {
+        if (zt.zone) {
+          if (zt.zone.min < lo) lo = zt.zone.min;
+          if (zt.zone.max > hi) hi = zt.zone.max;
+        }
+      });
     }
   }
 
@@ -2123,18 +2152,21 @@ function drawChart() {
     cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
   }
 
-  if (t && t.zone && t.mode === 'LIMIT') {
+  /* Zona entry (trade aktif + pasangan OCO) */
+  zoneTrades.forEach(zt => {
+    if (!zt.zone || zt.mode !== 'LIMIT') return;
+    const rgb = zt.dir > 0 ? '41,98,255' : '249,115,22';
     const x0 = plotL;
-    const y1 = yOf(t.zone.max), y2 = yOf(t.zone.min);
+    const y1 = yOf(zt.zone.max), y2 = yOf(zt.zone.min);
     cx.save();
-    cx.fillStyle = 'rgba(41,98,255,.16)';
-    cx.fillRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
-    cx.strokeStyle = 'rgba(41,98,255,.5)';
+    cx.fillStyle = `rgba(${rgb},.16)`;
+    cx.fillRect(x0, Math.min(y1, y2), plotR - x0, Math.max(1.5, Math.abs(y2 - y1)));
+    cx.strokeStyle = `rgba(${rgb},.5)`;
     cx.lineWidth = 1;
     cx.setLineDash([2, 2]);
-    cx.strokeRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
+    cx.strokeRect(x0, Math.min(y1, y2), plotR - x0, Math.max(1.5, Math.abs(y2 - y1)));
     cx.restore();
-  }
+  });
 
   const bodyW = Math.max(1.5, slot * 0.62);
   cx.lineWidth = 1;
@@ -2155,12 +2187,12 @@ function drawChart() {
   }
 
   if (t) {
-    L.forEach(l => {
+    ALL.forEach(l => {
       const y = yOf(l.v);
       cx.save();
       cx.strokeStyle = l.c;
-      cx.globalAlpha = l.label === 'ENTRY' ? .95 : .8;
-      cx.lineWidth = l.label === 'ENTRY' ? 1.4 : 1;
+      cx.globalAlpha = l.main ? .95 : .8;
+      cx.lineWidth = l.main ? 1.4 : 1;
       cx.setLineDash(l.dash);
       cx.beginPath();
       cx.moveTo(plotL, y);
@@ -2203,7 +2235,7 @@ function drawChart() {
     }
   }
 
-  const tags = L.map(l => ({ text: (l.hit ? '✓ ' : '') + l.label + ' ' + fmt(l.v), c: l.c, bg: l.bg, y: yOf(l.v) }));
+  const tags = ALL.map(l => ({ text: (l.hit ? '✓ ' : '') + l.label + ' ' + fmt(l.v), c: l.c, bg: l.bg, y: yOf(l.v) }));
   if (live != null) {
     tags.push({
       text: fmt(live),
@@ -2214,7 +2246,7 @@ function drawChart() {
   }
   tags.sort((a, b) => a.y - b.y);
 
-  const GAP = 16, capT = plotT + 6, capB = plotB - 6;
+  const GAP = 15, capT = plotT + 6, capB = plotB - 6;
   tags.forEach(g => { g.y = Math.max(capT, Math.min(capB, g.y)); });
   for (let i = 1; i < tags.length; i++) if (tags[i].y < tags[i - 1].y + GAP) tags[i].y = tags[i - 1].y + GAP;
   if (tags.length && tags[tags.length - 1].y > capB) {
@@ -2226,7 +2258,7 @@ function drawChart() {
   cx.textAlign = 'left';
   cx.textBaseline = 'middle';
   for (const g of tags) {
-    const x = plotR + 6, w = CHART_GUT - 12, h = 15, y = g.y - h / 2;
+    const x = plotR + 6, w = CHART_GUT - 12, h = 14, y = g.y - h / 2;
     rr(cx, x, y, w, h, 3);
     cx.fillStyle = g.bg; cx.fill();
     cx.strokeStyle = g.c; cx.lineWidth = .8; cx.stroke();
@@ -2561,7 +2593,7 @@ function calcBias(c) {
   return { bias: score > 0 ? 'BULLISH' : score < 0 ? 'BEARISH' : 'NETRAL', score };
 }
 
-/* ================= GENERATE SINYAL (SUDAH DIPERBAIKI) ================= */
+/* ================= GENERATE SINYAL ================= */
 async function generateSignal() {
   if (market === 'VISION') {
     if (visionImages.length === 0) return alert('Silakan upload minimal 1 gambar chart terlebih dahulu.');
@@ -2656,8 +2688,9 @@ async function generateSignal() {
 
     const sig = data.signal;
     const num = v => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
+    const expireAfter = EXPIRY_MS[style] || 4 * 3600 * 1000;
 
-    /* PERBAIKAN: satu pembuat trade untuk OCO dan sinyal tunggal.
+    /* Satu pembuat trade untuk OCO dan sinyal tunggal.
        Selalu menyertakan hits, dir, dan card supaya tidak error. */
     const mkTrade = (o, forceLimit) => {
       const isLimit = forceLimit || o.orderType === 'LIMIT' || o.mode === 'LIMIT';
@@ -2671,11 +2704,11 @@ async function generateSignal() {
         entry: Number(o.entry), sl: Number(o.sl),
         tp1: num(o.tp1), tp2: num(o.tp2), tp3: num(o.tp3),
         status: (isLimit || o.status === 'PENDING') ? 'PENDING' : 'RUNNING',
-        createdAt: Date.now(), expiresAt: Date.now() + 4 * 3600 * 1000,
+        createdAt: Date.now(), expiresAt: Date.now() + expireAfter,
         zone: o.zone || null,
         zoneLabel: o.zoneLabel || '',
         zoneNote: o.zoneNote || o.setupLabel || '',
-        setup: o.setupLabel || o.setup || sig.setup,
+        setup: o.setup || o.zoneLabel || sig.setup,
         confidence: o.confidence || sig.confidence,
         risk: o.risk || sig.risk,
         pip: MARKETS[market]?.pip || 0.1,
@@ -2684,16 +2717,23 @@ async function generateSignal() {
       };
     };
 
-    // Penanganan OCO (array orders)
+    // Penanganan OCO (array orders): semua order diberi ocoId yang sama
     if (Array.isArray(sig.orders) && sig.orders.length) {
+      const ocoId = 'oco_' + Date.now();
+      const created = [];
       sig.orders.forEach(o => {
         const tr = mkTrade(o, true);
+        tr.ocoId = ocoId;
         trades.push(tr);
-        activeId = tr.id;
+        created.push(tr);
       });
+      /* Tampilkan order yang entry-nya paling dekat dengan harga live */
+      const live = prices[market]?.price;
+      let focus = created[created.length - 1];
+      if (live != null) focus = created.slice().sort((a, b) => Math.abs(a.entry - live) - Math.abs(b.entry - live))[0];
+      activeId = focus.id;
       saveTrades();
       renderAll();
-      alert(`Berhasil membuat ${sig.orders.length} Sinyal OCO.`);
       return;
     }
 
