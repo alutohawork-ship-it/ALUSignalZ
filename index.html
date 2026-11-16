@@ -208,10 +208,10 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
       <div id="visionPanel" class="hidden bg-cardbg rounded-xl border border-panelborder p-3 shadow-md space-y-3">
         <div class="text-center">
           <label class="cursor-pointer inline-flex items-center gap-2 bg-panelborder hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition text-xs">
-            <i class="fa-solid fa-cloud-arrow-up"></i> Upload Gambar Chart (Max 3)
+            <i class="fa-solid fa-cloud-arrow-up"></i> <span data-i18n="visionUpload"></span>
             <input type="file" id="visionInput" accept="image/*" multiple class="hidden" onchange="handleImageUpload(event)">
           </label>
-          <p class="text-[8px] text-gray-500 mt-1">Format: JPG, PNG. Maks 5MB per gambar.</p>
+          <p data-i18n="visionFmt" class="text-[8px] text-gray-500 mt-1"></p>
         </div>
         <!-- Preview Area -->
         <div id="visionPreview" class="grid grid-cols-3 gap-2">
@@ -230,7 +230,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
       </div>
 
       <!-- 4. GENERATE BUTTON -->
-      <button id="signalBtn" onclick="generateSignal()" class="w-full bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 text-darkbg font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20 transition active:scale-95"><i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnText" data-i18n="btnGen"></span></button>
+      <button id="signalBtn" onclick="generateSignal()" class="w-full bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 text-darkbg font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20 transition active:scale-95"><i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnText"></span></button>
 
       <!-- 5. SIGNAL CARD -->
       <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2 relative">
@@ -282,7 +282,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
 
           <div class="bg-darkbg border border-panelborder rounded-lg p-2.5 text-[10px] text-gray-300 leading-relaxed">
             <p data-i18n="lblReason" class="font-bold text-gray-400 mb-1"></p>
-            <span id="cardReason">---</span>
+            <span id="cardReason" class="whitespace-pre-line">---</span>
           </div>
         </div>
 
@@ -464,10 +464,10 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
     </div>
   </main>
 
-  <!-- DISCLAIMER -->
+  <!-- DISCLAIMER (2 bahasa) -->
   <footer class="mt-6 pb-4 text-center">
     <p class="text-[9px] text-gray-500 font-mono leading-relaxed px-4">
-      <strong>DISCLAIMER:</strong> Sinyal dan analisa ini hanya untuk tujuan edukasi. Bukan merupakan saran keuangan (Financial Advisor). Trading memiliki risiko kehilangan modal. Selalu lakukan riset Anda sendiri (DYOR).
+      <strong data-i18n="disclaimerLbl"></strong> <span data-i18n="disclaimerTxt"></span>
     </p>
   </footer>
 </div>
@@ -538,8 +538,14 @@ const I18N = {
     lblMarket: 'TARGET ASET AKTIF', lblStyle: 'GAYA TRADING / STRATEGI', optScalp: 'Scalping Agresif (High Risk)', optDay: 'Scalping Konservatif', optIntra: 'Intraday / Day Trade', optSwing: 'Swing',
     infoScalp: 'Buy Now / Sell Now sesuai arah pasar. Jika ada di area pantulan, fokus ambil pantulan (tanpa limit order).',
     infoDay: 'Fokus menunggu Limit Order di zona pantulan / FVG.', infoIntra: 'Konsep Day Trade (H1/M15), menunggu retest zona yang lebih lebar.', infoSwing: 'Positioning di H4, menahan posisi lebih lama.',
-    btnGen: 'Analisa Signal', lblBias: 'BIAS MULTI-TIMEFRAME', lblStream: 'LIVE MARKET STREAM', lblSession: 'MARKET SESSIONS',
+    btnGen: 'Analisa Signal', btnGenVision: 'Analisa Gambar', btnGenBusy: 'Menganalisa Gambar...',
+    lblBias: 'BIAS MULTI-TIMEFRAME', lblStream: 'LIVE MARKET STREAM', lblSession: 'MARKET SESSIONS',
     standby1: 'Chart di bawah sudah aktif. Tekan Analisa Signal untuk membuat sinyal.', entryZone: 'ENTRY ZONE', lblMap: 'LIVE MAP CHART', lblReason: 'ANALYSIS REASON (CONFLUENCE SCORE):',
+    modeLimit: 'Entry zona', modeMarket: 'Entry market',
+    reasonOtherLang: '(Alasan ini dibuat dalam bahasa Inggris. Buat sinyal baru untuk versi Indonesia.)',
+    visionUpload: 'Upload Gambar Chart (Max 3)', visionFmt: 'Format: JPG, PNG. Maks 5MB per gambar.',
+    disclaimerLbl: 'DISCLAIMER:',
+    disclaimerTxt: 'Sinyal dan analisa ini hanya untuk tujuan edukasi. Bukan merupakan saran keuangan (Financial Advisor). Trading memiliki risiko kehilangan modal. Selalu lakukan riset Anda sendiri (DYOR).',
     valTitle: 'Validasi Analisa Structure', steps: ['Menganalisa struktur pasar...', 'Mencari zona supply & demand fresh...', 'Memeriksa bias M15 & H1...', 'Cek FVG & displacement...', 'Validasi rejection candle...', 'Menghitung entry, SL, TP...'],
     lblHistory: 'TRADING HISTORY', histToday: 'Hari ini', histAll: 'Semua',
     winLbl: 'WIN', loseLbl: 'LOSE', totalLbl: 'TOTAL PNL (WIN − LOSE)', ratioLbl: 'WIN RATIO',
@@ -553,8 +559,14 @@ const I18N = {
     lblMarket: 'ACTIVE TARGET ASSET', lblStyle: 'TRADING STYLE / STRATEGY', optScalp: 'Aggressive Scalping (High Risk)', optDay: 'Conservative Scalping', optIntra: 'Intraday / Day Trade', optSwing: 'Swing',
     infoScalp: 'Buy Now / Sell Now following market direction. If in a bounce zone, focus on the bounce (no limit orders).',
     infoDay: 'Wait for Limit Orders at retracement zones / FVG.', infoIntra: 'Day Trade concept (H1/M15), waiting for retest of wider zones.', infoSwing: 'Positioning on H4, holding positions longer.',
-    btnGen: 'Analyze Signal', lblBias: 'MULTI-TIMEFRAME BIAS', lblStream: 'LIVE MARKET STREAM', lblSession: 'MARKET SESSIONS',
+    btnGen: 'Analyze Signal', btnGenVision: 'Analyze Image', btnGenBusy: 'Analyzing Image...',
+    lblBias: 'MULTI-TIMEFRAME BIAS', lblStream: 'LIVE MARKET STREAM', lblSession: 'MARKET SESSIONS',
     standby1: 'The chart below is active. Press Analyze Signal to create a signal.', entryZone: 'ENTRY ZONE', lblMap: 'LIVE MAP CHART', lblReason: 'ANALYSIS REASON (CONFLUENCE SCORE):',
+    modeLimit: 'Zone entry', modeMarket: 'Market entry',
+    reasonOtherLang: '(This reasoning was generated in Indonesian. Create a new signal for the English version.)',
+    visionUpload: 'Upload Chart Images (Max 3)', visionFmt: 'Format: JPG, PNG. Max 5MB per image.',
+    disclaimerLbl: 'DISCLAIMER:',
+    disclaimerTxt: 'These signals and analyses are for educational purposes only. They are not financial advice. Trading carries the risk of losing your capital. Always do your own research (DYOR).',
     valTitle: 'Validating Market Structure', steps: ['Analyzing market structure...', 'Finding fresh supply & demand zones...', 'Checking M15 & H1 bias...', 'Checking FVG & displacement...', 'Validating rejection candles...', 'Calculating entry, SL, TP...'],
     lblHistory: 'TRADING HISTORY', histToday: 'Today', histAll: 'All',
     winLbl: 'WIN', loseLbl: 'LOSE', totalLbl: 'TOTAL PNL (WIN − LOSE)', ratioLbl: 'WIN RATIO',
@@ -603,6 +615,32 @@ const toMs = v => {
   const d = Date.parse(v);
   return Number.isFinite(d) ? d : NaN;
 };
+
+/* ================= REASONING 2 BAHASA ================= */
+// Ambil alasan dalam ID dan EN dari respons server (jika server mengirim keduanya).
+// Format yang dikenali: s.reasons {id,en} | s.reason_id / s.reason_en | s.reasonId / s.reasonEn.
+// Jika hanya ada satu s.reason, dianggap berbahasa sesuai permintaan (lang saat generate).
+function pickReasons(s, curLang) {
+  const out = {};
+  const obj = s.reasons || s.reason_i18n || {};
+  ['id', 'en'].forEach(l => {
+    const cap = l === 'id' ? 'Id' : 'En';
+    const v = obj[l] || s['reason_' + l] || s['reason' + cap];
+    if (v) out[l] = String(v);
+  });
+  if (!out[curLang] && s.reason) out[curLang] = String(s.reason);
+  return out;
+}
+function reasonFor(t) {
+  const c = t && t.card;
+  if (!c) return '---';
+  const r = c.reasons || {};
+  if (r[lang]) return r[lang];
+  const any = r.id || r.en || c.reason;
+  if (!any) return '---';
+  const from = c.reasonLang || (r.id ? 'id' : r.en ? 'en' : null);
+  return from && from !== lang ? any + '\n\n' + T('reasonOtherLang') : any;
+}
 
 /* ================= STATE ================= */
 let lang = 'id', market = 'XAUUSD', ws = null, connId = 0, reconT = null, pingT = null, authFailed = false, streamStarted = false;
@@ -849,8 +887,11 @@ function applyLang() {
     const v = I18N[lang][el.dataset.i18n];
     if (typeof v === 'string') el.textContent = v;
   });
+  document.documentElement.lang = lang;
   setTxt('langBtn', lang.toUpperCase() + ' 🌐');
+  setTxt('btnText', market === 'VISION' ? T('btnGenVision') : T('btnGen'));
   renderAll();
+  if (market === 'VISION') refreshCard(); // renderAll() berhenti lebih awal untuk VISION
 }
 function toggleStyleInfo() { $('styleInfoBox').classList.toggle('hidden'); }
 function wsBadge(text, color) {
@@ -886,7 +927,7 @@ function syncMarket(tradeId) {
   $('sessionPanel').classList.toggle('hidden', isVision);
 
   // Update tombol text
-  setTxt('btnText', isVision ? 'Analisa Gambar' : T('btnGen'));
+  setTxt('btnText', isVision ? T('btnGenVision') : T('btnGen'));
 
   activeId = isVision ? null : pickTradeFor(market, tradeId);
   refreshCard();
@@ -1530,7 +1571,7 @@ function refreshCard() {
   const sig = $('sigBadge');
   sig.textContent = t.signal;
   sig.className = `${t.signal === 'BUY' ? 'bg-sky-500' : 'bg-red-500'} text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg`;
-  setTxt('cardSub', `${optOf(t.style)} · ${t.mode === 'LIMIT' ? 'Entry zona' : 'Entry market'} / ${new Date(t.createdAt).toLocaleTimeString(lang === 'id' ? 'id-ID' : 'en-US', { hour12: false })}`);
+  setTxt('cardSub', `${optOf(t.style)} · ${t.mode === 'LIMIT' ? T('modeLimit') : T('modeMarket')} / ${new Date(t.createdAt).toLocaleTimeString(lang === 'id' ? 'id-ID' : 'en-US', { hour12: false })}`);
   setTxt('cardZone', t.zone ? fmt(t.zone.min) + ' - ' + fmt(t.zone.max) : fmt(t.entry));
   setTxt('cardZoneNote', [t.zoneLabel, t.zoneNote].filter(Boolean).join(' · '));
   const bs = $('badgeSetup');
@@ -1543,7 +1584,7 @@ function refreshCard() {
   br.textContent = 'RISK ' + (t.risk || '--');
   br.className = BADGE + (RISK_CLS[t.risk] || 'bg-darkbg text-gray-300 border-panelborder');
   setTxt('cardLive', priceTxt);
-  setTxt('cardReason', (t.card && t.card.reason) || '---');
+  setTxt('cardReason', reasonFor(t));
 
   const lv = { sl: t.sl, tp1: t.tp1, tp2: t.tp2, tp3: t.tp3 };
   const hit = { sl: t.result === 'SL', tp1: !!t.hits.tp1, tp2: !!t.hits.tp2, tp3: !!t.hits.tp3 };
@@ -1978,766 +2019,4 @@ function renderSmcInfo() {
   const style = t ? t.style : $('tradingStyleSelect').value;
   const iv = smcTfOverride || SMC_TF_MAP[style] || '5m';
 
-  document.querySelectorAll('.smc-tf-btn').forEach(btn => {
-    if (btn.dataset.tf === iv) btn.classList.add('active');
-    else btn.classList.remove('active');
-  });
-
-  const s = getSmc(k, iv);
-  const head = `${k} ${iv} · ${srcOf(k, iv)} · ${s.n || 0} candle`;
-  if (s.status !== 'ok') return setTxt('smcInfo', head + (s.err ? ' · ' + s.err : ' · memuat candle (min 20)...'));
-  setTxt('smcInfo', `${head} · ${s.fvgs.length} FVG · ${s.obs.length} S/D · ${s.breakers.length} BB · ${s.liq.pools.length} BSL/SSL · ${s.ev.length} BOS/CHoCH · ${s.cisd.length} CISD · ${s.liq.sweeps.length} SW`);
-}
-
-function sessionBoxes(rows, now) {
-  const out = [];
-  if (!rows.length) return out;
-  const d = new Date(now);
-  const day0 = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  for (const s of SESS) {
-    let a = day0 + s.h1 * 3600000, b = day0 + s.h2 * 3600000;
-    if (now < a) { a -= 86400000; b -= 86400000; }
-    const inS = rows.filter(c => c.t >= a && c.t < b);
-    if (!inS.length) continue;
-    out.push({
-      name: s.name, col: s.col, a, b: Math.min(b, now),
-      hi: Math.max(...inS.map(c => c.h)), lo: Math.min(...inS.map(c => c.l))
-    });
-  }
-  return out;
-}
-
-/* ================= UTIL CANVAS ================= */
-function fitCv(el, c) {
-  const r = el.getBoundingClientRect();
-  if (!r.width || !r.height) return null;
-  const dpr = window.devicePixelRatio || 1;
-  const W = Math.round(r.width * dpr), H = Math.round(r.height * dpr);
-  if (el.width !== W || el.height !== H) { el.width = W; el.height = H; }
-  c.setTransform(dpr, 0, 0, dpr, 0, 0);
-  c.clearRect(0, 0, r.width, r.height);
-  return { w: r.width, h: r.height };
-}
-function rr(c, x, y, w, h, r) {
-  c.beginPath();
-  c.moveTo(x + r, y);
-  c.arcTo(x + w, y, x + w, y + h, r);
-  c.arcTo(x + w, y + h, x, y + h, r);
-  c.arcTo(x, y + h, x, y, r);
-  c.arcTo(x, y, x + w, y, r);
-  c.closePath();
-}
-function layoutX(rows, plotL, plotR, tfMs) {
-  const plotW = plotR - plotL;
-  const nWant = Math.max(12, Math.floor(plotW / 5) - CH_PAD);
-  const N = Math.min(rows.length, nWant);
-  const vis = N ? rows.slice(rows.length - N) : [];
-  const slot = plotW / (Math.max(N, 12) + CH_PAD);
-  const t0 = vis.length ? vis[0].t : Date.now() - tfMs * 12;
-  const xOfT = tm => plotL + ((tm - t0) / tfMs + 0.5) * slot;
-  return { vis, slot, t0, xOfT };
-}
-function srcLabel(k, iv) { return `${k} · ${iv} · WIB · ${srcOf(k, iv)}`; }
-
-/* ================= CHART UTAMA (CANDLESTICK + FULL FRAME LINES) ================= */
-function drawChart() {
-  const d = fitCv(cv, cx);
-  if (!d || market === 'VISION') return;
-  const CW = d.w, CH = d.h;
-  const t = activeTrade();
-  const k = market;
-
-  const iv = '1m';
-  const tfMs = TF_MIN[iv] * 60000;
-  const rows = displayRows(k, iv);
-  const live = prices[k] ? prices[k].price : null;
-  const liveDir = prices[k] ? prices[k].dir : 0;
-  const plotL = 6, plotT = 20, plotB = CH - 14, plotR = CW - CHART_GUT;
-  const plotH = plotB - plotT;
-
-  cx.font = '8px ui-monospace, monospace';
-  cx.textAlign = 'left';
-  cx.textBaseline = 'top';
-  cx.fillStyle = 'rgba(148,163,184,.9)';
-  cx.fillText(srcLabel(k, iv), plotL + 2, 3);
-
-  if (!rows.length && live == null) {
-    cx.font = 'bold 11px ui-monospace, monospace';
-    cx.fillStyle = '#94a3b8';
-    cx.textAlign = 'center';
-    cx.textBaseline = 'middle';
-    cx.fillText(T('waitTick'), CW / 2, CH / 2);
-    cx.textAlign = 'left';
-    return;
-  }
-
-  const { vis, slot, xOfT } = layoutX(rows, plotL, plotR, tfMs);
-  const clampX = x => Math.max(plotL, Math.min(plotR, x));
-
-  const L = t ? [
-    { label: 'ENTRY', v: t.entry, c: '#93c5fd', bg: 'rgba(147,197,253,.14)', dash: [] },
-    { label: 'SL', v: t.sl, c: '#f87171', bg: 'rgba(248,113,113,.14)', dash: [4, 4], hit: t.result === 'SL' },
-    { label: 'TP1', v: t.tp1, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp1 },
-    { label: 'TP2', v: t.tp2, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp2 },
-    { label: 'TP3', v: t.tp3, c: '#38bdf8', bg: 'rgba(56,189,248,.14)', dash: [4, 4], hit: !!t.hits.tp3 }
-  ].filter(l => Number.isFinite(l.v)) : [];
-
-  let lo = Infinity, hi = -Infinity;
-
-  const isRunning = t && (t.status === 'RUNNING' || (t.hits && Object.keys(t.hits).length > 0));
-  const hitEntry = t && live != null && (t.dir > 0 ? live <= t.entry : live >= t.entry);
-  const isZoomed = t && (isRunning || hitEntry);
-
-  if (isZoomed) {
-    const levels = [t.sl, t.entry, t.tp1, t.tp2, t.tp3, live].filter(v => v != null && Number.isFinite(v));
-    lo = Math.min(...levels);
-    hi = Math.max(...levels);
-  } else {
-    vis.forEach(c => {
-      if (c.h < lo) lo = c.h;
-      if (c.h > hi) hi = c.h;
-      if (c.l < lo) lo = c.l;
-      if (c.l > hi) hi = c.l;
-    });
-    if (live != null) {
-      if (live < lo) lo = live;
-      if (live > hi) hi = live;
-    }
-    if (t) {
-      L.forEach(l => {
-        if (l.v < lo) lo = l.v;
-        if (l.v > hi) hi = l.v;
-      });
-      if (t.zone) {
-        if (t.zone.min < lo) lo = t.zone.min;
-        if (t.zone.max > hi) hi = t.zone.max;
-      }
-    }
-  }
-
-  if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
-  if (!(hi - lo > 0)) { const dd = Math.abs(hi) * 0.001 || 1; lo -= dd; hi += dd; }
-
-  const pad = (hi - lo) * (isZoomed ? 0.05 : 0.12);
-  lo -= pad;
-  hi += pad;
-
-  const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * plotH;
-
-  cx.lineWidth = 1;
-  cx.strokeStyle = 'rgba(148,163,184,.08)';
-  for (let i = 1; i < 4; i++) {
-    const y = plotT + plotH * i / 4;
-    cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
-  }
-
-  if (t && t.zone && t.mode === 'LIMIT') {
-    const x0 = plotL;
-    const y1 = yOf(t.zone.max), y2 = yOf(t.zone.min);
-    cx.save();
-    cx.fillStyle = 'rgba(41,98,255,.16)';
-    cx.fillRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
-    cx.strokeStyle = 'rgba(41,98,255,.5)';
-    cx.lineWidth = 1;
-    cx.setLineDash([2, 2]);
-    cx.strokeRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
-    cx.restore();
-  }
-
-  const bodyW = Math.max(1.5, slot * 0.62);
-  cx.lineWidth = 1;
-  for (const c of vis) {
-    const x = xOfT(c.t);
-    if (x < plotL || x > plotR) continue;
-
-    const up = c.c >= c.o;
-    const col = up ? '#34d399' : '#f87171';
-    const yH = yOf(c.h), yL = yOf(c.l), yO = yOf(c.o), yC = yOf(c.c);
-
-    cx.strokeStyle = col;
-    cx.beginPath(); cx.moveTo(x, yH); cx.lineTo(x, yL); cx.stroke();
-
-    cx.fillStyle = col;
-    const bY = Math.min(yO, yC);
-    const bH = Math.max(1, Math.abs(yC - yO));
-    cx.fillRect(x - bodyW / 2, bY, bodyW, bH);
-  }
-
-  // ================== GARIS FULL FRAME ==================
-  if (t) {
-    L.forEach(l => {
-      const y = yOf(l.v);
-      cx.save();
-      cx.strokeStyle = l.c;
-      cx.globalAlpha = l.label === 'ENTRY' ? .95 : .8;
-      cx.lineWidth = l.label === 'ENTRY' ? 1.4 : 1;
-      cx.setLineDash(l.dash);
-      cx.beginPath();
-      cx.moveTo(plotL, y);
-      cx.lineTo(plotR, y);
-      cx.stroke();
-      cx.restore();
-    });
-  }
-  // ======================================================
-
-  if (live != null) {
-    const y = yOf(live);
-    const lc = liveDir < 0 ? '#f87171' : '#34d399';
-    cx.save();
-    cx.strokeStyle = lc;
-    cx.globalAlpha = .6;
-    cx.lineWidth = 1;
-    cx.setLineDash([1, 3]);
-    cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
-    cx.restore();
-    if (vis.length) {
-      const hx = xOfT(vis[vis.length - 1].t);
-      const pr = 3 + Math.sin(Date.now() / 150) * 1.5;
-      cx.save();
-      cx.beginPath(); cx.arc(hx, y, pr + 2.5, 0, Math.PI * 2); cx.fillStyle = 'rgba(41,98,255,.35)'; cx.fill();
-      cx.beginPath(); cx.arc(hx, y, 3, 0, Math.PI * 2); cx.fillStyle = '#fff'; cx.shadowColor = '#2962ff'; cx.shadowBlur = 8; cx.fill();
-      cx.restore();
-    }
-  }
-
-  if (vis.length) {
-    const step = Math.max(1, Math.round(vis.length / 5));
-    cx.font = '8px ui-monospace, monospace';
-    cx.fillStyle = 'rgba(148,163,184,.85)';
-    cx.textAlign = 'center';
-    cx.textBaseline = 'bottom';
-    for (let i = 0; i < vis.length; i += step) {
-      const c = vis[i];
-      const hm = new Date(c.t + 7 * 3600000).toISOString().slice(11, 16);
-      cx.fillText(hm, xOfT(c.t), CH - 1);
-    }
-  }
-
-  const tags = L.map(l => ({ text: (l.hit ? '✓ ' : '') + l.label + ' ' + fmt(l.v), c: l.c, bg: l.bg, y: yOf(l.v) }));
-  if (live != null) {
-    tags.push({
-      text: fmt(live),
-      c: liveDir < 0 ? '#fca5a5' : '#86efac',
-      bg: liveDir < 0 ? 'rgba(239,68,68,.25)' : 'rgba(16,185,129,.25)',
-      y: yOf(live)
-    });
-  }
-  tags.sort((a, b) => a.y - b.y);
-
-  const GAP = 16, capT = plotT + 6, capB = plotB - 6;
-  tags.forEach(g => { g.y = Math.max(capT, Math.min(capB, g.y)); });
-  for (let i = 1; i < tags.length; i++) if (tags[i].y < tags[i - 1].y + GAP) tags[i].y = tags[i - 1].y + GAP;
-  if (tags.length && tags[tags.length - 1].y > capB) {
-    tags[tags.length - 1].y = capB;
-    for (let i = tags.length - 2; i >= 0; i--) if (tags[i].y > tags[i + 1].y - GAP) tags[i].y = tags[i + 1].y - GAP;
-  }
-
-  cx.font = 'bold 8px ui-monospace, monospace';
-  cx.textAlign = 'left';
-  cx.textBaseline = 'middle';
-  for (const g of tags) {
-    const x = plotR + 6, w = CHART_GUT - 12, h = 15, y = g.y - h / 2;
-    rr(cx, x, y, w, h, 3);
-    cx.fillStyle = g.bg; cx.fill();
-    cx.strokeStyle = g.c; cx.lineWidth = .8; cx.stroke();
-    cx.fillStyle = g.c;
-    cx.fillText(g.text, x + 4, g.y + .5);
-  }
-}
-
-/* ================= PANEL SMC (CANDLESTICK + ZONA) ================= */
-function drawSMC() {
-  const d = fitCv(scv, sx);
-  if (!d || market === 'VISION') return;
-  const CW = d.w, CH = d.h;
-  const k = market;
-  const t = activeTrade();
-  const style = t ? t.style : $('tradingStyleSelect').value;
-
-  const iv = smcTfOverride || SMC_TF_MAP[style] || '5m';
-
-  const tfMs = TF_MIN[iv] * 60000;
-  const rows = displayRows(k, iv);
-  const live = prices[k] ? prices[k].price : null;
-  const plotL = 6, plotT = 18, plotB = CH - 14, plotR = CW - CHART_GUT;
-  const plotH = plotB - plotT;
-
-  sx.font = '8px ui-monospace, monospace';
-  sx.textAlign = 'left';
-  sx.textBaseline = 'top';
-  sx.fillStyle = 'rgba(148,163,184,.9)';
-  sx.fillText('SMC · ' + srcLabel(k, iv), plotL + 2, 3);
-
-  const s = getSmc(k, iv);
-  if (s.status !== 'ok') {
-    sx.font = 'bold 10px ui-monospace, monospace';
-    sx.fillStyle = '#94a3b8';
-    sx.textAlign = 'center';
-    sx.textBaseline = 'middle';
-    sx.fillText(s.err ? 'Candle belum tersedia: ' + s.err : `Memuat candle (${s.n || 0}/20)...`, CW / 2, CH / 2);
-    sx.textAlign = 'left';
-    return;
-  }
-
-  // --- LOGIKA ZOOM & PAN ---
-  const plotW = plotR - plotL;
-  const baseN = Math.max(12, Math.floor(plotW / 5) - CH_PAD);
-  const nWant = Math.floor(baseN / smcZoom);
-  const slot = plotW / (Math.max(nWant, 5) + CH_PAD);
-
-  // Hitung batas pan
-  const maxPan = Math.max(0, rows.length - nWant);
-  smcPan = Math.max(0, Math.min(smcPan, maxPan));
-
-  const startIdx = Math.max(0, rows.length - nWant - Math.floor(smcPan));
-  const endIdx = Math.min(rows.length, startIdx + nWant);
-  const vis = rows.slice(startIdx, endIdx);
-
-  const t0 = vis.length ? vis[0].t : Date.now() - tfMs * nWant;
-  const xOfT = tm => plotL + ((tm - t0) / tfMs + 0.5) * slot;
-
-  const clampX = x => Math.max(plotL, Math.min(plotR, x));
-  const ref = live != null ? live : (vis.length ? vis[vis.length - 1].c : 0);
-  const near = p => Math.abs(p - ref) / ref < 0.03;
-  const inBand = (a, b) => b >= ref * 0.97 && a <= ref * 1.03;
-
-  const fvgs = s.fvgs.filter(z => inBand(z.bottom, z.top));
-  const obs = s.obs.filter(z => inBand(z.bottom, z.top));
-  const breakers = s.breakers.filter(z => inBand(z.bottom, z.top));
-  const pools = s.liq.pools.filter(p => near(p.p));
-  const sweeps = s.liq.sweeps.filter(p => near(p.p));
-  const ev = s.ev.filter(e => near(e.p) && e.toT >= t0);
-  const cis = s.cisd.filter(c => near(c.p) && c.toT >= t0);
-  const sess = sessionBoxes(rows, Date.now()).filter(se => se.b > t0);
-
-  let lo = Infinity, hi = -Infinity;
-  const grow = v => { if (Number.isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; } };
-  vis.forEach(c => { grow(c.h); grow(c.l); });
-  if (live != null) grow(live);
-  fvgs.concat(obs).concat(breakers).forEach(z => { grow(z.bottom); grow(z.top); });
-  pools.forEach(p => grow(p.p));
-  sess.forEach(se => { grow(se.hi); grow(se.lo); });
-  if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
-  if (!(hi - lo > 0)) { const dd = Math.abs(hi) * 0.001 || 1; lo -= dd; hi += dd; }
-  const pad = (hi - lo) * 0.1;
-  lo -= pad;
-  hi += pad;
-  const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * plotH;
-
-  // grid
-  sx.lineWidth = 1;
-  sx.strokeStyle = 'rgba(148,163,184,.08)';
-  for (let i = 1; i < 4; i++) {
-    const y = plotT + plotH * i / 4;
-    sx.beginPath(); sx.moveTo(plotL, y); sx.lineTo(plotR, y); sx.stroke();
-  }
-
-  // session box
-  sess.forEach(se => {
-    const x0 = clampX(xOfT(se.a)), x1 = clampX(xOfT(se.b));
-    if (x1 <= x0) return;
-    const yh = yOf(se.hi), yl = yOf(se.lo);
-    sx.save();
-    sx.fillStyle = `rgba(${se.col},.07)`;
-    sx.fillRect(x0, Math.min(yh, yl), x1 - x0, Math.abs(yl - yh));
-    sx.strokeStyle = `rgba(${se.col},.85)`;
-    sx.lineWidth = 1;
-    sx.beginPath();
-    sx.moveTo(x0, yh); sx.lineTo(x1, yh);
-    sx.moveTo(x0, yl); sx.lineTo(x1, yl);
-    sx.stroke();
-    sx.setLineDash([2, 3]);
-    sx.strokeStyle = 'rgba(250,204,21,.6)';
-    sx.beginPath();
-    sx.moveTo(x1, yh); sx.lineTo(plotR, yh);
-    sx.moveTo(x1, yl); sx.lineTo(plotR, yl);
-    sx.stroke();
-    sx.setLineDash([]);
-    sx.font = 'bold 8px ui-monospace, monospace';
-    sx.fillStyle = `rgba(${se.col},1)`;
-    sx.textAlign = 'left';
-    sx.textBaseline = 'top';
-    sx.fillText(se.name, x0 + 3, Math.min(yh, yl) + 2);
-    sx.restore();
-  });
-
-  // FVG & OB/SND (Supply/Demand)
-  const zone = (z, label, rgb) => {
-    const x0 = clampX(xOfT(z.t));
-    if (plotR - x0 < 2) return;
-    const y1 = yOf(z.top), y2 = yOf(z.bottom);
-    const y = Math.min(y1, y2), h = Math.abs(y2 - y1);
-    sx.save();
-    sx.fillStyle = `rgba(${rgb},.18)`;
-    sx.fillRect(x0, y, plotR - x0, h);
-    sx.strokeStyle = `rgba(${rgb},.6)`;
-    sx.lineWidth = 1;
-    sx.strokeRect(x0, y, plotR - x0, h);
-    sx.font = 'bold 8px ui-monospace, monospace';
-    sx.fillStyle = `rgba(${rgb},1)`;
-    sx.textAlign = 'left';
-    sx.textBaseline = 'top';
-    sx.fillText(label, x0 + 3, y + 2);
-    sx.restore();
-  };
-  fvgs.forEach(z => zone(z, z.dir > 0 ? 'FVG ▲' : 'FVG ▼', z.dir > 0 ? '59,130,246' : '168,85,247'));
-  obs.forEach(z => zone(z, z.dir > 0 ? 'Demand' : 'Supply', z.dir > 0 ? '16,185,129' : '239,68,68'));
-  breakers.forEach(z => zone(z, z.dir > 0 ? 'BB ▲' : 'BB ▼', z.dir > 0 ? '34,211,238' : '244,114,182'));
-
-  // BSL / SSL / EQH / EQL
-  pools.forEach(p => {
-    const y = yOf(p.p), x0 = clampX(xOfT(p.t));
-    sx.save();
-    sx.strokeStyle = 'rgba(245,158,11,.85)';
-    sx.lineWidth = 1;
-    sx.setLineDash([3, 3]);
-    sx.beginPath(); sx.moveTo(x0, y); sx.lineTo(plotR, y); sx.stroke();
-    sx.setLineDash([]);
-    sx.font = 'bold 8px ui-monospace, monospace';
-    sx.fillStyle = 'rgba(245,158,11,1)';
-    sx.textAlign = 'right';
-    sx.textBaseline = p.high ? 'bottom' : 'top';
-    sx.fillText(p.label, plotR - 4, y + (p.high ? -2 : 2));
-    sx.restore();
-  });
-
-  // Sweep (SW)
-  sweeps.forEach(w => {
-    const x = clampX(xOfT(w.t)), y = yOf(w.p);
-    sx.save();
-    sx.fillStyle = '#fbbf24';
-    sx.beginPath(); sx.arc(x, y, 2.5, 0, Math.PI * 2); sx.fill();
-    sx.font = 'bold 8px ui-monospace, monospace';
-    sx.textAlign = 'center';
-    sx.textBaseline = w.high ? 'bottom' : 'top';
-    sx.fillText('SW', x, y + (w.high ? -4 : 4));
-    sx.restore();
-  });
-
-  // BOS / CHoCH
-  ev.forEach(e => {
-    const x0 = clampX(xOfT(e.fromT)), x1 = clampX(xOfT(e.toT)), y = yOf(e.p);
-    const col = e.dir > 0 ? '125,211,252' : '251,146,60';
-    sx.save();
-    sx.strokeStyle = `rgba(${col},.95)`;
-    sx.lineWidth = 1;
-    sx.beginPath(); sx.moveTo(x0, y); sx.lineTo(x1, y); sx.stroke();
-    sx.font = 'bold 8px ui-monospace, monospace';
-    sx.fillStyle = `rgba(${col},1)`;
-    sx.textAlign = 'right';
-    sx.textBaseline = e.dir > 0 ? 'bottom' : 'top';
-    sx.fillText(`${e.type} ${e.dir > 0 ? '▲' : '▼'}`, x1, y + (e.dir > 0 ? -2 : 2));
-    sx.restore();
-  });
-
-  // CISD
-  cis.forEach(c => {
-    const x0 = clampX(xOfT(c.t)), x1 = clampX(xOfT(c.toT)), y = yOf(c.p);
-    sx.save();
-    sx.strokeStyle = 'rgba(232,121,249,.95)';
-    sx.lineWidth = 1;
-    sx.setLineDash([1, 2]);
-    sx.beginPath(); sx.moveTo(x0, y); sx.lineTo(x1, y); sx.stroke();
-    sx.setLineDash([]);
-    sx.font = 'bold 8px ui-monospace, monospace';
-    sx.fillStyle = 'rgba(232,121,249,1)';
-    sx.textAlign = 'left';
-    sx.textBaseline = 'middle';
-    sx.fillText('CISD', x1 + 3, y);
-    sx.restore();
-  });
-
-  // candle (sebagai referensi harga)
-  const bodyW = Math.max(1.5, slot * 0.62);
-  sx.lineWidth = 1;
-  sx.globalAlpha = .9;
-  for (const c of vis) {
-    const x = xOfT(c.t);
-    const up = c.c >= c.o;
-    const col = up ? '#34d399' : '#f87171';
-    const yH = yOf(c.h), yL = yOf(c.l), yO = yOf(c.o), yC = yOf(c.c);
-    sx.strokeStyle = col;
-    sx.fillStyle = col;
-    sx.beginPath(); sx.moveTo(x, yH); sx.lineTo(x, yL); sx.stroke();
-    sx.fillRect(x - bodyW / 2, Math.min(yO, yC), bodyW, Math.max(1, Math.abs(yC - yO)));
-  }
-  sx.globalAlpha = 1;
-
-  // harga live
-  if (live != null && vis.length) {
-    const y = yOf(live);
-    const hx = xOfT(vis[vis.length - 1].t);
-    const pr = 3 + Math.sin(Date.now() / 150) * 1.5;
-    sx.save();
-    sx.strokeStyle = 'rgba(41,98,255,.6)';
-    sx.lineWidth = 1;
-    sx.setLineDash([1, 3]);
-    sx.beginPath(); sx.moveTo(plotL, y); sx.lineTo(plotR, y); sx.stroke();
-    sx.setLineDash([]);
-    sx.beginPath(); sx.arc(hx, y, pr + 2.5, 0, Math.PI * 2); sx.fillStyle = 'rgba(41,98,255,.35)'; sx.fill();
-    sx.beginPath(); sx.arc(hx, y, 3, 0, Math.PI * 2); sx.fillStyle = '#fff'; sx.fill();
-    sx.restore();
-    sx.save();
-    sx.font = 'bold 8px ui-monospace, monospace';
-    sx.textAlign = 'left';
-    sx.textBaseline = 'middle';
-    rr(sx, plotR + 6, y - 7.5, CHART_GUT - 12, 15, 3);
-    sx.fillStyle = 'rgba(41,98,255,.25)'; sx.fill();
-    sx.strokeStyle = '#2962ff'; sx.lineWidth = .8; sx.stroke();
-    sx.fillStyle = '#93c5fd';
-    sx.fillText(fmt(live), plotR + 10, y + .5);
-    sx.restore();
-  }
-
-  // label waktu WIB
-  if (vis.length) {
-    const step = Math.max(1, Math.round(vis.length / 5));
-    sx.font = '8px ui-monospace, monospace';
-    sx.fillStyle = 'rgba(148,163,184,.85)';
-    sx.textAlign = 'center';
-    sx.textBaseline = 'bottom';
-    for (let i = 0; i < vis.length; i += step) {
-      const c = vis[i];
-      sx.fillText(new Date(c.t + 7 * 3600000).toISOString().slice(11, 16), xOfT(c.t), CH - 1);
-    }
-  }
-}
-
-function frame() {
-  drawChart();
-  if (showSMC) drawSMC();
-  requestAnimationFrame(frame);
-}
-
-/* ================= TRADINGVIEW ================= */
-function toggleTV() {
-  if (market === 'VISION') return;
-  tvOn = !tvOn;
-  $('tvBox').classList.toggle('hidden', !tvOn);
-  $('btnTvToggle').classList.toggle('bg-accentblue', tvOn);
-  $('btnTvToggle').classList.toggle('text-white', tvOn);
-  $('btnTvToggle').classList.toggle('border-accentblue', tvOn);
-  $('btnTvToggle').classList.toggle('text-gray-500', !tvOn);
-  setTxt('btnTvText', tvOn ? 'CLOSE' : 'TV');
-  $('tvWidget').innerHTML = '';
-  if (tvOn && window.TradingView) {
-    new TradingView.widget({
-      autosize: true, symbol: MARKETS[market].tv, interval: '5', timezone: 'Asia/Jakarta',
-      theme: 'dark', style: '1', locale: 'id', hide_side_toolbar: true, allow_symbol_change: false,
-      container_id: 'tvWidget', backgroundColor: '#151924', gridColor: 'rgba(35,41,54,.5)'
-    });
-  }
-}
-
-/* ================= OVERLAY ANALISA ================= */
-function showOverlay() {
-  const o = $('validationOverlay');
-  if (!o) return;
-  const steps = $('validationSteps');
-  const bar = $('validationProgress');
-  if (steps) steps.innerHTML = '';
-  if (bar) bar.style.width = '0%';
-  o.classList.remove('hidden');
-  void o.offsetWidth;
-  o.classList.add('active');
-}
-function hideOverlay() {
-  const o = $('validationOverlay');
-  if (!o) return;
-  o.classList.remove('active');
-  setTimeout(() => o.classList.add('hidden'), 320);
-}
-async function runSteps(ms) {
-  const steps = T('steps'), box = $('validationSteps'), bar = $('validationProgress');
-  if (!box || !bar) return; // Guard clause
-  const start = Date.now(), per = Math.max(400, ms / steps.length);
-  for (let i = 0; i < steps.length; i++) {
-    const el = document.createElement('div');
-    el.className = 'validation-step active';
-    el.innerHTML = `<span class="validation-step-icon">●</span><span>${esc(steps[i])}</span>`;
-    box.appendChild(el);
-    bar.style.width = ((i + 1) / steps.length * 85) + '%';
-    await sleep(per);
-    el.classList.remove('active');
-    el.classList.add('done');
-    el.querySelector('.validation-step-icon').textContent = '✓';
-  }
-  const left = ms - (Date.now() - start);
-  if (left > 0) await sleep(left);
-  bar.style.width = '100%';
-}
-
-/* ================= INDIKATOR ================= */
-function calcEMA(c, p) {
-  if (!c || !c.length) return [];
-  const k = 2 / (p + 1), out = [];
-  let prev = c[0].c;
-  out.push(prev);
-  for (let i = 1; i < c.length; i++) { prev = c[i].c * k + prev * (1 - k); out.push(prev); }
-  return out;
-}
-function calcBB(c, p = 20, m = 2) {
-  if (!c || c.length < p) return { upper: 0, middle: 0, lower: 0 };
-  const cl = c.slice(-p).map(x => x.c);
-  const mid = cl.reduce((a, b) => a + b, 0) / p;
-  const sd = Math.sqrt(cl.reduce((a, b) => a + (b - mid) ** 2, 0) / p);
-  return { middle: +mid.toFixed(5), upper: +(mid + m * sd).toFixed(5), lower: +(mid - m * sd).toFixed(5) };
-}
-function calcBias(c) {
-  if (!c || c.length < 10) return { bias: 'WAIT', score: 0 };
-  const closes = c.map(x => x.c);
-  const period = Math.min(20, Math.max(2, Math.floor(closes.length / 2)));
-  const e = calcEMA(c, period);
-  const i = closes.length - 1;
-  const score = (closes[i] >= e[i] ? 1 : -1) + (closes[i] >= closes[0] ? 1 : -1);
-  return { bias: score > 0 ? 'BULLISH' : score < 0 ? 'BEARISH' : 'NETRAL', score };
-}
-
-/* ================= GENERATE SINYAL ================= */
-async function generateSignal() {
-  const k = market;
-  const style = $('tradingStyleSelect').value;
-  const cfg = STYLE_CFG[style];
-
-  // LOGIKA KHUSUS VISION
-  if (k === 'VISION') {
-      if (visionImages.length === 0) return alert('Silakan upload minimal 1 gambar chart terlebih dahulu.');
-
-      const btn = $('signalBtn'), bt = $('btnText');
-      btn.disabled = true;
-      bt.textContent = 'Menganalisa Gambar...';
-      showOverlay();
-      const anim = runSteps(3500);
-      let data = null, err = null;
-
-      try {
-          const email = localStorage.getItem(K.email);
-          const res = await fetch('/api/generate', {
-              method: 'POST',
-              headers: JSON_H,
-              body: JSON.stringify({
-                  email, images: visionImages, tradingStyle: style, lang
-              })
-          });
-          const txt = await res.text();
-          try { data = JSON.parse(txt); } catch (e) { throw new Error('Server tidak kirim JSON (HTTP ' + res.status + ')'); }
-          if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-      } catch (e) { err = e.message; }
-
-      await anim;
-      hideOverlay();
-      await sleep(350);
-      btn.disabled = false;
-      bt.textContent = 'Analisa Gambar';
-
-      if (err) return alert('Gagal: ' + err);
-      const s = data && data.signal;
-      if (!s) return alert('AI tidak menemukan setup valid dari gambar tersebut.');
-
-      // Hasil vision disimpan terpisah (tidak masuk history dan rekap)
-      visionTrade = {
-          id: 'vision_' + Date.now(), key: 'VISION', style, signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
-          mode: s.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET', status: 'RUNNING', fill: 'NOW',
-          entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
-          zone: null, expiresAt: null,
-          confidence: s.confidence || 'MEDIUM', risk: s.risk || 'HIGH', setup: s.setup || 'Vision AI',
-          zoneLabel: 'AI Vision', zoneNote: 'Berdasarkan gambar',
-          pip: s.pipSize, last: s.lastPrice,
-          createdAt: Date.now(), hits: {}, card: { reason: s.reason }, no: '-'
-      };
-      refreshCard();
-      return;
-  }
-
-  // --- LOGIKA LIVE SMC (XAUUSD / BTCUSD) ---
-  if (!marketOpen(k)) { log(T('weekend'), 'error'); return alert(T('weekend')); }
-  const live = prices[k];
-  if (!live || Date.now() - live.recv > STALE_MS) return alert(k + ' TIDAK TERSAMBUNG ke stream. Tunggu harga masuk.');
-  const email = localStorage.getItem(K.email);
-  if (!email) return alert('Sesi tidak ditemukan. Login ulang.');
-
-  const btn = $('signalBtn'), bt = $('btnText');
-  btn.disabled = true;
-  bt.textContent = T('valTitle') + '...';
-  log(lang === 'id' ? 'Meminta analisa sinyal...' : 'Requesting signal analysis...', 'system');
-  showOverlay();
-  const anim = runSteps(3500);
-  let data = null, err = null;
-
-  try {
-    await Promise.all([cfg.htf, cfg.mtf, cfg.ltf].map(iv => fetchSeries(k, iv, false)));
-    const h = seriesRows(k, cfg.htf), m = seriesRows(k, cfg.mtf), l = seriesRows(k, cfg.ltf);
-    if (m.length < 10) {
-      const sr = ser(k, cfg.mtf);
-      const why = sr.err || sr.extErr;
-      throw new Error(`candle ${cfg.mtf} belum lengkap (${m.length}/10)${why ? ': ' + why : '. Coba lagi beberapa detik.'}`);
-    }
-    const ema = {};
-    cfg.ema.forEach(p => { const r = calcEMA(l, p); ema['EMA_' + p] = r.length ? Number(r[r.length - 1].toFixed(5)) : 0; });
-    const bb = calcBB(m.length ? m : l);
-    const res = await fetch('/api/generate', {
-      method: 'POST',
-      headers: JSON_H,
-      body: JSON.stringify({
-        email, marketId: 'xbtfx|' + k, tradingStyle: style, currentPrice: live.price, lang,
-        emaFilter: ema, bbFilter: bb,
-        candles: { htf: h.slice(-200), mtf: m.slice(-200), ltf: l.slice(-200) }
-      })
-    });
-    const txt = await res.text();
-    try { data = JSON.parse(txt); } catch (e) { throw new Error('Server tidak kirim JSON (HTTP ' + res.status + ')'); }
-    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-  } catch (e) { err = e.message; }
-
-  await anim;
-  hideOverlay();
-  await sleep(350);
-  btn.disabled = false;
-  bt.textContent = T('btnGen');
-
-  if (err) return alert('Gagal: ' + err);
-  const s = data && data.signal;
-  if (!s) return alert(T('signalWait') + '\n\n' + ((data && data.reason) || ''));
-  const valid = ['BUY', 'SELL'].includes(s.signal) && [s.entry, s.sl, s.tp1].every(v => v != null && Number.isFinite(Number(v)));
-  if (!valid) return alert('Sinyal belum lengkap.');
-
-  const t = {
-    id: Date.now().toString(36), key: k, style, signal: s.signal, dir: s.signal === 'BUY' ? 1 : -1,
-    mode: s.mode, status: s.status || 'RUNNING', fill: s.fill || null,
-    entry: s.entry, bufferEnd: s.bufferEnd, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
-    zone: s.zone, expiresAt: s.expireMs ? Date.now() + s.expireMs : null,
-    confidence: s.confidence, risk: s.risk, setup: s.setup, zoneLabel: s.zoneLabel, zoneNote: s.zoneNote,
-    createdAt: Date.now(), hits: {}, card: { reason: s.reason }, no: nextNo()
-  };
-  trades.push(t);
-  activeId = t.id;
-  saveTrades();
-  renderAll();
-  fetchUserStatus(); // Update status kuota setelah generate
-  log(`Signal ${s.signal} ${k} berhasil dibuat.`, s.signal === 'BUY' ? 'buy' : 'sell');
-}
-
-/* ================= BOOT ================= */
-$('authForm').addEventListener('submit', handleLogin);
-bindTap($('tickerList'), tapTicker);
-bindTap($('historyList'), viewTrade);
-bindTap($('setupChips'), viewTrade);
-loadLive();
-trades = loadTrades();
-applyLang();
-calSync();
-updateSessionCard();
-checkSession();
-requestAnimationFrame(frame);
-setInterval(() => { watchdog(); expirePending(); }, 1000);
-setInterval(() => { renderTickers(); renderHighlights(); renderHistory(); refreshCard(); renderSmcInfo(); updateSessionCard(); }, 500);
-setInterval(pump, 1200);
-setInterval(renderBias, 5000);
-setInterval(saveLive, 15000);
-window.addEventListener('beforeunload', saveLive);
-pump();
-log(lang === 'id' ? 'Sistem siap.' : 'System ready.', 'system');
-</script>
-</body>
-</html>
+  document.querySelectorAll('.smc-tf-btn').forEach(btn => 
