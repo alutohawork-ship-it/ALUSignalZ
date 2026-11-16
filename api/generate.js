@@ -1,5 +1,5 @@
 // api/generate.js
-// v100 (Vision: timeout 50s, max_tokens 700, maxDuration 60s, log ukuran gambar)
+// v101 (Vision: validasi SL/TP, pair name di reasoning, pembacaan pair MT4/MT5 & TradingView)
 
 export const config = {
   api: { bodyParser: { sizeLimit: '15mb' } },
@@ -134,6 +134,14 @@ const isoDate = d => d.toISOString().slice(0, 10);
 const lastClosePrice = arr => (arr && arr.length ? arr[arr.length - 1].c : 0);
 const dirLabel = d => (d === 0 ? 'Netral' : d === 1 ? 'Bullish' : 'Bearish');
 
+// Pastikan reasoning selalu diawali nama pair, misal "XAUUSD: ..."
+const withPair = (sym, text) => {
+  const body = String(text || '').trim();
+  if (!sym || sym === 'UNKNOWN_PAIR') return body;
+  if (body.toUpperCase().startsWith(sym.toUpperCase())) return body;
+  return `${sym}: ${body}`;
+};
+
 function isWithinKillzone() {
   const now = new Date();
   const utcHour = now.getUTCHours();
@@ -234,6 +242,7 @@ const TX = {
     slCapped: (max, raw) => `SL dibatasi ${max} pip, struktur lebih lebar (${raw} pip)`,
     aiPrompt: (d) => `
 Anda adalah "Alu Signal Z", trader institusional SMC/ICT. Tulis analisa eksekusi (maks 600 karakter, bahasa Indonesia) berdasarkan data di bawah.
+WAJIB diawali dengan nama pair: "${d.symbol}: ..."
 WAJIB jelaskan narasi:
 1. **Konteks State Machine**: Jelaskan alur dari Sweep -> MSS -> POI -> Signal.
 2. **Konteks Premium/Discount**: Sebutkan apakah harga saat ini di area Premium (Mahal) atau Discount (Murah).
@@ -275,6 +284,7 @@ WAJIB jelaskan narasi:
     slCapped: (max, raw) => `SL capped at ${max} pips, structure is wider (${raw} pips)`,
     aiPrompt: (d) => `
 You are "Alu Signal Z", an institutional SMC/ICT trader. Write an execution analysis (max 600 characters, in English) based on the data below.
+MUST start with the pair name: "${d.symbol}: ..."
 MUST explain the narrative:
 1. **State Machine Context**: Explain the flow from Sweep -> MSS -> POI -> Signal.
 2. **Premium/Discount Context**: State whether the current price is in Premium or Discount.
@@ -748,7 +758,8 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
 
     if (!resp.ok) return null;
     const data = await resp.json();
-    return data.choices?.[0]?.message?.content?.trim() || null;
+    const text = data.choices?.[0]?.message?.content?.trim() || null;
+    return text ? withPair(symbol, text) : null;
   } catch (err) {
     console.error('AI Reasoning Exception/Timeout:', err.message);
     return null;
@@ -763,26 +774,33 @@ async function getVisionSignal(images, lang) {
   console.log(`[Vision] ${images.length} gambar, total ~${totalKB} KB base64`);
 
   const prompt = `
-Anda adalah trader institusional SMC/ICT profesional. Anda menerima ${images.length} gambar chart TradingView (Multi-Timeframe).
+Anda adalah trader institusional SMC/ICT profesional. Anda menerima ${images.length} gambar chart (MetaTrader 4/5 atau TradingView, Multi-Timeframe).
 TIDAK ADA gaya trading. Berikan REKOMENDASI murni berdasarkan arsitektur SMC State Machine.
 
 LANGKAH WAJIB (Analisa Top-Down + State Machine):
 1. **Baca TF**: Semua TF di tiap gambar. Kumpulkan ke ARRAY (misal ["H4", "M15", "M5"]).
-2. **Baca Pair**: Pojok kiri atas ("PEPE / TetherUS" -> "PEPEUSDT"). Jika tidak ada, "UNKNOWN".
+2. **Baca Pair (WAJIB)**: Tentukan nama pair dari gambar.
+   - MetaTrader 4/5: lihat judul jendela chart di pojok kiri atas atau tab chart (contoh "XAUUSD,M5" -> "XAUUSD"). Bisa juga dari kotak Market Watch yang aktif.
+   - TradingView: lihat label di pojok kiri atas (contoh "XAUUSD · 5 · OANDA" -> "XAUUSD"). Abaikan nama exchange (OANDA, FOREXCOM, BINANCE, dll) dan timeframe.
+   - Buang awalan/akhiran broker atau simbol seperti ".", "#", "m", "c" bila bukan bagian nama pair inti. Contoh: "XAUUSD.m" -> "XAUUSD".
+   - "PEPE / TetherUS" -> "PEPEUSDT".
+   - Jika benar-benar tidak terbaca, isi "UNKNOWN".
 3. **IDLE (Dealing Range)**: Tentukan range harga saat ini (High-Low). Apakah harga berada di Premium (>50%) atau Discount (<50%)?
 4. **SWEEP DETECTED**: Apakah ada likuiditas (BSL/SSL) yang baru saja disapu?
 5. **MSS CONFIRMED**: Apakah ada Market Structure Shift / CHoCH di LTF?
 6. **POI_REACHED**: Cari zona kunci (FVG, Order Block, Breaker). Apakah harga sudah menyentuh zona ini?
 7. **SIGNAL FIRED (Entry & SL)**:
    - Tentukan Entry (NOW jika di POI, LIMIT jika menunggu retest).
-   - **SL ANTI-SWEEP**: Letakkan SL di LUAR zona pelindung (buffer 1.5 ATR).
+   - **SL**: Letakkan SL sedikit di luar swing sweep (buffer kecil, sekitar 0.2-0.3 ATR). Jarak entry ke SL maksimal 60 pip untuk XAUUSD.
+   - Jarak entry ke TP1 WAJIB minimal sama dengan jarak entry ke SL (RR minimal 1:1).
    - Tentukan TP1, TP2, TP3 berdasarkan likuiditas berikutnya.
    - **PENTING**: Field "signal" HANYA BOLEH berisi string "BUY" atau "SELL". Jangan isi dengan kata lain.
 8. **chartContext**: Tuliskan alur state machine secara eksplisit (contoh: "HTF H4 Bullish -> Sweep SSL M15 -> MSS M5 -> POI FVG -> SIGNAL BUY").
+9. **reason WAJIB diawali nama pair** dengan format "NAMAPAIR: ...", contoh "XAUUSD: Harga menyapu SSL di M15...".
 
 KEMBALIKAN HANYA DALAM FORMAT JSON (tanpa teks lain, tanpa markdown):
 {
-  "symbol": "BTCUSDT",
+  "symbol": "XAUUSD",
   "timeframes": ["H4", "M15", "M5"],
   "signal": "BUY",
   "orderType": "LIMIT",
@@ -794,7 +812,7 @@ KEMBALIKAN HANYA DALAM FORMAT JSON (tanpa teks lain, tanpa markdown):
   "setup": "M15 Demand Retest (Continuity)",
   "range_info": "H4 Premium (70%), M15 Discount (30%)",
   "chartContext": "IDLE at Premium -> Sweep SSL M15 -> MSS M5 -> POI FVG -> SIGNAL FIRED",
-  "reason": "Harga menyapu SSL di M15 (Sweep Detected), lalu terjadi MSS Bullish di M5. Entry Limit di FVG M5 yang berada di area Discount. SL aman di bawah swing low dengan buffer."
+  "reason": "XAUUSD: Harga menyapu SSL di M15 (Sweep Detected), lalu terjadi MSS Bullish di M5. Entry Limit di FVG M5 yang berada di area Discount. SL aman di bawah swing low dengan buffer."
 }`;
 
   const userContent = [
@@ -900,8 +918,77 @@ async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, 
   return {
     dir,
     plan: { kind, orderType, status: orderType === 'LIMIT' ? 'PENDING' : 'RUNNING', entry, bufferEnd: entry, sl, tps, zone: zoneRange || null, expireMs: 0, zoneNote, chartContext },
-    meta: { confidence, riskLabel: 'MEDIUM', setup, reason: aiReason || manualReason },
+    meta: { confidence, riskLabel: 'MEDIUM', setup, reason: withPair(ctx.symbol, aiReason || manualReason) },
   };
+}
+
+// ═══════════════════════════ VALIDASI SETUP VISION ═══════════════════════════
+// Batas jarak SL (pip) per kelas aset untuk mode Vision
+const VISION_SL_RANGE_PIPS = {
+  gold: [25, 60], silver: [8, 60], metal: [8, 60], fx: [5, 40], fx_jpy: [5, 40],
+  index: [10, 100], commodity: [10, 100], crypto: [20, 300],
+};
+const VISION_MIN_RR = 1.0;
+const VISION_FALLBACK_RR = [1.0, 2.0, 3.0];
+
+function validateVisionPlan({ dir, entry, sl, tps, ctx }) {
+  const { pip, prof, lang } = ctx;
+  const en = lang === 'en';
+  const isBuy = dir === 1;
+  const [minPips, maxPips] = VISION_SL_RANGE_PIPS[prof.cls] || [5, 40];
+
+  // 1. SL harus di sisi yang benar terhadap entry
+  if (isBuy ? !(sl < entry) : !(sl > entry)) {
+    return {
+      ok: false,
+      reason: en
+        ? 'AI placed the SL on the wrong side of entry. Setup rejected, please try another chart.'
+        : 'SL dari AI berada di sisi yang salah terhadap entry. Setup ditolak, coba gambar lain.',
+    };
+  }
+
+  // 2. Jarak SL tidak boleh terlalu lebar
+  let risk = Math.abs(entry - sl);
+  let riskPips = risk / pip;
+  if (riskPips > maxPips) {
+    return {
+      ok: false,
+      reason: en
+        ? `SL ${riskPips.toFixed(0)} pips is too wide for ${prof.label} (max ${maxPips} pips). Setup rejected.`
+        : `SL ${riskPips.toFixed(0)} pip terlalu lebar untuk ${prof.label} (maks ${maxPips} pip). Setup ditolak.`,
+    };
+  }
+
+  // 3. SL tidak boleh terlalu sempit (kena spread/noise)
+  let note = '';
+  if (riskPips < minPips) {
+    risk = minPips * pip;
+    sl = isBuy ? entry - risk : entry + risk;
+    riskPips = minPips;
+    note = en
+      ? `SL widened to minimum ${minPips} pips.`
+      : `SL dilebarkan ke minimum ${minPips} pip.`;
+  }
+
+  // 4. TP: pakai TP AI jika searah dan RR >= 1R, selain itu hitung ulang 1R/2R/3R
+  const aiTps = (tps || [])
+    .filter(tp => (isBuy ? tp > entry : tp < entry))
+    .map(tp => ({ tp, rr: Math.abs(tp - entry) / risk }))
+    .filter(x => x.rr >= VISION_MIN_RR)
+    .sort((a, b) => a.rr - b.rr)
+    .map(x => x.tp);
+
+  let finalTps;
+  if (aiTps.length >= 3) {
+    finalTps = aiTps.slice(0, 3);
+  } else {
+    const sign = isBuy ? 1 : -1;
+    finalTps = VISION_FALLBACK_RR.map(m => entry + sign * risk * m);
+    const msg = en ? 'TP recalculated at 1R/2R/3R.' : 'TP dihitung ulang dengan RR 1R/2R/3R.';
+    note = note ? `${note} ${msg}` : msg;
+  }
+
+  return { ok: true, sl, tps: finalTps, riskPips, note };
 }
 
 // ═══════════════════════════ WORKFLOW MTF ═══════════════════════════
@@ -1324,6 +1411,7 @@ function toSignal(result, style, ctx) {
   };
 
   const en = ctx.lang === 'en';
+  const reasonText = withPair(ctx.symbol, meta.reason);
 
   if (plan && plan.isOCO) {
     const [buy, sell] = plan.orders;
@@ -1338,7 +1426,7 @@ function toSignal(result, style, ctx) {
       setup: plan.setup,
       confidence: meta.confidence,
       risk: meta.riskLabel,
-      reason: meta.reason,
+      reason: reasonText,
       chartContext: plan.chartContext,
       orders: plan.orders.map(o => ({
         signal: o.dir === 1 ? 'BUY' : 'SELL',
@@ -1385,7 +1473,7 @@ function toSignal(result, style, ctx) {
     setupLabel: en ? style.labelEn : style.label,
     zoneLabel: isLimit ? 'Limit Entry Zone' : 'Market Execution Zone',
     zoneNote: plan.zoneNote,
-    reason: meta.reason,
+    reason: reasonText,
     chartContext: plan.chartContext,
   };
 }
@@ -1440,8 +1528,8 @@ export default async function handler(req, res) {
 
       const p = visionRes.plan;
       const entry = Number(p.entry);
-      const sl = Number(p.sl);
-      const tps = [p.tp1, p.tp2, p.tp3].filter(v => v != null).map(Number);
+      const rawSl = Number(p.sl);
+      const rawTps = [p.tp1, p.tp2, p.tp3].filter(v => v != null).map(Number);
       const orderType = p.orderType === 'LIMIT' ? 'LIMIT' : 'NOW';
 
       // ✅ SMART SIGNAL DEDUCTION
@@ -1450,15 +1538,17 @@ export default async function handler(req, res) {
 
       if (rawSignal.includes('BUY') || rawSignal === 'LONG') dir = 1;
       else if (rawSignal.includes('SELL') || rawSignal === 'SHORT') dir = -1;
-      else if (entry > 0 && sl > 0) {
-          // Deduksi dari Entry/SL jika AI lupa/lengah mengisi field signal
-          if (entry > sl) dir = 1;
-          else if (entry < sl) dir = -1;
+      else if (entry > 0 && rawSl > 0) {
+        if (entry > rawSl) dir = 1;
+        else if (entry < rawSl) dir = -1;
       }
 
       if (dir === 0) return res.status(400).json({ error: 'AI gagal menentukan arah BUY/SELL. Silakan coba gambar yang lebih jelas atau tunggu tren valid.' });
-      if (entry <= 0 || sl <= 0 || tps.some(v => v <= 0)) return res.status(400).json({ error: 'AI mengembalikan harga 0.0. Pastikan chart jelas.' });
+      if (!(entry > 0) || !(rawSl > 0) || rawTps.length === 0 || rawTps.some(v => !(v > 0))) {
+        return res.status(400).json({ error: 'AI mengembalikan harga 0.0 atau tidak lengkap. Pastikan chart jelas.' });
+      }
 
+      // Pair: prioritas dari body (input user), lalu dari hasil baca AI
       let symbol = resolveSymbol(body, req.query) || (p.symbol && p.symbol !== 'UNKNOWN' ? normalizeSymbol(p.symbol) : null);
       if (!symbol) symbol = 'UNKNOWN_PAIR';
 
@@ -1466,15 +1556,22 @@ export default async function handler(req, res) {
       if (isKnownSymbol(symbol)) {
         dec = DECIMALS[symbol] || 2; pip = pipSizeOf(symbol, dec); gold = isGold(symbol); prof = pairProfile(symbol);
       } else {
-         if (entry > 1000) { dec = 2; pip = 0.1; } else if (entry > 100) { dec = 2; pip = 0.01; } else if (entry > 1) { dec = 4; pip = 0.0001; } else if (entry > 0.01) { dec = 5; pip = 0.00001; } else if (entry > 0.0001) { dec = 6; pip = 0.000001; } else if (entry > 0.00001) { dec = 7; pip = 0.0000001; } else { dec = 8; pip = 0.00000001; }
-         if (symbol.includes('XAU')) { gold = true; dec = 2; pip = 0.1; }
-         const cls = symbol.includes('XAU') ? 'gold' : (symbol.includes('BTC') ? 'crypto' : 'fx');
-         prof = { cls, ...PAIR_CLASS_PROFILE[cls] };
+        if (entry > 1000) { dec = 2; pip = 0.1; } else if (entry > 100) { dec = 2; pip = 0.01; } else if (entry > 1) { dec = 4; pip = 0.0001; } else if (entry > 0.01) { dec = 5; pip = 0.00001; } else if (entry > 0.0001) { dec = 6; pip = 0.000001; } else if (entry > 0.00001) { dec = 7; pip = 0.0000001; } else { dec = 8; pip = 0.00000001; }
+        if (symbol.includes('XAU')) { gold = true; dec = 2; pip = 0.1; }
+        const cls = symbol.includes('XAU') ? 'gold' : (symbol.includes('BTC') ? 'crypto' : 'fx');
+        prof = { cls, ...PAIR_CLASS_PROFILE[cls] };
       }
 
       const ctx = { symbol, dec, pip, gold, prof, lang };
       const f = v => { if (v === 0) return 0; if (v < 0.001) return Number(v).toFixed(8); return Number(Number(v).toFixed(dec)); };
-      const riskPips = Math.abs(entry - sl) / pip;
+
+      // ✅ VALIDASI: arah, jarak SL, dan RR TP
+      const v = validateVisionPlan({ dir, entry, sl: rawSl, tps: rawTps, ctx });
+      if (!v.ok) return res.status(400).json({ error: v.reason });
+
+      const sl = v.sl;
+      const tps = v.tps;
+      const riskPips = v.riskPips;
 
       let tfText = 'Chart';
       if (Array.isArray(p.timeframes)) tfText = p.timeframes.join(', ');
@@ -1484,14 +1581,19 @@ export default async function handler(req, res) {
         ctx, dir, kind: 'vision', orderType, entry, sl, tps, setup: p.setup || 'SMC Top-Down', rawReason: p.reason, riskPips, zoneLine: `MTF: ${tfText}`, timeframes: tfText, rangeInfo: p.range_info || '-', chartContext: p.chartContext || '-'
       });
 
+      const riskNote = v.note ? ` ${v.note}` : '';
+      const baseReason = aiReason || p.reason || 'Vision Analysis';
+      const reasonText = withPair(symbol, baseReason) + riskNote + sessionNote;
+
       return res.status(200).json({
         ok: true,
         analysis_steps: [`Analisa Top-Down (${tfText})`, `Identifikasi Likuiditas & Trend HTF`, `Konfirmasi Zona LTF`, `Penentuan Entry & Anti-Sweep SL`],
         signal: {
           symbol, decimals: dec, pipSize: pip, signal: dir === 1 ? 'BUY' : 'SELL', mode: orderType === 'LIMIT' ? 'LIMIT' : 'MARKET', orderType, orderLabel: `${dir === 1 ? 'BUY' : 'SELL'} ${orderType}`, status: orderType === 'LIMIT' ? 'PENDING' : 'RUNNING',
-          entry: f(entry), sl: f(sl), tp1: tps[0] != null ? f(tps[0]) : null, tp2: tps[1] != null ? f(tps[1]) : null, tp3: tps[2] != null ? f(tps[2]) : null, tpCount: tps.length,
+          entry: f(entry), sl: f(sl), tp1: f(tps[0]), tp2: f(tps[1]), tp3: f(tps[2]), tpCount: tps.length,
+          riskPips: Number(riskPips.toFixed(1)),
           zone: null, expireMs: 0, confidence: 'HIGH', risk: 'MEDIUM', setup: p.setup || `SMC MTF (${tfText})`, entryStyle: 'Rekomendasi AI', setupLabel: 'SMC Top-Down', zoneLabel: orderType === 'LIMIT' ? 'Limit Entry Zone' : 'Market Execution Zone', zoneNote: `Timeframes: ${tfText}`,
-          reason: (aiReason || p.reason) + sessionNote,
+          reason: reasonText,
           chartContext: p.chartContext || '-'
         }
       });
