@@ -1,6 +1,5 @@
 // api/generate.js
-// v91 (Rotasi key TickerLayer utama lalu cadangan, routing simbol sesuai dokumen, sort desc,
-//      pesan error lengkap, jendela minimal 7 hari untuk candle)
+// v92 (Fix Security, OCO 2-Arah, ERL/IRL TP1-3, Sanitize Limit, Refine M1)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
@@ -71,25 +70,33 @@ const PIP_OVERRIDE = {
 };
 const pipSizeOf = (symbol, dec) => PIP_OVERRIDE[symbol] ?? Math.pow(10, -(dec - 1));
 
+// ── MINIMUM SL (PIPS) UNTUK MENCEGAH KENA SPREAD ──
+const MIN_SL_PIPS = { fx: 5, fx_jpy: 5, gold: 25, silver: 8, metal: 8, crypto: 20, index: 10, commodity: 10 };
+const slFloor = (kind, ctx) => {
+  const base = MIN_SL_PIPS[ctx.prof.cls] || 5;
+  const mult = { scalp: 1, day: 1, intraday: 1.5, swing: 2 }[kind] || 1;
+  return base * mult * ctx.pip;
+};
+
 const STYLES = {
   'Scalping': {
-    label: 'Scalping Agresif · Market Execution NOW (M1/M5 Structure)',
-    labelEn: 'Aggressive Scalping · Market Execution NOW (M1/M5 Structure)',
-    entryStyle: 'Agresif', entryStyleEn: 'Aggressive', mode: 'MARKET', kind: 'scalp', rr: [1.0, 2.0, 3.0],
+    label: 'Scalping Agresif · OCO / Market NOW (M1 Structure)',
+    labelEn: 'Aggressive Scalping · OCO / Market NOW (M1 Structure)',
+    entryStyle: 'Agresif', entryStyleEn: 'Aggressive', mode: 'MIXED', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
   'Day Trading': {
-    label: 'Scalping Konservatif · Fokus Zona/FVG M5 (Refine M1)',
-    labelEn: 'Conservative Scalping · M5 Zone/FVG Focused (M1 Refine)',
+    label: 'Scalping Konservatif · OCO M5 / Refine M1',
+    labelEn: 'Conservative Scalping · M5 OCO / M1 Refine',
     entryStyle: 'Konservatif', entryStyleEn: 'Conservative', mode: 'LIMIT', kind: 'day', rr: [1.0, 1.5, 2.0],
   },
   'Intraday': {
-    label: 'Day Trading / Intraday · Strict Trend Following (Bias H1+M15, Zona/FVG M5)',
-    labelEn: 'Day Trading / Intraday · Strict Trend Following (H1+M15 Bias, M5 Zone/FVG)',
+    label: 'Day Trading / Intraday · OCO M5 (HTF Ranging) / Trend Follow',
+    labelEn: 'Day Trading / Intraday · M5 OCO (HTF Ranging) / Trend Follow',
     entryStyle: 'Moderat', entryStyleEn: 'Moderate', mode: 'LIMIT', kind: 'intraday', rr: [1.0, 2.0, 3.0],
   },
   'Swing': {
-    label: 'Swing · Strict Trend Following (Bias D1+H4+H1, Zona/FVG M15)',
-    labelEn: 'Swing · Strict Trend Following (D1+H4+H1 Bias, M15 Zone/FVG)',
+    label: 'Swing · Strict Trend Following (Bias D1+H4+H1, Zona M15)',
+    labelEn: 'Swing · Strict Trend Following (D1+H4+H1 Bias, M15 Zone)',
     entryStyle: 'Positioning', entryStyleEn: 'Positioning', mode: 'LIMIT', kind: 'swing', rr: [3.0],
   },
 };
@@ -99,74 +106,11 @@ const MIN_BARS = { m1: 100, m5: 40, m15: 120, m15Swing: 400 };
 
 const SCALP_PIVOT = 2;
 const DAY_PIVOT = 3;
-const DAY_BOS_LOOKBACK = 60;
-const DAY_OB_LOOKBACK = 12;
-
-const BB_PERIOD = 20;
-const BB_MULT = 2;
-const BAND_TOL_PIPS = 10;
-const BAND_TOL_ATR = 0.2;
 
 const ZONE_ATR_PERIOD = 14;
 const ZONE_DISP_ATR = 1.2;
 const ZONE_MAX_ATR = 2.5;
-const ZONE_REQUIRE_FVG = false;
 const ZONE_FRESH_ONLY = true;
-
-const SCALP_ZONE_LOOKBACK_M5 = 60;
-const SCALP_ZONE_DISP_ATR = 0.8;
-const SCALP_ZONE_FRESH_ONLY = true;
-const SCALP_CHASE_MAX_PIPS = 15;
-const scalpZoneOpts = { dispAtr: SCALP_ZONE_DISP_ATR, freshOnly: SCALP_ZONE_FRESH_ONLY };
-
-const REACTION_ATR = { scalp: 1.5, day: 1.5, intraday: 1.5, swing: 2.0 };
-const REACTION_MIN_PIP = 5;
-const NOW_MAX_ATR = { scalp: 0.4, day: 0.6, intraday: 0.8 };
-const FVG_LOOKBACK_BY_STYLE = { scalp: 40, day: 40, intraday: 40 };
-const FVG_MIN_SIZE_ATR = 0.15;
-const SCALP_ZONE_MIN_AGE_BARS = 8;
-const FIXED_RISK_XAU_DAY_PIPS = 50;
-
-function fixedRiskFor(kind, ctx) {
-  if (kind === 'day' && ctx.gold) return FIXED_RISK_XAU_DAY_PIPS * ctx.pip;
-  return null;
-}
-
-function findRecentFVGs(candles, lookback) {
-  const n = candles.length;
-  const fvgs = [];
-  const start = Math.max(1, n - lookback);
-  for (let i = start; i < n - 1; i++) {
-    const prev = candles[i - 1], next = candles[i + 1];
-    if (prev.h < next.l) fvgs.push({ dir: 1,  lo: prev.h, hi: next.l, idx: i });
-    if (prev.l > next.h) fvgs.push({ dir: -1, lo: next.h, hi: prev.l, idx: i });
-  }
-  return fvgs.filter(f => {
-    for (let i = f.idx + 2; i < n; i++) {
-      if (candles[i].l <= f.hi && candles[i].h >= f.lo) return false;
-    }
-    return true;
-  });
-}
-
-function evaluateFVG(candles, price, dir, atrVal, lookback = 40) {
-  const fvgs = findRecentFVGs(candles, lookback)
-    .filter(f => f.dir === dir && (f.hi - f.lo) >= FVG_MIN_SIZE_ATR * atrVal);
-  if (!fvgs.length) return { useFVG: false, reason: 'no-fvg' };
-  const candidates = dir === 1
-    ? fvgs.filter(f => f.hi <= price + 0.2 * atrVal).sort((a, b) => b.hi - a.hi)
-    : fvgs.filter(f => f.lo >= price - 0.2 * atrVal).sort((a, b) => a.lo - b.lo);
-  if (!candidates.length) return { useFVG: false, reason: 'fvg-opposite-side' };
-  const fvg = candidates[0];
-  const inFVG = price >= fvg.lo && price <= fvg.hi;
-  const distToFVG = dir === 1 ? (price - fvg.hi) : (fvg.lo - price);
-  const entry = dir === 1 ? fvg.hi : fvg.lo;
-  const sl = dir === 1 ? fvg.lo - 0.25 * atrVal : fvg.hi + 0.25 * atrVal;
-  if (inFVG) return { useFVG: true, entry, sl, fvg, retraceMandatory: false, reason: 'inside-fvg' };
-  if (distToFVG > 0) return { useFVG: true, entry, sl, fvg, retraceMandatory: true, reason: 'retrace-needed' };
-  if (Math.abs(distToFVG) < 1.0 * atrVal) return { useFVG: true, entry, sl, fvg, retraceMandatory: true, reason: 'near-breakout' };
-  return { useFVG: false, reason: 'breakout-far', fvg };
-}
 
 const GOLD_SL_PIPS = { scalp: [25, 30], day: [50, 120], intraday: [80, 200], swing: [150, 300] };
 const SL_BUFFER_PIPS = { scalp: 3, day: 5, intraday: 10, swing: 15 };
@@ -174,7 +118,6 @@ const ATR_SL_MULT = { scalp: [0.5, 2.5], day: [1, 3], intraday: [1, 3], swing: [
 
 const orderLabel = (dir, orderType) => `${dir === 1 ? 'BUY' : 'SELL'} ${orderType === 'LIMIT' ? 'LIMIT' : 'NOW'}`;
 const isoDate = d => d.toISOString().slice(0, 10);
-const sleep = ms => new Promise(r => setTimeout(r, ms));
 const lastClosePrice = arr => (arr && arr.length ? arr[arr.length - 1].c : 0);
 
 // ── KILLZONE & FILTERS ──
@@ -194,12 +137,20 @@ function getRangeInfo(candles, lookback = 50) {
   return { high, low, eq };
 }
 
-function getLiquidityLevels(candles, lookback = 30) {
+function liquidityInsideZone(candles, zone, lookback = 30) {
   const s = candles.slice(-lookback);
-  if (s.length < 10) return { ssl: 0, bsl: 0 };
-  const lows = s.map(c => c.l).sort((a, b) => a - b);
-  const highs = s.map(c => c.h).sort((a, b) => b - a);
-  return { ssl: lows[0], bsl: highs[0] };
+  const lows = s.map(c => c.l).filter(l => l > zone.bottom && l < zone.top);
+  const highs = s.map(c => c.h).filter(h => h > zone.bottom && h < zone.top);
+  return { insideLows: lows, insideHighs: highs };
+}
+
+// ── SANITIZE ENTRY ──
+function sanitizeEntry({ dir, entry, price, orderType, pip }) {
+  if (orderType !== 'LIMIT') return { entry, orderType };
+  const minGap = 2 * pip;
+  if (dir === 1 && entry >= price - minGap) return { entry: price, orderType: 'NOW' };
+  if (dir === -1 && entry <= price + minGap) return { entry: price, orderType: 'NOW' };
+  return { entry, orderType };
 }
 
 // ── KV & AUTH ──
@@ -232,8 +183,10 @@ async function checkAccess(email) {
     if (!c) return { ok: false, key: 'notRegistered' };
     if (new Date(c.expires_at) <= new Date()) return { ok: false, key: 'expired' };
     return { ok: true, status: c.status };
-  } catch (e) {}
-  return { ok: true, status: 'admin' };
+  } catch (e) {
+    console.error('checkAccess error', e);
+    return { ok: false, key: 'notRegistered' }; // Fail-closed
+  }
 }
 
 async function checkTrialLimit(email, status) {
@@ -252,7 +205,7 @@ async function checkTrialLimit(email, status) {
     if (dailyCount === 0) await kv(['EXPIRE', dailyKey, 172800]);
     await kv(['INCR', totalKey]);
     return { ok: true };
-  } catch (e) { return { ok: true }; }
+  } catch (e) { return { ok: true }; } // Tetap fail-open untuk trial demi kenyamanan user jika KV error
 }
 
 // ── TRANSLATIONS ──
@@ -276,7 +229,7 @@ WAJIB jelaskan narasi:
 1. **Konteks State Machine**: Jelaskan alur dari Sweep -> MSS -> POI -> Signal.
 2. **Konteks Premium/Discount**: Sebutkan apakah harga saat ini di area Premium (Mahal) atau Discount (Murah).
 3. **Analisa Struktur & Zona**: Sebutkan zona kunci (Supply/Demand/FVG/OB) dan konfirmasi Liquidity Sweep (SSL/BSL).
-4. **Alasan & Tipe Entry**: Apakah ini setup Reversal, Continuity, atau Retest?
+4. **Alasan & Tipe Entry**: Apakah ini setup Reversal, Continuity, OCO, atau Retest?
 5. **Invalidasi**: Sebutkan alasan SL diletakkan di level tersebut.
 
 === DATA ===
@@ -291,8 +244,6 @@ WAJIB jelaskan narasi:
 - Detail Zona/Struktur: ${d.raw}
 `,
     aiSystem: 'Anda adalah AI analis trading SMC/ICT yang objektif, dingin, dan presisi.',
-
-    // Pesan error yang dipakai handler
     noEmail: 'Email tidak ditemukan. Silakan login ulang.',
     notRegistered: 'Email ini belum terdaftar sebagai klien.',
     expired: 'Masa akses sudah berakhir. Hubungi admin.',
@@ -319,7 +270,7 @@ MUST explain the narrative:
 1. **State Machine Context**: Explain the flow from Sweep -> MSS -> POI -> Signal.
 2. **Premium/Discount Context**: State whether the current price is in Premium or Discount.
 3. **Structure & Zone Analysis**: State the key zones used (Supply/Demand/FVG/OB) and confirm Liquidity Sweep (SSL/BSL).
-4. **Reason & Entry Type**: Is this a Reversal, Continuity, or Retest setup?
+4. **Reason & Entry Type**: Is this a Reversal, Continuity, OCO, or Retest setup?
 5. **Invalidation**: Explain the reasoning behind the SL placement.
 
 === DATA ===
@@ -334,8 +285,6 @@ MUST explain the narrative:
 - Zone/Structure Details: ${d.raw}
 `,
     aiSystem: 'You are an objective, calm, and precise SMC/ICT trading analyst.',
-
-    // Error messages used by the handler
     noEmail: 'Email not found. Please log in again.',
     notRegistered: 'This email is not registered as a client.',
     expired: 'Access has expired. Please contact the admin.',
@@ -354,8 +303,7 @@ const tx = ctx => TX[ctx.lang] || TX.id;
 const SRC_EN = { 'BOS Bullish': 'BOS Bullish', 'BOS Bearish': 'BOS Bearish', 'Struktur HH + HL': 'HH + HL', 'Struktur LH + LL': 'LH + LL', 'Mitigasi FVG / Inducement': 'FVG mitigation', 'Sweep FVG / OB': 'Sweep', 'Default': 'Default' };
 const srcName = (src, lang) => (lang === 'en' ? (SRC_EN[src] || src) : src);
 
-// ── TICKERLAYER: asset class dan simbol sesuai dokumen ──
-// XAUUSD, perak, minyak, dan logam termasuk commodities. Indeks memakai kode tanpa prefix.
+// ── TICKERLAYER ──
 const TL_ROUTE = {
   XAUUSD: ['commodities', 'XAUUSD'], XAUUSDX: ['commodities', 'XAUUSD'],
   XAGUSD: ['commodities', 'XAGUSD'], XPTUSD: ['commodities', 'XPTUSD'], XPDUSD: ['commodities', 'XPDUSD'],
@@ -368,8 +316,6 @@ const TL_ROUTE = {
 const TL_SPAN = { '1m': { mult: 1, span: 'minute', minutes: 1 }, '5m': { mult: 5, span: 'minute', minutes: 5 }, '15m': { mult: 15, span: 'minute', minutes: 15 } };
 const CACHE_TTL = { '1m': 120, '5m': 300, '15m': 600 };
 const CACHE_BARS = { '1m': 500, '5m': 500, '15m': 2000 };
-
-// Jendela minimal untuk pengambilan candle (ms): awal pekan tetap dapat bar yang cukup
 const TL_MIN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 function tlCandidates(symbol) {
@@ -382,7 +328,6 @@ function tlCandidates(symbol) {
   return [{ asset: 'forex', symbol: s }];
 }
 
-// ── KEY ROTATION: urutan tetap (utama lalu cadangan), cooldown dibagi dengan api/candles.js ──
 const TL_CD_SEC = { quota: 600, rate: 5, invalid: 6 * 3600 };
 const tlCdMem = new Map();
 
@@ -431,10 +376,10 @@ async function tlFetch(url) {
 
     if (r.status === 429 || r.status === 401) {
       await tlSetCooldown(idx, tlCooldownFor(r.status, body, r.headers.get('retry-after')));
-      continue; // coba key cadangan berikutnya
+      continue;
     }
-    if (r.status === 403) continue; // paket key ini tidak memuat data ini, coba cadangan berikutnya
-    break; // 404, 400, 5xx: masalah simbol atau server, bukan key
+    if (r.status === 403) continue;
+    break;
   }
   return { response: null, status: last.status, detail: last.detail };
 }
@@ -451,7 +396,6 @@ async function fetchTickerLayerRows(cand, interval, need) {
   const tf = TL_SPAN[interval];
   if (!tf) return info;
   const now = Date.now();
-  // Jendela minimal 7 hari, lalu sort=desc: yang diambil tetap bar terbaru
   const startMs = now - Math.max(Math.ceil(need * 1.2 * tf.minutes * 60000), TL_MIN_WINDOW_MS) - 86400000;
   const url = `${TICKERLAYER_BASE_URL}/${cand.asset}/agg/${cand.symbol}/${tf.mult}/${tf.span}/${isoDate(new Date(startMs))}/${isoDate(new Date(now + 86400000))}?sort=desc&limit=5000`;
   try {
@@ -491,8 +435,7 @@ function mergeLiveBar(candles, price, tfMin) {
   return candles;
 }
 
-// v5: jendela minimal 7 hari, cache kandidat lama tidak dipakai lagi
-const CANDLE_CACHE_VER = 'v5';
+const CANDLE_CACHE_VER = 'v6';
 const matchesRef = (arr, ref) => arr.length > 0 && ref > 0 && Math.abs(arr[arr.length - 1].c - ref) / ref <= MAX_SRC_DEVIATION;
 
 async function getCandles(symbol, tf, need, ref) {
@@ -625,6 +568,72 @@ function recentExtreme(candles, dir, bars) {
   return dir === 1 ? Math.min(...s.map(c => c.l)) : Math.max(...s.map(c => c.h));
 }
 
+// ── TARGET PROFIT (ERL / IRL) ──
+function getStructuralTPs(candles, dir, entry, sl, minRR = 1.0) {
+  const risk = Math.abs(entry - sl);
+  const { highs, lows } = findPivots(candles, 2);
+  const fvgs = findRecentFVGs(candles, 40);
+
+  let erlTargets = [];
+  if (dir === 1) {
+    erlTargets = highs.filter(h => h.p > entry + risk * minRR).map(h => h.p).sort((a, b) => a - b);
+  } else {
+    erlTargets = lows.filter(l => l.p < entry - risk * minRR).map(l => l.p).sort((a, b) => b - a);
+  }
+
+  let irlTarget = null;
+  if (dir === 1) {
+    const bearFVG = fvgs.filter(f => f.dir === -1 && f.lo > entry + risk * 0.5).sort((a, b) => a.lo - b.lo)[0];
+    if (bearFVG) irlTarget = bearFVG.lo;
+  } else {
+    const bullFVG = fvgs.filter(f => f.dir === 1 && f.hi < entry - risk * 0.5).sort((a, b) => b.hi - a.hi)[0];
+    if (bullFVG) irlTarget = bullFVG.hi;
+  }
+
+  let tps = [];
+
+  if (irlTarget && Math.abs(irlTarget - entry) >= risk * minRR) {
+    tps.push(irlTarget);
+  } else if (erlTargets.length > 0) {
+    tps.push(erlTargets[0]);
+  } else {
+    tps.push(entry + dir * risk * 1.0);
+  }
+
+  for (let i = 0; i < erlTargets.length; i++) {
+    const target = erlTargets[i];
+    if (Math.abs(target - entry) > Math.abs(tps[tps.length - 1] - entry) + (risk * 0.1)) {
+      tps.push(target);
+    }
+    if (tps.length >= 3) break;
+  }
+
+  while (tps.length < 3) {
+    const lastTpDist = Math.abs(tps[tps.length - 1] - entry);
+    const nextRR = (lastTpDist / risk) + 0.5;
+    tps.push(entry + dir * risk * nextRR);
+  }
+
+  return tps.slice(0, 3);
+}
+
+function findRecentFVGs(candles, lookback) {
+  const n = candles.length;
+  const fvgs = [];
+  const start = Math.max(1, n - lookback);
+  for (let i = start; i < n - 1; i++) {
+    const prev = candles[i - 1], next = candles[i + 1];
+    if (prev.h < next.l) fvgs.push({ dir: 1,  lo: prev.h, hi: next.l, idx: i });
+    if (prev.l > next.h) fvgs.push({ dir: -1, lo: next.h, hi: prev.l, idx: i });
+  }
+  return fvgs.filter(f => {
+    for (let i = f.idx + 2; i < n; i++) {
+      if (candles[i].l <= f.hi && candles[i].h >= f.lo) return false;
+    }
+    return true;
+  });
+}
+
 function slBounds(kind, ctx, atrVal) {
   if (ctx.gold) { const [a, b] = GOLD_SL_PIPS[kind]; return { min: a * ctx.pip, max: b * ctx.pip }; }
   const [a, b] = ATR_SL_MULT[kind];
@@ -651,7 +660,7 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8500);
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
     const resp = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
       method: 'POST',
@@ -750,33 +759,36 @@ KEMBALIKAN HANYA DALAM FORMAT JSON:
 }
 
 // ── FINALIZE PLAN ──
-async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, rrList, confidence, setup, zoneNote, zoneRange, head, lines, zoneLine, timeframes, rangeInfo, chartContext }) {
+async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, rrList, confidence, setup, zoneNote, zoneRange, head, lines, zoneLine, timeframes, rangeInfo, chartContext, customTPs = null }) {
   const { f, pip, gold, prof } = ctx;
   const t = tx(ctx);
 
   let risk, slNote = '';
-  const fixedRisk = fixedRiskFor(kind, ctx);
+  const fixedRisk = kind === 'day' && gold ? 50 * pip : null;
+  
   if (fixedRisk) {
     risk = fixedRisk;
-    slNote = ctx.lang === 'en' ? `SL fixed ${FIXED_RISK_XAU_DAY_PIPS} pips` : `SL fixed ${FIXED_RISK_XAU_DAY_PIPS} pip`;
+    slNote = ctx.lang === 'en' ? `SL fixed 50 pips` : `SL fixed 50 pip`;
   } else {
     const b = slBounds(kind, ctx, atrVal);
     const buf = gold ? SL_BUFFER_PIPS[kind] * pip : prof.bufAtr * atrVal;
     let raw = Math.abs(entry - baseSL) + buf;
     if ((dir === 1 && baseSL >= entry) || (dir === -1 && baseSL <= entry)) raw = b.min;
-    risk = Math.min(Math.max(raw, b.min), b.max);
+    
+    // Tambahkan slFloor untuk mencegah SL kena spread
+    risk = Math.min(Math.max(raw, b.min, slFloor(kind, ctx)), b.max);
     if (raw > b.max) slNote = t.slCapped((b.max / pip).toFixed(0), (raw / pip).toFixed(0));
   }
 
   const sl = entry - dir * risk;
-  const tps = rrList.map(x => entry + dir * x * risk);
+  const tps = (customTPs && customTPs.length > 0) ? customTPs : rrList.map(x => entry + dir * x * risk);
 
   const minDist = atrVal * 0.5;
   if (Math.abs(tps[0] - entry) < minDist) {
      return { plan: null, reason: 'Dibatalkan: Target TP terlalu dekat dengan Entry (terkena noise volatilitas).' };
   }
 
-  const parts = [head, ...lines, slNote, t.entryLine(f(entry), (risk / pip).toFixed(0), f(sl)), rrList.map((x, i) => `TP${i + 1} 1:${x}`).join(', ')].filter(Boolean);
+  const parts = [head, ...lines, slNote, t.entryLine(f(entry), (risk / pip).toFixed(0), f(sl)), tps.map((val, i) => `TP${i + 1}: ${f(val)}`).join(', ')].filter(Boolean);
   const manualReason = parts.map(s => s.replace(/\.?$/, '.')).join(' • ');
 
   const aiReason = await getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup, rawReason: manualReason, riskPips: risk / pip, zoneLine, timeframes, rangeInfo, chartContext });
@@ -788,7 +800,7 @@ async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, 
   };
 }
 
-// ═══════════════════════════ WORKFLOW MTF (STATE MACHINE SIMULATION) ═══════════════════════════
+// ═══════════════════════════ WORKFLOW MTF ═══════════════════════════
 
 async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
   const { pip } = ctx;
@@ -797,143 +809,156 @@ async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
 
   const biasM15 = analyzePureSMCStructure(m15);
   const rangeM15 = getRangeInfo(m15, 50);
-  let rangeInfoStr = '-';
-  let isPremium = false, isDiscount = false;
+  let rangeInfoStr = '-', isPremium = false, isDiscount = false;
   if (rangeM15 && rangeM15.high > rangeM15.low) {
-      const diff = rangeM15.high - rangeM15.low;
-      const pricePos = (price - rangeM15.low) / diff;
-      isPremium = pricePos > 0.5;
-      isDiscount = pricePos <= 0.5;
-      rangeInfoStr = `M15 Range: ${isPremium ? 'PREMIUM' : 'DISCOUNT'} (Pos: ${(pricePos*100).toFixed(1)}%)`;
+    const diff = rangeM15.high - rangeM15.low;
+    const pricePos = (price - rangeM15.low) / diff;
+    isPremium = pricePos > 0.5;
+    isDiscount = pricePos <= 0.5;
+    rangeInfoStr = `M15 Range: ${isPremium ? 'PREMIUM' : 'DISCOUNT'} (Pos: ${(pricePos*100).toFixed(1)}%)`;
   }
 
   const structM5 = analyzePureSMCStructure(m5);
   const structM1 = analyzePureSMCStructure(m1);
 
-  const demand = findSDZones(m1, 1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
-  const supply = findSDZones(m1, -1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
+  // ── DETEKSI MOMENTUM VS RANGING ──
+  const rangeM5 = getRangeInfo(m5, 50);
+  const lastM1 = m1[m1.length - 1];
+  const bodyM1 = Math.abs(lastM1.c - lastM1.o);
+  const isMomentumStrong = structM1.dir !== 0 && bodyM1 > 1.2 * atrM1;
 
   const fvgs = findRecentFVGs(m1, 20);
-  const inBullFVG = fvgs.some(f => f.dir === 1 && price >= f.lo && price <= f.hi);
-  const inBearFVG = fvgs.some(f => f.dir === -1 && price >= f.lo && price <= f.hi);
 
-  const inDemand = (demand && price >= demand.bottom && price <= demand.top) || inBullFVG;
-  const inSupply = (supply && price >= supply.bottom && price <= supply.top) || inBearFVG;
+  // ── SKENARIO 1: RANGING (OCO ZONA M1) ──
+  const demandBelow = findSDZones(m1, 1, price, { dispAtr: 0.8, freshOnly: true }).filter(z => z.top < price - 0.2 * atrM1 && z.dist > 0).sort((a, b) => a.dist - b.dist)[0] || null;
+  const fvgBullBelow = fvgs.filter(f => f.dir === 1 && f.hi < price - 0.2 * atrM1 && (price - f.hi) < 2.5 * atrM1).sort((a, b) => b.hi - a.hi)[0] || null;
 
-  let state = 'IDLE';
-  let chartContext = '';
+  const supplyAbove = findSDZones(m1, -1, price, { dispAtr: 0.8, freshOnly: true }).filter(z => z.bottom > price + 0.2 * atrM1 && z.dist > 0).sort((a, b) => a.dist - b.dist)[0] || null;
+  const fvgBearAbove = fvgs.filter(f => f.dir === -1 && f.lo > price + 0.2 * atrM1 && (f.lo - price) < 2.5 * atrM1).sort((a, b) => a.lo - b.lo)[0] || null;
 
-  if (structM5.dir !== 0) state = 'SWEEP_DETECTED';
-  if (structM1.dir !== 0) state = 'MSS_CONFIRMED';
+  let buyOrder = null, sellOrder = null;
 
-  let dir = structM1.dir;
-  let setup = `Market NOW (${srcName(structM1.src, ctx.lang)})`;
-  let lines = [`Eksekusi NOW mengikuti momentum M1: ${srcName(structM1.src, ctx.lang)}`];
-
-  if (inDemand && inSupply) {
-    return { plan: null, reason: 'Dibatalkan: Harga terjepit di antara Supply dan Demand (Konsolidasi).' };
-  } else if (inDemand) {
-    if (state !== 'IDLE') state = 'POI_REACHED';
-    dir = 1;
-    setup = `Reaksi Demand / Bullish FVG (Discount Buy)`;
-    lines = [`Harga di area Demand/FVG M1 (${isDiscount ? 'Discount' : 'Premium'}). Prioritas BUY.`];
-  } else if (inSupply) {
-    if (state !== 'IDLE') state = 'POI_REACHED';
-    dir = -1;
-    setup = `Reaksi Supply / Bearish FVG (Premium Sell)`;
-    lines = [`Harga di area Supply/FVG M1 (${isPremium ? 'Premium' : 'Discount'}). Prioritas SELL.`];
-  } else if (dir === 0) {
-    return { plan: null, reason: 'Dibatalkan: Struktur M1 ranging & harga di luar zona.' };
-  } else if (isPremium && dir === 1) {
-    return { plan: null, reason: 'Dibatalkan: Harga di area Premium (Mahal), tapi struktur M1 Bullish. Rawan fakeout.' };
-  } else if (isDiscount && dir === -1) {
-    return { plan: null, reason: 'Dibatalkan: Harga di area Discount (Murah), tapi struktur M1 Bearish. Rawan fakeout.' };
+  if (demandBelow) {
+    const entry = demandBelow.top; const sl = demandBelow.sl - 0.3 * atrM1; const risk = entry - sl;
+    if (risk > 0) buyOrder = { dir: 1, entry, sl, tps: rrList.map(m => entry + risk * m), type: 'BUY LIMIT', label: 'Buy Limit · Demand M1', zone: { min: demandBelow.bottom, max: demandBelow.top } };
+  } else if (fvgBullBelow) {
+    const entry = fvgBullBelow.hi; const sl = fvgBullBelow.lo - 0.3 * atrM1; const risk = entry - sl;
+    if (risk > 0) buyOrder = { dir: 1, entry, sl, tps: rrList.map(m => entry + risk * m), type: 'BUY LIMIT', label: 'Buy Limit · FVG M1', zone: { min: fvgBullBelow.lo, max: fvgBullBelow.hi } };
   }
 
-  if (state === 'POI_REACHED') state = 'SIGNAL_FIRED';
-  chartContext = `HTF M15 ${biasM15.src} -> M5 ${structM5.src} -> M1 ${state} at POI`;
+  if (supplyAbove) {
+    const entry = supplyAbove.bottom; const sl = supplyAbove.sl + 0.3 * atrM1; const risk = sl - entry;
+    if (risk > 0) sellOrder = { dir: -1, entry, sl, tps: rrList.map(m => entry - risk * m), type: 'SELL LIMIT', label: 'Sell Limit · Supply M1', zone: { min: supplyAbove.bottom, max: supplyAbove.top } };
+  } else if (fvgBearAbove) {
+    const entry = fvgBearAbove.lo; const sl = fvgBearAbove.hi + 0.3 * atrM1; const risk = sl - entry;
+    if (risk > 0) sellOrder = { dir: -1, entry, sl, tps: rrList.map(m => entry - risk * m), type: 'SELL LIMIT', label: 'Sell Limit · FVG M1', zone: { min: fvgBearAbove.lo, max: fvgBearAbove.hi } };
+  }
 
-  const side = dir === 1 ? 'BUY' : 'SELL';
-  const baseSL = inDemand ? (demand ? demand.sl : recentExtreme(m1, dir, 5)) : (inSupply ? (supply ? supply.sl : recentExtreme(m1, dir, 5)) : recentExtreme(m1, dir, 10));
-  const zoneRange = inDemand ? (demand ? { min: demand.bottom, max: demand.top } : { min: price, max: price }) : (inSupply ? (supply ? { min: supply.bottom, max: supply.top } : { min: price, max: price }) : { min: price, max: price });
+  if (!isMomentumStrong && buyOrder && sellOrder) {
+    return {
+      plan: { isOCO: true, orders: [buyOrder, sellOrder], setup: 'Ranging OCO (2 Arah Zona M1)', chartContext: `M15 ${biasM15.src} -> M5 Ranging -> OCO M1` },
+      meta: { confidence: 'HIGH', riskLabel: 'MEDIUM', reason: `Pasar ranging. Pasang OCO: BUY @ ${buyOrder.entry.toFixed(2)}, SELL @ ${sellOrder.entry.toFixed(2)}. Jika tersentuh, batalkan yang lain.` }
+    };
+  }
+
+  // ── SKENARIO 2: MOMENTUM KUAT ──
+  const inFvgBull = fvgs.find(f => f.dir === 1 && price >= f.lo && price <= f.hi);
+  const inFvgBear = fvgs.find(f => f.dir === -1 && price >= f.lo && price <= f.hi);
+
+  let dir = structM1.dir;
+  if (inFvgBull) dir = 1;
+  if (inFvgBear) dir = -1;
+  if (dir === 0) return { plan: null, reason: 'M1 ranging, tidak ada momentum atau FVG.' };
+
+  if (biasM15.dir !== 0 && biasM15.dir !== dir) return { plan: null, reason: `Konflik bias M15.` };
+
+  let orderType = 'NOW', entry = price, baseSL, setup, zoneRange, lines = [];
+  const maxChaseDist = 1.5 * atrM1;
+
+  if (dir === 1) {
+    if (inFvgBull) { setup = 'M1 Bullish FVG (Market NOW)'; baseSL = inFvgBull.lo - 0.25 * atrM1; zoneRange = { min: inFvgBull.lo, max: inFvgBull.hi }; lines.push('Harga di FVG M1.'); }
+    else if (fvgBullBelow && (price - fvgBullBelow.hi) <= maxChaseDist) { orderType = 'LIMIT'; entry = fvgBullBelow.hi; baseSL = fvgBullBelow.lo - 0.25 * atrM1; zoneRange = { min: fvgBullBelow.lo, max: fvgBullBelow.hi }; setup = 'M1 Bullish FVG (Tight Limit)'; lines.push('Pending di FVG M1.'); }
+    else {
+      if (price > recentExtreme(m1, 1, 20) + (2 * atrM1)) return { plan: null, reason: 'Overextended. Hindari FOMO.' };
+      setup = 'M1 Momentum (Market NOW)'; baseSL = recentExtreme(m1, 1, 5); zoneRange = { min: price, max: price }; lines.push('Momentum kencang. Eksekusi NOW.');
+    }
+  } else {
+    if (inFvgBear) { setup = 'M1 Bearish FVG (Market NOW)'; baseSL = inFvgBear.hi + 0.25 * atrM1; zoneRange = { min: inFvgBear.lo, max: inFvgBear.hi }; lines.push('Harga di FVG M1.'); }
+    else if (fvgBearAbove && (fvgBearAbove.lo - price) <= maxChaseDist) { orderType = 'LIMIT'; entry = fvgBearAbove.lo; baseSL = fvgBearAbove.hi + 0.25 * atrM1; zoneRange = { min: fvgBearAbove.lo, max: fvgBearAbove.hi }; setup = 'M1 Bearish FVG (Tight Limit)'; lines.push('Pending di FVG M1.'); }
+    else {
+      if (price < recentExtreme(m1, -1, 20) - (2 * atrM1)) return { plan: null, reason: 'Overextended. Hindari FOMO.' };
+      setup = 'M1 Momentum (Market NOW)'; baseSL = recentExtreme(m1, -1, 5); zoneRange = { min: price, max: price }; lines.push('Momentum kencang. Eksekusi NOW.');
+    }
+  }
+
+  if (dir === 1 && isPremium) return { plan: null, reason: 'BUY di Premium M15. Rawan fakeout.' };
+  if (dir === -1 && isDiscount) return { plan: null, reason: 'SELL di Discount M15. Rawan fakeout.' };
 
   return await finalizePlan({
-    dir, entry: price, orderType: 'NOW', baseSL, kind: 'scalp', atrVal: atrM1, ctx, rrList,
-    confidence: 'HIGH', setup,
-    zoneNote: inDemand ? 'Area Demand / Bullish FVG' : (inSupply ? 'Area Supply / Bearish FVG' : 'Momentum M1'),
-    zoneRange, timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr, chartContext,
-    head: t.headLine(t.title.scalp, side, 'NOW', ctx.symbol),
-    lines,
+    dir, entry, orderType, baseSL, kind: 'scalp', atrVal: atrM1, ctx, rrList,
+    confidence: 'HIGH', setup, zoneNote: setup, zoneRange, timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
+    chartContext: `M15 ${biasM15.src} -> M1 ${orderType}`,
+    head: t.headLine(t.title.scalp, dir === 1 ? 'BUY' : 'SELL', orderType, ctx.symbol), lines
   });
 }
 
-async function buildDayPlan({ m1, m5, price, rrList, ctx }) {
+async function buildDayPlan({ m1, m5, m15, price, rrList, ctx }) {
   const t = tx(ctx);
   const { f, pip } = ctx;
   const atrM5 = atrOf(m5, pip);
 
+  const biasM15 = analyzePureSMCStructure(m15);
   const rangeM5 = getRangeInfo(m5, 50);
-  let rangeInfoStr = '-';
-  if (rangeM5 && rangeM5.high > rangeM5.low) {
-      const diff = rangeM5.high - rangeM5.low;
-      const pricePos = (price - rangeM5.low) / diff;
-      rangeInfoStr = `M5 Range Pos: ${(pricePos*100).toFixed(1)}%`;
-  }
+  let rangeInfoStr = rangeM5 ? `M5 Range Pos: ${(((price - rangeM5.low) / (rangeM5.high - rangeM5.low))*100).toFixed(1)}%` : '-';
 
   const demand = findSDZones(m5, 1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
   const supply = findSDZones(m5, -1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
-  const liqM5 = getLiquidityLevels(m5, 30);
 
-  let dir, entry, baseSL, zoneRange, setup;
-  let lines = [];
-  let state = 'IDLE';
-  let chartContext = '';
+  let buyOrder = null, sellOrder = null;
 
-  if (demand && (!supply || demand.dist <= supply.dist)) {
-    if (liqM5.ssl > 0 && liqM5.ssl > demand.bottom && liqM5.ssl < demand.top) {
-       return { plan: null, reason: 'Dibatalkan: Ada likuiditas (SSL) di dalam zona Demand M5. Rentan tersapu. Menunggu sweep.' };
-    }
-    state = 'POI_REACHED';
-    dir = 1; entry = demand.top; baseSL = demand.sl; zoneRange = { min: demand.bottom, max: demand.top };
-    setup = `M5 Demand Limit (Zone Scalping)`;
-    lines.push(`Setup M5: Zona Demand Fresh (OB/SD)`);
-  } else if (supply) {
-    if (liqM5.bsl > 0 && liqM5.bsl < supply.top && liqM5.bsl > supply.bottom) {
-       return { plan: null, reason: 'Dibatalkan: Ada likuiditas (BSL) di dalam zona Supply M5. Rentan tersapu. Menunggu sweep.' };
-    }
-    state = 'POI_REACHED';
-    dir = -1; entry = supply.bottom; baseSL = supply.sl; zoneRange = { min: supply.bottom, max: supply.top };
-    setup = `M5 Supply Limit (Zone Scalping)`;
-    lines.push(`Setup M5: Zona Supply Fresh (OB/SD)`);
-  } else {
-    const fvgBuy = evaluateFVG(m5, price, 1, atrM5, 40);
-    const fvgSell = evaluateFVG(m5, price, -1, atrM5, 40);
-
-    if (fvgBuy.useFVG && (!fvgSell.useFVG || Math.abs(price - fvgBuy.entry) < Math.abs(price - fvgSell.entry))) {
-      state = 'POI_REACHED';
-      dir = 1; entry = fvgBuy.entry; baseSL = fvgBuy.sl;
-      zoneRange = { min: fvgBuy.fvg.lo, max: fvgBuy.fvg.hi };
-      setup = `M5 FVG Bullish Limit (Continuity)`;
-      lines.push(`Setup M5: FVG Bullish (Retest)`);
-    } else if (fvgSell.useFVG) {
-      state = 'POI_REACHED';
-      dir = -1; entry = fvgSell.entry; baseSL = fvgSell.sl;
-      zoneRange = { min: fvgSell.fvg.lo, max: fvgSell.fvg.hi };
-      setup = `M5 FVG Bearish Limit (Continuity)`;
-      lines.push(`Setup M5: FVG Bearish (Retest)`);
-    } else {
-      return { plan: null, reason: 'Tidak ada setup valid. Tidak ada Zona S/D atau FVG M5 yang fresh.' };
-    }
+  if (demand) {
+    const entry = demand.top; const sl = demand.sl; const tps = getStructuralTPs(m5, 1, entry, sl, 1.0);
+    if (tps[0] > entry) buyOrder = { dir: 1, entry, sl, tps, type: 'BUY LIMIT', label: 'Buy Limit · M5 Demand', zone: { min: demand.bottom, max: demand.top } };
+  }
+  if (supply) {
+    const entry = supply.bottom; const sl = supply.sl; const tps = getStructuralTPs(m5, -1, entry, sl, 1.0);
+    if (tps[0] < entry) sellOrder = { dir: -1, entry, sl, tps, type: 'SELL LIMIT', label: 'Sell Limit · M5 Supply', zone: { min: supply.bottom, max: supply.top } };
   }
 
-  if (state === 'POI_REACHED') state = 'SIGNAL_FIRED';
-  chartContext = `M5 Structure IDLE -> POI_REACHED -> ${state}`;
+  if (biasM15.dir === 0 && buyOrder && sellOrder) {
+    return {
+      plan: { isOCO: true, orders: [buyOrder, sellOrder], setup: 'M5 OCO Ranging (2 Arah)', chartContext: `M15 Netral -> M5 Ranging -> OCO` },
+      meta: { confidence: 'HIGH', riskLabel: 'MEDIUM', reason: `HTF (M15) Netral. Pasang OCO: BUY @ ${f(buyOrder.entry)}, SELL @ ${f(sellOrder.entry)}. TP mengikuti ERL/IRL M5.` }
+    };
+  }
+
+  let finalOrder = null, reason = '';
+  if (biasM15.dir === 1 && buyOrder) { finalOrder = buyOrder; reason = 'M15 Bullish. Fokus Buy Limit.'; }
+  else if (biasM15.dir === -1 && sellOrder) { finalOrder = sellOrder; reason = 'M15 Bearish. Fokus Sell Limit.'; }
+  else if (biasM15.dir === 0 && (buyOrder || sellOrder)) { finalOrder = buyOrder || sellOrder; reason = `M15 Netral, hanya ada 1 zona valid.`; }
+
+  if (!finalOrder) return { plan: null, reason: 'Tidak ada setup valid. Zona M5 tidak fresh atau bertentangan dengan bias M15.' };
+
+  const inZone = price >= finalOrder.zone.min && price <= finalOrder.zone.max;
+  let orderType = 'LIMIT', entry = finalOrder.entry;
+
+  if (inZone) {
+    const lastM1 = m1[m1.length - 1];
+    const counter = (finalOrder.dir === 1 && lastM1.c < lastM1.o) || (finalOrder.dir === -1 && lastM1.c > lastM1.o);
+    if (counter) return { plan: null, reason: 'Harga di zona tapi candle M1 counter-trend.' };
+    entry = price; orderType = 'NOW';
+  } else {
+    const san = sanitizeEntry({ dir: finalOrder.dir, entry, price, orderType: 'LIMIT', pip });
+    entry = san.entry; orderType = san.orderType;
+  }
 
   return await finalizePlan({
-    dir, entry, orderType: 'LIMIT', baseSL, kind: 'day', atrVal: atrM5, ctx, rrList,
-    confidence: 'HIGH', setup, zoneNote: setup, zoneRange, timeframes: 'M1, M5', rangeInfo: rangeInfoStr, chartContext,
-    head: t.headLine(t.title.day, dir === 1 ? 'BUY' : 'SELL', 'LIMIT', ctx.symbol),
-    lines: [...lines, `Area Eksekusi M5: ${f(zoneRange.min)} - ${f(zoneRange.max)}`],
+    dir: finalOrder.dir, entry, orderType, baseSL: finalOrder.sl, kind: 'day', atrVal: atrM5, ctx, rrList,
+    confidence: 'HIGH', setup: finalOrder.label, zoneNote: finalOrder.label, zoneRange: finalOrder.zone,
+    timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr, chartContext: `M15 ${biasM15.dir === 0 ? 'Netral' : biasM15.dir === 1 ? 'Bullish' : 'Bearish'} -> M5 POI`,
+    head: t.headLine(t.title.day, finalOrder.dir === 1 ? 'BUY' : 'SELL', orderType, ctx.symbol),
+    lines: [reason, `Area Eksekusi: ${f(finalOrder.zone.min)} - ${f(finalOrder.zone.max)}`],
+    customTPs: finalOrder.tps
   });
 }
 
@@ -943,85 +968,62 @@ async function buildIntradayPlan({ m5, m15, price, rrList, ctx }) {
   const h1 = aggregateCandles(m15, 60);
   const atrM5 = atrOf(m5, pip);
 
-  const rangeH1 = getRangeInfo(h1, 50);
-  let rangeInfoStr = '-';
-  if (rangeH1 && rangeH1.high > rangeH1.low) {
-      const diff = rangeH1.high - rangeH1.low;
-      const pricePos = (price - rangeH1.low) / diff;
-      rangeInfoStr = `H1 Range Pos: ${(pricePos*100).toFixed(1)}% (${pricePos > 0.5 ? 'Premium' : 'Discount'})`;
-  }
-
   const biasH1 = analyzePureSMCStructure(h1);
   const biasM15 = analyzePureSMCStructure(m15);
+  
+  const rangeH1 = getRangeInfo(h1, 50);
+  let rangeInfoStr = rangeH1 ? `H1 Range Pos: ${(((price - rangeH1.low) / (rangeH1.high - rangeH1.low))*100).toFixed(1)}%` : '-';
+
+  const demand = findSDZones(m5, 1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
+  const supply = findSDZones(m5, -1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
+
+  let buyOrder = null, sellOrder = null;
+
+  if (demand) {
+    const entry = demand.top; const sl = demand.sl; const tps = getStructuralTPs(m15, 1, entry, sl, 1.0);
+    if (tps[0] > entry) buyOrder = { dir: 1, entry, sl, tps, type: 'BUY LIMIT', label: 'Buy Limit · M5 Demand', zone: { min: demand.bottom, max: demand.top } };
+  }
+  if (supply) {
+    const entry = supply.bottom; const sl = supply.sl; const tps = getStructuralTPs(m15, -1, entry, sl, 1.0);
+    if (tps[0] < entry) sellOrder = { dir: -1, entry, sl, tps, type: 'SELL LIMIT', label: 'Sell Limit · M5 Supply', zone: { min: supply.bottom, max: supply.top } };
+  }
+
+  if (biasH1.dir === 0 && biasM15.dir === 0 && buyOrder && sellOrder) {
+    return {
+      plan: { isOCO: true, orders: [buyOrder, sellOrder], setup: 'Intraday OCO (HTF Ranging)', chartContext: `H1 Netral -> M15 Netral -> OCO M5` },
+      meta: { confidence: 'HIGH', riskLabel: 'MEDIUM', reason: `HTF (H1 & M15) Ranging. Pasang OCO: BUY @ ${f(buyOrder.entry)}, SELL @ ${f(sellOrder.entry)}. TP ERL/IRL M15.` }
+    };
+  }
 
   let htfBias = 0;
   if (biasH1.dir === 1 && biasM15.dir === 1) htfBias = 1;
   if (biasH1.dir === -1 && biasM15.dir === -1) htfBias = -1;
 
-  if (htfBias === 0) {
-    return { plan: null, reason: 'Bias H1 & M15 tidak searah / ranging. Menunggu tren yang jelas.' };
-  }
+  if (htfBias === 0) return { plan: null, reason: 'Bias H1 & M15 tidak searah / konflik.' };
 
-  let dir, entry, baseSL, zoneRange, setup;
-  let lines = [
-    `Bias H1: ${srcName(biasH1.src, ctx.lang)}`,
-    `Bias M15: ${srcName(biasM15.src, ctx.lang)}`
-  ];
-  let state = 'MSS_CONFIRMED';
-  let chartContext = '';
+  let finalOrder = null, reason = '';
+  if (htfBias === 1 && buyOrder) { finalOrder = buyOrder; reason = `H1 & M15 Bullish. Fokus Buy Limit.`; }
+  else if (htfBias === -1 && sellOrder) { finalOrder = sellOrder; reason = `H1 & M15 Bearish. Fokus Sell Limit.`; }
 
-  const liqM15 = getLiquidityLevels(m15, 40);
+  if (!finalOrder) return { plan: null, reason: 'Tidak ada zona M5 fresh searah tren HTF.' };
 
-  if (htfBias === 1) {
-    dir = 1;
-    const demand = findSDZones(m5, 1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
-    if (demand) {
-      if (liqM15.ssl > 0 && liqM15.ssl > demand.bottom && liqM15.ssl < demand.top) {
-         return { plan: null, reason: 'Dibatalkan: Likuiditas (SSL) terdeteksi di dalam zona Demand. Risiko sweep tinggi.' };
-      }
-      entry = demand.top; baseSL = demand.sl; zoneRange = { min: demand.bottom, max: demand.top };
-      setup = `M5 Demand Limit (Trend Follow)`;
-      lines.push(`Setup M5: Zona Demand Fresh (OB/SD)`);
-    } else {
-      const fvgBuy = evaluateFVG(m5, price, 1, atrM5, 40);
-      if (fvgBuy.useFVG) {
-        entry = fvgBuy.entry; baseSL = fvgBuy.sl; zoneRange = { min: fvgBuy.fvg.lo, max: fvgBuy.fvg.hi };
-        setup = `M5 FVG Bullish Limit (Trend Continuity)`;
-        lines.push(`Setup M5: FVG Bullish (Retest)`);
-      } else {
-        return { plan: null, reason: 'Tren Bullish, tetapi tidak ada zona Demand M5 atau FVG Bullish M5 yang fresh.' };
-      }
-    }
+  const inZone = price >= finalOrder.zone.min && price <= finalOrder.zone.max;
+  let orderType = 'LIMIT', entry = finalOrder.entry;
+
+  if (inZone) {
+    entry = price; orderType = 'NOW';
   } else {
-    dir = -1;
-    const supply = findSDZones(m5, -1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
-    if (supply) {
-      if (liqM15.bsl > 0 && liqM15.bsl < supply.top && liqM15.bsl > supply.bottom) {
-         return { plan: null, reason: 'Dibatalkan: Likuiditas (BSL) terdeteksi di dalam zona Supply. Risiko sweep tinggi.' };
-      }
-      entry = supply.bottom; baseSL = supply.sl; zoneRange = { min: supply.bottom, max: supply.top };
-      setup = `M5 Supply Limit (Trend Follow)`;
-      lines.push(`Setup M5: Zona Supply Fresh (OB/SD)`);
-    } else {
-      const fvgSell = evaluateFVG(m5, price, -1, atrM5, 40);
-      if (fvgSell.useFVG) {
-        entry = fvgSell.entry; baseSL = fvgSell.sl; zoneRange = { min: fvgSell.fvg.lo, max: fvgSell.fvg.hi };
-        setup = `M5 FVG Bearish Limit (Trend Continuity)`;
-        lines.push(`Setup M5: FVG Bearish (Retest)`);
-      } else {
-        return { plan: null, reason: 'Tren Bearish, tetapi tidak ada zona Supply M5 atau FVG Bearish M5 yang fresh.' };
-      }
-    }
+    const san = sanitizeEntry({ dir: finalOrder.dir, entry, price, orderType: 'LIMIT', pip });
+    entry = san.entry; orderType = san.orderType;
   }
-
-  state = 'SIGNAL_FIRED';
-  chartContext = `HTF H1/M15 ${htfBias === 1 ? 'Bullish' : 'Bearish'} -> MSS M15 -> POI M5 -> ${state}`;
 
   return await finalizePlan({
-    dir, entry, orderType: 'LIMIT', baseSL, kind: 'intraday', atrVal: atrM5, ctx, rrList,
-    confidence: 'HIGH', setup, zoneNote: setup, zoneRange, timeframes: 'M5, M15, H1', rangeInfo: rangeInfoStr, chartContext,
-    head: t.headLine(t.title.intraday, dir === 1 ? 'BUY' : 'SELL', 'LIMIT', ctx.symbol),
-    lines: [...lines, `Area Eksekusi M5: ${f(zoneRange.min)} - ${f(zoneRange.max)}`],
+    dir: finalOrder.dir, entry, orderType, baseSL: finalOrder.sl, kind: 'intraday', atrVal: atrM5, ctx, rrList,
+    confidence: 'HIGH', setup: finalOrder.label, zoneNote: finalOrder.label, zoneRange: finalOrder.zone,
+    timeframes: 'M5, M15, H1', rangeInfo: rangeInfoStr, chartContext: `HTF H1/M15 ${htfBias === 1 ? 'Bullish' : 'Bearish'} -> M5 POI`,
+    head: t.headLine(t.title.intraday, finalOrder.dir === 1 ? 'BUY' : 'SELL', orderType, ctx.symbol),
+    lines: [reason, `Area Eksekusi: ${f(finalOrder.zone.min)} - ${f(finalOrder.zone.max)}`],
+    customTPs: finalOrder.tps
   });
 }
 
@@ -1032,14 +1034,6 @@ async function buildSwingPlan({ m15, price, rrList, ctx }) {
   const h4 = aggregateCandles(m15, 240);
   const d1 = aggregateCandles(m15, 1440);
   const atrM15 = atrOf(m15, pip);
-
-  const rangeH4 = getRangeInfo(h4, 50);
-  let rangeInfoStr = '-';
-  if (rangeH4 && rangeH4.high > rangeH4.low) {
-      const diff = rangeH4.high - rangeH4.low;
-      const pricePos = (price - rangeH4.low) / diff;
-      rangeInfoStr = `H4 Range Pos: ${(pricePos*100).toFixed(1)}% (${pricePos > 0.5 ? 'Premium' : 'Discount'})`;
-  }
 
   const biasD1 = analyzePureSMCStructure(d1);
   const biasH4 = analyzePureSMCStructure(h4);
@@ -1052,71 +1046,39 @@ async function buildSwingPlan({ m15, price, rrList, ctx }) {
   if (bullCount >= 2) htfBias = 1;
   if (bearCount >= 2) htfBias = -1;
 
-  if (htfBias === 0) {
-    return { plan: null, reason: 'Bias D1/H4/H1 tidak searah. Menunggu tren makro.' };
+  if (htfBias === 0) return { plan: null, reason: 'Bias D1/H4/H1 tidak searah. Menunggu tren makro.' };
+
+  const demand = findSDZones(m15, 1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
+  const supply = findSDZones(m15, -1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
+
+  let finalOrder = null, reason = '';
+
+  if (htfBias === 1 && demand) {
+    const entry = demand.top; const sl = demand.sl; const tps = getStructuralTPs(m15, 1, entry, sl, 1.0);
+    if (tps[0] > entry) { finalOrder = { dir: 1, entry, sl, tps, label: 'M15 Demand Limit' }; reason = 'Tren Makro Bullish. Buy Limit di M15 Demand.'; }
+  } else if (htfBias === -1 && supply) {
+    const entry = supply.bottom; const sl = supply.sl; const tps = getStructuralTPs(m15, -1, entry, sl, 1.0);
+    if (tps[0] < entry) { finalOrder = { dir: -1, entry, sl, tps, label: 'M15 Supply Limit' }; reason = 'Tren Makro Bearish. Sell Limit di M15 Supply.'; }
   }
 
-  let dir, entry, baseSL, zoneRange, setup;
-  let lines = [
-    `Bias D1: ${srcName(biasD1.src, ctx.lang)}`,
-    `Bias H4: ${srcName(biasH4.src, ctx.lang)}`,
-    `Bias H1: ${srcName(biasH1.src, ctx.lang)}`
-  ];
-  let state = 'MSS_CONFIRMED';
-  let chartContext = '';
+  if (!finalOrder) return { plan: null, reason: 'Tidak ada zona M15 fresh searah tren makro.' };
 
-  const liqH1 = getLiquidityLevels(h1, 40);
+  const inZone = price >= demand?.bottom && price <= demand?.top || price >= supply?.bottom && price <= supply?.top;
+  let orderType = 'LIMIT', entry = finalOrder.entry;
 
-  if (htfBias === 1) {
-    dir = 1;
-    const demand = findSDZones(m15, 1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
-    if (demand) {
-      if (liqH1.ssl > 0 && liqH1.ssl > demand.bottom && liqH1.ssl < demand.top) {
-         return { plan: null, reason: 'Dibatalkan: Likuiditas (SSL) berada di dalam zona Demand M15. Risiko sweep tinggi.' };
-      }
-      entry = demand.top; baseSL = demand.sl; zoneRange = { min: demand.bottom, max: demand.top };
-      setup = `M15 Demand Limit (Trend Follow)`;
-      lines.push(`Setup M15: Zona Demand Fresh (OB/SD)`);
-    } else {
-      const fvgBuy = evaluateFVG(m15, price, 1, atrM15, 40);
-      if (fvgBuy.useFVG) {
-        entry = fvgBuy.entry; baseSL = fvgBuy.sl; zoneRange = { min: fvgBuy.fvg.lo, max: fvgBuy.fvg.hi };
-        setup = `M15 FVG Bullish Limit (Trend Continuity)`;
-        lines.push(`Setup M15: FVG Bullish (Retest)`);
-      } else {
-        return { plan: null, reason: 'Tren Makro Bullish, tetapi tidak ada zona Demand M15 atau FVG Bullish M15 yang fresh.' };
-      }
-    }
-  } else {
-    dir = -1;
-    const supply = findSDZones(m15, -1, price, { dispAtr: 0.8, freshOnly: true })[0] || null;
-    if (supply) {
-      if (liqH1.bsl > 0 && liqH1.bsl < supply.top && liqH1.bsl > supply.bottom) {
-         return { plan: null, reason: 'Dibatalkan: Likuiditas (BSL) berada di dalam zona Supply M15. Risiko sweep tinggi.' };
-      }
-      entry = supply.bottom; baseSL = supply.sl; zoneRange = { min: supply.bottom, max: supply.top };
-      setup = `M15 Supply Limit (Trend Follow)`;
-      lines.push(`Setup M15: Zona Supply Fresh (OB/SD)`);
-    } else {
-      const fvgSell = evaluateFVG(m15, price, -1, atrM15, 40);
-      if (fvgSell.useFVG) {
-        entry = fvgSell.entry; baseSL = fvgSell.sl; zoneRange = { min: fvgSell.fvg.lo, max: fvgSell.fvg.hi };
-        setup = `M15 FVG Bearish Limit (Trend Continuity)`;
-        lines.push(`Setup M15: FVG Bearish (Retest)`);
-      } else {
-        return { plan: null, reason: 'Tren Makro Bearish, tetapi tidak ada zona Supply M15 atau FVG Bearish M15 yang fresh.' };
-      }
-    }
+  if (inZone) { entry = price; orderType = 'NOW'; }
+  else {
+    const san = sanitizeEntry({ dir: finalOrder.dir, entry, price, orderType: 'LIMIT', pip });
+    entry = san.entry; orderType = san.orderType;
   }
-
-  state = 'SIGNAL_FIRED';
-  chartContext = `HTF D1/H4/H1 Sync -> MSS H1 -> POI M15 -> ${state}`;
 
   return await finalizePlan({
-    dir, entry, orderType: 'LIMIT', baseSL, kind: 'swing', atrVal: atrM15, ctx, rrList,
-    confidence: 'HIGH', setup, zoneNote: setup, zoneRange, timeframes: 'M15, H1, H4, D1', rangeInfo: rangeInfoStr, chartContext,
-    head: t.headLine(t.title.swing, dir === 1 ? 'BUY' : 'SELL', 'LIMIT', ctx.symbol),
-    lines: [...lines, `Area Eksekusi M15: ${f(zoneRange.min)} - ${f(zoneRange.max)}`],
+    dir: finalOrder.dir, entry, orderType, baseSL: finalOrder.sl, kind: 'swing', atrVal: atrM15, ctx, rrList,
+    confidence: 'HIGH', setup: finalOrder.label, zoneNote: finalOrder.label, zoneRange: { min: demand?.bottom || supply?.bottom, max: demand?.top || supply?.top },
+    timeframes: 'M15, H1, H4, D1', rangeInfo: '-', chartContext: `HTF ${htfBias === 1 ? 'Bullish' : 'Bearish'} -> POI M15`,
+    head: t.headLine(t.title.swing, finalOrder.dir === 1 ? 'BUY' : 'SELL', orderType, ctx.symbol),
+    lines: [reason, `Area Eksekusi M15`],
+    customTPs: finalOrder.tps
   });
 }
 
@@ -1128,10 +1090,43 @@ function toSignal(result, style, ctx) {
     if (v < 0.001) return Number(v).toFixed(8);
     return Number(Number(v).toFixed(ctx.dec));
   };
+  
+  const en = ctx.lang === 'en';
+
+  if (plan && plan.isOCO) {
+    const [buy, sell] = plan.orders;
+    return {
+      signal: 'OCO',
+      mode: 'OCO_PENDING',
+      orderType: 'OCO',
+      orderLabel: `OCO ${r(buy.entry)} / ${r(sell.entry)}`,
+      status: 'PENDING',
+      statusLabel: `OCO ${r(buy.entry)} / ${r(sell.entry)}`,
+      pendingEntries: [r(buy.entry), r(sell.entry)],
+      setup: plan.setup,
+      confidence: meta.confidence,
+      risk: meta.riskLabel,
+      reason: meta.reason,
+      chartContext: plan.chartContext,
+      orders: plan.orders.map(o => ({
+        signal: o.dir === 1 ? 'BUY' : 'SELL',
+        orderType: 'LIMIT',
+        entry: r(o.entry),
+        sl: r(o.sl),
+        tp1: o.tps[0] != null ? r(o.tps[0]) : null,
+        tp2: o.tps[1] != null ? r(o.tps[1]) : null,
+        tp3: o.tps[2] != null ? r(o.tps[2]) : null,
+        zone: o.zone ? { min: r(o.zone.min), max: r(o.zone.max) } : null,
+        entryStyle: en ? style.entryStyleEn : style.entryStyle,
+        setupLabel: style.label,
+        zoneLabel: o.label,
+        zoneNote: o.label,
+      })),
+    };
+  }
 
   const tps = plan.tps;
   const isLimit = plan.orderType === 'LIMIT';
-  const en = ctx.lang === 'en';
   const mode = isLimit ? 'LIMIT' : 'MARKET';
 
   return {
@@ -1140,6 +1135,7 @@ function toSignal(result, style, ctx) {
     orderType: plan.orderType,
     orderLabel: orderLabel(dir, plan.orderType),
     status: plan.status,
+    statusLabel: plan.status,
     entry: r(plan.entry),
     bufferEnd: r(plan.entry),
     sl: r(plan.sl),
@@ -1157,7 +1153,7 @@ function toSignal(result, style, ctx) {
     zoneLabel: isLimit ? 'Limit Entry Zone' : 'Market Execution Zone',
     zoneNote: plan.zoneNote,
     reason: meta.reason,
-    chartContext: plan.chartContext
+    chartContext: plan.chartContext,
   };
 }
 
@@ -1222,10 +1218,10 @@ export default async function handler(req, res) {
       const tps = [p.tp1, p.tp2, p.tp3].filter(v => v != null).map(Number);
       const orderType = p.orderType === 'LIMIT' ? 'LIMIT' : 'NOW';
 
-      if (!['BUY', 'SELL'].includes(p.signal)) return res.status(400).json({ error: 'AI gagal menentukan arah BUY/SELL.' });
+      if (!['BUY', 'SELL'].includes(p.signal?.toUpperCase())) return res.status(400).json({ error: 'AI gagal menentukan arah BUY/SELL.' });
       if (entry <= 0 || sl <= 0 || tps.some(v => v <= 0)) return res.status(400).json({ error: 'AI mengembalikan harga 0.0. Pastikan chart jelas.' });
 
-      const dir = p.signal === 'BUY' ? 1 : -1;
+      const dir = p.signal.toUpperCase() === 'BUY' ? 1 : -1;
       let symbol = resolveSymbol(body, req.query) || (p.symbol && p.symbol !== 'UNKNOWN' ? normalizeSymbol(p.symbol) : null);
       if (!symbol) symbol = 'UNKNOWN_PAIR';
 
@@ -1235,7 +1231,8 @@ export default async function handler(req, res) {
       } else {
          if (entry > 1000) { dec = 2; pip = 0.1; } else if (entry > 100) { dec = 2; pip = 0.01; } else if (entry > 1) { dec = 4; pip = 0.0001; } else if (entry > 0.01) { dec = 5; pip = 0.00001; } else if (entry > 0.0001) { dec = 6; pip = 0.000001; } else if (entry > 0.00001) { dec = 7; pip = 0.0000001; } else { dec = 8; pip = 0.00000001; }
          if (symbol.includes('XAU')) { gold = true; dec = 2; pip = 0.1; }
-         prof = pairProfile(symbol.includes('XAU') ? 'gold' : (symbol.includes('BTC') ? 'crypto' : 'fx'));
+         const cls = symbol.includes('XAU') ? 'gold' : (symbol.includes('BTC') ? 'crypto' : 'fx');
+         prof = { cls, ...PAIR_CLASS_PROFILE[cls] };
       }
 
       const ctx = { symbol, dec, pip, gold, prof, lang };
@@ -1247,14 +1244,14 @@ export default async function handler(req, res) {
       else if (typeof p.timeframes === 'string') tfText = p.timeframes;
 
       const aiReason = await getAIReasoning({
-        ctx, dir, kind: 'vision', orderType: orderType, entry, sl, tps, setup: p.setup || 'SMC Top-Down', rawReason: p.reason, riskPips: riskPips, zoneLine: `MTF: ${tfText}`, timeframes: tfText, rangeInfo: p.range_info || '-', chartContext: p.chartContext || '-'
+        ctx, dir, kind: 'vision', orderType, entry, sl, tps, setup: p.setup || 'SMC Top-Down', rawReason: p.reason, riskPips, zoneLine: `MTF: ${tfText}`, timeframes: tfText, rangeInfo: p.range_info || '-', chartContext: p.chartContext || '-'
       });
 
       return res.status(200).json({
         ok: true,
         analysis_steps: [`Analisa Top-Down (${tfText})`, `Identifikasi Likuiditas & Trend HTF`, `Konfirmasi Zona LTF`, `Penentuan Entry & Anti-Sweep SL`],
         signal: {
-          symbol, decimals: dec, pipSize: pip, signal: p.signal, mode: orderType === 'LIMIT' ? 'LIMIT' : 'MARKET', orderType: orderType, orderLabel: `${p.signal} ${orderType}`, status: orderType === 'LIMIT' ? 'PENDING' : 'RUNNING',
+          symbol, decimals: dec, pipSize: pip, signal: p.signal.toUpperCase(), mode: orderType === 'LIMIT' ? 'LIMIT' : 'MARKET', orderType, orderLabel: `${p.signal.toUpperCase()} ${orderType}`, status: orderType === 'LIMIT' ? 'PENDING' : 'RUNNING',
           entry: f(entry), sl: f(sl), tp1: tps[0] != null ? f(tps[0]) : null, tp2: tps[1] != null ? f(tps[1]) : null, tp3: tps[2] != null ? f(tps[2]) : null, tpCount: tps.length,
           zone: null, expireMs: 0, confidence: 'HIGH', risk: 'MEDIUM', setup: p.setup || `SMC MTF (${tfText})`, entryStyle: 'Rekomendasi AI', setupLabel: 'SMC Top-Down', zoneLabel: orderType === 'LIMIT' ? 'Limit Entry Zone' : 'Market Execution Zone', zoneNote: `Timeframes: ${tfText}`,
           reason: (aiReason || p.reason) + sessionNote,
@@ -1299,7 +1296,7 @@ export default async function handler(req, res) {
 
     const needM1 = (style === 'Scalping' || style === 'Day Trading') ? NEED.m1 : 0;
     const needM5 = (style === 'Scalping' || style === 'Day Trading' || style === 'Intraday') ? NEED.m5 : 0;
-    const needM15 = (style === 'Intraday' || style === 'Swing') ? NEED.m15 : 0;
+    const needM15 = (style === 'Intraday' || style === 'Swing' || style === 'Day Trading') ? NEED.m15 : 0;
 
     const pick = async (arr, tf, need) => {
       if (!need) return { candles: [], source: 'none', tried: [] };
@@ -1333,16 +1330,16 @@ export default async function handler(req, res) {
     let liveSteps = [];
 
     if (style === 'Scalping') {
-      liveSteps = [`Cek Premium/Discount Range (M15)`, `Analisa Struktur M5`, `Validasi Trigger M1`, `Entry Market NOW`];
+      liveSteps = [`Cek Premium/Discount Range (M15)`, `Analisa Struktur M5`, `Validasi Trigger M1`, `Entry Market NOW / OCO`];
       result = await buildScalpPlan({ m1, m5, m15, price, rrList, ctx });
     } else if (style === 'Day Trading') {
-      liveSteps = [`Cek Zona / FVG M5`, `Validasi Likuiditas (SSL/BSL)`, `Menghitung Limit Entry`];
-      result = await buildDayPlan({ m1, m5, price, rrList, ctx });
+      liveSteps = [`Cek Zona / FVG M5`, `Validasi Likuiditas (SSL/BSL)`, `Menghitung Limit Entry`, `Cek OCO / Refine M1`];
+      result = await buildDayPlan({ m1, m5, m15, price, rrList, ctx });
     } else if (style === 'Intraday') {
-      liveSteps = [`Memeriksa bias M15 & H1`, `Mencari Zona Supply & Demand M5`, `Cek Liquidity Sweep (SSL/BSL)`, `Validasi rejection candle`];
+      liveSteps = [`Memeriksa bias M15 & H1`, `Mencari Zona M5`, `Cek OCO / Trend Follow`, `Validasi ERL/IRL`];
       result = await buildIntradayPlan({ m5, m15, price, rrList, ctx });
     } else if (style === 'Swing') {
-      liveSteps = [`Memeriksa bias D1, H4 & H1`, `Mencari Zona Supply & Demand M15`, `Cek Liquidity Sweep (SSL/BSL)`, `Validasi rejection candle`];
+      liveSteps = [`Memeriksa bias D1, H4 & H1`, `Mencari Zona M15`, `Cek Trend Follow`, `Validasi ERL/IRL`];
       result = await buildSwingPlan({ m15, price, rrList, ctx });
     }
 
