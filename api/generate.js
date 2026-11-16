@@ -1,7 +1,10 @@
 // api/generate.js
-// v99 (Fix Vision Timeout & Better Error Handling)
+// v100 (Vision: timeout 50s, max_tokens 700, maxDuration 60s, log ukuran gambar)
 
-export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
+export const config = {
+  api: { bodyParser: { sizeLimit: '15mb' } },
+  maxDuration: 60,
+};
 
 const KV_KEY = 'alu_clients';
 const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
@@ -11,6 +14,10 @@ const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const AI_MODEL = process.env.AI_MODEL || 'qwen-3.8-max';
 const AI_VISION_MODEL = process.env.AI_VISION_MODEL || 'gpt-6-luna';
+
+// Timeout Vision (ms). Harus lebih kecil dari maxDuration (60s) agar sempat membalas error.
+const VISION_TIMEOUT_MS = 50000;
+const VISION_MAX_TOKENS = 700;
 
 // Urutan tetap: utama dulu, lalu cadangan
 const API_KEYS = [
@@ -751,6 +758,10 @@ async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup
 async function getVisionSignal(images, lang) {
   if (!OPENAI_API_KEY) return { plan: null, reason: 'API Key AI tidak ada.' };
 
+  // Log ukuran gambar untuk memantau beban request
+  const totalKB = Math.round(images.reduce((s, img) => s + (img?.length || 0), 0) / 1024);
+  console.log(`[Vision] ${images.length} gambar, total ~${totalKB} KB base64`);
+
   const prompt = `
 Anda adalah trader institusional SMC/ICT profesional. Anda menerima ${images.length} gambar chart TradingView (Multi-Timeframe).
 TIDAK ADA gaya trading. Berikan REKOMENDASI murni berdasarkan arsitektur SMC State Machine.
@@ -769,7 +780,7 @@ LANGKAH WAJIB (Analisa Top-Down + State Machine):
    - **PENTING**: Field "signal" HANYA BOLEH berisi string "BUY" atau "SELL". Jangan isi dengan kata lain.
 8. **chartContext**: Tuliskan alur state machine secara eksplisit (contoh: "HTF H4 Bullish -> Sweep SSL M15 -> MSS M5 -> POI FVG -> SIGNAL BUY").
 
-KEMBALIKAN HANYA DALAM FORMAT JSON:
+KEMBALIKAN HANYA DALAM FORMAT JSON (tanpa teks lain, tanpa markdown):
 {
   "symbol": "BTCUSDT",
   "timeframes": ["H4", "M15", "M5"],
@@ -791,22 +802,32 @@ KEMBALIKAN HANYA DALAM FORMAT JSON:
     ...images.map(imgBase64 => ({ type: "image_url", image_url: { url: imgBase64 } }))
   ];
 
-  try {
-    const controller = new AbortController();
-    // ✅ Naikkan timeout AI Vision ke 9500ms (9.5 detik) untuk mencegah "Operation aborted"
-    const timeoutId = setTimeout(() => controller.abort(), 9500);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), VISION_TIMEOUT_MS);
+  const startedAt = Date.now();
 
+  try {
     const resp = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: AI_VISION_MODEL, messages: [{ role: 'user', content: userContent }], max_tokens: 1500, temperature: 0.1 }),
+      body: JSON.stringify({
+        model: AI_VISION_MODEL,
+        messages: [{ role: 'user', content: userContent }],
+        max_tokens: VISION_MAX_TOKENS,
+        temperature: 0.1,
+      }),
       signal: controller.signal
     });
 
-    clearTimeout(timeoutId);
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => '');
+      console.error(`[Vision] HTTP ${resp.status}: ${errText.slice(0, 300)}`);
+      return { plan: null, reason: `Server AI menolak (HTTP ${resp.status}).` };
+    }
 
-    if (!resp.ok) return { plan: null, reason: `Server AI menolak (HTTP ${resp.status}).` };
     const data = await resp.json();
+    console.log(`[Vision] selesai dalam ${Date.now() - startedAt} ms`);
+
     let content = data.choices?.[0]?.message?.content?.trim() || '';
     if (!content) return { plan: null, reason: `AI gagal membaca gambar.` };
 
@@ -818,18 +839,21 @@ KEMBALIKAN HANYA DALAM FORMAT JSON:
       try {
         const parsed = JSON.parse(jsonString);
         return { plan: parsed, reason: parsed.reason || 'Vision Analysis' };
-      } catch (parseError) { 
-        return { plan: null, reason: 'Gagal memproses format JSON dari AI. Silakan coba lagi.' }; 
+      } catch (parseError) {
+        console.error('[Vision] JSON parse error:', parseError.message);
+        return { plan: null, reason: 'Gagal memproses format JSON dari AI. Silakan coba lagi.' };
       }
     }
     return { plan: null, reason: `AI tidak mengembalikan format JSON yang valid.` };
   } catch (err) {
-    console.error('Vision AI Exception:', err.message);
-    // ✅ Jika timeout, berikan pesan error yang jelas (bukan 'This operation was aborted')
+    const elapsed = Date.now() - startedAt;
+    console.error(`[Vision] exception setelah ${elapsed} ms:`, err.name, err.message);
     if (err.name === 'AbortError') {
-      return { plan: null, reason: 'Waktu habis (Timeout): AI Vision memakan waktu terlalu lama. Pastikan gambar tidak terlalu besar/HD, atau coba lagi.' };
+      return { plan: null, reason: `Waktu habis (${Math.round(VISION_TIMEOUT_MS / 1000)} detik): AI Vision belum selesai memproses ${images.length} gambar. Coba kurangi jumlah gambar atau perkecil ukurannya, lalu ulangi.` };
     }
     return { plan: null, reason: `Gagal memproses AI Vision: ${err.message}` };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -910,7 +934,7 @@ async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
   if (isMomentumStrong) {
     const dir = structM1.dir;
     const isOverextended = dir === 1 ? (price > recentExtreme(m1, -1, 10) + 3 * atrM1) : (price < recentExtreme(m1, 1, 10) - 3 * atrM1);
-    
+
     if (!isOverextended) {
       return await finalizePlan({
         dir, entry: price, orderType: 'NOW', baseSL: recentExtreme(m1, dir, 5),
@@ -1423,7 +1447,7 @@ export default async function handler(req, res) {
       // ✅ SMART SIGNAL DEDUCTION
       const rawSignal = String(p.signal || '').toUpperCase();
       let dir = 0;
-      
+
       if (rawSignal.includes('BUY') || rawSignal === 'LONG') dir = 1;
       else if (rawSignal.includes('SELL') || rawSignal === 'SHORT') dir = -1;
       else if (entry > 0 && sl > 0) {
