@@ -1,5 +1,5 @@
 // api/generate.js
-// v95 (Scalp NOW->OCO->LIMIT strict zones, Konservatif OCO->LIMIT RR pure, Anti random entry)
+// v96 (Prioritas Momentum NOW untuk Scalp Agresif, Anti random entry, Konservatif OCO/LIMIT valid)
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
@@ -80,8 +80,8 @@ const slFloor = (kind, ctx) => {
 
 const STYLES = {
   'Scalping': {
-    label: 'Scalping Agresif · NOW / OCO 2 Zona / LIMIT Valid',
-    labelEn: 'Aggressive Scalping · NOW / OCO 2 Zones / Valid LIMIT',
+    label: 'Scalping Agresif · Momentum NOW / OCO 2 Zona / LIMIT',
+    labelEn: 'Aggressive Scalping · Momentum NOW / OCO 2 Zones / LIMIT',
     entryStyle: 'Agresif', entryStyleEn: 'Aggressive', mode: 'MIXED', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
   'Day Trading': {
@@ -854,7 +854,7 @@ async function finalizePlan({ dir, entry, orderType, baseSL, kind, atrVal, ctx, 
 
 // ═══════════════════════════ WORKFLOW MTF ═══════════════════════════
 
-// ── SCALPING AGRESIF: NOW jika valid → OCO (2 zona valid) → LIMIT (1 zona valid) → NULL ──
+// ── SCALPING AGRESIF: Momentum/FVG NOW → OCO (2 zona valid) → LIMIT (1 zona valid) → NULL ──
 async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
   const { pip } = ctx;
   const t = tx(ctx);
@@ -878,49 +878,54 @@ async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx }) {
   const isMomentumStrong = structM1.dir !== 0 && bodyM1 > 1.2 * atrM1;
   const fvgs = findRecentFVGs(m1, 20);
 
-  // ── SKENARIO 1: NOW (Hanya jika struktur M1 & M15 mendukung) ──
+  // ── 1. MARKET KENCENG (MOMENTUM) -> NOW ──
+  if (isMomentumStrong) {
+    const dir = structM1.dir;
+    // Guard against extreme FOMO (jarak > 3x ATR dari swing terdekat)
+    const isOverextended = dir === 1 ? (price > recentExtreme(m1, -1, 10) + 3 * atrM1) : (price < recentExtreme(m1, 1, 10) - 3 * atrM1);
+    
+    // Untuk agresif, jika kencang, abaikan konflik M15, langsung NOW
+    if (!isOverextended) {
+      return await finalizePlan({
+        dir, entry: price, orderType: 'NOW', baseSL: recentExtreme(m1, dir, 5),
+        kind: 'scalp', atrVal: atrM1, ctx, rrList,
+        confidence: 'HIGH', setup: 'M1 Momentum (Market NOW)', zoneNote: 'M1 Momentum', zoneRange: { min: price, max: price },
+        timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
+        chartContext: `M1 Momentum Kuat -> NOW ${dir === 1 ? 'BUY' : 'SELL'}`,
+        head: t.headLine(t.title.scalp, dir === 1 ? 'BUY' : 'SELL', 'NOW', ctx.symbol),
+        lines: [`Market kencang terdeteksi. Eksekusi Market NOW searah momentum M1.`],
+      });
+    }
+  }
+
+  // ── 2. FVG NOW (Harga sedang di FVG) ──
   const inFvgBull = fvgs.find(f => f.dir === 1 && price >= f.lo && price <= f.hi);
   const inFvgBear = fvgs.find(f => f.dir === -1 && price >= f.lo && price <= f.hi);
 
-  let nowSetup = null;
   if (inFvgBull && biasM15.dir >= 0) {
-    nowSetup = {
-      dir: 1, setup: 'M1 Bullish FVG (Market NOW)',
-      baseSL: inFvgBull.lo - 0.25 * atrM1,
-      zone: { min: inFvgBull.lo, max: inFvgBull.hi },
-    };
-  } else if (inFvgBear && biasM15.dir <= 0) {
-    nowSetup = {
-      dir: -1, setup: 'M1 Bearish FVG (Market NOW)',
-      baseSL: inFvgBear.hi + 0.25 * atrM1,
-      zone: { min: inFvgBear.lo, max: inFvgBear.hi },
-    };
-  } else if (
-    isMomentumStrong &&
-    (biasM15.dir === 0 || biasM15.dir === structM1.dir) &&
-    ((structM1.dir === 1 && !isPremium) || (structM1.dir === -1 && !isDiscount))
-  ) {
-    const dir = structM1.dir;
-    nowSetup = {
-      dir, setup: 'M1 Momentum (Market NOW)',
-      baseSL: recentExtreme(m1, dir, 5),
-      zone: { min: price, max: price },
-    };
-  }
-
-  if (nowSetup) {
     return await finalizePlan({
-      dir: nowSetup.dir, entry: price, orderType: 'NOW', baseSL: nowSetup.baseSL,
+      dir: 1, entry: price, orderType: 'NOW', baseSL: inFvgBull.lo - 0.25 * atrM1,
       kind: 'scalp', atrVal: atrM1, ctx, rrList,
-      confidence: 'HIGH', setup: nowSetup.setup, zoneNote: nowSetup.setup, zoneRange: nowSetup.zone,
+      confidence: 'HIGH', setup: 'M1 Bullish FVG (Market NOW)', zoneNote: 'M1 Bullish FVG', zoneRange: { min: inFvgBull.lo, max: inFvgBull.hi },
       timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
-      chartContext: `M15 ${biasM15.src} -> M1 NOW ${nowSetup.dir === 1 ? 'BUY' : 'SELL'}`,
-      head: t.headLine(t.title.scalp, nowSetup.dir === 1 ? 'BUY' : 'SELL', 'NOW', ctx.symbol),
-      lines: [`Entry NOW: ${nowSetup.setup}.`],
+      chartContext: `M15 ${biasM15.src} -> M1 FVG NOW BUY`,
+      head: t.headLine(t.title.scalp, 'BUY', 'NOW', ctx.symbol),
+      lines: [`Harga berada di zona FVG Bullish M1. Eksekusi NOW.`],
+    });
+  }
+  if (inFvgBear && biasM15.dir <= 0) {
+    return await finalizePlan({
+      dir: -1, entry: price, orderType: 'NOW', baseSL: inFvgBear.hi + 0.25 * atrM1,
+      kind: 'scalp', atrVal: atrM1, ctx, rrList,
+      confidence: 'HIGH', setup: 'M1 Bearish FVG (Market NOW)', zoneNote: 'M1 Bearish FVG', zoneRange: { min: inFvgBear.lo, max: inFvgBear.hi },
+      timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
+      chartContext: `M15 ${biasM15.src} -> M1 FVG NOW SELL`,
+      head: t.headLine(t.title.scalp, 'SELL', 'NOW', ctx.symbol),
+      lines: [`Harga berada di zona FVG Bearish M1. Eksekusi NOW.`],
     });
   }
 
-  // ── SKENARIO 2: AREA VALID (OCO 2 Arah / 1 Arah) ──
+  // ── 3. AREA VALID (OCO 2 Arah / 1 Arah) ──
   const demandBelow = findSDZones(m1, 1, price, { dispAtr: 0.8, freshOnly: true })
     .filter(z => z.top < price - 0.2 * atrM1 && z.dist > 0 && z.dist <= maxZoneDist)
     .sort((a, b) => a.dist - b.dist)[0] || null;
@@ -1468,7 +1473,7 @@ export default async function handler(req, res) {
     let liveSteps = [];
 
     if (style === 'Scalping') {
-      liveSteps = [`Cek Premium/Discount Range (M15)`, `Validasi Struktur M1`, `Cari NOW / OCO / LIMIT`, `Anti Entry Acak`];
+      liveSteps = [`Cek Momentum M1`, `Cek FVG M1`, `Cari OCO / LIMIT Valid`, `Anti Entry Acak`];
       result = await buildScalpPlan({ m1, m5, m15, price, rrList, ctx });
     } else if (style === 'Day Trading') {
       liveSteps = [`Cek Zona M5 / M1 (refine)`, `Validasi Bias M15`, `Hitung SL / RR murni`, `OCO / LIMIT Valid`];
