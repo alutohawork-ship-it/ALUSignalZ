@@ -234,8 +234,6 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
 
       <!-- 5. SIGNAL CARD -->
       <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2 relative">
-        <!-- Daftar setup pair aktif (chip) -->
-        <div id="setupChips" class="hidden flex-wrap gap-1 justify-center"></div>
 
         <div id="standbyView" class="py-3 text-center text-xs text-gray-400" data-i18n="standby1"></div>
 
@@ -745,26 +743,62 @@ function startStatusTimer(data) {
   statusInterval = setInterval(tick, 1000);
 }
 
+/* ================= OCO HELPER ================= */
+/* Mengembalikan { buy, sell } jika trade ini bagian dari OCO yang kedua sisinya masih PENDING. */
+function ocoPending(t) {
+  if (!t || !t.ocoId) return null;
+  const grp = trades.filter(x => x.ocoId === t.ocoId && x.key === t.key);
+  if (grp.length < 2 || !grp.every(x => x.status === 'PENDING')) return null;
+  const buy = grp.find(x => x.dir === 1), sell = grp.find(x => x.dir === -1);
+  return buy && sell ? { buy, sell } : null;
+}
+const lvTxt = v => (v != null && Number.isFinite(Number(v)) ? fmt(v) : '--');
+const pipTxt = (tr, v) => {
+  if (v == null) return '--';
+  const x = pipsOf(tr, v);
+  return (x > 0 ? '+' : '') + Number(x.toFixed(1));
+};
+
 /* ================= COPY SIGNAL ================= */
 function copySignal() {
-    const t = activeTrade();
-    if (!t) return;
+  const t = activeTrade();
+  if (!t) return;
+
+  let text;
+  const oco = ocoPending(t);
+
+  if (oco) {
+    const tps = tr => [tr.tp1, tr.tp2, tr.tp3].map(v => (v != null ? fmt(v) : '-')).join('/');
+    const side = (label, tr) => [
+      `${label} ${lvTxt(tr.entry)}`,
+      `SL ${lvTxt(tr.sl)}`,
+      `TP ${tps(tr)}`,
+    ].join('\n');
+
+    text = [
+      'OCO Setup',
+      t.key,
+      optOf(t.style),
+      '',
+      side('Buy', oco.buy),
+      '',
+      side('Sell', oco.sell),
+    ].join('\n');
+  } else {
     const dirText = t.signal === 'BUY' ? 'BUY' : 'SELL';
     const orderText = t.mode === 'LIMIT' ? 'LIMIT' : 'NOW';
-    const styleText = optOf(t.style);
-    const entry = fmt(t.entry);
-    const sl = fmt(t.sl);
     const tp1 = t.tp1 ? fmt(t.tp1) : '-';
     const tp2 = t.tp2 ? fmt(t.tp2) : '-';
     const tp3 = t.tp3 ? fmt(t.tp3) : '-';
+    text = `${t.key}\n${optOf(t.style)}\n${dirText} ${orderText}\nEntry: ${fmt(t.entry)}\nSL: ${fmt(t.sl)}\nTP1: ${tp1}\nTP2: ${tp2}\nTP3: ${tp3}`;
+  }
 
-    const text = `${t.key}\n${styleText}\n${dirText} ${orderText}\nEntry: ${entry}\nSL: ${sl}\nTP1: ${tp1}\nTP2: ${tp2}\nTP3: ${tp3}`;
-    navigator.clipboard.writeText(text).then(() => {
-        alert('Signal copied to clipboard!');
-    }).catch(err => {
-        console.error('Copy failed', err);
-        alert('Gagal copy signal.');
-    });
+  navigator.clipboard.writeText(text).then(() => {
+    alert('Signal copied to clipboard!');
+  }).catch(err => {
+    console.error('Copy failed', err);
+    alert('Gagal copy signal.');
+  });
 }
 
 /* ================= API & SESI ================= */
@@ -1546,28 +1580,6 @@ function renderHistory() {
   }).join('');
 }
 
-function renderChips() {
-  const el = $('setupChips');
-  if (!el) return;
-  const list = market === 'VISION' ? [] : trades.filter(x => x.key === market).slice(-8).reverse();
-  if (list.length < 2) {
-    el.classList.add('hidden');
-    el.classList.remove('flex');
-    el.innerHTML = '';
-    return;
-  }
-  el.classList.remove('hidden');
-  el.classList.add('flex');
-  el.innerHTML = list.map(x => {
-    const act = x.id === activeId;
-    const s = statusOf(x);
-    const cls = act
-      ? 'bg-accentblue border-accentblue text-white'
-      : `bg-darkbg border-panelborder ${TXT[s.color]}`;
-    return `<button data-tap="${esc(x.id)}" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border ${cls}">#${esc(x.no)} ${esc(x.signal)}${x.ocoId ? ' OCO' : ''} · ${esc(s.text)}</button>`;
-  }).join('');
-}
-
 const BADGE = 'text-[8px] font-mono font-bold px-2 py-0.5 rounded border ';
 function refreshCard() {
   const t = activeTrade();
@@ -1576,21 +1588,34 @@ function refreshCard() {
   const priceTxt = isVision
     ? (t && t.last ? fmt(t.last) : '--')
     : (p ? fmt(p.price) : '--.--');
-  renderChips();
   $('standbyView').classList.toggle('hidden', !!t);
   $('activeCard').classList.toggle('hidden', !t);
   $('tradeStatus').classList.toggle('hidden', !t);
 
   if (!t) { setTxt('tradePnl', ''); setTxt('tradeLive', ''); return; }
 
+  const oco = ocoPending(t);
   const sig = $('sigBadge');
-  sig.textContent = t.signal;
-  sig.className = `${t.signal === 'BUY' ? 'bg-sky-500' : 'bg-red-500'} text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg`;
+  if (oco) {
+    sig.textContent = 'WAITING';
+    sig.className = 'bg-yellow-500 text-darkbg px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg';
+  } else {
+    sig.textContent = t.signal;
+    sig.className = `${t.signal === 'BUY' ? 'bg-sky-500' : 'bg-red-500'} text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg`;
+  }
+
   setTxt('cardSub', `${optOf(t.style)}${t.ocoId ? ' · OCO' : ''} · ${t.mode === 'LIMIT' ? T('modeLimit') : T('modeMarket')} / ${new Date(t.createdAt).toLocaleTimeString(lang === 'id' ? 'id-ID' : 'en-US', { hour12: false })}`);
-  setTxt('cardZone', t.zone ? fmt(t.zone.min) + ' - ' + fmt(t.zone.max) : fmt(t.entry));
-  setTxt('cardZoneNote', [t.zoneLabel, t.zoneNote].filter(Boolean).join(' · '));
+
+  if (oco) {
+    setTxt('cardZone', `BUY ${lvTxt(oco.buy.entry)} · SELL ${lvTxt(oco.sell.entry)}`);
+    setTxt('cardZoneNote', [oco.buy.zoneLabel, oco.sell.zoneLabel].filter(Boolean).join(' / '));
+  } else {
+    setTxt('cardZone', t.zone ? fmt(t.zone.min) + ' - ' + fmt(t.zone.max) : fmt(t.entry));
+    setTxt('cardZoneNote', [t.zoneLabel, t.zoneNote].filter(Boolean).join(' · '));
+  }
+
   const bs = $('badgeSetup');
-  bs.textContent = t.setup || '--';
+  bs.textContent = oco ? 'OCO Buy & Sell' : (t.setup || '--');
   bs.className = BADGE + 'bg-darkbg text-gray-300 border-panelborder';
   const bc = $('badgeConf');
   bc.textContent = 'CONFIDENCE ' + (t.confidence || '--');
@@ -1601,26 +1626,46 @@ function refreshCard() {
   setTxt('cardLive', priceTxt);
   setTxt('cardReason', reasonFor(t));
 
-  const lv = { sl: t.sl, tp1: t.tp1, tp2: t.tp2, tp3: t.tp3 };
-  const hit = { sl: t.result === 'SL', tp1: !!t.hits.tp1, tp2: !!t.hits.tp2, tp3: !!t.hits.tp3 };
-  for (const n of ['sl', 'tp1', 'tp2', 'tp3']) {
-    const has = lv[n] != null;
-    setTxt('lv-' + n, has ? fmt(lv[n]) : '--');
-    setTxt('pp-' + n, has ? fmtPips(pipsOf(t, lv[n])) : '--');
-    const box = $('lb-' + n), chk = $('chk-' + n);
-    box.classList.remove('tp-hit', 'sl-hit');
-    chk.classList.remove('show');
-    if (hit[n]) { box.classList.add(n === 'sl' ? 'sl-hit' : 'tp-hit'); chk.classList.add('show'); }
+  const LV = ['sl', 'tp1', 'tp2', 'tp3'];
+  if (oco) {
+    /* Mode OCO menunggu: tampilkan level BUY / SELL dalam satu kotak */
+    for (const n of LV) {
+      const a = oco.buy[n], b = oco.sell[n];
+      setTxt('lv-' + n, `${lvTxt(a)} / ${lvTxt(b)}`);
+      setTxt('pp-' + n, `${pipTxt(oco.buy, a)} / ${pipTxt(oco.sell, b)}`);
+      $('lb-' + n).classList.remove('tp-hit', 'sl-hit');
+      $('chk-' + n).classList.remove('show');
+    }
+  } else {
+    const lv = { sl: t.sl, tp1: t.tp1, tp2: t.tp2, tp3: t.tp3 };
+    const hit = { sl: t.result === 'SL', tp1: !!t.hits.tp1, tp2: !!t.hits.tp2, tp3: !!t.hits.tp3 };
+    for (const n of LV) {
+      const has = lv[n] != null;
+      setTxt('lv-' + n, has ? fmt(lv[n]) : '--');
+      setTxt('pp-' + n, has ? fmtPips(pipsOf(t, lv[n])) : '--');
+      const box = $('lb-' + n), chk = $('chk-' + n);
+      box.classList.remove('tp-hit', 'sl-hit');
+      chk.classList.remove('show');
+      if (hit[n]) { box.classList.add(n === 'sl' ? 'sl-hit' : 'tp-hit'); chk.classList.add('show'); }
+    }
   }
 
-  const f = tradeFlow(t), s = statusOf(t);
   const st = $('tradeStatus');
+  const s = oco ? { text: T('waitEntry'), color: 'yellow' } : statusOf(t);
   st.textContent = s.text;
   st.className = `text-[8px] font-mono font-bold px-2 py-0.5 rounded border whitespace-nowrap ${PILL[s.color]}`;
+
   const pnl = $('tradePnl');
-  pnl.textContent = f.main;
-  pnl.className = `text-[10px] font-mono font-bold ${pipColor(f.pips)}`;
-  setTxt('tradeLive', f.sub);
+  if (oco) {
+    pnl.textContent = `BUY ${lvTxt(oco.buy.entry)} · SELL ${lvTxt(oco.sell.entry)}`;
+    pnl.className = 'text-[10px] font-mono font-bold text-gray-400';
+    setTxt('tradeLive', `live ${priceTxt}`);
+  } else {
+    const f = tradeFlow(t);
+    pnl.textContent = f.main;
+    pnl.className = `text-[10px] font-mono font-bold ${pipColor(f.pips)}`;
+    setTxt('tradeLive', f.sub);
+  }
 }
 
 /* ================= BIAS ================= */
@@ -2818,7 +2863,6 @@ async function generateSignal() {
 $('authForm').addEventListener('submit', handleLogin);
 bindTap($('tickerList'), tapTicker);
 bindTap($('historyList'), viewTrade);
-bindTap($('setupChips'), viewTrade);
 loadLive();
 trades = loadTrades();
 applyLang();
