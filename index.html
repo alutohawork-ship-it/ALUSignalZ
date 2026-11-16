@@ -1322,56 +1322,73 @@ function tradeFlow(t) {
   if (live == null) return { main: `${entry} > --`, sub: '', pips: 0 };
   return { main: line(live, 'RUNNING'), sub: '', pips: pipsOf(t, live) };
 }
+
+/* ================= CEK TRADE (TOUCH-BASED) ================= */
+const lastTick = {}; // { [key]: { p, at } } untuk membuat rentang antar-tick
+
 function checkTrades(k, p) {
   if (k === 'VISION') return;
+  const now = Date.now();
+  const prev = lastTick[k];
+  /* Rentang harga dari tick sebelumnya ke tick ini. Jika koneksi putus lama, pakai harga saat ini saja. */
+  const fresh = prev && now - prev.at < 5000;
+  const lo = fresh ? Math.min(prev.p, p) : p;
+  const hi = fresh ? Math.max(prev.p, p) : p;
+  lastTick[k] = { p, at: now };
+
   let ch = false;
-  for (const t of trades) if (t.key === k && t.status !== 'CLOSED' && evalTrade(t, p)) ch = true;
+  for (const t of trades) {
+    if (t.key !== k || t.status === 'CLOSED') continue;
+    t.scanAt = now;
+    if (evalTrade(t, p, lo, hi, now)) ch = true;
+  }
   if (ch) { saveTrades(); renderHistory(); }
 }
 
-function evalTrade(t, p) {
-  if (t.key === 'VISION') return false;
+/* lo/hi = rentang harga yang sudah dilewati. Level dianggap tersentuh jika berada di dalam rentang (toleransi 0.5 pip). */
+function evalTrade(t, p, lo = p, hi = p, now = Date.now()) {
+  if (t.key === 'VISION' || t.status === 'CLOSED') return false;
   if (!t.hits) t.hits = {};
   const d = t.dir;
+  const eps = (t.pip || MARKETS[t.key].pip) * 0.5;
 
   if (t.status === 'PENDING') {
-    if (t.expiresAt && Date.now() > t.expiresAt) {
+    if (t.expiresAt && now > t.expiresAt) {
       cancelTrade(t, 'Zona tidak tersentuh (Expired)');
       return true;
     }
-    if (d > 0 ? p <= t.sl : p >= t.sl) {
+    const slTouched = d > 0 ? lo <= t.sl + eps : hi >= t.sl - eps;
+    if (slTouched) {
       cancelTrade(t, 'SL tersentuh sebelum entry');
       return true;
     }
     const isStop = t.fill === 'STOP';
-    const fillCond = isStop
-      ? (d > 0 ? p >= t.entry : p <= t.entry)
-      : (d > 0 ? p <= t.entry : p >= t.entry);
+    const filled = isStop
+      ? (d > 0 ? hi >= t.entry - eps : lo <= t.entry + eps)
+      : (d > 0 ? lo <= t.entry + eps : hi >= t.entry - eps);
+    if (!filled) return false;
 
-    if (fillCond) {
-      t.status = 'RUNNING';
-      t.filledAt = Date.now();
-      /* OCO: begitu satu order terisi, order lawannya otomatis dibatalkan */
-      if (t.ocoId) {
-        for (const s of trades) {
-          if (s.id !== t.id && s.ocoId === t.ocoId && s.status === 'PENDING') {
-            cancelTrade(s, 'OCO: order lawan sudah terisi');
-          }
+    t.status = 'RUNNING';
+    t.filledAt = now;
+    /* OCO: begitu satu order terisi, order lawannya dibatalkan */
+    if (t.ocoId) {
+      for (const s of trades) {
+        if (s.id !== t.id && s.ocoId === t.ocoId && s.status === 'PENDING') {
+          cancelTrade(s, 'OCO: order lawan sudah terisi');
         }
-        activeId = t.id;
       }
-      return true;
+      activeId = t.id;
     }
-    return false;
+    return true;
   }
 
-  const reached = v => v != null && (d > 0 ? p >= v : p <= v);
-  const lost = v => v != null && (d > 0 ? p <= v : p >= v);
+  const reached = v => v != null && (d > 0 ? hi >= v - eps : lo <= v + eps);
+  const lost = v => v != null && (d > 0 ? lo <= v + eps : hi >= v - eps);
   let changed = false;
 
   for (const k of TP_KEYS) {
     if (t[k] != null && !t.hits[k] && reached(t[k])) {
-      t.hits[k] = { at: Date.now(), price: t[k] };
+      t.hits[k] = { at: now, price: t[k] };
       changed = true;
     }
   }
@@ -1394,6 +1411,32 @@ function evalTrade(t, p) {
   }
 
   return changed;
+}
+
+/* Memulihkan hit yang terlewat (browser ditutup / koneksi putus).
+   Candle 1 menit yang sudah selesai dan belum di-scan diproses berurutan.
+   Urutan titik dalam candle: bullish = O→L→H→C, bearish = O→H→L→C. */
+function replayMissed() {
+  let ch = false;
+  const nowT = Date.now();
+  for (const t of trades) {
+    if (t.key === 'VISION' || t.status === 'CLOSED') continue;
+    const rows = seriesRows(t.key, '1m');
+    if (!rows.length) continue;
+    const from = t.scanAt || t.createdAt || 0;
+    for (const c of rows) {
+      if (t.status === 'CLOSED') break;
+      if (c.t + 60000 <= from) continue;   // candle sudah selesai sebelum scan terakhir
+      if (c.t + 60000 > nowT) continue;    // candle yang masih berjalan, ditangani tick
+      const path = c.c >= c.o ? [c.o, c.l, c.h, c.c] : [c.o, c.h, c.l, c.c];
+      for (const pt of path) {
+        if (t.status === 'CLOSED') break;
+        if (evalTrade(t, pt, pt, pt, c.t + 60000)) ch = true;
+      }
+      t.scanAt = c.t + 60000;
+    }
+  }
+  if (ch) { saveTrades(); renderAll(); }
 }
 
 function closeTrade(t, result, exitPrice) {
@@ -1709,54 +1752,72 @@ function calReset() {
 
 /* ================= SESSION UI ================= */
 function updateSessionCard() {
-    if (market === 'VISION') return;
-    const now = new Date();
-    const currentUTCSeconds = now.getUTCHours() * 3600 + now.getUTCMinutes() * 60 + now.getUTCSeconds();
-    let activeName = 'No Session', activeColor = 'text-gray-400', activeBorder = 'border-gray-500/40', html = '';
+  if (market === 'VISION') return;
+  const now = new Date();
+  const nowSec = now.getUTCHours() * 3600 + now.getUTCMinutes() * 60 + now.getUTCSeconds();
 
-    const SESSION_UI = [
-        { name: 'Asia Session', startUTC: 0, endUTC: 9, color: 'text-yellow-400', border: 'border-yellow-500/50' },
-        { name: 'London Kill Zone', startUTC: 7, endUTC: 10, color: 'text-red-400', border: 'border-red-500/50' },
-        { name: 'London Session', startUTC: 8, endUTC: 17, color: 'text-blue-400', border: 'border-blue-500/50' },
-        { name: 'NY Kill Zone', startUTC: 12, endUTC: 15, color: 'text-red-400', border: 'border-red-500/50' },
-        { name: 'NY Session', startUTC: 13, endUTC: 22, color: 'text-emerald-400', border: 'border-emerald-500/50' }
-    ];
+  const SESSION_UI = [
+    { name: 'Asia Session',     startUTC: 0,  endUTC: 9,  color: 'text-yellow-400',  border: 'border-yellow-500/50' },
+    { name: 'London Kill Zone', startUTC: 7,  endUTC: 10, color: 'text-red-400',     border: 'border-red-500/50' },
+    { name: 'London Session',   startUTC: 8,  endUTC: 17, color: 'text-blue-400',    border: 'border-blue-500/50' },
+    { name: 'NY Kill Zone',     startUTC: 12, endUTC: 15, color: 'text-red-400',     border: 'border-red-500/50' },
+    { name: 'NY Session',       startUTC: 13, endUTC: 22, color: 'text-emerald-400', border: 'border-emerald-500/50' }
+  ];
 
-    const sorted = [...SESSION_UI].sort((a, b) => a.startUTC - b.startUTC);
+  const fmtCd = s => {
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
+    if (m > 0) return `${m}m ${String(sec).padStart(2, '0')}s`;
+    return `${sec}s`;
+  };
+  const hm = sec => {
+    const d = new Date();
+    d.setUTCHours(0, 0, 0, 0);
+    d.setUTCSeconds(sec);
+    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).toLowerCase().replace(' ', '');
+  };
 
-    sorted.forEach(s => {
-        const startSec = s.startUTC * 3600;
-        const endSec = s.endUTC * 3600;
-        let isActive = currentUTCSeconds >= startSec && currentUTCSeconds < endSec;
-        if (endSec < startSec) isActive = currentUTCSeconds >= startSec || currentUTCSeconds < endSec;
+  const activeList = [];
+  let nextS = null, nextIn = Infinity;
 
-        const d1 = new Date(); d1.setUTCHours(s.startUTC, 0, 0, 0);
-        const d2 = new Date(); d2.setUTCHours(s.endUTC, 0, 0, 0);
+  const html = SESSION_UI.map(s => {
+    const startSec = s.startUTC * 3600, endSec = s.endUTC * 3600;
+    const isActive = nowSec >= startSec && nowSec < endSec;
+    if (isActive) activeList.push(s);
 
-        const formatOpt = { hour: '2-digit', minute: '2-digit', hour12: true };
-        const localStart = d1.toLocaleTimeString('en-US', formatOpt).toLowerCase().replace(' ', '');
-        const localEnd = d2.toLocaleTimeString('en-US', formatOpt).toLowerCase().replace(' ', '');
+    let untilStart = startSec - nowSec;
+    if (untilStart <= 0) untilStart += 86400;
+    if (!isActive && untilStart < nextIn) { nextIn = untilStart; nextS = s; }
 
-        let statusHtml = isActive ? `<span class="text-emerald-400 font-bold animate-pulse">Open</span>` : `<span class="text-gray-500">Closed</span>`;
+    const status = isActive
+      ? `<span class="text-emerald-400 font-bold animate-pulse">Open</span>
+         <span class="text-gray-400 block">tutup ${fmtCd(endSec - nowSec)}</span>`
+      : `<span class="text-yellow-400 font-bold">Upcoming</span>
+         <span class="text-gray-400 block">dibuka ${fmtCd(untilStart)}</span>`;
 
-        html += `
-            <div class="flex justify-between items-center bg-darkbg border ${isActive ? s.border : 'border-panelborder'} px-2 py-1.5 rounded transition-all">
-                <div class="flex flex-col">
-                    <span class="${s.color} font-bold text-[9px]">${s.name}</span>
-                    <span class="text-gray-400 text-[8px]">${localStart} - ${localEnd}</span>
-                </div>
-                <div class="text-[8px] text-right font-mono">${statusHtml}</div>
-            </div>
-        `;
-    });
+    return `
+      <div class="flex justify-between items-center bg-darkbg border ${isActive ? s.border : 'border-panelborder'} px-2 py-1.5 rounded transition-all">
+        <div class="flex flex-col">
+          <span class="${s.color} font-bold text-[9px]">${s.name}</span>
+          <span class="text-gray-400 text-[8px]">${hm(startSec)} - ${hm(endSec)}</span>
+        </div>
+        <div class="text-[8px] text-right font-mono">${status}</div>
+      </div>`;
+  }).join('');
 
-    const badge = $('currentSessionBadge');
-    if (badge) {
-        badge.textContent = activeName;
-        badge.className = `text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-darkbg ${activeColor} ${activeBorder}`;
+  const badge = $('currentSessionBadge');
+  if (badge) {
+    if (activeList.length) {
+      badge.textContent = activeList.map(s => s.name).join(' + ');
+      badge.className = 'text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-emerald-500/20 text-emerald-400 border-emerald-500/40 truncate max-w-[60%]';
+    } else if (nextS) {
+      badge.textContent = `Next: ${nextS.name} · ${fmtCd(nextIn)}`;
+      badge.className = 'text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-yellow-500/20 text-yellow-400 border-yellow-500/40 truncate max-w-[60%]';
     }
-    const list = $('sessionList');
-    if (list) list.innerHTML = html;
+  }
+
+  const list = $('sessionList');
+  if (list) list.innerHTML = html;
 }
 
 /* ================= SMC ================= */
@@ -2770,6 +2831,7 @@ setInterval(() => { renderTickers(); renderHighlights(); renderHistory(); refres
 setInterval(pump, 1200);
 setInterval(renderBias, 5000);
 setInterval(saveLive, 15000);
+setInterval(replayMissed, 5000);   // pulihkan hit TP/SL yang terlewat
 window.addEventListener('beforeunload', saveLive);
 pump();
 log(lang === 'id' ? 'Sistem siap.' : 'System ready.', 'system');
