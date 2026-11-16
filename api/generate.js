@@ -959,6 +959,10 @@ const LIQ_BUF_ATR = 0.3;
 const SCALP_MAX_RISK_ATR = 5;
 const DAY_MAX_RISK_ATR = 6;
 
+// ✅ KONSTANTA TAMBAHAN UNTUK DAY TRADING (SCALPING KONSERVATIF)
+const DAY_FVG_IMPULSE_ATR = 0.8;  // candle impuls FVG pullback minimal 0,8 ATR M5
+const DAY_ZONE_DISP_ATR = 0.8;    // zona biasa M5: displacement minimal 0,8 ATR M5
+
 const SCALP_STRUCT_BARS = 60;
 const SCALP_EVENT_FRESH = 12;
 const SCALP_RECLAIM_ATR = 0.15;
@@ -1119,7 +1123,7 @@ async function planFromOrder(o, { ctx, kind, orderType, setup, chartContext, tim
 
 function buildOcoResult(buy, sell, { ctx, setup, chartContext, confidence }) {
   const fx = v => Number(Number(v).toFixed(ctx.dec));
-  const manual = `OCO strong zone. BUY @ ${fx(buy.entry)} (SL ${fx(buy.sl)} di balik ${buy.liqName} ${fx(buy.liqLevel)}). SELL @ ${fx(sell.entry)} (SL ${fx(sell.sl)} di balik ${sell.liqName} ${sell.liqLevel}}). Jika salah satu tersentuh, order lawannya dibatalkan.`;
+  const manual = `OCO strong zone. BUY @ ${fx(buy.entry)} (SL ${fx(buy.sl)} di balik ${buy.liqName} ${fx(buy.liqLevel)}). SELL @ ${fx(sell.entry)} (SL ${fx(sell.sl)} di balik ${sell.liqName} ${fx(sell.liqLevel)}). Jika salah satu tersentuh, order lawannya dibatalkan.`;
   return {
     plan: { isOCO: true, orders: [buy, sell], setup, chartContext },
     meta: { confidence, riskLabel: 'MEDIUM', reason: withPair(ctx.symbol, manual) },
@@ -1421,7 +1425,7 @@ function buildDayOrder(dir, zone, liq, atrVal, ctx, rrList) {
   };
 }
 
-// ═══════════════════════════ NEW BUILD DAY PLAN (Sesuai Permintaan) ═══════════════════════════
+// ═══════════════════════════ BUILD DAY PLAN (SCALPING KONSERVATIF) ═══════════════════════════
 async function buildDayPlan({ m1, m5, m15, price, rrList, ctx }) {
   const t = tx(ctx);
   const { pip } = ctx;
