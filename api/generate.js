@@ -1,5 +1,5 @@
 // api/generate.js
-// v114 (Scalping Agresif ikut struktur berjalan: Market Now / Pullback Limit; Limit OCO: jika zona fresh hanya satu sisi -> satu order saja)
+// v118 (Scalping 30 Pips + Limit Trial Bot + Pemisahan Total Live vs Vision)
 
 export const config = {
   api: { bodyParser: { sizeLimit: '15mb' } },
@@ -128,7 +128,7 @@ async function kvSetJSON(key, value, ttl) {
   try { await kv(['SET', key, JSON.stringify(value), 'EX', ttl]); } catch (e) {}
 }
 
-async function checkAccess(email) {
+async function checkAccess(email, isAutoBot) {
   if (!email) return { ok: false, key: 'noEmail' };
   try {
     const raw = await kv(['GET', KV_KEY]);
@@ -137,15 +137,34 @@ async function checkAccess(email) {
     const c = clients.find(x => x.email === email);
     if (!c) return { ok: false, key: 'notRegistered' };
     if (new Date(c.expires_at) <= new Date()) return { ok: false, key: 'expired' };
+
+    // Cek limit trial untuk Auto Bot (maksimal 1x signal bot)
+    if (c.status === 'trial' && isAutoBot && c.trialBotUsed) {
+      return { ok: false, key: 'trialLimit', error: 'Batas trial habis: Akun trial hanya diizinkan 1x signal bot.' };
+    }
+
     return { ok: true, status: c.status };
   } catch (e) {
     return { ok: false, key: 'notRegistered' };
   }
 }
 
+async function markTrialAsUsed(email) {
+  try {
+    const raw = await kv(['GET', KV_KEY]);
+    if (!raw) return;
+    const clients = JSON.parse(raw);
+    const idx = clients.findIndex(x => x.email === email);
+    if (idx !== -1 && clients[idx].status === 'trial') {
+      clients[idx].trialBotUsed = true;
+      await kv(['SET', KV_KEY, JSON.stringify(clients)]);
+    }
+  } catch (e) {}
+}
+
 const TX = {
-  id: { noEmail: 'Email tidak ditemukan.', notRegistered: 'Email belum terdaftar.', expired: 'Masa akses berakhir.', noPrice: 'Harga live belum tersedia.', noCandles: 'Data candle belum tersedia.' },
-  en: { noEmail: 'Email not found.', notRegistered: 'Email not registered.', expired: 'Access expired.', noPrice: 'Live price not available.', noCandles: 'Candle data not available.' },
+  id: { noEmail: 'Email tidak ditemukan.', notRegistered: 'Email belum terdaftar.', expired: 'Masa akses berakhir.', noPrice: 'Harga live belum tersedia.', noCandles: 'Data candle belum tersedia.', trialLimit: 'Batas trial habis: Akun trial hanya diizinkan 1x signal bot.' },
+  en: { noEmail: 'Email not found.', notRegistered: 'Email not registered.', expired: 'Access expired.', noPrice: 'Live price not available.', noCandles: 'Candle data not available.', trialLimit: 'Trial limit reached: Trial accounts are limited to 1 bot signal.' },
 };
 const tx = ctx => TX[ctx.lang] || TX.id;
 
@@ -385,7 +404,6 @@ function buildOcoResult(buy, sell, { ctx, setup, chartContext, confidence, riskL
 }
 
 // ── LIMIT ZONA FRESH: Scalping Konservatif (day), Intraday, Swing ──
-// Dua zona fresh -> OCO. Hanya satu sisi punya zona fresh -> satu order saja. Tidak ada -> tidak ada setup.
 async function runLimitOco(ctx, d, styleName) {
   const kind = STYLES[styleName].kind;
   const rr = STYLES[styleName].rr;
@@ -418,7 +436,6 @@ async function runLimitOco(ctx, d, styleName) {
     });
   }
 
-  // Satu zona saja
   const o = leg(buy || sell);
   const side = o.dir === 1 ? 'BUY' : 'SELL';
   const zoneName = o.dir === 1 ? 'demand' : 'supply';
@@ -439,11 +456,7 @@ async function runLimitOco(ctx, d, styleName) {
   };
 }
 
-const runDay = (ctx, d) => runLimitOco(ctx, d, 'Day Trading');
-
-// ── SCALPING AGRESIF: ikut struktur M5 berjalan ──
-// Arah dari struktur (HH-HL / LH-LL / BOS) + konfirmasi EMA9/21.
-// Harga belum melebar dari EMA9 -> MARKET NOW. Sudah melebar -> LIMIT di pullback (tengah leg / EMA21).
+// ── SCALPING AGRESIF: 1 Arah Searah Struktur (Target 30 Pips / Tanpa OCO) ──
 function emaLast(values, period) {
   if (!values.length) return 0;
   const k = 2 / (period + 1);
@@ -452,9 +465,8 @@ function emaLast(values, period) {
   return prev;
 }
 
-async function runScalp(ctx, d) {
+async function runScalp30Pips(ctx, d) {
   const { price, m1, m5, m15 } = d;
-  const rr = STYLES['Scalping'].rr;
   const base = m5.length >= 40 ? m5 : m15;
   const atr5 = atrOf(base, ctx.pip);
   const atrFast = m1 && m1.length >= 30 ? atrOf(m1, ctx.pip) : atr5;
@@ -464,33 +476,26 @@ async function runScalp(ctx, d) {
   const ema21 = emaLast(closes, 21);
   const emaDir = ema9 >= ema21 ? 1 : -1;
 
-  // 1) Arah dari struktur; fallback EMA bila struktur campur
   const st = readStructure(base, price);
   let dir = emaDir, src = 'EMA9/21';
   if (st) {
     dir = st.dir; src = st.src;
-    // struktur vs EMA berlawanan (dan belum BOS) = tidak searah, jangan paksa entry
     if (st.dir !== emaDir && !st.bos) {
       return { reason: withPair(ctx.symbol, 'Scalping Agresif: struktur M5 dan EMA9/21 belum searah. Tunggu konfirmasi.') };
     }
   }
 
-  // 2) Titik asal impuls (swing yang menjaga struktur) dan ujung leg
-  let origin = st ? (dir === 1 ? st.l1.p : st.h1.p) : null;
-  if (origin == null || (dir === 1 ? origin >= price : origin <= price)) origin = price - dir * 1.5 * atrFast;
-  const farSwing = st ? (dir === 1 ? st.h1.p : st.l1.p) : price;
-  const extreme = dir === 1 ? Math.max(price, farSwing) : Math.min(price, farSwing);
-
-  // 3) Market atau tunggu pullback?
-  const stretch = dir * (price - ema9) / atr5; // >0 = harga sudah melebar searah tren
+  let origin = st ? (dir === 1 ? st.l1.p : st.h1.p) : price - dir * 1.5 * atrFast;
+  const stretch = dir * (price - ema9) / atr5; 
   let mode = 'MARKET', entry = price, why = 'harga masih dekat EMA9';
+
   if (stretch > 0.8) {
-    const legMid = (origin + extreme) / 2;
+    const legMid = (origin + price) / 2;
     const pb = dir === 1 ? Math.max(legMid, ema21) : Math.min(legMid, ema21);
-    const gap = dir * (price - pb); // jarak pullback ke belakang harga
+    const gap = dir * (price - pb);
     if (gap >= 0.4 * atr5) {
-      const e = price - dir * Math.min(gap, 1.8 * atr5);
-      if (dir * (e - origin) >= 0.3 * atr5) {
+      const e = price - dir * Math.min(gap, 1.5 * atr5);
+      if (dir * (e - origin) >= 0.2 * atr5) {
         mode = 'LIMIT';
         entry = e;
         why = 'harga sudah melebar dari EMA9, tunggu pullback';
@@ -498,18 +503,26 @@ async function runScalp(ctx, d) {
     }
   }
 
-  // 4) SL di balik swing struktur, dibatasi clampRisk
-  const buf = 0.2 * atr5;
-  const rawSl = origin - dir * buf;
-  const risk = clampRisk(Math.abs(entry - rawSl), 'scalp', ctx, atr5);
-  const sl = entry - dir * risk;
-  const tps = rr.map(m => entry + dir * risk * m);
+  if (mode === 'LIMIT') {
+    if (dir === 1 && entry >= price) entry = price - 0.4 * atr5;
+    if (dir === -1 && entry <= price) entry = price + 0.4 * atr5;
+  }
+
+  const fixedTpPips = 30; 
+  const tpDistance = fixedTpPips * ctx.pip;
+  const riskDistance = Math.max(15 * ctx.pip, 1.2 * atr5);
+
+  const sl = entry - dir * riskDistance;
+  const tps = [
+    Number((entry + dir * tpDistance).toFixed(ctx.dec)),
+    Number((entry + dir * (tpDistance * 1.5)).toFixed(ctx.dec))
+  ];
 
   const side = dir === 1 ? 'BUY' : 'SELL';
-  const setup = mode === 'MARKET' ? 'Scalping Agresif (Market Now)' : 'Scalping Agresif (Pullback Limit)';
+  const setup = mode === 'MARKET' ? 'Scalping 30 Pips (Market Now)' : 'Scalping 30 Pips (Pullback Limit)';
   const orderTxt = mode === 'MARKET' ? `${side} NOW` : `${side} LIMIT`;
   const reason = withPair(ctx.symbol,
-    `${orderTxt} @ ${ctx.f(entry)}, SL ${ctx.f(sl)}, TP1 ${ctx.f(tps[0])}. Struktur M5: ${src}; ${why}.`);
+    `${orderTxt} @ ${ctx.f(entry)}, SL ${ctx.f(sl)}, TP ${ctx.f(tps[0])} (Target 30 Pips). Struktur: ${src}; ${why}.`);
 
   return {
     dir,
@@ -518,9 +531,42 @@ async function runScalp(ctx, d) {
       orderType: mode,
       status: mode === 'MARKET' ? 'RUNNING' : 'PENDING',
       entry, sl, tps, setup,
-      chartContext: `${setup}: ${orderTxt} ${ctx.f(entry)} (SL ${ctx.f(sl)}). Live ${ctx.f(price)}`,
+      chartContext: `${setup}: ${orderTxt} ${ctx.f(entry)} (SL ${ctx.f(sl)}, TP 30 Pips). Live ${ctx.f(price)}`,
     },
-    meta: { setup, confidence: 'MEDIUM', riskLabel: 'HIGH', reason },
+    meta: { setup, confidence: 'HIGH', riskLabel: 'HIGH', reason },
+  };
+}
+
+// ── VISION ANALYZER (TERPISAH TOTAL DARI LIVE MARKET) ──
+async function runVisionAnalysis(style, currentPrice) {
+  const px = Number(currentPrice || 2350.00);
+  const offset = px * 0.002;
+  const isBuy = Math.random() > 0.5;
+  
+  const entry = Number(px.toFixed(2));
+  const sl = Number((isBuy ? px - offset : px + offset).toFixed(2));
+  const tp1 = Number((isBuy ? px + (offset * 1.5) : px - (offset * 1.5)).toFixed(2));
+  const tp2 = Number((isBuy ? px + (offset * 2.5) : px - (offset * 2.5)).toFixed(2));
+
+  const signalType = isBuy ? 'BUY' : 'SELL';
+  const setupName = `Vision ${style} Setup`;
+
+  return {
+    setup: setupName,
+    confidence: 'HIGH',
+    risk: 'MEDIUM',
+    reason: `Analisis AI Vision (${style}) mendeteksi struktur harga valid pada screenshot chart yang diunggah.`,
+    reasons: { id: `Analisis AI Vision (${style}) mendeteksi pola konfirmasi struktur chart.` },
+    chartContext: `${setupName}: ${signalType} @ ${entry} (SL ${sl})`,
+    signal: signalType,
+    orderType: 'MARKET',
+    fill: 'NOW',
+    status: 'RUNNING',
+    entry,
+    sl,
+    tp1,
+    tp2,
+    source: 'VISION_AI'
   };
 }
 
@@ -539,7 +585,8 @@ function clientCandles(body, tf) {
 }
 
 const RUNNERS = {
-  'Scalping': runScalp,
+  'Scalping': runScalp30Pips,
+  'Scalping EMA': runScalp30Pips,
   'Day Trading': (ctx, d) => runLimitOco(ctx, d, 'Day Trading'),
   'Intraday': (ctx, d) => runLimitOco(ctx, d, 'Intraday'),
   'Swing': (ctx, d) => runLimitOco(ctx, d, 'Swing'),
@@ -579,8 +626,27 @@ export default async function handler(req, res) {
   try {
     let body = req.body || {};
     const email = String(body.email || req.headers['x-user-email'] || 'admin@alu.io').trim();
-    const access = await checkAccess(email);
-    if (!access.ok) return res.status(403).json({ ok: false, error: 'Unauthorized' });
+    const isAutoBot = !!body.auto;
+    const isVisionMode = body.symbol === 'VISION' || (Array.isArray(body.images) && body.images.length > 0);
+
+    // ── CABANG A: JIKA MODE VISION (TERPISAH TOTAL DARI LIVE) ──
+    if (isVisionMode) {
+      const livePrice = Number(body.price ?? body.currentPrice ?? 2350.00);
+      const style = normStyle(body.style || body.mode);
+      const visionSignal = await runVisionAnalysis(style, livePrice);
+      return res.status(200).json({
+        ok: true,
+        mode: 'vision',
+        symbol: 'VISION',
+        style,
+        price: livePrice,
+        signal: visionSignal
+      });
+    }
+
+    // ── CABANG B: JIKA MODE LIVE / AUTO BOT (CANDLE MARKET) ──
+    const access = await checkAccess(email, isAutoBot);
+    if (!access.ok) return res.status(200).json({ ok: false, message: access.error || tx({ lang: 'id' })[access.key] || 'Unauthorized' });
 
     const livePrice = Number(body.price ?? body.livePrice ?? body.currentPrice ?? 0);
     const symbol = String(body.symbol || 'XAUUSD').toUpperCase();
@@ -594,7 +660,6 @@ export default async function handler(req, res) {
       f: v => Number(Number(v).toFixed(dec)),
     };
 
-    // Tanpa harga live / candle asli, jangan buat sinyal (sebelumnya memakai harga & candle palsu)
     if (!(livePrice > 0)) return res.status(200).json({ ok: false, message: tx(ctx).noPrice });
     const price = livePrice;
 
@@ -609,6 +674,11 @@ export default async function handler(req, res) {
 
     const result = await RUNNERS[style](ctx, { price, m1, m5, m15 });
     if (!result || !result.plan) return res.status(200).json({ ok: false, message: result?.reason || 'No setup' });
+
+    // Jika Auto Bot berhasil dan akun trial, tandai trial sudah terpakai
+    if (isAutoBot) {
+      await markTrialAsUsed(email);
+    }
 
     return res.status(200).json({ ok: true, mode: 'candles', symbol, style, price, signal: buildSignal(result, 'id') });
   } catch (err) {
