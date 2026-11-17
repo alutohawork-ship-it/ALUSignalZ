@@ -1,13 +1,6 @@
 // api/generate.js
-// v107 (Hybrid lama tetap untuk style "Scalping".
-//       Scalping EMA: cross EMA 9/21 searah EMA 200, hanya di killzone, NOW saat trigger M1,
-//       rejection block opsional, LIMIT terdekat jika NOW ditahan.
-//       Day Trading: OCO 2 arah wajib. Area M15 strong, di-refine ke M5.
-//       Momentum M1 kuat -> NOW searah, tanpa menunggu pullback.
-//       SL di balik invalidation, zona yang melewati batas SL dilewati.
-//       TickerLayer: slot key tetap, maksimal percobaan per request, bisa dimatikan TICKERLAYER_DISABLED=1.
-//       Vision tetap.)
-// v107-fix: handler (export default) dipulihkan + logika Scalping EMA, Day, Intraday, Swing, Vision.
+// v108 (Perbaikan Entry & SL: Consequent Encroachment 50%, SL di Invalidation Level, 
+//       Filter FVG kecil, Memperketat batas maksimal risiko ATR untuk scalping konservatif).
 
 export const config = {
   api: { bodyParser: { sizeLimit: '15mb' } },
@@ -28,7 +21,6 @@ const VISION_TIMEOUT_MS = 50000;
 const VISION_MAX_TOKENS = 700;
 
 // ── TICKERLAYER: slot key tetap (utama + _1 sampai _19) ──
-// Slot tetap: key kosong di tengah tidak menggeser cooldown key lain.
 const TL_KEY_NAMES = [
   'TICKERLAYER_API_KEY',
   ...Array.from({ length: 19 }, (_, i) => `TICKERLAYER_API_KEY_${i + 1}`),
@@ -149,7 +141,6 @@ const isoDate = d => d.toISOString().slice(0, 10);
 const lastClosePrice = arr => (arr && arr.length ? arr[arr.length - 1].c : 0);
 const dirLabel = d => (d === 0 ? 'Netral' : d === 1 ? 'Bullish' : 'Bearish');
 
-// Pastikan reasoning selalu diawali nama pair, misal "XAUUSD: ..."
 const withPair = (sym, text) => {
   const body = String(text || '').trim();
   if (!sym || sym === 'UNKNOWN_PAIR') return body;
@@ -157,7 +148,6 @@ const withPair = (sym, text) => {
   return `${sym}: ${body}`;
 };
 
-// Killzone: 07–10 dan 12–15 UTC (sekitar 14–18 dan 19–23 WIB)
 function isWithinKillzone() {
   const now = new Date();
   const utcHour = now.getUTCHours();
@@ -365,7 +355,6 @@ function tlCooldownFor(status, body, retryAfter) {
   return 0;
 }
 
-// Slot key yang terisi dan tidak sedang cooldown. Indeks = nomor slot, jadi cooldown tetap cocok.
 async function tlUsableKeys() {
   const names = TL_KEY_NAMES.map((_, i) => `tl_cd_${i}`);
   let vals = names.map(() => null);
@@ -703,21 +692,6 @@ function slBounds(kind, ctx, atrVal) {
   return { min: a * ctx.prof.slMul * atrVal, max: b * ctx.prof.slMul * atrVal };
 }
 
-function clampSL(dir, entry, baseSL, kind, ctx, atrVal) {
-  const { pip, gold, prof } = ctx;
-  let risk;
-  if (kind === 'day' && gold) {
-    risk = 50 * pip;
-  } else {
-    const b = slBounds(kind, ctx, atrVal);
-    const buf = gold ? SL_BUFFER_PIPS[kind] * pip : prof.bufAtr * atrVal;
-    let raw = Math.abs(entry - baseSL) + buf;
-    if ((dir === 1 && baseSL >= entry) || (dir === -1 && baseSL <= entry)) raw = b.min;
-    risk = Math.min(Math.max(raw, b.min, slFloor(kind, ctx)), b.max);
-  }
-  return entry - dir * risk;
-}
-
 async function getAIReasoning({ ctx, dir, kind, orderType, entry, sl, tps, setup, rawReason, riskPips, zoneLine, timeframes, rangeInfo, chartContext }) {
   if (!OPENAI_API_KEY) return null;
   const { symbol, dec, prof, lang } = ctx;
@@ -982,7 +956,7 @@ const STRONG_DISP_ATR = 1.5;
 const STRONG_SWEEP_BARS = 12;
 const LIQ_BUF_ATR = 0.3;
 const SCALP_MAX_RISK_ATR = 5;
-const DAY_MAX_RISK_ATR = 6;
+const DAY_MAX_RISK_ATR = 3; // DIPERKETAT: Sebelumnya 6. Scalping Konservatif tidak boleh pakai SL terlalu lebar.
 
 const SCALP_STRUCT_BARS = 60;
 const SCALP_EVENT_FRESH = 12;
@@ -1074,14 +1048,17 @@ function nearestLiquidity(dir, liq, edge, atrVal) {
     : pool.reduce((a, b) => (b.p < a.p ? b : a));
 }
 
+// DIPERBAIKI: Entry di 50% zona (Consequent Encroachment), SL ketat di balik invalidation level
 function buildLiquidityOrder({ dir, zone, liq, atrVal, ctx, kind, maxRiskAtr, rrList, entryOverride = null }) {
-  const entry = entryOverride ?? (dir === 1 ? zone.top : zone.bottom);
-  const edge = dir === 1 ? zone.bottom : zone.top;
-  const liqPick = nearestLiquidity(dir, liq, edge, atrVal);
-  if (!liqPick) return null;
+  // 1. Entry di 50% Zona
+  const zoneMid = (zone.top + zone.bottom) / 2;
+  const entry = entryOverride ?? zoneMid;
 
-  const buf = LIQ_BUF_ATR * atrVal;
-  const slRaw = dir === 1 ? liqPick.p - buf : liqPick.p + buf;
+  // 2. SL di balik invalidation level (swing asal zona), bukan sembarang likuiditas jauh
+  const invLevel = zone.inv ?? (dir === 1 ? zone.bottom : zone.top);
+  const buf = 0.15 * atrVal;
+  const slRaw = dir === 1 ? invLevel - buf : invLevel + buf;
+
   const rawRisk = Math.abs(entry - slRaw);
   if (dir === 1 ? entry <= slRaw : entry >= slRaw) return null;
   if (rawRisk > maxRiskAtr * atrVal) return null;
@@ -1092,10 +1069,10 @@ function buildLiquidityOrder({ dir, zone, liq, atrVal, ctx, kind, maxRiskAtr, rr
 
   return {
     dir, entry, sl, risk, tps,
-    label: `${dir === 1 ? 'Buy' : 'Sell'} Limit · ${zone.tag} · SL di balik ${liqPick.name}`,
+    label: `${dir === 1 ? 'Buy' : 'Sell'} Limit · ${zone.tag} (50% Zone) · SL di invalidation`,
     zone: { min: zone.bottom, max: zone.top },
-    liqLevel: liqPick.p,
-    liqName: liqPick.name,
+    liqLevel: invLevel,
+    liqName: 'invalidation',
     tag: zone.tag,
   };
 }
@@ -1267,11 +1244,6 @@ function biasAllows(dir, biasM15Dir, evType) {
   return biasM15Dir === dir;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  BAGIAN BARU (v107-fix): helper strategi, Scalping EMA, Day, Intraday, Swing,
-//  jalur Vision, dan HANDLER (export default) yang sebelumnya hilang.
-// ═══════════════════════════════════════════════════════════════════════════
-
 const fail = reason => ({ plan: null, reason });
 
 const guessDec = p => (p < 0.001 ? 8 : p < 1 ? 5 : p < 100 ? 4 : 2);
@@ -1300,7 +1272,6 @@ function normSymbol(raw) {
   if (!s || s === 'UNKNOWN' || s === 'UNKNOWNPAIR') return '';
   if (SYMBOL_ALIAS[s]) return SYMBOL_ALIAS[s];
   if (DECIMALS[s]) return s;
-  // akhiran broker (XAUUSDM, EURUSDC) dan USDT -> USD
   if ((s.endsWith('M') || s.endsWith('C')) && DECIMALS[s.slice(0, -1)]) return s.slice(0, -1);
   if (s.endsWith('USDT') && DECIMALS[s.slice(0, -1)]) return s.slice(0, -1);
   return s;
@@ -1319,8 +1290,6 @@ function rangeInfoText(ctx, m5) {
   return `M5 range ${ctx.f(r.low)} - ${ctx.f(r.high)}, harga di ${pct >= 50 ? 'Premium' : 'Discount'} (${pct.toFixed(0)}%)`;
 }
 
-// Ambil order LIMIT pertama yang lolos batas SL (zona yang melewati batas SL dilewati).
-// allowNow: jika harga sudah di dalam zona, ubah jadi NOW di harga live.
 function firstLimitOrder(zones, { dir, liq, atrVal, ctx, kind, maxRiskAtr, rrList, price, maxDist, allowNow }) {
   const gap = 2 * ctx.pip;
   for (const z of zones) {
@@ -1350,7 +1319,6 @@ function asLimitLeg(o) {
   return { ...o, orderType: 'LIMIT', status: 'PENDING' };
 }
 
-// ─────────────────────────── SCALPING (HYBRID) ───────────────────────────
 async function runScalpHybrid(ctx, d) {
   const { price, m1, m5, m15 } = d;
   if (!inScalpSession()) return fail('Di luar sesi scalping (07:00–22:00 UTC). Coba lagi saat sesi London/New York.');
@@ -1366,7 +1334,6 @@ async function runScalpHybrid(ctx, d) {
   const maxDist = SCALP_MAX_DIST_ATR * atr5;
   const common = { ctx, kind: 'scalp', timeframes: 'M15/M5/M1', rangeInfo, confidence: 'MEDIUM' };
 
-  // 1) Market ranging -> OCO di strong zone dua sisi
   if (isRangingDir(m5, atr5)) {
     const chartContext = `Ranging M5 -> strong zone dua sisi -> OCO`;
     const get = dir => blocked.has(dir) ? null : firstLimitOrder(
@@ -1386,7 +1353,6 @@ async function runScalpHybrid(ctx, d) {
     return planFromOrder(pick.single, { ...common, orderType: 'LIMIT', setup: pick.setup, chartContext, head: 'Scalping Ranging', lines: ['Market ranging M5'], confidence: 'HIGH' });
   }
 
-  // 2) Trending -> event struktur M5 (BOS / CHoCH / CISD)
   const st = scalpStructureEvents(m5, atr5);
   const ev = st.current;
   if (!ev) return fail('Belum ada event struktur M5 (BOS/CHoCH/CISD) yang segar.');
@@ -1394,7 +1360,6 @@ async function runScalpHybrid(ctx, d) {
   if (blocked.has(dir)) return fail('Arah ini baru kena SL. Cooldown 20 menit aktif.');
   if (!biasAllows(dir, biasDir, ev.type)) return fail(`${ev.type} berlawanan dengan bias EMA M15 (${dirLabel(biasDir)}). Setup dilewati.`);
 
-  // Likuiditas lawan terlalu dekat -> ruang gerak sempit
   const oppPool = dir === 1 ? [...liq.swingHigh, ...liq.eqh].filter(p => p > price) : [...liq.swingLow, ...liq.eql].filter(p => p < price);
   if (oppPool.length) {
     const nearest = Math.min(...oppPool.map(p => Math.abs(p - price)));
@@ -1404,7 +1369,6 @@ async function runScalpHybrid(ctx, d) {
   const chartContext = `${dirLabel(biasDir)} M15 -> ${ev.type} M5 -> ${m1Trigger(m1, dir) ? 'Trigger M1' : 'Tunggu retest'} -> SIGNAL ${dir === 1 ? 'BUY' : 'SELL'}`;
   const chase = Math.abs(price - ev.level) > SCALP_MAX_CHASE_ATR * atr5;
 
-  // NOW: trigger M1 searah, tidak mengejar harga
   if (m1Trigger(m1, dir) && !chase) {
     const o = buildNowOrder({
       dir, entry: price, baseSL: recentExtreme(m5, dir, 6), atrM5: atr5, atrM1: atr1,
@@ -1415,7 +1379,6 @@ async function runScalpHybrid(ctx, d) {
     }
   }
 
-  // LIMIT: strong zone terdekat
   const lim = firstLimitOrder(
     strongZoneList(m5, dir, price, atr5, maxDist),
     { dir, liq, atrVal: atr5, ctx, kind: 'scalp', maxRiskAtr: SCALP_MAX_RISK_ATR, rrList: rr, price, maxDist, allowNow: true }
@@ -1424,8 +1387,6 @@ async function runScalpHybrid(ctx, d) {
   return planFromOrder(lim.order, { ...common, orderType: lim.orderType, setup: `Scalping ${ev.type} (${lim.orderType})`, chartContext, head: `Scalping ${orderLabel(dir, lim.orderType)}`, lines: [`${ev.type} M5`, `Retest ${lim.order.tag}`] });
 }
 
-// ─────────────────────────── SCALPING EMA ───────────────────────────
-// Rejection block: candle dengan wick panjang yang menolak harga searah dir.
 function rejectionBlocks(m5, dir, atrVal) {
   const out = [];
   const s = m5.slice(-11, -1);
@@ -1436,7 +1397,7 @@ function rejectionBlocks(m5, dir, atrVal) {
     if (dir === 1 && (bodyBot - c.l) / range >= 0.55) out.push({ bottom: c.l, top: bodyBot, tag: 'Rejection Block', dist: 0 });
     if (dir === -1 && (c.h - bodyTop) / range >= 0.55) out.push({ bottom: bodyTop, top: c.h, tag: 'Rejection Block', dist: 0 });
   }
-  return out.reverse(); // terbaru dulu
+  return out.reverse();
 }
 
 async function runScalpEMA(ctx, d) {
@@ -1455,7 +1416,6 @@ async function runScalpEMA(ctx, d) {
   if ((dir === 1 && e21[i] <= e200[i]) || (dir === -1 && e21[i] >= e200[i])) return fail('EMA 21 belum berada di sisi yang sama dengan harga terhadap EMA 200.');
   if ((dir === 1 && e9[i] <= e21[i]) || (dir === -1 && e9[i] >= e21[i])) return fail('EMA 9 belum searah di atas/bawah EMA 21.');
 
-  // Cross EMA 9/21 dalam 8 candle M5 terakhir
   let crossed = false;
   for (let j = n - 8; j <= i; j++) {
     if (j < 1) continue;
@@ -1471,7 +1431,6 @@ async function runScalpEMA(ctx, d) {
   const chartContext = `Harga ${dir === 1 ? 'di atas' : 'di bawah'} EMA200 -> Cross EMA 9/21 ${dir === 1 ? 'Bullish' : 'Bearish'} -> ${m1Trigger(m1, dir) ? 'Trigger M1' : 'Tunggu pullback'} -> SIGNAL ${dir === 1 ? 'BUY' : 'SELL'}`;
   const common = { ctx, kind: 'scalp', timeframes: 'M5/M1', rangeInfo, confidence: 'MEDIUM', chartContext };
 
-  // NOW: trigger breakout M1
   if (m1Trigger(m1, dir)) {
     const o = buildNowOrder({
       dir, entry: price, baseSL: recentExtreme(m5, dir, 6), atrM5: atr5, atrM1: atr1,
@@ -1482,12 +1441,11 @@ async function runScalpEMA(ctx, d) {
     }
   }
 
-  // LIMIT terdekat: rejection block, lalu zona EMA 21
   const liq = liquidityLevels(m5, atr5);
   const maxDist = SCALP_MAX_DIST_ATR * atr5;
   const ema21Zone = dir === 1
-    ? { bottom: e21[i] - 0.15 * atr5, top: e21[i], tag: 'EMA21', dist: 0 }
-    : { bottom: e21[i], top: e21[i] + 0.15 * atr5, tag: 'EMA21', dist: 0 };
+    ? { bottom: e21[i] - 0.15 * atr5, top: e21[i], tag: 'EMA21', dist: 0, inv: e21[i] - 0.3 * atr5 }
+    : { bottom: e21[i], top: e21[i] + 0.15 * atr5, tag: 'EMA21', dist: 0, inv: e21[i] + 0.3 * atr5 };
   const zones = [...rejectionBlocks(m5, dir, atr5), ema21Zone];
   const lim = firstLimitOrder(zones, {
     dir, liq, atrVal: atr5, ctx, kind: 'scalp', maxRiskAtr: SCALP_MAX_RISK_ATR, rrList: rr, price, maxDist, allowNow: false,
@@ -1496,7 +1454,6 @@ async function runScalpEMA(ctx, d) {
   return planFromOrder(lim.order, { ...common, orderType: 'LIMIT', setup: `Scalping EMA 9/21 Cross (${lim.order.tag} LIMIT)`, head: `Scalping EMA ${orderLabel(dir, 'LIMIT')}`, lines: ['Cross EMA 9/21 searah EMA 200', `Pullback ke ${lim.order.tag}`] });
 }
 
-// ─────────────────────────── DAY TRADING (OCO 2 ARAH) ───────────────────────────
 function refineToM5(zone15, dir, m5, price, atr5, maxDist) {
   const cands = strongZoneList(m5, dir, price, atr5, maxDist)
     .filter(a => a.bottom <= zone15.top && a.top >= zone15.bottom);
@@ -1508,25 +1465,28 @@ function refineToM5(zone15, dir, m5, price, atr5, maxDist) {
     dist: a.dist,
     tag: `${zone15.tag}>M5 ${a.tag}`,
     strong: true,
+    inv: a.inv ?? zone15.inv // Propagate invalidation level
   };
 }
 
-// Zona kontinuitas: OB/FVG M15 dan M5 yang tidak harus strong atau fresh, diurutkan dari yang terdekat.
-function continuityZones(dir, price, m5, m15, maxDist) {
+// DIPERBAIKI: Tambahkan properti 'inv' dan filter FVG kecil
+function continuityZones(dir, price, m5, m15, maxDist, atr5) {
   const out = [];
-  const push = (z, tag) => out.push({ bottom: z.bottom, top: z.top, dist: z.dist, tag });
+  const push = (z, tag) => out.push({ bottom: z.bottom, top: z.top, dist: z.dist, tag, inv: z.inv ?? z.sl });
   for (const z of findSDZones(m15, dir, price, { dispAtr: 0.8, freshOnly: false })) push(z, dir === 1 ? 'Demand M15 (Kontinuitas)' : 'Supply M15 (Kontinuitas)');
   for (const z of findSDZones(m5, dir, price, { dispAtr: 0.8, freshOnly: false })) push(z, dir === 1 ? 'Demand M5 (Kontinuitas)' : 'Supply M5 (Kontinuitas)');
+  
   for (const f of findRecentFVGs(m5, 60)) {
     if (f.dir !== dir) continue;
+    const fvgSize = f.hi - f.lo;
+    if (fvgSize < 0.3 * atr5) continue; // Abaikan FVG yang terlalu kecil
     const dist = dir === 1 ? price - f.hi : f.lo - price;
     if (dist < 0) continue;
-    push({ bottom: f.lo, top: f.hi, dist }, 'FVG M5');
+    push({ bottom: f.lo, top: f.hi, dist, inv: dir === 1 ? f.lo : f.hi }, 'FVG M5');
   }
   return out.filter(z => z.dist <= maxDist).sort((a, b) => a.dist - b.dist);
 }
 
-// Fallback terakhir: limit pullback, SL di balik swing M5 (selalu menghasilkan order).
 function buildManualOrder({ dir, entry, ctx, m5, atr5, atr15, rrList, tag }) {
   const swing = recentExtreme(m5, dir, 20);
   const slRaw = dir === 1 ? swing - LIQ_BUF_ATR * atr5 : swing + LIQ_BUF_ATR * atr5;
@@ -1550,7 +1510,6 @@ async function runDay(ctx, d) {
   const rangeInfo = rangeInfoText(ctx, m5);
   const biasDir = emaBias(m15, 20);
 
-  // Momentum M1 kuat -> NOW searah, tanpa menunggu pullback
   if (m1 && m1.length > M1_TRIGGER_BARS + 1 && m5.length >= SCALP_MIN_DIR_CANDLES) {
     const ev = scalpStructureEvents(m5, atr5).current;
     const lastM5 = m5[m5.length - 1];
@@ -1568,7 +1527,6 @@ async function runDay(ctx, d) {
     }
   }
 
-  // OCO 2 arah wajib: area M15 strong, di-refine ke M5
   const liq15 = liquidityLevels(m15, atr15);
   const liq5 = liquidityLevels(m5, atr5);
   const liqAll = {
@@ -1579,26 +1537,30 @@ async function runDay(ctx, d) {
   const maxDistFb = 1.5 * maxDist;
   const e21 = emaSeries(m5, 21);
 
-  // Urutan: Strong M15>M5 -> Strong M5 -> Kontinuitas (OB/FVG) -> Pullback EMA21 M5. Selalu menghasilkan order.
   const build = dir => {
     const base = { dir, ctx, kind: 'day', rrList: rr, price, allowNow: false };
+    
     let r = firstLimitOrder(
       strongZoneList(m15, dir, price, atr15, maxDist).map(z => refineToM5(z, dir, m5, price, atr5, maxDist)),
       { ...base, liq: liq15, atrVal: atr15, maxRiskAtr: DAY_MAX_RISK_ATR, maxDist }
     );
     if (r) return { ...r, tier: 'Strong M15>M5', strong: true };
+    
     r = firstLimitOrder(strongZoneList(m5, dir, price, atr5, maxDistFb),
-      { ...base, liq: liqAll, atrVal: atr5, maxRiskAtr: 10, maxDist: maxDistFb });
+      { ...base, liq: liqAll, atrVal: atr5, maxRiskAtr: DAY_MAX_RISK_ATR, maxDist: maxDistFb }); // maxRiskAtr diperketat
     if (r) return { ...r, tier: 'Strong M5', strong: true };
-    r = firstLimitOrder(continuityZones(dir, price, m5, m15, maxDistFb),
-      { ...base, liq: liqAll, atrVal: atr5, maxRiskAtr: 10, maxDist: maxDistFb });
+    
+    r = firstLimitOrder(continuityZones(dir, price, m5, m15, maxDistFb, atr5),
+      { ...base, liq: liqAll, atrVal: atr5, maxRiskAtr: DAY_MAX_RISK_ATR, maxDist: maxDistFb }); // maxRiskAtr diperketat
     if (r) return { ...r, tier: 'Kontinuitas', strong: false };
+    
     const ema = e21[e21.length - 1];
     let entry = dir === 1 ? Math.min(ema, price - 0.5 * atr5) : Math.max(ema, price + 0.5 * atr5);
     if (Math.abs(price - entry) > maxDistFb) entry = price - dir * 0.5 * atr5;
     const order = buildManualOrder({ dir, entry, ctx, m5, atr5, atr15, rrList: rr, tag: 'Pullback M5' });
     return { order, orderType: 'LIMIT', tier: 'Pullback M5', strong: false };
   };
+  
   const b = build(1), s = build(-1);
   const tiers = b.tier === s.tier ? b.tier : `BUY ${b.tier} / SELL ${s.tier}`;
   const chartContext = `Area ${tiers} -> OCO dua arah`;
@@ -1609,7 +1571,6 @@ async function runDay(ctx, d) {
   return { dir: 0, ...res };
 }
 
-// ─────────────────────────── INTRADAY ───────────────────────────
 async function runIntraday(ctx, d) {
   const { price, m5, m15 } = d;
   const atr15 = atrOf(m15, ctx.pip);
@@ -1620,7 +1581,6 @@ async function runIntraday(ctx, d) {
   const htf = analyzePureSMCStructure(h1);
   const maxDist = INTRADAY_MAX_DIST_ATR * atr15;
 
-  // HTF ranging -> OCO
   if (htf.dir === 0) {
     const liq = liquidityLevels(m15, atr15);
     const build = dir => firstLimitOrder(
@@ -1638,7 +1598,6 @@ async function runIntraday(ctx, d) {
     return planFromOrder(pick.single, { ctx, kind: 'intraday', orderType: 'LIMIT', setup: pick.setup, chartContext, timeframes: 'H1/M15/M5', rangeInfo, head: `Intraday ${orderLabel(pick.single.dir, 'LIMIT')}`, lines: [`H1 ${htf.src}`], confidence: 'HIGH' });
   }
 
-  // Trend follow: zona M15 searah struktur H1
   const dir = htf.dir;
   const zones = findSDZones(m15, dir, price, {}).filter(z => z.dist <= maxDist);
   if (!zones.length) return fail(`Bias H1 ${dirLabel(dir)}, tetapi belum ada zona ${dir === 1 ? 'Demand' : 'Supply'} M15 yang fresh dan dekat.`);
@@ -1656,7 +1615,6 @@ async function runIntraday(ctx, d) {
   });
 }
 
-// ─────────────────────────── SWING ───────────────────────────
 async function runSwing(ctx, d) {
   const { price, m15 } = d;
   const atr15 = atrOf(m15, ctx.pip);
@@ -1693,7 +1651,6 @@ async function runSwing(ctx, d) {
   });
 }
 
-// ─────────────────────────── VISION ───────────────────────────
 function collectImages(body) {
   const raw = [];
   for (const k of ['images', 'imgs', 'screenshots']) if (Array.isArray(body?.[k])) raw.push(...body[k]);
@@ -1752,7 +1709,6 @@ async function runVision(body, images, lang, livePrice) {
   };
 }
 
-// ─────────────────────────── INPUT CANDLE ───────────────────────────
 function normStyle(raw) {
   const k = String(raw || '').toLowerCase().replace(/[^a-z]/g, '');
   if (!k) return 'Scalping';
@@ -1804,8 +1760,6 @@ const RUNNERS = {
   'Swing': runSwing,
 };
 
-// ─────────────────────────── FORMAT BALASAN UNTUK FRONTEND ───────────────────────────
-// Frontend membaca data.signal: { orders:[...] } untuk OCO, atau satu sinyal tunggal.
 function buildSignal(result, lang) {
   const meta = result.meta || {};
   const plan = result.plan;
@@ -1844,7 +1798,6 @@ function buildSignal(result, lang) {
   };
 }
 
-// ═══════════════════════════ HANDLER ═══════════════════════════
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -1866,7 +1819,6 @@ export default async function handler(req, res) {
 
     if (!Object.keys(body).length) return sendErr(400, t.emptyBody);
 
-    // ── Akses ──
     const email = String(body.email || req.headers['x-user-email'] || '').trim();
     const access = await checkAccess(email);
     if (!access.ok) return sendErr(access.key === 'noEmail' ? 401 : 403, t[access.key] || t.notRegistered);
@@ -1874,7 +1826,6 @@ export default async function handler(req, res) {
     const livePrice = toNum(body.price ?? body.livePrice ?? body.live_price ?? body.currentPrice ?? body.last);
     const images = collectImages(body);
 
-    // ── Jalur Vision (screenshot chart) ──
     if (images.length) {
       const trial = await checkTrialLimit(email, access.status);
       if (!trial.ok) return sendErr(429, trial.msg);
@@ -1893,7 +1844,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // ── Jalur candle ──
     const symbol = normSymbol(body.symbol ?? body.pair ?? body.asset ?? body.ticker ?? body.instrument);
     if (!symbol) return sendErr(400, t.noPair(Object.keys(body).join(', ')));
 
@@ -1914,7 +1864,6 @@ export default async function handler(req, res) {
     const trial = await checkTrialLimit(email, access.status);
     if (!trial.ok) return sendErr(429, trial.msg);
 
-    // Ambil candle: dari client jika cukup dan cocok, selain itu TickerLayer / cache
     const tfs = Object.keys(need);
     const triedAll = [];
     const got = await Promise.all(tfs.map(async tf => {
