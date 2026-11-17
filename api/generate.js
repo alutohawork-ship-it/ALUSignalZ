@@ -1,11 +1,11 @@
 // api/generate.js
-// v106 (Hybrid lama tetap untuk style "Scalping".
-//       Scalping EMA: cross EMA 9/21 searah EMA 200, hanya di killzone,
-//       NOW saat trigger M1, rejection block opsional, LIMIT terdekat jika NOW ditahan.
-//       Day Trading: satu setup searah tren saat kontinuitas, OCO hanya dari dua zona strong
-//       tanpa kontinuitas. SL di balik invalidation M5 + buffer 0,5 ATR M5, maks 50 pip XAUUSD.
-//       TickerLayer: sampai 20 key dengan slot tetap, maksimal percobaan per request,
-//       bisa dimatikan lewat env TICKERLAYER_DISABLED=1.
+// v107 (Hybrid lama tetap untuk style "Scalping".
+//       Scalping EMA: cross EMA 9/21 searah EMA 200, hanya di killzone, NOW saat trigger M1,
+//       rejection block opsional, LIMIT terdekat jika NOW ditahan.
+//       Day Trading: OCO 2 arah wajib. Area M15 strong, di-refine ke M5.
+//       Momentum M1 kuat -> NOW searah, tanpa menunggu pullback.
+//       SL di balik invalidation, zona yang melewati batas SL dilewati.
+//       TickerLayer: slot key tetap, maksimal percobaan per request, bisa dimatikan TICKERLAYER_DISABLED=1.
 //       Vision tetap.)
 
 export const config = {
@@ -106,8 +106,8 @@ const STYLES = {
     entryStyle: 'Agresif', entryStyleEn: 'Aggressive', mode: 'MIXED', kind: 'scalp', rr: [1.0, 2.0, 3.0],
   },
   'Day Trading': {
-    label: 'Scalping Konservatif · Satu setup searah tren / OCO 2 zona kuat · LIMIT / NOW',
-    labelEn: 'Conservative Scalping · Single trend setup / OCO on 2 strong zones · LIMIT / NOW',
+    label: 'Scalping Konservatif · OCO 2 arah · Area M15 refine M5 · Momentum NOW',
+    labelEn: 'Conservative Scalping · Two-way OCO · M15 area refined on M5 · Momentum NOW',
     entryStyle: 'Konservatif', entryStyleEn: 'Conservative', mode: 'LIMIT', kind: 'day',
     rr: [1.0, 2.0, 3.0],
   },
@@ -1425,15 +1425,22 @@ async function buildScalpPlan({ m1, m5, m15, price, rrList, ctx, recentSL = [] }
 }
 
 // ═══════════════════════════ SCALPING KONSERVATIF (DAY TRADE) ═══════════════════════════
-const DAY_FVG_IMPULSE_ATR = 0.8;   // candle impuls FVG pullback minimal 0,8 ATR M5
-const DAY_ZONE_DISP_ATR = 0.8;     // zona biasa M5: displacement minimal 0,8 ATR M5
-const DAY_SL_MODE = 'dynamic';     // 'dynamic' = di balik invalidation, 'fixed' = jarak tetap
+const DAY_ZONE_DISP_ATR = 0.8;      // zona biasa M5: displacement minimal 0,8 ATR M5
+const DAY_LEG_MAX_ATR = 2;          // kaki OCO tidak boleh lebih dari 2 ATR M5 dari harga
+const DAY_SL_OVER_MODE = 'skip';    // 'skip' = zona dengan invalidation di luar batas SL dilewati, 'cut' = SL dipotong
+const DAY_SL_MODE = 'dynamic';      // 'dynamic' = di balik invalidation, 'fixed' = jarak tetap
 const DAY_MAX_SL_PIPS = { XAUUSD: 50, XAUUSDX: 50 };
 const DAY_FIXED_SL_PIPS = { XAUUSD: 50, XAUUSDX: 50 };
-const DAY_SL_BUF_ATR_M5 = 0.5;     // buffer di balik invalidation, kelipatan ATR M5
+const DAY_SL_BUF_ATR_M5 = 0.5;      // buffer di balik invalidation, kelipatan ATR M5
+const DAY_REFINE_SL = 'm5';         // 'm5' = SL di balik invalidation M5 (sempit), 'm15' = di balik M15 (lebih aman)
+const DAY_MOM_BARS = 6;             // jendela momentum M1
+const DAY_MOM_MIN_ATR = 2.5;        // gerak bersih minimal 2,5 ATR M1 dalam jendela
+const DAY_MOM_CONFIRM = 4;          // minimal 4 dari 6 candle searah
+const DAY_MOM_OPP_PIPS = 30;        // zona lawan kuat dalam jarak ini membatalkan NOW momentum
 
-// Order untuk satu kaki. entryOverride = harga live untuk NOW, atau tepi LIMIT.
-function buildDayOrder(dir, zone, atrM5, ctx, rrList, entryOverride = null, isNow = false) {
+// Order untuk satu kaki. entryOverride = tepi LIMIT, atau harga live untuk NOW.
+// allowCut = true hanya dipakai kalau tidak ada zona lain yang muat dalam batas SL.
+function buildDayOrder(dir, zone, atrM5, ctx, rrList, entryOverride = null, isNow = false, allowCut = false) {
   const { pip, symbol } = ctx;
   const entry = entryOverride ?? (dir === 1 ? zone.top : zone.bottom);
   const inv = zone.inv ?? (dir === 1 ? zone.bottom : zone.top);
@@ -1448,7 +1455,11 @@ function buildDayOrder(dir, zone, atrM5, ctx, rrList, entryOverride = null, isNo
 
   let risk = useFixed ? fixedPips * pip : Math.abs(entry - slRaw);
   let capped = false;
-  if (!useFixed && risk > capPrice) { risk = capPrice; capped = true; }
+  if (!useFixed && risk > capPrice) {
+    if (DAY_SL_OVER_MODE === 'skip' && !allowCut) return null;
+    risk = capPrice;
+    capped = true;
+  }
   risk = Math.max(risk, slFloor('day', ctx));
 
   const sl = entry - dir * risk;
@@ -1464,21 +1475,34 @@ function buildDayOrder(dir, zone, atrM5, ctx, rrList, entryOverride = null, isNo
   };
 }
 
+// Momentum M1: gerak bersih cepat dan mayoritas candle searah. Return 1, -1, atau 0.
+function momentumDir(m1, atrM1) {
+  if (!m1 || m1.length < DAY_MOM_BARS + 1 || !(atrM1 > 0)) return 0;
+  const last = m1[m1.length - 1];
+  const base = m1[m1.length - 1 - DAY_MOM_BARS];
+  const net = last.c - base.c;
+  if (Math.abs(net) < DAY_MOM_MIN_ATR * atrM1) return 0;
+  const dir = net > 0 ? 1 : -1;
+  const win = m1.slice(-DAY_MOM_BARS);
+  const agree = win.filter(c => (dir === 1 ? c.c > c.o : c.c < c.o)).length;
+  return agree >= DAY_MOM_CONFIRM ? dir : 0;
+}
+
 async function buildDayPlan({ m1, m5, m15, price, rrList, ctx }) {
   const t = tx(ctx);
   const { pip } = ctx;
+  const atrM1 = atrOf(m1, pip);
   const atrM5 = atrOf(m5, pip);
-  const maxDist = DAY_MAX_DIST_ATR * atrM5;
+  const atrM15 = atrOf(m15, pip);
+  const legMax = DAY_LEG_MAX_ATR * atrM5;
   const gap = 0.1 * atrM5;
 
   const biasM15 = analyzePureSMCStructure(m15);
   const dirM15 = biasM15.dir || emaBias(m15, 20);
   const dirM5 = analyzePureSMCStructure(m5).dir;
-  // Kontinuitas: M5 dan M15 searah. Hanya ini yang membuat satu setup searah tren.
-  const trend = dirM5 !== 0 && dirM5 === dirM15 ? dirM15 : 0;
+  const trendTxt = `Bias M15 ${dirLabel(dirM15)}, M5 ${dirLabel(dirM5)}.`;
 
   const rangeM5 = getRangeInfo(m5, 50);
-  const mid = rangeM5 ? rangeM5.eq : price;
   const rangeInfoStr = rangeM5 && rangeM5.high > rangeM5.low
     ? `M5 Range Pos: ${(((price - rangeM5.low) / (rangeM5.high - rangeM5.low)) * 100).toFixed(1)}%`
     : '-';
@@ -1486,46 +1510,12 @@ async function buildDayPlan({ m1, m5, m15, price, rrList, ctx }) {
   const liq = liquidityLevels(m5.slice(-120), atrM5);
   const onSide = (dir, z) => (dir === 1 ? z.top < price - gap : z.bottom > price + gap);
 
-  // Zona nyata M5: strong M5 dulu, lalu zona biasa M5
-  const realZone = dir => {
-    const strong = strongZoneList(m5, dir, price, atrM5, maxDist)
-      .filter(z => onSide(dir, z))
-      .map(s => ({
-        bottom: s.bottom, top: s.top, dist: s.dist,
-        tag: `M5 Strong ${s.tag}`, strong: true, fallback: false, inv: s.inv,
-      }));
-    if (strong.length) return strong.sort((a, b) => a.dist - b.dist)[0];
+  // LIMIT di tepi zona terdekat, tidak melewati harga
+  const limitEntry = (dir, zone) => dir === 1
+    ? Math.max(zone.bottom, Math.min(zone.top, price - gap))
+    : Math.min(zone.top, Math.max(zone.bottom, price + gap));
 
-    const z = findSDZones(m5, dir, price, { dispAtr: DAY_ZONE_DISP_ATR, freshOnly: true })
-      .filter(x => onSide(dir, x))
-      .find(x => x.dist <= maxDist);
-    return z
-      ? { bottom: z.bottom, top: z.top, dist: z.dist, tag: 'M5 Zona', strong: false, fallback: false, inv: z.sl }
-      : null;
-  };
-
-  // FVG pullback M5 searah tren (hanya saat kontinuitas)
-  const pullbackFvg = dir => {
-    let best = null;
-    for (const f of findRecentFVGs(m5, 30)) {
-      if (f.dir !== dir) continue;
-      const imp = m5[f.idx];
-      if (!imp || Math.abs(imp.c - imp.o) < DAY_FVG_IMPULSE_ATR * atrM5) continue;
-      if (dir === 1 && (f.hi >= mid || f.hi >= price - gap)) continue;
-      if (dir === -1 && (f.lo <= mid || f.lo <= price + gap)) continue;
-      const dist = dir === 1 ? price - f.hi : f.lo - price;
-      if (dist > maxDist) continue;
-      if (!best || dist < best.dist) {
-        best = {
-          bottom: f.lo, top: f.hi, dist, tag: 'M5 FVG Pullback',
-          strong: false, fallback: false, inv: dir === 1 ? f.lo : f.hi,
-        };
-      }
-    }
-    return best;
-  };
-
-  // Cadangan: swing terdekat, lalu ATR Pullback
+  // Cadangan terakhir: swing terdekat, lalu ATR Pullback
   const fallback = dir => {
     const lvl = dir === 1
       ? [...liq.eql, ...liq.swingLow].filter(p => p < price - gap).sort((a, b) => b - a)[0]
@@ -1533,88 +1523,137 @@ async function buildDayPlan({ m1, m5, m15, price, rrList, ctx }) {
     if (lvl != null) {
       return {
         bottom: lvl - 0.1 * atrM5, top: lvl + 0.1 * atrM5, dist: Math.abs(price - lvl),
-        tag: 'Swing', strong: false, fallback: true, inv: lvl,
+        tag: 'Swing', strong: false, inv: lvl,
       };
     }
     const p = dir === 1 ? price - atrM5 : price + atrM5;
     return {
       bottom: p - 0.1 * atrM5, top: p + 0.1 * atrM5, dist: atrM5,
-      tag: 'ATR Pullback', strong: false, fallback: true, inv: p,
+      tag: 'ATR Pullback', strong: false, inv: p,
     };
   };
 
-  // LIMIT di tepi zona terdekat, tidak melewati harga (pullback kecil)
-  const limitEntry = (dir, zone) => dir === 1
-    ? Math.max(zone.bottom, Math.min(zone.top, price - gap))
-    : Math.min(zone.top, Math.max(zone.bottom, price + gap));
-
-  // Satu setup: NOW hanya jika harga di dalam zona dan trigger M1 terjadi, selain itu LIMIT
-  const build = async (dir, zone, confidence, note) => {
-    const inside = price >= zone.bottom && price <= zone.top;
-    const isNow = inside && m1Trigger(m1, dir);
-    const entry = isNow ? price : limitEntry(dir, zone);
-    const o = buildDayOrder(dir, zone, atrM5, ctx, rrList, entry, isNow);
-    if (!o) return null;
-    const orderType = isNow ? 'NOW' : 'LIMIT';
-    const capNote = o.capped ? ' SL dipotong ke batas maksimum.' : '';
-    return await planFromOrder(o, {
-      ctx, kind: 'day', orderType,
-      setup: `${dir === 1 ? 'BUY' : 'SELL'} ${orderType} (${zone.tag})`,
-      chartContext: `M15 ${dirLabel(dirM15)}, M5 ${dirLabel(dirM5)} -> ${zone.tag} ${orderType}`,
-      timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
-      head: t.headLine(t.title.day, dir === 1 ? 'BUY' : 'SELL', orderType, ctx.symbol),
-      lines: [note + capNote],
-      confidence,
-    });
-  };
-
-  // A. Ada kontinuitas: satu setup searah tren, tanpa OCO
-  if (trend !== 0) {
-    const z = pullbackFvg(trend) || realZone(trend) || fallback(trend);
-    const conf = z.strong ? 'HIGH' : (z.fallback ? 'LOW' : 'MEDIUM');
-    const res = await build(trend, z, conf, `Kontinuitas M5 dan M15 ${dirLabel(trend)}. Satu setup searah tren.`);
-    if (res) return res;
-    const res2 = await build(trend, fallback(trend), 'LOW', 'Kontinuitas, zona utama belum valid. Memakai cadangan.');
-    if (res2) return res2;
-    return { plan: null, reason: 'Kontinuitas ada tetapi belum ada entry yang valid. Menunggu.' };
-  }
-
-  const buyZ = realZone(1);
-  const sellZ = realZone(-1);
-
-  // B. Tanpa kontinuitas dan ada dua zona strong di kedua sisi: OCO
-  if (buyZ?.strong && sellZ?.strong) {
-    const buyO = buildDayOrder(1, buyZ, atrM5, ctx, rrList, limitEntry(1, buyZ), false);
-    const sellO = buildDayOrder(-1, sellZ, atrM5, ctx, rrList, limitEntry(-1, sellZ), false);
-    if (buyO && sellO) {
-      const fx = v => Number(Number(v).toFixed(ctx.dec));
-      const pipsOf = o => (o.risk / pip).toFixed(0);
-      const capNote = [buyO, sellO].some(o => o.capped) ? ' SL dipotong ke batas maksimum.' : '';
-      const manual = `OCO konservatif, dua zona strong M5 tanpa kontinuitas. BUY LIMIT @ ${fx(buyO.entry)} (SL ${fx(buyO.sl)}, ${pipsOf(buyO)} pip). SELL LIMIT @ ${fx(sellO.entry)} (SL ${fx(sellO.sl)}, ${pipsOf(sellO)} pip). Jika salah satu tersentuh, order lawannya dibatalkan.${capNote}`;
-      return {
-        plan: {
-          isOCO: true,
-          orders: [buyO, sellO],
-          setup: 'Konservatif OCO (Strong M5 dua sisi)',
-          chartContext: `M15 ${dirLabel(dirM15)}, M5 ${dirLabel(dirM5)} -> OCO dua zona strong`,
-        },
-        meta: { confidence: 'HIGH', riskLabel: 'MEDIUM', reason: withPair(ctx.symbol, manual) },
+  // ── 1. MOMENTUM: harga bergerak cepat, tidak menunggu pullback ──
+  const momDir = momentumDir(m1, atrM1);
+  if (momDir !== 0) {
+    const oppStrong = [
+      ...strongZoneList(m5, -momDir, price, atrM5, DAY_MOM_OPP_PIPS * pip),
+      ...strongZoneList(m15, -momDir, price, atrM15, DAY_MOM_OPP_PIPS * pip),
+    ];
+    if (!oppStrong.length) {
+      const zone = {
+        bottom: price, top: price,
+        inv: recentExtreme(m1, momDir, DAY_MOM_BARS),
+        tag: 'Momentum M1', strong: false,
       };
+      const o = buildDayOrder(momDir, zone, atrM5, ctx, rrList, price, true, false);
+      if (o) {
+        const aligned = dirM15 === momDir;
+        const side = momDir === 1 ? 'BUY' : 'SELL';
+        return await planFromOrder(o, {
+          ctx, kind: 'day', orderType: 'NOW',
+          setup: `${side} NOW (Momentum M1)`,
+          chartContext: `${trendTxt} Momentum M1 ${momDir === 1 ? 'naik' : 'turun'} kuat -> NOW`,
+          timeframes: 'M1, M5, M15', rangeInfo: rangeInfoStr,
+          head: t.headLine(t.title.day, side, 'NOW', ctx.symbol),
+          lines: [
+            `Harga bergerak cepat (${DAY_MOM_MIN_ATR} ATR M1 dalam ${DAY_MOM_BARS} candle). Pending LIMIT tidak diambil, eksekusi NOW.`
+            + (aligned ? '' : ' Melawan bias M15, risiko lebih tinggi.'),
+          ],
+          confidence: aligned ? 'HIGH' : 'LOW',
+        });
+      }
     }
   }
 
-  // C. Lainnya: satu setup searah bias M15, netral pilih yang terdekat
-  let side = dirM15;
-  if (side === 0) {
-    const bz = buyZ || fallback(1);
-    const sz = sellZ || fallback(-1);
-    side = bz.dist <= sz.dist ? 1 : -1;
+  // ── 2. OCO dua arah wajib ──
+  // Tier 5: strong M15 dengan zona M5 di dalamnya (refine)
+  // Tier 4: strong M15 tanpa zona M5
+  // Tier 3: strong M5 tanpa M15
+  // Tier 2: zona biasa M5
+  // Tier 1: cadangan swing/ATR
+
+  // Zona M5 yang berada di dalam (atau menyentuh) zona M15. Strong M5 diutamakan.
+  const refineInM15 = (dir, htf) => {
+    const overlaps = z => z.top >= htf.bottom && z.bottom <= htf.top;
+    const fromStrong = strongZoneList(m5, dir, price, atrM5, legMax)
+      .filter(z => onSide(dir, z) && overlaps(z))
+      .map(z => ({ bottom: z.bottom, top: z.top, dist: z.dist, tag: `M5 Strong ${z.tag}`, inv: z.inv }));
+    const fromZona = findSDZones(m5, dir, price, { dispAtr: DAY_ZONE_DISP_ATR, freshOnly: true })
+      .filter(z => onSide(dir, z) && z.dist <= legMax && overlaps(z))
+      .map(z => ({ bottom: z.bottom, top: z.top, dist: z.dist, tag: 'M5 Zona', inv: z.sl }));
+    return fromStrong.sort((a, b) => a.dist - b.dist)[0]
+      || fromZona.sort((a, b) => a.dist - b.dist)[0]
+      || null;
+  };
+
+  const legCandidates = dir => {
+    const out = [];
+
+    for (const h of strongZoneList(m15, dir, price, atrM15, legMax).filter(z => onSide(dir, z))) {
+      const r = refineInM15(dir, h);
+      if (r) {
+        out.push({
+          bottom: r.bottom, top: r.top, dist: r.dist,
+          tag: `M15 Strong ${h.tag} → ${r.tag}`,
+          strong: true, tier: 5,
+          inv: DAY_REFINE_SL === 'm15' ? h.inv : r.inv,
+        });
+      } else {
+        out.push({
+          bottom: h.bottom, top: h.top, dist: h.dist,
+          tag: `M15 Strong ${h.tag}`, strong: true, tier: 4, inv: h.inv,
+        });
+      }
+    }
+
+    for (const s of strongZoneList(m5, dir, price, atrM5, legMax).filter(z => onSide(dir, z))) {
+      out.push({ bottom: s.bottom, top: s.top, dist: s.dist, tag: `M5 Strong ${s.tag}`, strong: true, tier: 3, inv: s.inv });
+    }
+
+    for (const z of findSDZones(m5, dir, price, { dispAtr: DAY_ZONE_DISP_ATR, freshOnly: true })) {
+      if (!onSide(dir, z) || z.dist > legMax) continue;
+      out.push({ bottom: z.bottom, top: z.top, dist: z.dist, tag: 'M5 Zona', strong: false, tier: 2, inv: z.sl });
+    }
+
+    out.push({ ...fallback(dir), tier: 1 });
+    return out.sort((a, b) => b.tier - a.tier || a.dist - b.dist);
+  };
+
+  const pickLeg = (dir, allowCut) => {
+    for (const z of legCandidates(dir)) {
+      const o = buildDayOrder(dir, z, atrM5, ctx, rrList, limitEntry(dir, z), false, allowCut);
+      if (o) return { z, o };
+    }
+    return null;
+  };
+
+  // OCO dua arah wajib. Kalau tidak ada kaki yang muat dalam batas SL, baru pakai SL dipotong.
+  const buy = pickLeg(1, false) || pickLeg(1, true);
+  const sell = pickLeg(-1, false) || pickLeg(-1, true);
+  if (!buy || !sell) {
+    return { plan: null, reason: 'OCO dua arah belum bisa dibentuk: kaki valid tidak ditemukan di kedua sisi. Menunggu.' };
   }
-  const z = (side === 1 ? buyZ : sellZ) || fallback(side);
-  const conf = z.strong ? 'MEDIUM' : 'LOW';
-  const res = await build(side, z, conf, `Tanpa kontinuitas dan tidak ada dua zona strong. Satu setup searah bias M15 ${dirLabel(dirM15)}.`);
-  if (res) return res;
-  return { plan: null, reason: 'Tidak ada setup konservatif yang valid. Menunggu.' };
+
+  const minTier = Math.min(buy.z.tier, sell.z.tier);
+  const anyCut = buy.o.capped || sell.o.capped;
+  let confidence = minTier >= 5 ? 'HIGH' : minTier >= 3 ? 'MEDIUM' : 'LOW';
+  if (anyCut) confidence = 'LOW';
+
+  const fx = v => Number(Number(v).toFixed(ctx.dec));
+  const pipsOf = o => (o.risk / pip).toFixed(0);
+  const cutTxt = anyCut ? ' Salah satu kaki memakai SL dipotong karena tidak ada zona dengan invalidation dalam batas.' : '';
+  const manual = `OCO konservatif 2 arah. BUY LIMIT @ ${fx(buy.o.entry)} (${buy.z.tag}, SL ${fx(buy.o.sl)}, ${pipsOf(buy.o)} pip). SELL LIMIT @ ${fx(sell.o.entry)} (${sell.z.tag}, SL ${fx(sell.o.sl)}, ${pipsOf(sell.o)} pip). Jika salah satu tersentuh, order lawannya dibatalkan. ${trendTxt}${cutTxt}`;
+
+  return {
+    plan: {
+      isOCO: true,
+      orders: [buy.o, sell.o],
+      setup: `Konservatif OCO 2 arah (${buy.z.tag} / ${sell.z.tag})`,
+      chartContext: `${trendTxt} -> OCO 2 arah, M15 sebagai area, M5 sebagai refine`,
+    },
+    meta: { confidence, riskLabel: 'MEDIUM', reason: withPair(ctx.symbol, manual) },
+  };
 }
 
 // ── INTRADAY: bias H1/M15 fleksibel (struktur → EMA), zona M5 lalu fallback M15 ──
@@ -2234,23 +2273,8 @@ export default async function handler(req, res) {
         useRB: body.useRejectionBlock === true,
       });
     } else if (style === 'Day Trading') {
-      liveSteps = [`Cek Kontinuitas M5 & M15`, `Cari Zona M5 / FVG Pullback`, `Cek OCO dua zona strong`, `NOW / LIMIT, SL di balik invalidation`];
+      liveSteps = ['Cek Momentum M1', 'Cari area M15 strong', 'Refine ke M5', 'OCO dua arah / NOW momentum'];
       result = await buildDayPlan({ m1, m5, m15, price, rrList, ctx });
     } else if (style === 'Intraday') {
       liveSteps = [`Memeriksa bias M15 & H1`, `Mencari Zona M5 / M15`, `Cek OCO / Trend Follow`, `Validasi ERL/IRL`];
-      result = await buildIntradayPlan({ m5, m15, price, rrList, ctx });
-    } else if (style === 'Swing') {
-      liveSteps = [`Memeriksa bias D1, H4 & H1`, `Mencari Zona M15`, `Cek Trend Follow`, `Validasi ERL/IRL`];
-      result = await buildSwingPlan({ m15, price, rrList, ctx });
-    }
-
-    if (!result.plan) return res.status(200).json({ ok: false, reason: result.reason || t.noSetup, analysis_steps: liveSteps });
-
-    const payload = toSignal(result, styleCfg, ctx);
-    return res.status(200).json({ ok: true, analysis_steps: liveSteps, signal: payload });
-
-  } catch (globalError) {
-    console.error('Global Handler Error:', globalError);
-    return res.status(500).json({ error: `Internal Server Error: ${globalError.message}` });
-  }
-}
+      result = await buildIntrada
