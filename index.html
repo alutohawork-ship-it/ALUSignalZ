@@ -2097,6 +2097,8 @@ function drawChart() {
   const d = fitCv(cv, cx);
   if (!d || market === 'VISION') return;
   const CW = d.w, CH = d.h;
+  
+  // Ambil trade aktif (mendukung trade manual maupun dari bot otomatis)
   const t = activeTrade();
   const k = market;
 
@@ -2112,7 +2114,7 @@ function drawChart() {
   cx.textAlign = 'left';
   cx.textBaseline = 'top';
   cx.fillStyle = 'rgba(148,163,184,.9)';
-  cx.fillText(srcLabel(k, iv), plotL + 2, 3);
+  cx.fillText(srcLabel(k, iv) + (botRunning ? ' [BOT ACTIVE]' : ''), plotL + 2, 3);
 
   if (!rows.length && live == null) {
     cx.font = 'bold 11px ui-monospace, monospace';
@@ -2128,25 +2130,14 @@ function drawChart() {
 
   const pre = t && t.ocoId ? (t.signal === 'BUY' ? 'B ' : 'S ') : '';
   const L = t ? [
-    { label: pre + 'ENTRY', main: true, v: t.entry, c: '#93c5fd', bg: 'rgba(147,197,253,.14)', dash: [] },
+    { label: (t.id && t.id.startsWith('bot') ? 'BOT ' : '') + pre + 'ENTRY', main: true, v: t.entry, c: '#93c5fd', bg: 'rgba(147,197,253,.14)', dash: [] },
     { label: pre + 'SL', v: t.sl, c: '#f87171', bg: 'rgba(248,113,113,.14)', dash: [4, 4], hit: t.result === 'SL' },
     { label: pre + 'TP1', v: t.tp1, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp1 },
     { label: pre + 'TP2', v: t.tp2, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp2 },
     { label: pre + 'TP3', v: t.tp3, c: '#38bdf8', bg: 'rgba(56,189,248,.14)', dash: [4, 4], hit: !!t.hits.tp3 }
   ].filter(l => Number.isFinite(l.v)) : [];
 
-  const sibs = t && t.ocoId ? trades.filter(x => x.ocoId === t.ocoId && x.id !== t.id && x.status === 'PENDING') : [];
-  const L2 = [];
-  sibs.forEach(s => {
-    const tag = s.signal === 'BUY' ? 'B' : 'S';
-    [
-      { label: tag + ' ENTRY', main: true, v: s.entry, c: '#c4b5fd', bg: 'rgba(196,181,253,.16)', dash: [] },
-      { label: tag + ' SL', v: s.sl, c: '#fca5a5', bg: 'rgba(252,165,165,.12)', dash: [4, 4] },
-      { label: tag + ' TP1', v: s.tp1, c: '#6ee7b7', bg: 'rgba(110,231,183,.12)', dash: [4, 4] }
-    ].forEach(x => { if (Number.isFinite(x.v)) L2.push(x); });
-  });
-  const ALL = L.concat(L2);
-  const zoneTrades = t ? [t].concat(sibs) : [];
+  const zoneTrades = t ? [t] : [];
 
   let lo = Infinity, hi = -Infinity;
   const isRunning = t && (t.status === 'RUNNING' || (t.hits && Object.keys(t.hits).length > 0));
@@ -2168,15 +2159,9 @@ function drawChart() {
       if (live > hi) hi = live;
     }
     if (t) {
-      ALL.forEach(l => {
+      L.forEach(l => {
         if (l.v < lo) lo = l.v;
         if (l.v > hi) hi = l.v;
-      });
-      zoneTrades.forEach(zt => {
-        if (zt.zone) {
-          if (zt.zone.min < lo) lo = zt.zone.min;
-          if (zt.zone.max > hi) hi = zt.zone.max;
-        }
       });
     }
   }
@@ -2197,21 +2182,7 @@ function drawChart() {
     cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
   }
 
-  zoneTrades.forEach(zt => {
-    if (!zt.zone || zt.mode !== 'LIMIT') return;
-    const rgb = zt.dir > 0 ? '41,98,255' : '249,115,22';
-    const x0 = plotL;
-    const y1 = yOf(zt.zone.max), y2 = yOf(zt.zone.min);
-    cx.save();
-    cx.fillStyle = `rgba(${rgb},.16)`;
-    cx.fillRect(x0, Math.min(y1, y2), plotR - x0, Math.max(1.5, Math.abs(y2 - y1)));
-    cx.strokeStyle = `rgba(${rgb},.5)`;
-    cx.lineWidth = 1;
-    cx.setLineDash([2, 2]);
-    cx.strokeRect(x0, Math.min(y1, y2), plotR - x0, Math.max(1.5, Math.abs(y2 - y1)));
-    cx.restore();
-  });
-
+  // Render Candle Stick
   const bodyW = Math.max(1.5, slot * 0.62);
   cx.lineWidth = 1;
   for (const c of vis) {
@@ -2230,8 +2201,9 @@ function drawChart() {
     cx.fillRect(x - bodyW / 2, bY, bodyW, bH);
   }
 
+  // Render Garis Level Bot / Trade (Entry, TP, SL)
   if (t) {
-    ALL.forEach(l => {
+    L.forEach(l => {
       const y = yOf(l.v);
       cx.save();
       cx.strokeStyle = l.c;
@@ -2266,20 +2238,8 @@ function drawChart() {
     }
   }
 
-  if (vis.length) {
-    const step = Math.max(1, Math.round(vis.length / 5));
-    cx.font = '8px ui-monospace, monospace';
-    cx.fillStyle = 'rgba(148,163,184,.85)';
-    cx.textAlign = 'center';
-    cx.textBaseline = 'bottom';
-    for (let i = 0; i < vis.length; i += step) {
-      const c = vis[i];
-      const hm = new Date(c.t + 7 * 3600000).toISOString().slice(11, 16);
-      cx.fillText(hm, xOfT(c.t), CH - 1);
-    }
-  }
-
-  const tags = ALL.map(l => ({ text: (l.hit ? '✓ ' : '') + l.label + ' ' + fmt(l.v), c: l.c, bg: l.bg, y: yOf(l.v) }));
+  // Label di Sisi Kanan Chart
+  const tags = L.map(l => ({ text: (l.hit ? '✓ ' : '') + l.label + ' ' + fmt(l.v), c: l.c, bg: l.bg, y: yOf(l.v) }));
   if (live != null) {
     tags.push({
       text: fmt(live),
@@ -2293,10 +2253,6 @@ function drawChart() {
   const GAP = 15, capT = plotT + 6, capB = plotB - 6;
   tags.forEach(g => { g.y = Math.max(capT, Math.min(capB, g.y)); });
   for (let i = 1; i < tags.length; i++) if (tags[i].y < tags[i - 1].y + GAP) tags[i].y = tags[i - 1].y + GAP;
-  if (tags.length && tags[tags.length - 1].y > capB) {
-    tags[tags.length - 1].y = capB;
-    for (let i = tags.length - 2; i >= 0; i--) if (tags[i].y > tags[i + 1].y - GAP) tags[i].y = tags[i + 1].y - GAP;
-  }
 
   cx.font = 'bold 8px ui-monospace, monospace';
   cx.textAlign = 'left';
