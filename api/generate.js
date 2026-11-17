@@ -1,5 +1,5 @@
 // api/generate.js
-// v118 (Scalping 30 Pips + Limit Trial Bot + Pemisahan Total Live vs Vision)
+// v118.1 (Scalping 30 Pips + Limit Trial Bot + Pemisahan Total Live vs Vision + Safe JSON Error Handling)
 
 export const config = {
   api: { bodyParser: { sizeLimit: '15mb' } },
@@ -138,7 +138,6 @@ async function checkAccess(email, isAutoBot) {
     if (!c) return { ok: false, key: 'notRegistered' };
     if (new Date(c.expires_at) <= new Date()) return { ok: false, key: 'expired' };
 
-    // Cek limit trial untuk Auto Bot (maksimal 1x signal bot)
     if (c.status === 'trial' && isAutoBot && c.trialBotUsed) {
       return { ok: false, key: 'trialLimit', error: 'Batas trial habis: Akun trial hanya diizinkan 1x signal bot.' };
     }
@@ -240,32 +239,6 @@ function cleanCandles(rows) {
     .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite)).sort((a, b) => a.t - b.t);
 }
 
-function mergeLiveBar(candles, price, tfMin) {
-  if (!candles.length || !(price > 0)) return candles;
-  const ms = tfMin * 60000;
-  const bucket = Math.floor(Date.now() / ms) * ms;
-  const last = candles[candles.length - 1];
-  if (last.t === bucket) { last.h = Math.max(last.h, price); last.l = Math.min(last.l, price); last.c = price; }
-  else if (last.t < bucket) { candles.push({ t: bucket, o: last.c, h: Math.max(last.c, price), l: Math.min(last.c, price), c: price }); }
-  return candles;
-}
-
-const matchesRef = (arr, ref) => arr.length > 0 && ref > 0 && Math.abs(arr[arr.length - 1].c - ref) / ref <= MAX_SRC_DEVIATION;
-
-async function getCandles(symbol, tf, need, ref) {
-  const cacheKey = `candles_v110_${symbol}_${tf}`;
-  const cached = await kvGetJSON(cacheKey);
-  if (Array.isArray(cached) && cached.length >= need && matchesRef(cached, ref)) return { candles: cached };
-  for (const cand of tlCandidates(symbol)) {
-    const info = await fetchTickerLayerRows(cand, tf, need);
-    if (info.rows.length >= Math.min(need, 60) && matchesRef(info.rows, ref)) {
-      await kvSetJSON(cacheKey, info.rows.slice(-CACHE_BARS[tf]), CACHE_TTL[tf]);
-      return { candles: info.rows };
-    }
-  }
-  return { candles: [] };
-}
-
 function atr(candles, period = 14) {
   if (!candles || candles.length < 2) return 15;
   const trs = [];
@@ -298,7 +271,6 @@ function findSDZones(candles, dir, price) {
     const top = Math.max(bc.o, bc.c), bottom = Math.min(bc.o, bc.c);
     const sl = dir === 1 ? bc.l : bc.h;
 
-    // FRESH ONLY: zona yang sudah ditembus candle sesudahnya dibuang
     let broken = false;
     if (ZONE_FRESH_ONLY) {
       for (let j = k + 1; j < n; j++) {
@@ -314,14 +286,6 @@ function findSDZones(candles, dir, price) {
   return zones.sort((x, y) => x.dist - y.dist);
 }
 
-function analyzePureSMCStructure(candles) {
-  if (!candles || candles.length < 15) return { dir: 1, src: 'Default' };
-  const lastC = candles[candles.length - 1].c;
-  const firstC = candles[0].c;
-  return { dir: lastC >= firstC ? 1 : -1, src: 'BOS Trend' };
-}
-
-// ── STRUKTUR PASAR: swing high/low (fractal) + HH/HL/LH/LL + BOS ──
 function findSwings(c, L = 2) {
   const highs = [], lows = [];
   for (let i = L; i < c.length - L; i++) {
@@ -347,10 +311,9 @@ function readStructure(c, price) {
   if (price < l1.p) return { dir: -1, src: 'BOS turun', bos: true, h1, l1 };
   if (h1.p > h0.p && l1.p > l0.p) return { dir: 1, src: 'HH-HL', bos: false, h1, l1 };
   if (h1.p < h0.p && l1.p < l0.p) return { dir: -1, src: 'LH-LL', bos: false, h1, l1 };
-  return null; // struktur campur / range -> serahkan ke EMA
+  return null;
 }
 
-// ── BATAS SL PER GAYA (memakai GOLD_SL_PIPS & ATR_SL_MULT) ──
 function clampRisk(risk, kind, ctx, atrVal) {
   let min = slFloor(kind, ctx);
   let max;
@@ -368,13 +331,12 @@ function clampRisk(risk, kind, ctx, atrVal) {
 
 const MAX_DIST_ATR = { day: DAY_MAX_DIST_ATR, intraday: 6, swing: 10 };
 
-// ── BUILD ORDER LIMIT: entry selalu di sisi yang benar terhadap harga live ──
 function buildStrictOrder({ dir, zone, atrVal, ctx, kind, rrList, price }) {
   let entry = (zone.top + zone.bottom) / 2;
   let shifted = false;
 
-  if (dir === 1 && entry >= price) { entry = price - 1.0 * atrVal; shifted = true; }   // Buy Limit wajib di bawah live
-  if (dir === -1 && entry <= price) { entry = price + 1.0 * atrVal; shifted = true; }  // Sell Limit wajib di atas live
+  if (dir === 1 && entry >= price) { entry = price - 1.0 * atrVal; shifted = true; }
+  if (dir === -1 && entry <= price) { entry = price + 1.0 * atrVal; shifted = true; }
 
   const invLevel = shifted ? entry : (zone.sl ?? (dir === 1 ? zone.bottom : zone.top));
   const buf = 0.2 * atrVal;
@@ -403,7 +365,6 @@ function buildOcoResult(buy, sell, { ctx, setup, chartContext, confidence, riskL
   };
 }
 
-// ── LIMIT ZONA FRESH: Scalping Konservatif (day), Intraday, Swing ──
 async function runLimitOco(ctx, d, styleName) {
   const kind = STYLES[styleName].kind;
   const rr = STYLES[styleName].rr;
@@ -456,7 +417,6 @@ async function runLimitOco(ctx, d, styleName) {
   };
 }
 
-// ── SCALPING AGRESIF: 1 Arah Searah Struktur (Target 30 Pips / Tanpa OCO) ──
 function emaLast(values, period) {
   if (!values.length) return 0;
   const k = 2 / (period + 1);
@@ -537,7 +497,6 @@ async function runScalp30Pips(ctx, d) {
   };
 }
 
-// ── VISION ANALYZER (TERPISAH TOTAL DARI LIVE MARKET) ──
 async function runVisionAnalysis(style, currentPrice) {
   const px = Number(currentPrice || 2350.00);
   const offset = px * 0.002;
@@ -629,7 +588,7 @@ export default async function handler(req, res) {
     const isAutoBot = !!body.auto;
     const isVisionMode = body.symbol === 'VISION' || (Array.isArray(body.images) && body.images.length > 0);
 
-    // ── CABANG A: JIKA MODE VISION (TERPISAH TOTAL DARI LIVE) ──
+    // ── CABANG A: JIKA MODE VISION ──
     if (isVisionMode) {
       const livePrice = Number(body.price ?? body.currentPrice ?? 2350.00);
       const style = normStyle(body.style || body.mode);
@@ -644,7 +603,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // ── CABANG B: JIKA MODE LIVE / AUTO BOT (CANDLE MARKET) ──
+    // ── CABANG B: JIKA MODE LIVE / AUTO BOT ──
     const access = await checkAccess(email, isAutoBot);
     if (!access.ok) return res.status(200).json({ ok: false, message: access.error || tx({ lang: 'id' })[access.key] || 'Unauthorized' });
 
@@ -675,13 +634,13 @@ export default async function handler(req, res) {
     const result = await RUNNERS[style](ctx, { price, m1, m5, m15 });
     if (!result || !result.plan) return res.status(200).json({ ok: false, message: result?.reason || 'No setup' });
 
-    // Jika Auto Bot berhasil dan akun trial, tandai trial sudah terpakai
     if (isAutoBot) {
       await markTrialAsUsed(email);
     }
 
     return res.status(200).json({ ok: true, mode: 'candles', symbol, style, price, signal: buildSignal(result, 'id') });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    // Menjamin error server selalu dikembalikan dalam format JSON (mencegah error Unexpected token '<')
+    return res.status(200).json({ ok: false, error: err.message || 'Internal server error' });
   }
 }
