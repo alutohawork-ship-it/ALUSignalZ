@@ -1,5 +1,6 @@
 // api/generate.js
-// v118.1 (Scalping 30 Pips + Limit Trial Bot + Pemisahan Total Live vs Vision + Safe JSON Error Handling)
+// v118.2 (Fixed Timeout & Safe JSON Error Handling)
+import { Buffer } from 'buffer';
 
 export const config = {
   api: { bodyParser: { sizeLimit: '15mb' } },
@@ -109,16 +110,35 @@ const withPair = (sym, text) => {
   return `${sym}: ${body}`;
 };
 
+// Helper untuk fetch dengan timeout agar Vercel tidak mengembalikan HTML 504
+async function fetchWithTimeout(url, options = {}, timeout = 8000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+}
+
 async function kv(command) {
   if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) return null;
-  const r = await fetch(process.env.KV_REST_API_URL, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.KV_REST_API_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(command),
-  });
-  const data = await r.json();
-  if (!r.ok || data.error) throw new Error(data.error || `KV HTTP ${r.status}`);
-  return data.result;
+  try {
+    const r = await fetchWithTimeout(process.env.KV_REST_API_URL, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.KV_REST_API_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(command),
+    }, 5000);
+    const data = await r.json();
+    if (!r.ok || data.error) throw new Error(data.error || `KV HTTP ${r.status}`);
+    return data.result;
+  } catch (e) {
+    console.error('KV Error:', e.message);
+    return null;
+  }
 }
 
 async function kvGetJSON(key) {
@@ -199,9 +219,12 @@ async function tlFetch(url) {
   if (!order.length) return { response: null, status: 429, detail: 'All keys in cooldown' };
   for (const idx of order.slice(0, TL_MAX_TRY)) {
     try {
-      const r = await fetch(url, { headers: { 'x-api-key': API_KEYS[idx] } });
+      // Gunakan fetchWithTimeout agar tidak menggantung
+      const r = await fetchWithTimeout(url, { headers: { 'x-api-key': API_KEYS[idx] } }, 8000);
       if (r.ok) return { response: r };
-    } catch {}
+    } catch (err) {
+      console.warn(`TL fetch error (Key ${idx}):`, err.message);
+    }
   }
   return { response: null, status: 500, detail: 'Failed' };
 }
@@ -229,7 +252,9 @@ async function fetchTickerLayerRows(cand, interval, need) {
       o: Number(bar.o ?? bar.open), h: Number(bar.h ?? bar.high),
       l: Number(bar.l ?? bar.low), c: Number(bar.c ?? bar.close)
     })).filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite)).sort((a, b) => a.t - b.t).slice(-Math.max(1, Math.ceil(need)));
-  } catch {}
+  } catch (e) {
+    console.error('TickerLayer parse error:', e.message);
+  }
   return info;
 }
 
@@ -576,14 +601,22 @@ function buildSignal(result, lang) {
 }
 
 export default async function handler(req, res) {
+  // Pastikan header CORS diset agar tidak diblokir browser
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-user-email');
+
+  // Selalu kembalikan JSON, bahkan jika method salah atau error
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
 
   try {
+    // Pastikan body valid (terkadang Vercel mengirim string mentah)
     let body = req.body || {};
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch (e) { throw new Error('Invalid JSON body request'); }
+    }
+
     const email = String(body.email || req.headers['x-user-email'] || 'admin@alu.io').trim();
     const isAutoBot = !!body.auto;
     const isVisionMode = body.symbol === 'VISION' || (Array.isArray(body.images) && body.images.length > 0);
@@ -605,7 +638,10 @@ export default async function handler(req, res) {
 
     // ── CABANG B: JIKA MODE LIVE / AUTO BOT ──
     const access = await checkAccess(email, isAutoBot);
-    if (!access.ok) return res.status(200).json({ ok: false, message: access.error || tx({ lang: 'id' })[access.key] || 'Unauthorized' });
+    if (!access.ok) {
+      const errorMsg = access.error || tx({ lang: 'id' })[access.key] || 'Unauthorized';
+      return res.status(200).json({ ok: false, message: errorMsg });
+    }
 
     const livePrice = Number(body.price ?? body.livePrice ?? body.currentPrice ?? 0);
     const symbol = String(body.symbol || 'XAUUSD').toUpperCase();
@@ -632,15 +668,21 @@ export default async function handler(req, res) {
     const m15 = m15c.length ? m15c : m5c;
 
     const result = await RUNNERS[style](ctx, { price, m1, m5, m15 });
-    if (!result || !result.plan) return res.status(200).json({ ok: false, message: result?.reason || 'No setup' });
+    if (!result || !result.plan) {
+      return res.status(200).json({ ok: false, message: result?.reason || 'No setup found' });
+    }
 
     if (isAutoBot) {
       await markTrialAsUsed(email);
     }
 
     return res.status(200).json({ ok: true, mode: 'candles', symbol, style, price, signal: buildSignal(result, 'id') });
+
   } catch (err) {
-    // Menjamin error server selalu dikembalikan dalam format JSON (mencegah error Unexpected token '<')
-    return res.status(200).json({ ok: false, error: err.message || 'Internal server error' });
+    console.error('Fatal API Error:', err); // Print ke console Vercel untuk debugging
+    // Pastikan response selalu JSON, jangan pernah biarkan Vercel mengembalikan HTML error
+    if (!res.headersSent) {
+      return res.status(200).json({ ok: false, error: err.message || 'Internal server error' });
+    }
   }
 }
