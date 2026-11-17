@@ -1804,6 +1804,46 @@ const RUNNERS = {
   'Swing': runSwing,
 };
 
+// ─────────────────────────── FORMAT BALASAN UNTUK FRONTEND ───────────────────────────
+// Frontend membaca data.signal: { orders:[...] } untuk OCO, atau satu sinyal tunggal.
+function buildSignal(result, lang) {
+  const meta = result.meta || {};
+  const plan = result.plan;
+  const reason = meta.reason || '';
+  const common = {
+    setup: meta.setup || plan.setup || '',
+    confidence: meta.confidence || 'MEDIUM',
+    risk: meta.riskLabel || 'MEDIUM',
+    reason,
+    reasons: { [lang]: reason },
+    chartContext: plan.chartContext || '',
+  };
+  if (plan.isOCO && Array.isArray(plan.orders)) {
+    const orders = plan.orders.map(o => ({
+      signal: o.dir === 1 ? 'BUY' : 'SELL',
+      orderType: 'LIMIT', fill: 'LIMIT', status: 'PENDING',
+      entry: o.entry, sl: o.sl,
+      tp1: o.tps[0] ?? null, tp2: o.tps[1] ?? null, tp3: o.tps[2] ?? null,
+      zone: o.zone || null,
+      zoneLabel: o.tag || '',
+      zoneNote: o.label || '',
+      setup: plan.setup || common.setup,
+      confidence: common.confidence, risk: common.risk,
+    }));
+    return { ...common, setup: plan.setup || common.setup, orders };
+  }
+  return {
+    ...common,
+    signal: result.dir === 1 ? 'BUY' : 'SELL',
+    orderType: plan.orderType, fill: 'LIMIT', status: plan.status,
+    entry: plan.entry, sl: plan.sl,
+    tp1: plan.tps[0] ?? null, tp2: plan.tps[1] ?? null, tp3: plan.tps[2] ?? null,
+    zone: plan.zone || null,
+    zoneLabel: plan.zoneNote || '',
+    zoneNote: plan.chartContext || '',
+  };
+}
+
 // ═══════════════════════════ HANDLER ═══════════════════════════
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -1839,11 +1879,17 @@ export default async function handler(req, res) {
       const trial = await checkTrialLimit(email, access.status);
       if (!trial.ok) return sendErr(429, trial.msg);
       const v = await runVision(body, images, lang, livePrice);
-      if (!v.ok) return res.status(200).json({ ok: false, error: null, message: v.reason, reason: v.reason, plan: null, meta: { reason: v.reason } });
-      const f = v.ctx.f;
+      if (!v.ok) return sendErr(422, v.reason);
+      const pl = v.plan;
       return res.status(200).json({
-        ok: true, mode: 'vision', symbol: v.symbol, price: livePrice || f(v.plan.entry),
-        dir: v.dir, plan: v.plan, meta: v.meta,
+        ok: true, mode: 'vision', symbol: v.symbol,
+        signal: {
+          signal: v.dir === 1 ? 'BUY' : 'SELL', orderType: pl.orderType,
+          entry: pl.entry, sl: pl.sl, tp1: pl.tps[0] ?? null, tp2: pl.tps[1] ?? null, tp3: pl.tps[2] ?? null,
+          confidence: v.meta.confidence, risk: v.meta.riskLabel, setup: v.meta.setup,
+          pipSize: v.ctx.pip, lastPrice: livePrice || pl.entry, symbol: v.symbol, timeframes: v.meta.timeframes,
+          reason: v.meta.reason, reasons: { [lang]: v.meta.reason },
+        },
       });
     }
 
@@ -1872,11 +1918,12 @@ export default async function handler(req, res) {
     const tfs = Object.keys(need);
     const triedAll = [];
     const got = await Promise.all(tfs.map(async tf => {
-      const fromClient = clientCandles(body, tf);
-      if (fromClient.length >= minFor(style, tf) && matchesRef(fromClient, price)) return fromClient;
       const r = await getCandles(symbol, TF_API[tf], need[tf], price);
       if (r.tried) triedAll.push(...r.tried);
-      return r.candles;
+      if (r.candles.length >= minFor(style, tf)) return r.candles;
+      const fromClient = clientCandles(body, tf);
+      if (fromClient.length >= minFor(style, tf) && matchesRef(fromClient, price)) return fromClient;
+      return r.candles.length >= fromClient.length ? r.candles : fromClient;
     }));
 
     const d = { price, m1: [], m5: [], m15: [], recentSL: body.recentSL };
@@ -1902,7 +1949,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: true, mode: 'candles', symbol, style,
       label: lang === 'en' ? cfg.labelEn : cfg.label,
-      price, dir: result.dir ?? 0, plan: result.plan, meta: result.meta,
+      price, signal: buildSignal(result, lang),
     });
   } catch (err) {
     console.error('[generate] unhandled error:', err && err.stack ? err.stack : err);
