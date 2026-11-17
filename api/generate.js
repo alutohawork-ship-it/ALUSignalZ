@@ -1,5 +1,5 @@
 // api/generate.js
-// v110 (Perbaikan Total OCO & Zona Harga Sell/Buy terhadap Harga Live)
+// v111 (Fix: ctx.f is not a function, meta.setup kosong, sinkronisasi zona saat entry digeser)
 
 export const config = {
   api: { bodyParser: { sizeLimit: '15mb' } },
@@ -295,33 +295,40 @@ function analyzePureSMCStructure(candles) {
 function buildStrictOrder({ dir, zone, atrVal, ctx, kind, rrList, price }) {
   const zoneMid = (zone.top + zone.bottom) / 2;
   let entry = zoneMid;
+  let shifted = false;
 
   // Validasi absolut posisi harga limit order terhadap harga live
-  if (dir === 1 && entry >= price) entry = price - 1.0 * atrVal; // Buy Limit wajib di bawah live
-  if (dir === -1 && entry <= price) entry = price + 1.0 * atrVal; // Sell Limit wajib di atas live
+  if (dir === 1 && entry >= price) { entry = price - 1.0 * atrVal; shifted = true; } // Buy Limit wajib di bawah live
+  if (dir === -1 && entry <= price) { entry = price + 1.0 * atrVal; shifted = true; } // Sell Limit wajib di atas live
 
-  const invLevel = zone.sl ?? (dir === 1 ? zone.bottom : zone.top);
+  // SL: dari level invalidasi zona; kalau entry digeser, SL dihitung dari entry
+  const invLevel = shifted
+    ? entry
+    : (zone.sl ?? (dir === 1 ? zone.bottom : zone.top));
   const buf = 0.2 * atrVal;
   const sl = dir === 1 ? invLevel - buf : invLevel + buf;
   const risk = Math.max(Math.abs(entry - sl), slFloor(kind, ctx));
-  
-  const finalSl = entry - dir * risk;
+
+  const finalSl = entry - dir * risk; // selalu di sisi yang benar
   const tps = rrList.map(m => entry + dir * risk * m);
+
+  const zoneOut = shifted
+    ? { min: entry - 0.2 * atrVal, max: entry + 0.2 * atrVal }
+    : { min: zone.bottom, max: zone.top };
 
   return {
     dir, entry, sl: finalSl, risk, tps,
     label: `${dir === 1 ? 'Buy' : 'Sell'} Limit · ${dir === 1 ? 'Demand' : 'Supply'} (50% Zone)`,
-    zone: { min: zone.bottom, max: zone.top },
+    zone: zoneOut,
     tag: dir === 1 ? 'Demand' : 'Supply',
   };
 }
 
 function buildOcoResult(buy, sell, { ctx, setup, chartContext, confidence }) {
-  const fx = v => Number(Number(v).toFixed(ctx.dec));
-  const manual = `OCO Konservatif 2 Arah. BUY LIMIT @ ${fx(buy.entry)} (SL ${fx(buy.sl)}) & SELL LIMIT @ ${fx(sell.entry)} (SL ${fx(sell.sl)}).`;
+  const manual = `OCO Konservatif 2 Arah. BUY LIMIT @ ${ctx.f(buy.entry)} (SL ${ctx.f(buy.sl)}) & SELL LIMIT @ ${ctx.f(sell.entry)} (SL ${ctx.f(sell.sl)}).`;
   return {
     plan: { isOCO: true, orders: [buy, sell], setup, chartContext },
-    meta: { confidence, riskLabel: 'MEDIUM', reason: withPair(ctx.symbol, manual) },
+    meta: { setup, confidence, riskLabel: 'MEDIUM', reason: withPair(ctx.symbol, manual) },
   };
 }
 
@@ -387,7 +394,7 @@ function buildSignal(result, lang) {
   const meta = result.meta || {};
   const plan = result.plan;
   const reason = meta.reason || '';
-  const common = { setup: meta.setup || '', confidence: meta.confidence || 'HIGH', risk: 'MEDIUM', reason, reasons: { [lang]: reason } };
+  const common = { setup: meta.setup || plan.setup || '', confidence: meta.confidence || 'HIGH', risk: 'MEDIUM', reason, reasons: { [lang]: reason }, chartContext: plan.chartContext || '' };
 
   if (plan.isOCO && Array.isArray(plan.orders)) {
     return {
@@ -423,8 +430,14 @@ export default async function handler(req, res) {
     const symbol = String(body.symbol || 'XAUUSD').toUpperCase();
     const style = normStyle(body.style || body.mode);
     const price = livePrice > 0 ? livePrice : 3875.29; // Mengikuti harga live terkini
-    const dec = DECIMALS[symbol] || 2;
-    const ctx = { symbol, lang: 'id', dec, pip: pipSizeOf(symbol, dec), prof: pairProfile(symbol), gold: isGold(symbol) };
+    const dec = DECIMALS[symbol] ?? 2;
+    const ctx = {
+      symbol, lang: 'id', dec,
+      pip: pipSizeOf(symbol, dec),
+      prof: pairProfile(symbol),
+      gold: isGold(symbol),
+      f: v => Number(Number(v).toFixed(dec)), // FIX: helper format angka (sebelumnya hilang -> "ctx.f is not a function")
+    };
 
     const m5 = clientCandles(body, 'm5').length ? clientCandles(body, 'm5') : Array.from({ length: 100 }, (_, i) => ({ t: Date.now() - i * 300000, o: price, h: price + 1, l: price - 1, c: price }));
     const m15 = clientCandles(body, 'm15').length ? clientCandles(body, 'm15') : m5;
