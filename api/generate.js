@@ -1,5 +1,5 @@
 // api/generate.js
-// v111 (Fix: ctx.f is not a function, meta.setup kosong, sinkronisasi zona saat entry digeser)
+// v112 (Fix: ctx.f, meta.setup, sinkron zona, baca currentPrice dari frontend)
 
 export const config = {
   api: { bodyParser: { sizeLimit: '15mb' } },
@@ -426,7 +426,7 @@ export default async function handler(req, res) {
     const access = await checkAccess(email);
     if (!access.ok) return res.status(403).json({ ok: false, error: 'Unauthorized' });
 
-    const livePrice = Number(body.price ?? body.livePrice ?? 0);
+    const livePrice = Number(body.price ?? body.livePrice ?? body.currentPrice ?? 0); // FIX: frontend mengirim currentPrice
     const symbol = String(body.symbol || 'XAUUSD').toUpperCase();
     const style = normStyle(body.style || body.mode);
     const price = livePrice > 0 ? livePrice : 3875.29; // Mengikuti harga live terkini
