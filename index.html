@@ -79,7 +79,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
       <h1 class="text-xl font-extrabold text-white pt-2 tracking-tight">Welcome, Alu Signal Z</h1>
       <p data-i18n="loginSub" class="text-[11px] text-gray-400"></p>
     </div>
-    <form id="authForm" class="space-y-4 pt-2">
+    <form id="authForm" class="space-y-4 pt-2" onsubmit="handleLogin(event)">
       <div>
         <label data-i18n="lblAccess" class="text-[10px] font-bold text-gray-400 block mb-1 tracking-wider"></label>
         <input type="text" id="authInput" required placeholder="nama@email.com / Kode Admin" class="w-full bg-darkbg border border-panelborder rounded-xl p-3 text-xs font-mono text-white focus:outline-none focus:border-accentblue">
@@ -2775,19 +2775,19 @@ async function generateSignal() {
 }
 </script>
 
-<!-- SCRIPT AUTO BOT TERINTEGRASI AMAN -->
+<!-- SCRIPT AUTO BOT TERINTEGRASI & RESPONSIF -->
 <script>
 (function () {
   'use strict';
 
-  const BOT_KEY = 'aluBot_v1';
+  const BOT_KEY = 'aluBot_v2';
   const BSYM = 'XAUUSD';
-  const M5 = 300000;
-  const CD_WIN = 5 * 60000;
-  const CD_LOSS = 10 * 60000;
+  const SCAN_INTERVAL = 15000; 
+  const CD_WIN = 2 * 60000;   
+  const CD_LOSS = 5 * 60000;  
   const MAX_LOSS = 3;
-  const PEND_MS = 50 * 60000;
-  const RUN_AWAY_ATR = 1.0;
+  const PEND_MS = 30 * 60000;
+  const RUN_AWAY_ATR = 1.2;
 
   const BOT = { on: false, since: 0, mode: 'loop', style: 'Scalping', session: false, launched: false, lastScan: 0, msg: '', last: '', busy: false };
 
@@ -2814,6 +2814,7 @@ async function generateSignal() {
     }
     return n ? s / n : 0;
   }
+
   function lossStreak() {
     const list = trades
       .filter(t => t.auto && t.status === 'CLOSED' && t.result !== 'CANCEL' && (t.createdAt || 0) >= BOT.since)
@@ -2822,6 +2823,7 @@ async function generateSignal() {
     for (let i = list.length - 1; i >= 0; i--) { if (list[i].result === 'SL') n++; else break; }
     return n;
   }
+
   function cooldownLeft() {
     const last = trades.filter(t => t.auto && t.status === 'CLOSED')
       .sort((a, b) => (a.closedAt || 0) - (b.closedAt || 0)).pop();
@@ -2829,12 +2831,13 @@ async function generateSignal() {
     const w = last.result === 'SL' ? CD_LOSS : CD_WIN;
     return Math.max(0, (last.closedAt || 0) + w - Date.now());
   }
+
   function botState() {
     const open = openOf(BSYM)[0];
-    if (open) return open.status === 'PENDING' ? { k: 'PENDING', c: 'yellow' } : { k: 'RUNNING', c: 'blue' };
+    if (open) return open.status === 'PENDING' ? { k: 'PENDING SETUP', c: 'yellow' } : { k: 'POSITION LIVE', c: 'blue' };
     if (!BOT.on) return /^Berhenti/.test(BOT.msg) ? { k: 'STOPPED', c: 'red' } : { k: 'OFF', c: 'gray' };
     if (cooldownLeft() > 0) return { k: 'COOLDOWN', c: 'gray' };
-    return { k: 'WAITING SETUP', c: 'green' };
+    return { k: 'SCANNING SETUP', c: 'green' };
   }
 
   function initBotListeners() {
@@ -2855,14 +2858,15 @@ async function generateSignal() {
   function toggleBot() {
     if (BOT.on) {
       BOT.on = false;
-      BOT.msg = 'Bot dihentikan. Trade berjalan tetap dipantau.';
+      BOT.msg = 'Bot dijeda. Posisi aktif tetap dipantau.';
     } else {
       BOT.on = true;
       BOT.since = Date.now();
       BOT.launched = false;
       BOT.lastScan = 0;
       BOT.last = '';
-      BOT.msg = 'Bot aktif...';
+      BOT.msg = 'Bot EA aktif, memindai market...';
+      if($('marketSelect')) { $('marketSelect').value = 'AUTOBOT'; syncMarket(); }
     }
     saveBotState();
     renderBotUI();
@@ -2879,7 +2883,7 @@ async function generateSignal() {
     }
     const btn = $('botBtn');
     if (btn) {
-        btn.textContent = BOT.on ? 'STOP BOT' : 'START BOT';
+        btn.textContent = BOT.on ? 'STOP BOT (EA)' : 'START BOT (EA)';
         btn.className = 'w-full font-bold py-2 rounded-lg text-xs transition ' +
           (BOT.on ? 'bg-red-500/20 text-red-400 border border-red-500/40' : 'bg-emerald-600 hover:bg-emerald-500 text-white');
     }
@@ -2896,68 +2900,74 @@ async function generateSignal() {
   async function tickBot() {
     if (!BOT.on) return renderBotUI();
     const now = Date.now();
-    if (!marketOpen(BSYM)) { BOT.msg = 'Market tutup (weekend).'; return renderBotUI(); }
+    if (!marketOpen(BSYM)) { BOT.msg = 'Market libur (Weekend).'; return renderBotUI(); }
 
     const open = openOf(BSYM);
     const pend = open.find(t => t.status === 'PENDING' && t.auto && !t.ocoId && t.px0 != null);
     if (pend) {
       const a = atr5(), px = prices[BSYM] && prices[BSYM].price;
       if (a > 0 && px != null && pend.dir * (px - pend.px0) > RUN_AWAY_ATR * a) {
-        cancelTrade(pend, 'Harga lari menjauh dari entry');
-        BOT.msg = 'Order dibatalkan: harga lari menjauh.';
+        cancelTrade(pend, 'Harga lari dari zona entry');
+        BOT.msg = 'Order dibatalkan: harga terlewat.';
         return renderBotUI();
       }
     }
 
     if (open.length) {
-      BOT.msg = open[0].status === 'PENDING' ? 'Menunggu harga menyentuh entry...' : 'Posisi berjalan, dipantau TP/SL.';
+      BOT.msg = open[0].status === 'PENDING' ? 'Menunggu harga masuk zona entry...' : 'Posisi berjalan (Monitoring TP/SL).';
       return renderBotUI();
     }
 
     if (BOT.mode === 'once' && BOT.launched) {
       BOT.on = false; BOT.launched = false;
-      BOT.msg = 'Selesai: trade sudah ditutup.';
+      BOT.msg = 'Selesai: target 1 trade tercapai.';
       saveBotState();
       return renderBotUI();
     }
 
     if (lossStreak() >= MAX_LOSS) {
       BOT.on = false;
-      BOT.msg = `Berhenti: ${MAX_LOSS} loss beruntun.`;
+      BOT.msg = `Berhenti otomatis: ${MAX_LOSS}x loss beruntun.`;
       saveBotState();
       return renderBotUI();
     }
 
     const cd = cooldownLeft();
-    if (cd > 0) { BOT.msg = 'Cooldown ' + Math.ceil(cd / 1000) + ' dtk'; return renderBotUI(); }
+    if (cd > 0) { BOT.msg = 'Cooldown jeda trade: ' + Math.ceil(cd / 1000) + ' detik'; return renderBotUI(); }
 
     if (BOT.session) {
       const h = new Date().getUTCHours();
-      if (h < 7 || h >= 21) { BOT.msg = 'Di luar sesi London/NY...'; return renderBotUI(); }
+      if (h < 7 || h >= 21) { BOT.msg = 'Menunggu sesi London/NY (07–21 UTC)...'; return renderBotUI(); }
     }
 
-    const bucket = Math.floor(now / M5);
-    if (BOT.lastScan === bucket) {
-      BOT.msg = 'Menunggu setup · scan berikutnya ' + Math.ceil(((bucket + 1) * M5 - now) / 1000) + ' dtk' + (BOT.last ? ' · ' + BOT.last : '');
+    if (now - BOT.lastScan < SCAN_INTERVAL) {
+      BOT.msg = 'Mencari setup bagus... (Scan ulang dalam ' + Math.ceil((SCAN_INTERVAL - (now - BOT.lastScan)) / 1000) + 's)';
       return renderBotUI();
     }
-    if (now - bucket * M5 < 4000) return;
 
     const px = prices[BSYM];
-    if (!px || now - px.recv > 15000) { BOT.msg = 'Menunggu harga live...'; return renderBotUI(); }
-    if (seriesRows(BSYM, '5m').length < 40) { BOT.msg = 'Menunggu data candle M5...'; return renderBotUI(); }
+    if (!px || now - px.recv > 15000) { BOT.msg = 'Menghubungkan feed harga live...'; return renderBotUI(); }
+    if (seriesRows(BSYM, '5m').length < 20) { BOT.msg = 'Memuat riwayat candle chart...'; return renderBotUI(); }
     if (BOT.busy) return;
 
     BOT.busy = true;
-    BOT.lastScan = bucket;
-    BOT.msg = 'Menganalisa...';
+    BOT.lastScan = now;
+    BOT.msg = 'Menganalisa struktur SMC & FVG...';
     saveBotState(); renderBotUI();
+
     try {
       const r = await generateLiveBot({ auto: true });
-      if (r.ok) { BOT.launched = true; BOT.last = ''; BOT.msg = 'Sinyal dibuat.'; }
-      else BOT.last = r.msg || 'Belum ada setup';
+      if (r.ok) { 
+        BOT.launched = true; 
+        BOT.last = ''; 
+        BOT.msg = 'Setup ditemukan! Signal dipasang.'; 
+      } else { 
+        BOT.last = r.msg || 'Belum ada setup valid';
+        BOT.msg = 'Scan ulang: ' + BOT.last;
+      }
     } catch (e) {
       BOT.last = 'Error: ' + e.message;
+      BOT.msg = BOT.last;
     } finally {
       BOT.busy = false;
       saveBotState(); renderBotUI();
@@ -2993,7 +3003,7 @@ async function generateSignal() {
 
     const data = res.data;
     if (!res.ok || !data || !data.ok) {
-      return { ok: false, msg: (data && (data.message || data.reason || data.error || data.msg)) || 'Belum ada setup valid.' };
+      return { ok: false, msg: (data && (data.message || data.reason || data.error || data.msg)) || 'Belum ada setup.' };
     }
 
     const sig = data.signal;
@@ -3047,7 +3057,7 @@ async function generateSignal() {
     initBotListeners();
     if (BOT.on) { if($('marketSelect')) $('marketSelect').value = 'AUTOBOT'; syncMarket(); }
     renderBotUI();
-    setInterval(tickBot, 2000);
+    setInterval(tickBot, 3000); 
     setInterval(renderBotUI, 1000);
   }
 
