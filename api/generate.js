@@ -1,5 +1,5 @@
 // api/generate.js
-// v112 (Fix: ctx.f, meta.setup, sinkron zona, baca currentPrice dari frontend)
+// v113 (Strategi dipisah: Scalping Agresif = Market Now; Konservatif/Intraday/Swing = OCO Limit; SL dibatasi; zona fresh only)
 
 export const config = {
   api: { bodyParser: { sizeLimit: '15mb' } },
@@ -278,6 +278,17 @@ function findSDZones(candles, dir, price) {
     const bc = candles[base];
     const top = Math.max(bc.o, bc.c), bottom = Math.min(bc.o, bc.c);
     const sl = dir === 1 ? bc.l : bc.h;
+
+    // FRESH ONLY: zona yang sudah ditembus candle sesudahnya dibuang
+    let broken = false;
+    if (ZONE_FRESH_ONLY) {
+      for (let j = k + 1; j < n; j++) {
+        if (dir === 1 && candles[j].l < bottom) { broken = true; break; }
+        if (dir === -1 && candles[j].h > top) { broken = true; break; }
+      }
+    }
+    if (broken) continue;
+
     const dist = dir === 1 ? Math.max(0, price - top) : Math.max(0, bottom - price);
     zones.push({ top, bottom, sl, dist, fresh: true });
   }
@@ -291,27 +302,39 @@ function analyzePureSMCStructure(candles) {
   return { dir: lastC >= firstC ? 1 : -1, src: 'BOS Trend' };
 }
 
-// ── BUILD ORDER DENGAN FILTER HARGA LIVE YANG KETAT ──
+// ── BATAS SL PER GAYA (memakai GOLD_SL_PIPS & ATR_SL_MULT) ──
+function clampRisk(risk, kind, ctx, atrVal) {
+  let min = slFloor(kind, ctx);
+  let max;
+  if (ctx.gold && GOLD_SL_PIPS[kind]) {
+    min = Math.max(min, GOLD_SL_PIPS[kind][0] * ctx.pip);
+    max = GOLD_SL_PIPS[kind][1] * ctx.pip;
+  } else {
+    const m = ATR_SL_MULT[kind] || [1, 3];
+    min = Math.max(min, m[0] * atrVal);
+    max = m[1] * atrVal;
+  }
+  if (max < min) max = min;
+  return Math.min(Math.max(risk, min), max);
+}
+
+const MAX_DIST_ATR = { day: DAY_MAX_DIST_ATR, intraday: 6, swing: 10 };
+
+// ── BUILD ORDER LIMIT: entry selalu di sisi yang benar terhadap harga live ──
 function buildStrictOrder({ dir, zone, atrVal, ctx, kind, rrList, price }) {
-  const zoneMid = (zone.top + zone.bottom) / 2;
-  let entry = zoneMid;
+  let entry = (zone.top + zone.bottom) / 2;
   let shifted = false;
 
-  // Validasi absolut posisi harga limit order terhadap harga live
-  if (dir === 1 && entry >= price) { entry = price - 1.0 * atrVal; shifted = true; } // Buy Limit wajib di bawah live
-  if (dir === -1 && entry <= price) { entry = price + 1.0 * atrVal; shifted = true; } // Sell Limit wajib di atas live
+  if (dir === 1 && entry >= price) { entry = price - 1.0 * atrVal; shifted = true; }   // Buy Limit wajib di bawah live
+  if (dir === -1 && entry <= price) { entry = price + 1.0 * atrVal; shifted = true; }  // Sell Limit wajib di atas live
 
-  // SL: dari level invalidasi zona; kalau entry digeser, SL dihitung dari entry
-  const invLevel = shifted
-    ? entry
-    : (zone.sl ?? (dir === 1 ? zone.bottom : zone.top));
+  const invLevel = shifted ? entry : (zone.sl ?? (dir === 1 ? zone.bottom : zone.top));
   const buf = 0.2 * atrVal;
-  const sl = dir === 1 ? invLevel - buf : invLevel + buf;
-  const risk = Math.max(Math.abs(entry - sl), slFloor(kind, ctx));
+  const rawSl = dir === 1 ? invLevel - buf : invLevel + buf;
+  const risk = clampRisk(Math.abs(entry - rawSl), kind, ctx, atrVal);
 
-  const finalSl = entry - dir * risk; // selalu di sisi yang benar
+  const finalSl = entry - dir * risk;
   const tps = rrList.map(m => entry + dir * risk * m);
-
   const zoneOut = shifted
     ? { min: entry - 0.2 * atrVal, max: entry + 0.2 * atrVal }
     : { min: zone.bottom, max: zone.top };
@@ -324,57 +347,109 @@ function buildStrictOrder({ dir, zone, atrVal, ctx, kind, rrList, price }) {
   };
 }
 
-function buildOcoResult(buy, sell, { ctx, setup, chartContext, confidence }) {
-  const manual = `OCO Konservatif 2 Arah. BUY LIMIT @ ${ctx.f(buy.entry)} (SL ${ctx.f(buy.sl)}) & SELL LIMIT @ ${ctx.f(sell.entry)} (SL ${ctx.f(sell.sl)}).`;
+function buildFallbackOrder({ dir, atrVal, ctx, kind, rrList, price }) {
+  const entry = price - dir * 1.5 * atrVal;
+  const risk = clampRisk(2.5 * atrVal, kind, ctx, atrVal);
   return {
-    plan: { isOCO: true, orders: [buy, sell], setup, chartContext },
-    meta: { setup, confidence, riskLabel: 'MEDIUM', reason: withPair(ctx.symbol, manual) },
+    dir, entry, sl: entry - dir * risk, risk, tps: rrList.map(m => entry + dir * risk * m),
+    label: `${dir === 1 ? 'Buy' : 'Sell'} Limit (Fallback)`,
+    zone: { min: Math.min(entry, entry + dir * 0.2 * atrVal), max: Math.max(entry, entry + dir * 0.2 * atrVal) },
+    tag: dir === 1 ? 'Demand' : 'Supply',
   };
 }
 
-async function runDay(ctx, d) {
+function buildOcoResult(buy, sell, { ctx, setup, chartContext, confidence, riskLabel }) {
+  const manual = `${setup}. BUY LIMIT @ ${ctx.f(buy.entry)} (SL ${ctx.f(buy.sl)}) & SELL LIMIT @ ${ctx.f(sell.entry)} (SL ${ctx.f(sell.sl)}).`;
+  return {
+    plan: { isOCO: true, orders: [buy, sell], setup, chartContext },
+    meta: { setup, confidence, riskLabel: riskLabel || 'MEDIUM', reason: withPair(ctx.symbol, manual) },
+  };
+}
+
+// ── LIMIT OCO 2 ARAH: dipakai Scalping Konservatif (day), Intraday, Swing ──
+async function runLimitOco(ctx, d, styleName) {
+  const kind = STYLES[styleName].kind;
+  const rr = STYLES[styleName].rr;
   const { price, m5, m15 } = d;
-  const atr15 = atrOf(m15, ctx.pip);
-  const atr5 = atrOf(m5, ctx.pip);
-  const rr = STYLES['Day Trading'].rr;
+  const zoneRows = kind === 'day' && m5.length >= 40 && m15.length < 40 ? m5 : m15;
+  const atrVal = atrOf(zoneRows, ctx.pip);
+  const maxDist = (MAX_DIST_ATR[kind] || 4) * atrVal;
 
-  // 1. Cari zona Demand (di bawah harga live)
-  const rawDemandZones = findSDZones(m15, 1, price).filter(z => z.top < price);
-  // 2. Cari zona Supply (di atas harga live)
-  const rawSupplyZones = findSDZones(m15, -1, price).filter(z => z.bottom > price);
+  const demand = findSDZones(zoneRows, 1, price).filter(z => z.top < price && (price - (z.top + z.bottom) / 2) <= maxDist);
+  const supply = findSDZones(zoneRows, -1, price).filter(z => z.bottom > price && ((z.top + z.bottom) / 2 - price) <= maxDist);
 
-  let buyOrder, sellOrder;
+  const base = { atrVal, ctx, kind, rrList: rr, price };
+  const buy = demand.length ? buildStrictOrder({ dir: 1, zone: demand[0], ...base }) : buildFallbackOrder({ dir: 1, ...base });
+  const sell = supply.length ? buildStrictOrder({ dir: -1, zone: supply[0], ...base }) : buildFallbackOrder({ dir: -1, ...base });
 
-  if (rawDemandZones.length > 0) {
-    buyOrder = buildStrictOrder({ dir: 1, zone: rawDemandZones[0], atrVal: atr15, ctx, kind: 'day', rrList: rr, price });
-  } else {
-    const entry = price - 1.5 * atr5;
-    const sl = entry - 2.5 * atr5;
-    const risk = Math.abs(entry - sl);
-    buyOrder = { dir: 1, entry, sl, risk, tps: rr.map(m => entry + m * risk), label: 'Buy Limit (Fallback)', zone: { min: entry - 0.2 * atr5, max: entry }, tag: 'Demand' };
-  }
-
-  if (rawSupplyZones.length > 0) {
-    sellOrder = buildStrictOrder({ dir: -1, zone: rawSupplyZones[0], atrVal: atr15, ctx, kind: 'day', rrList: rr, price });
-  } else {
-    const entry = price + 1.5 * atr5;
-    const sl = entry + 2.5 * atr5;
-    const risk = Math.abs(entry - sl);
-    sellOrder = { dir: -1, entry, sl, risk, tps: rr.map(m => entry - m * risk), label: 'Sell Limit (Fallback)', zone: { min: entry, max: entry + 0.2 * atr5 }, tag: 'Supply' };
-  }
-
-  const asLimitLeg = o => ({ ...o, orderType: 'LIMIT', status: 'PENDING' });
-  const chartContext = `OCO Konservatif: Buy Limit di bawah harga live (${ctx.f(buyOrder.entry)}) & Sell Limit di atas harga live (${ctx.f(sellOrder.entry)}). Live Price: ${ctx.f(price)}`;
-
-  return buildOcoResult(asLimitLeg(buyOrder), asLimitLeg(sellOrder), {
-    ctx, setup: 'Scalping Konservatif OCO (Trend & Counter-Trend)', chartContext, confidence: 'HIGH',
+  const leg = o => ({ ...o, orderType: 'LIMIT', status: 'PENDING' });
+  const setup = `${STYLES[styleName].label}`;
+  const chartContext = `${setup}: Buy Limit ${ctx.f(buy.entry)} (SL ${ctx.f(buy.sl)}) & Sell Limit ${ctx.f(sell.entry)} (SL ${ctx.f(sell.sl)}). Live ${ctx.f(price)}`;
+  return buildOcoResult(leg(buy), leg(sell), {
+    ctx, setup, chartContext,
+    confidence: demand.length && supply.length ? 'HIGH' : 'MEDIUM',
+    riskLabel: kind === 'day' ? 'MEDIUM' : 'LOW',
   });
+}
+
+const runDay = (ctx, d) => runLimitOco(ctx, d, 'Day Trading');
+
+// ── SCALPING AGRESIF: Buy Now / Sell Now, SL ketat, satu arah ──
+function emaLast(values, period) {
+  if (!values.length) return 0;
+  const k = 2 / (period + 1);
+  let prev = values[0];
+  for (let i = 1; i < values.length; i++) prev = values[i] * k + prev * (1 - k);
+  return prev;
+}
+
+async function runScalp(ctx, d) {
+  const { price, m1, m5, m15 } = d;
+  const rr = STYLES['Scalping'].rr;
+  const base = m5.length >= 20 ? m5 : m15;
+  const atr5 = atrOf(base, ctx.pip);
+  const atrFast = m1 && m1.length >= 30 ? atrOf(m1, ctx.pip) : atr5;
+
+  // Skor arah: EMA cepat vs lambat, posisi harga, momentum 10 candle
+  const closes = base.map(c => c.c);
+  const fast = emaLast(closes, 9), slow = emaLast(closes, 21);
+  let score = 0;
+  score += fast >= slow ? 1 : -1;
+  score += price >= slow ? 1 : -1;
+  if (closes.length > 11) score += closes[closes.length - 1] >= closes[closes.length - 11] ? 1 : -1;
+
+  // Area pantulan: harga dekat zona demand/supply yang masih fresh
+  const dz = findSDZones(m15.length >= 40 ? m15 : base, 1, price).find(z => price <= z.top + 0.5 * atr5 && price >= z.bottom - 0.5 * atr5);
+  const sz = findSDZones(m15.length >= 40 ? m15 : base, -1, price).find(z => price >= z.bottom - 0.5 * atr5 && price <= z.top + 0.5 * atr5);
+  let bounce = '';
+  if (dz && !sz) { score += 2; bounce = 'pantulan demand'; }
+  if (sz && !dz) { score -= 2; bounce = 'pantulan supply'; }
+
+  const dir = score > 0 ? 1 : score < 0 ? -1 : (base[base.length - 1].c >= base[base.length - 1].o ? 1 : -1);
+
+  // SL ketat: berbasis ATR cepat, dibatasi GOLD_SL_PIPS.scalp / ATR_SL_MULT.scalp
+  const raw = 1.5 * atrFast;
+  const risk = clampRisk(raw, 'scalp', ctx, atr5);
+  const entry = price;
+  const sl = entry - dir * risk;
+  const tps = rr.map(m => entry + dir * risk * m);
+
+  const setup = 'Scalping Agresif (Market Now)';
+  const reason = withPair(ctx.symbol,
+    `${dir === 1 ? 'BUY NOW' : 'SELL NOW'} @ ${ctx.f(entry)}, SL ${ctx.f(sl)}, TP1 ${ctx.f(tps[0])}. Arah dari EMA9/21 dan momentum M5${bounce ? ', area ' + bounce : ''}. Risiko tinggi, tanpa limit order.`);
+
+  return {
+    dir,
+    plan: { isOCO: false, orderType: 'MARKET', status: 'RUNNING', entry, sl, tps, setup },
+    meta: { setup, confidence: 'MEDIUM', riskLabel: 'HIGH', reason },
+  };
 }
 
 function normStyle(raw) {
   const k = String(raw || '').toLowerCase().replace(/[^a-z]/g, '');
   if (k.includes('swing')) return 'Swing';
   if (k.includes('intraday')) return 'Intraday';
+  if (k.includes('scalp')) return 'Scalping';
   return 'Day Trading';
 }
 
@@ -385,16 +460,17 @@ function clientCandles(body, tf) {
 }
 
 const RUNNERS = {
-  'Day Trading': runDay,
-  'Intraday': async (ctx, d) => runDay(ctx, d),
-  'Swing': async (ctx, d) => runDay(ctx, d),
+  'Scalping': runScalp,
+  'Day Trading': (ctx, d) => runLimitOco(ctx, d, 'Day Trading'),
+  'Intraday': (ctx, d) => runLimitOco(ctx, d, 'Intraday'),
+  'Swing': (ctx, d) => runLimitOco(ctx, d, 'Swing'),
 };
 
 function buildSignal(result, lang) {
   const meta = result.meta || {};
   const plan = result.plan;
   const reason = meta.reason || '';
-  const common = { setup: meta.setup || plan.setup || '', confidence: meta.confidence || 'HIGH', risk: 'MEDIUM', reason, reasons: { [lang]: reason }, chartContext: plan.chartContext || '' };
+  const common = { setup: meta.setup || plan.setup || '', confidence: meta.confidence || 'HIGH', risk: meta.riskLabel || 'MEDIUM', reason, reasons: { [lang]: reason }, chartContext: plan.chartContext || '' };
 
   if (plan.isOCO && Array.isArray(plan.orders)) {
     return {
@@ -408,7 +484,7 @@ function buildSignal(result, lang) {
   }
   return {
     ...common,
-    signal: result.dir === 1 ? 'BUY' : 'SELL', orderType: plan.orderType, fill: 'LIMIT', status: plan.status,
+    signal: result.dir === 1 ? 'BUY' : 'SELL', orderType: plan.orderType, fill: plan.orderType === 'MARKET' ? 'NOW' : 'LIMIT', status: plan.status,
     entry: plan.entry, sl: plan.sl, tp1: plan.tps[0] ?? null, tp2: plan.tps[1] ?? null, tp3: plan.tps[2] ?? null,
   };
 }
@@ -441,8 +517,9 @@ export default async function handler(req, res) {
 
     const m5 = clientCandles(body, 'm5').length ? clientCandles(body, 'm5') : Array.from({ length: 100 }, (_, i) => ({ t: Date.now() - i * 300000, o: price, h: price + 1, l: price - 1, c: price }));
     const m15 = clientCandles(body, 'm15').length ? clientCandles(body, 'm15') : m5;
+    const m1 = clientCandles(body, 'm1');
 
-    const result = await RUNNERS[style](ctx, { price, m5, m15 });
+    const result = await RUNNERS[style](ctx, { price, m1, m5, m15 });
     if (!result || !result.plan) return res.status(200).json({ ok: false, message: 'No setup' });
 
     return res.status(200).json({ ok: true, mode: 'candles', symbol, style, price, signal: buildSignal(result, 'id') });
