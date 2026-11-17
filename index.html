@@ -182,6 +182,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
         <select id="marketSelect" onchange="syncMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
           <option value="XAUUSD">XAUUSD / Gold</option>
           <option value="BTCUSD">BTCUSD / Bitcoin</option>
+          <option value="AUTOBOT">Auto Bot (XAUUSD Scalping)</option>
           <option value="VISION">Vision Chart (Upload)</option>
         </select>
         <div>
@@ -403,7 +404,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
           </div>
           <div class="bg-darkbg/70 border border-red-500/30 rounded-lg p-1.5">
             <p data-i18n="calLoseLbl" class="text-[8px] font-bold text-red-400"></p>
-            <p id="calLose" class="text-[11px] font-extrabold text-red-400 font-mono">0 pip</p>
+            <p id="calLose" class="text-[11px] font-extrabold text-red-400 font-mono">-0 pip</p>
             <p id="calLoseCount" class="text-[7px] text-gray-500 font-mono">0 L</p>
           </div>
           <div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5">
@@ -443,7 +444,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
           </div>
           <div class="bg-darkbg/70 border border-red-500/30 rounded-lg p-1.5">
             <p data-i18n="loseLbl" class="text-[8px] font-bold text-red-400"></p>
-            <p id="sumLose" class="text-[11px] font-extrabold text-red-400 font-mono">0 pip</p>
+            <p id="sumLose" class="text-[11px] font-extrabold text-red-400 font-mono">-0 pip</p>
             <p id="sumLoseCount" class="text-[7px] text-gray-500 font-mono">0 trade</p>
           </div>
           <div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5">
@@ -542,7 +543,7 @@ const I18N = {
     lblBias: 'BIAS MULTI-TIMEFRAME', lblStream: 'LIVE MARKET STREAM', lblSession: 'MARKET SESSIONS',
     standby1: 'Chart di bawah sudah aktif. Tekan Analisa Signal untuk membuat sinyal.', entryZone: 'ENTRY ZONE', lblMap: 'LIVE MAP CHART', lblReason: 'ANALYSIS REASON (CONFLUENCE SCORE):',
     modeLimit: 'Entry zona', modeMarket: 'Entry market',
-    reasonOtherLang: '(Alasan ini dibuat dalam bahasa Inggris. Buat sinyal baru untuk versi Indonesia.)',
+    reasonOtherLang: '(Alasan ini dibuat dalam bahasa Indonesia. Buat sinyal baru untuk versi Indonesia.)',
     visionUpload: 'Upload Gambar Chart (Max 3)', visionFmt: 'Format: JPG, PNG. Maks 5MB per gambar.',
     disclaimerLbl: 'DISCLAIMER:',
     disclaimerTxt: 'Sinyal dan analisa ini hanya untuk tujuan edukasi. Bukan merupakan saran keuangan (Financial Advisor). Trading memiliki risiko kehilangan modal. Selalu lakukan riset Anda sendiri (DYOR).',
@@ -556,7 +557,7 @@ const I18N = {
   en: {
     subHeader: 'SMC x ICT x Alchemist (XAUUSD & BTCUSD)', loginSub: 'Enter your registered email or admin code',
     lblAccess: 'ACCESS LOGIN', btnLogin: 'LOG IN', btnLogout: 'LOGOUT', loginNeed: 'Enter your email or admin code first.', checking: 'Checking...', denied: 'Login denied: ',
-    lblMarket: 'ACTIVE TARGET ASSET', lblStyle: 'TRADING STYLE / STRATEGY', optScalp: 'Aggressive Scalping (High Risk)', optDay: 'Conservative Scalping', optIntra: 'Intraday / Day Trade', optSwing: 'Swing',
+    lblMarket: 'ACTIVE TARGET ASSET', lblStyle: 'TRADING STYLE / STRATEGI', optScalp: 'Aggressive Scalping (High Risk)', optDay: 'Conservative Scalping', optIntra: 'Intraday / Day Trade', optSwing: 'Swing',
     infoScalp: 'Buy Now / Sell Now following market direction. If in a bounce zone, focus on the bounce (no limit orders).',
     infoDay: 'Wait for Limit Orders at retracement zones / FVG close to price (far zones are ignored).', infoIntra: 'Day Trade concept (H1/M15), waiting for retest of wider zones.', infoSwing: 'Positioning on H4, holding positions longer.',
     btnGen: 'Analyze Signal', btnGenVision: 'Analyze Image', btnGenBusy: 'Analyzing Image...',
