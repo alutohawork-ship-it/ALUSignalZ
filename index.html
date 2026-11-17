@@ -174,7 +174,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
           <option value="AUTOBOT">Auto Bot (XAUUSD Scalping)</option>
           <option value="VISION">Vision Chart (Upload)</option>
         </select>
-        
+
         <!-- PANEL AUTO BOT -->
         <div id="botPanel" class="hidden bg-darkbg border border-panelborder rounded-xl p-2.5 space-y-2">
           <div class="flex justify-between items-center">
@@ -195,6 +195,22 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
           <button id="botBtn" onclick="toggleBot()" class="w-full font-bold py-2 rounded-lg text-xs transition bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20">START BOT (EA)</button>
           <p id="botMsg" class="text-[9px] font-mono text-gray-300 min-h-[12px] break-words"></p>
           <p id="botStats" class="text-[8px] font-mono text-gray-500">Total Bot Trade: 0 | Win: 0 | Loss: 0</p>
+
+          <!-- BOT LIVE MAP (terpisah dari chart manual) -->
+          <div class="border-t border-panelborder pt-2 space-y-1.5">
+            <div class="flex justify-between items-center">
+              <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-chart-line text-accentblue"></i> BOT LIVE MAP</span>
+              <span id="botTradeStatus" class="hidden text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40 whitespace-nowrap">RUNNING</span>
+            </div>
+            <p id="botPnl" class="text-[10px] font-mono font-bold text-gray-400"></p>
+            <p id="botLive" class="text-[8px] font-mono text-gray-400"></p>
+            <div id="botLevels" class="text-[8px] font-mono text-gray-400 break-words"></div>
+            <div class="relative w-full h-[240px] sm:h-[300px]">
+              <canvas id="botCanvas" class="absolute inset-0 w-full h-full"></canvas>
+            </div>
+            <p class="text-[8px] font-bold text-gray-500 pt-1">RIWAYAT BOT</p>
+            <div id="botHistory" class="space-y-1 max-h-[160px] overflow-y-auto pr-1"></div>
+          </div>
         </div>
 
         <div id="styleContainer">
@@ -595,8 +611,9 @@ const marketOpen = k => MARKETS[k].h24 || ![0, 6].includes(new Date().getUTCDay(
 const T = k => I18N[lang][k];
 const optOf = s => T((STYLE_CFG[s] || STYLE_CFG.Scalping).opt);
 const symOf = k => workingSym[k] || MARKETS[k].aliases[aliasIdx[k] || 0];
+// activeTrade: trade manual saja (trade bot dipisah, src === 'bot')
 const activeTrade = () => {
-  const t = market === 'VISION' ? visionTrade : (trades.find(x => x.id === activeId && x.key === market) || null);
+  const t = market === 'VISION' ? visionTrade : (trades.find(x => x.id === activeId && x.key === market && x.src !== 'bot') || null);
   if (t && !t.hits) t.hits = {};
   return t;
 };
@@ -645,6 +662,19 @@ const cv = $('priceChart');
 const cx = cv ? cv.getContext('2d') : null;
 const scv = $('smcCanvas');
 const sx = scv ? scv.getContext('2d') : null;
+const bcv = $('botCanvas');
+const bcx = bcv ? bcv.getContext('2d') : null;
+
+// ---- Helper bot (trade bot dipisah dari trade manual) ----
+let botActiveId = null, botBusy = false;
+const isBotView = () => !!$('marketSelect') && $('marketSelect').value === 'AUTOBOT';
+const botTrades = () => trades.filter(x => x.src === 'bot');
+const botTrade = () => {
+  const l = botTrades();
+  return l.find(x => x.id === botActiveId)
+    || l.filter(x => x.status !== 'CLOSED').pop()
+    || l[l.length - 1] || null;
+};
 
 function log(msg, type) { console.log(`[${type || 'info'}] ${msg}`); }
 
@@ -864,9 +894,10 @@ function wsBadge(text, color) {
   e.className = 'text-[8px] font-mono px-2 py-0.5 rounded border ' + PILL[color];
 }
 
-function openOf(k) { return trades.filter(x => x.key === k && x.status !== 'CLOSED'); }
+// openOf: trade manual yang masih berjalan (trade bot tidak dihitung)
+function openOf(k) { return trades.filter(x => x.key === k && x.status !== 'CLOSED' && x.src !== 'bot'); }
 function pickTradeFor(k, preferId) {
-  const list = trades.filter(x => x.key === k);
+  const list = trades.filter(x => x.key === k && x.src !== 'bot');
   if (preferId) { const hit = list.find(x => x.id === preferId); if (hit) return hit.id; }
   if (list.some(x => x.id === activeId)) return activeId;
   const open = openOf(k);
@@ -884,16 +915,16 @@ function syncMarket(tradeId) {
   $('visionPanel').classList.toggle('hidden', !isVision);
   $('streamPanel').classList.toggle('hidden', isVision);
   $('biasPanel').classList.toggle('hidden', isVision);
-  $('chartPanel').classList.toggle('hidden', isVision);
+  $('chartPanel').classList.toggle('hidden', isVision || isBot);
   $('smcPanel').classList.toggle('hidden', isVision);
   $('sessionPanel').classList.toggle('hidden', isVision);
-  
+
   const botPanel = $('botPanel');
   if (botPanel) botPanel.classList.toggle('hidden', !isBot);
 
   const styleContainer = $('styleContainer');
   if (styleContainer) styleContainer.classList.toggle('hidden', isBot);
-  
+
   const signalBtn = $('signalBtn');
   if (signalBtn) signalBtn.classList.toggle('hidden', isBot);
 
@@ -925,8 +956,22 @@ function tapTicker(k) {
 function viewTrade(id) {
   const t = trades.find(x => x.id === id);
   if (!t) return;
+  if (t.src === 'bot') {
+    botActiveId = id;
+    $('marketSelect').value = 'AUTOBOT';
+    syncMarket();
+    return;
+  }
   pickMarket(t.key, id);
 }
+
+// Delegasi klik untuk elemen [data-tap] (ticker & history)
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-tap]');
+  if (!el) return;
+  const v = el.dataset.tap;
+  if (KEYS.includes(v)) tapTicker(v); else viewTrade(v);
+});
 
 function handleImageUpload(e) {
   const files = e.target.files;
@@ -1424,6 +1469,7 @@ function clearHistory() {
   if (!confirm('Hapus semua history?')) return;
   trades = [];
   activeId = null;
+  botActiveId = null;
   saveTrades();
   renderAll();
 }
@@ -1498,8 +1544,8 @@ function renderHistory() {
   box.innerHTML = trades.slice().reverse().filter(t => t.key !== 'VISION').map(t => {
     const f = tradeFlow(t), s = statusOf(t);
     const hits = hitKeys(t).map(k => '✓' + k.toUpperCase()).join(' ');
-    const ocoTag = t.ocoId ? ' · OCO' : '';
-    return `<div data-tap="${esc(t.id)}" class="bg-darkbg hover:bg-panelborder/60 border ${t.id === activeId ? 'border-accentblue' : 'border-panelborder'} px-2 py-1.5 rounded cursor-pointer select-none space-y-0.5">
+    const ocoTag = (t.ocoId ? ' · OCO' : '') + (t.src === 'bot' ? ' · BOT' : '');
+    return `<div data-tap="${esc(t.id)}" class="bg-darkbg hover:bg-panelborder/60 border ${t.id === activeId || t.id === botActiveId ? 'border-accentblue' : 'border-panelborder'} px-2 py-1.5 rounded cursor-pointer select-none space-y-0.5">
       <div class="flex justify-between items-center gap-2 text-[9px] font-bold">
         <span class="text-white truncate">${t.no}. ${esc(t.key)} <span class="text-[8px] text-gray-400">${esc(optOf(t.style))} · ${esc(t.signal)}${ocoTag}</span></span>
         <span class="font-mono whitespace-nowrap ${TXT[s.color]}">${esc(s.text)}</span>
@@ -2073,13 +2119,13 @@ function layoutX(rows, plotL, plotR, tfMs) {
 }
 function srcLabel(k, iv) { return `${k} · ${iv} · WIB · ${srcOf(k, iv)}`; }
 
-function drawChart() {
+// Parameter cv & cx sengaja menimpa variabel global agar fungsi ini
+// bisa dipakai untuk canvas manual (priceChart) dan canvas bot (botCanvas).
+function drawLiveMap(cv, cx, t, k) {
   if (!cx) return;
   const d = fitCv(cv, cx);
-  if (!d || market === 'VISION') return;
+  if (!d) return;
   const CW = d.w, CH = d.h;
-  const t = activeTrade();
-  const k = market;
 
   const iv = '1m';
   const tfMs = TF_MIN[iv] * 60000;
@@ -2239,6 +2285,17 @@ function drawChart() {
     cx.fillStyle = g.c;
     cx.fillText(g.text, x + 4, g.y + .5);
   }
+}
+
+// Chart manual (mengikuti trade manual aktif)
+function drawChart() {
+  if (market === 'VISION' || isBotView()) return;
+  drawLiveMap(cv, cx, activeTrade(), market);
+}
+// Chart bot (mengikuti trade bot, terpisah dari chart manual)
+function drawBotChart() {
+  if (!isBotView()) return;
+  drawLiveMap(bcv, bcx, botTrade(), 'XAUUSD');
 }
 
 function drawSMC() {
@@ -2524,11 +2581,11 @@ async function runValidationSteps() {
   const stepsBox = $('validationSteps');
   const progFill = $('validationProgress');
   if(!stepsBox || !progFill) return;
-  
+
   const stepsText = T('steps');
   stepsBox.innerHTML = '';
   progFill.style.width = '0%';
-  
+
   showValidationOverlay(true);
 
   for (let i = 0; i < stepsText.length; i++) {
@@ -2536,19 +2593,18 @@ async function runValidationSteps() {
     stepEl.className = 'validation-step active';
     stepEl.innerHTML = `<span class="validation-step-icon"><i class="fa-solid fa-spinner fa-spin"></i></span><span>${stepsText[i]}</span>`;
     stepsBox.appendChild(stepEl);
-    
+
     progFill.style.width = `${((i + 1) / stepsText.length) * 100}%`;
     await sleep(220 + Math.random() * 150);
-    
+
     stepEl.className = 'validation-step done';
     stepEl.querySelector('.validation-step-icon').innerHTML = '<i class="fa-solid fa-check"></i>';
   }
-  
+
   await sleep(180);
   showValidationOverlay(false);
 }
 
-// PERBAIKAN: Menggunakan endpoint /api/generate yang sesuai dengan backend original
 async function generateSignal() {
   if (market === 'VISION') {
     if (!visionImages.length) return alert('Silakan upload gambar chart terlebih dahulu.');
@@ -2570,7 +2626,7 @@ async function generateSignal() {
 
   const email = localStorage.getItem(K.email);
   if (!email) return alert('Sesi berakhir.');
-  
+
   const btn = $('signalBtn');
   const btnText = $('btnText');
   const originalText = btnText.textContent;
@@ -2666,11 +2722,10 @@ async function generateSignal() {
 }
 
 // =========================================================================
-// AUTO BOT (EA) DENGAN PNL REKAP & KALENDER OTOMATIS + WEB AUDIO API ALARM
+// AUTO BOT (EA) — trade bot terpisah (src:'bot'), live map chart sendiri
 // =========================================================================
 let botRunning = false;
 let botTimer = null;
-let botStatsObj = { total: 0, wins: 0, losses: 0 };
 let audioCtx = null;
 
 function getAudioContext() {
@@ -2704,12 +2759,19 @@ function playTradeAlert() {
   } catch (e) {}
 }
 
-function renderBotUI() {
-  const btn = $('botBtn');
-  const badge = $('botBadge');
-  const stats = $('botStats');
-  if(!btn || !badge) return;
+function botCounts() {
+  const all = botTrades();
+  const closed = all.filter(t => t.status === 'CLOSED' && t.result !== 'CANCEL');
+  return {
+    total: all.length,
+    wins: closed.filter(t => t.pips > 0).length,
+    losses: closed.filter(t => t.pips < 0).length
+  };
+}
 
+function renderBotUI() {
+  const btn = $('botBtn'), badge = $('botBadge'), stats = $('botStats');
+  if (!btn || !badge) return;
   if (botRunning) {
     btn.textContent = 'STOP BOT (EA)';
     btn.className = 'w-full bg-red-600 hover:bg-red-500 text-white font-bold py-2 rounded-lg text-xs transition shadow-lg shadow-red-600/20';
@@ -2721,69 +2783,85 @@ function renderBotUI() {
     badge.textContent = 'OFF';
     badge.className = 'text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-red-500/20 text-red-400 border-red-500/40';
   }
-  if (stats) stats.textContent = `Total Bot Trade: ${botStatsObj.total} | Win: ${botStatsObj.wins} | Loss: ${botStatsObj.losses}`;
+  const c = botCounts();
+  if (stats) stats.textContent = `Total Bot Trade: ${c.total} | Win: ${c.wins} | Loss: ${c.losses}`;
+}
+
+function stopBot(text) {
+  botRunning = false;
+  if (botTimer) { clearInterval(botTimer); botTimer = null; }
+  renderBotUI();
+  if (text && $('botMsg')) $('botMsg').textContent = text;
 }
 
 async function toggleBot() {
-  botRunning = !botRunning;
+  getAudioContext(); // buka izin audio lewat klik user
+  if (botRunning) return stopBot('Bot dihentikan.');
+  botRunning = true;
   renderBotUI();
-  const msg = $('botMsg');
-  if (botRunning) {
-    if(msg) msg.textContent = 'Bot diaktifkan. Memantau pasar XAUUSD secara otomatis...';
-    runBotCycle();
-    botTimer = setInterval(runBotCycle, 15000);
-  } else {
-    if(msg) msg.textContent = 'Bot dihentikan.';
-    if (botTimer) clearInterval(botTimer);
-  }
+  if ($('botMsg')) $('botMsg').textContent = 'Bot diaktifkan. Memantau pasar XAUUSD secara otomatis...';
+  runBotCycle();
+  botTimer = setInterval(runBotCycle, 15000);
 }
 
 async function runBotCycle() {
-  if (!botRunning) return;
-  const checkSess = $('botSess') ? $('botSess').checked : false;
-  if (checkSess) {
+  if (!botRunning || botBusy) return;
+  const say = t => { const m = $('botMsg'); if (m) m.textContent = t; };
+
+  if ($('botSess') && $('botSess').checked) {
     const h = new Date().getUTCHours();
-    if (h < 7 || h >= 21) {
-      if($('botMsg')) $('botMsg').textContent = 'Di luar sesi London/NY (07-21 UTC). Bot menunggu...';
-      return;
-    }
+    if (h < 7 || h >= 21) return say('Di luar sesi London/NY (07-21 UTC). Bot menunggu...');
   }
+  if (botTrades().some(x => x.status !== 'CLOSED')) return say('Trade bot masih berjalan. Menunggu hingga selesai...');
+  if (!marketOpen('XAUUSD')) return say(T('weekend'));
 
-  const openTrades = trades.filter(x => x.key === 'XAUUSD' && x.status !== 'CLOSED');
-  if (openTrades.length > 0) {
-    if($('botMsg')) $('botMsg').textContent = 'Trade XAUUSD masih berjalan. Menunggu hingga selesai...';
-    return;
-  }
-
-  if($('botMsg')) $('botMsg').textContent = 'Bot sedang memindai setup SMC XAUUSD...';
-  
   const email = localStorage.getItem(K.email);
   if (!email) return;
-  const style = $('botStyle') ? $('botStyle').value : 'Scalping';
-  const livePx = prices['XAUUSD']?.price || 0;
-  const rowsOf = iv => seriesRows('XAUUSD', iv).slice(-300).map(c => ({ t: c.t, o: c.o, h: c.h, l: c.l, c: c.c }));
-  
-  const payload = {
-    email: email,
-    symbol: 'XAUUSD',
-    style: style,
-    price: livePx,
-    currentPrice: livePx,
-    candles: { m1: rowsOf('1m'), m5: rowsOf('5m'), m15: rowsOf('15m') },
-    lang: lang
-  };
+  const livePx = prices.XAUUSD ? prices.XAUUSD.price : 0;
+  if (!livePx) return say('Menunggu harga live XAUUSD...');
 
-  const res = await post('/api/generate', payload);
-  const data = res.data;
+  botBusy = true;
+  try {
+    say('Bot sedang memindai setup SMC XAUUSD...');
+    const style = $('botStyle') ? $('botStyle').value : 'Scalping';
+    const rowsOf = iv => seriesRows('XAUUSD', iv).slice(-300).map(c => ({ t: c.t, o: c.o, h: c.h, l: c.l, c: c.c }));
 
-  if (res.ok && data && data.ok) {
-    const sig = data.signal;
+    const res = await post('/api/generate', {
+      email: email,
+      symbol: 'XAUUSD',
+      style: style,
+      price: livePx,
+      currentPrice: livePx,
+      candles: { m1: rowsOf('1m'), m5: rowsOf('5m'), m15: rowsOf('15m') },
+      lang: lang,
+      auto: true,
+      source: 'bot'
+    });
+    const data = res.data;
+
+    if (!(res.ok && data && data.ok)) {
+      const why = errOf(res, 'Belum ada setup valid yang terdeteksi bot.');
+      say(why);
+      if (/trial/i.test(why)) stopBot(why);
+      return;
+    }
+
+    let sig = data.signal;
+    // Pengaman: bila backend tetap mengirim OCO, pilih sisi terdekat dari harga
+    if (Array.isArray(sig.orders) && sig.orders.length) {
+      const o = sig.orders.reduce((a, b) => Math.abs(b.entry - livePx) < Math.abs(a.entry - livePx) ? b : a);
+      sig = { ...sig, ...o };
+      delete sig.orders;
+    }
+    if (!sig.signal || !Number.isFinite(Number(sig.entry)) || !Number.isFinite(Number(sig.sl))) {
+      return say('Sinyal bot tidak valid, dilewati.');
+    }
+
     const num = v => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
-    const expireAfter = EXPIRY_MS[style] || 4 * 3600 * 1000;
     const isLimit = sig.orderType === 'LIMIT' || sig.mode === 'LIMIT';
-
     const trade = {
-      id: 'bot_' + Math.random().toString(36).slice(2, 9),
+      id: 'bot_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      src: 'bot',
       no: nextNo(), key: 'XAUUSD', style: style, signal: sig.signal,
       dir: sig.signal === 'BUY' ? 1 : -1,
       mode: isLimit ? 'LIMIT' : 'MARKET',
@@ -2792,7 +2870,7 @@ async function runBotCycle() {
       entry: Number(sig.entry), sl: Number(sig.sl),
       tp1: num(sig.tp1), tp2: num(sig.tp2), tp3: num(sig.tp3),
       status: (isLimit || sig.status === 'PENDING') ? 'PENDING' : 'RUNNING',
-      createdAt: Date.now(), expiresAt: Date.now() + expireAfter,
+      createdAt: Date.now(), expiresAt: Date.now() + (EXPIRY_MS[style] || 4 * 3600 * 1000),
       zone: sig.zone || null,
       zoneLabel: sig.zoneLabel || '',
       zoneNote: sig.zoneNote || sig.setupLabel || '',
@@ -2803,19 +2881,65 @@ async function runBotCycle() {
       hits: {},
       card: { reason: sig.reason, reasons: pickReasons(sig, lang), reasonLang: lang }
     };
-    
+
     trades.push(trade);
-    activeId = trade.id;
+    botActiveId = trade.id;   // bukan activeId -> chart & kartu manual tidak terganggu
     saveTrades();
-    botStatsObj.total++;
     renderAll();
     playTradeAlert();
+    say(`Sinyal bot baru: ${trade.signal} ${trade.mode === 'LIMIT' ? 'LIMIT' : 'NOW'} @ ${fmt(trade.entry)}.`);
 
-    if($('botMsg')) $('botMsg').textContent = `Sinyal bot baru dieksekusi (${trade.signal} di ${fmt(trade.entry)}).`;
-    renderBotUI();
-  } else {
-    if($('botMsg')) $('botMsg').textContent = 'Belum ada setup valid yang terdeteksi bot.';
+    if ($('botMode') && $('botMode').value === 'once') {
+      stopBot('Mode sekali: bot berhenti setelah 1 sinyal. Lanjut manual.');
+    }
+  } catch (e) {
+    say('Bot error: ' + e.message);
+  } finally {
+    botBusy = false;
   }
+}
+
+// Panel status + riwayat khusus bot (dipanggil tiap 1 detik saat mode Auto Bot)
+function refreshBotPanel() {
+  if (!isBotView()) return;
+  const t = botTrade();
+  const st = $('botTradeStatus'), pnl = $('botPnl'), live = $('botLive'), lv = $('botLevels');
+  if (!st || !pnl || !live || !lv) return;
+
+  if (!t) {
+    st.classList.add('hidden');
+    pnl.textContent = '';
+    live.textContent = '';
+    lv.textContent = 'Belum ada trade bot.';
+  } else {
+    const s = statusOf(t), f = tradeFlow(t);
+    st.classList.remove('hidden');
+    st.textContent = s.text;
+    st.className = `text-[8px] font-mono font-bold px-2 py-0.5 rounded border whitespace-nowrap ${PILL[s.color]}`;
+    pnl.textContent = f.main;
+    pnl.className = `text-[10px] font-mono font-bold ${pipColor(f.pips)}`;
+    live.textContent = f.sub;
+    const part = (lab, v, cls, hit) => v != null ? `<span class="${cls}">${hit ? '✓ ' : ''}${lab} ${fmt(v)}</span>` : '';
+    lv.innerHTML = [
+      `<span class="text-sky-300">${esc(t.signal)} ${t.mode === 'LIMIT' ? 'LIMIT' : 'NOW'} ${fmt(t.entry)}</span>`,
+      part('SL', t.sl, TXT.red, t.result === 'SL'),
+      part('TP1', t.tp1, TXT.green, !!t.hits.tp1),
+      part('TP2', t.tp2, TXT.green, !!t.hits.tp2),
+      part('TP3', t.tp3, 'text-sky-400', !!t.hits.tp3)
+    ].filter(Boolean).join(' · ');
+  }
+
+  const box = $('botHistory');
+  if (box) {
+    const list = botTrades().slice(-8).reverse();
+    box.innerHTML = list.length ? list.map(x => {
+      const f = tradeFlow(x), s = statusOf(x);
+      return `<div data-tap="${esc(x.id)}" class="bg-darkbg border ${t && x.id === t.id ? 'border-accentblue' : 'border-panelborder'} px-2 py-1 rounded cursor-pointer select-none">
+        <div class="flex justify-between text-[9px] font-bold"><span class="text-white">${x.no}. ${esc(x.signal)} · ${esc(optOf(x.style))}</span><span class="font-mono ${TXT[s.color]}">${esc(s.text)}</span></div>
+        <div class="font-mono text-[9px] ${pipColor(f.pips)}">${esc(f.main)}</div></div>`;
+    }).join('') : '<p class="text-center text-[9px] text-gray-500 py-2">Belum ada riwayat bot.</p>';
+  }
+  renderBotUI();
 }
 
 setInterval(() => {
@@ -2825,6 +2949,8 @@ setInterval(() => {
   replayMissed();
   drawChart();
   drawSMC();
+  drawBotChart();
+  refreshBotPanel();
   if (market !== 'VISION') refreshCard();
 }, 1000);
 
