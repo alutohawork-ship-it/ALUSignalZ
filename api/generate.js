@@ -1511,6 +1511,36 @@ function refineToM5(zone15, dir, m5, price, atr5, maxDist) {
   };
 }
 
+// Zona kontinuitas: OB/FVG M15 dan M5 yang tidak harus strong atau fresh, diurutkan dari yang terdekat.
+function continuityZones(dir, price, m5, m15, maxDist) {
+  const out = [];
+  const push = (z, tag) => out.push({ bottom: z.bottom, top: z.top, dist: z.dist, tag });
+  for (const z of findSDZones(m15, dir, price, { dispAtr: 0.8, freshOnly: false })) push(z, dir === 1 ? 'Demand M15 (Kontinuitas)' : 'Supply M15 (Kontinuitas)');
+  for (const z of findSDZones(m5, dir, price, { dispAtr: 0.8, freshOnly: false })) push(z, dir === 1 ? 'Demand M5 (Kontinuitas)' : 'Supply M5 (Kontinuitas)');
+  for (const f of findRecentFVGs(m5, 60)) {
+    if (f.dir !== dir) continue;
+    const dist = dir === 1 ? price - f.hi : f.lo - price;
+    if (dist < 0) continue;
+    push({ bottom: f.lo, top: f.hi, dist }, 'FVG M5');
+  }
+  return out.filter(z => z.dist <= maxDist).sort((a, b) => a.dist - b.dist);
+}
+
+// Fallback terakhir: limit pullback, SL di balik swing M5 (selalu menghasilkan order).
+function buildManualOrder({ dir, entry, ctx, m5, atr5, atr15, rrList, tag }) {
+  const swing = recentExtreme(m5, dir, 20);
+  const slRaw = dir === 1 ? swing - LIQ_BUF_ATR * atr5 : swing + LIQ_BUF_ATR * atr5;
+  let risk = (dir === 1 ? entry > slRaw : entry < slRaw) ? Math.abs(entry - slRaw) : 0;
+  risk = Math.min(Math.max(risk, slFloor('day', ctx), atr5), DAY_MAX_RISK_ATR * atr15);
+  const sl = entry - dir * risk;
+  return {
+    dir, entry, sl, risk, tps: rrList.map(m => entry + dir * risk * m),
+    label: `${dir === 1 ? 'Buy' : 'Sell'} Limit · ${tag} · SL di balik swing M5`,
+    zone: dir === 1 ? { min: entry - 0.15 * atr5, max: entry } : { min: entry, max: entry + 0.15 * atr5 },
+    liqLevel: swing, liqName: 'swing M5', tag,
+  };
+}
+
 async function runDay(ctx, d) {
   const { price, m1, m5, m15 } = d;
   const atr15 = atrOf(m15, ctx.pip);
@@ -1539,21 +1569,43 @@ async function runDay(ctx, d) {
   }
 
   // OCO 2 arah wajib: area M15 strong, di-refine ke M5
-  const liq = liquidityLevels(m15, atr15);
+  const liq15 = liquidityLevels(m15, atr15);
+  const liq5 = liquidityLevels(m5, atr5);
+  const liqAll = {
+    swingHigh: [...liq15.swingHigh, ...liq5.swingHigh], swingLow: [...liq15.swingLow, ...liq5.swingLow],
+    eqh: [...liq15.eqh, ...liq5.eqh], eql: [...liq15.eql, ...liq5.eql],
+  };
   const maxDist = DAY_MAX_DIST_ATR * atr15;
+  const maxDistFb = 1.5 * maxDist;
+  const e21 = emaSeries(m5, 21);
+
+  // Urutan: Strong M15>M5 -> Strong M5 -> Kontinuitas (OB/FVG) -> Pullback EMA21 M5. Selalu menghasilkan order.
   const build = dir => {
-    const zones = strongZoneList(m15, dir, price, atr15, maxDist).map(z => refineToM5(z, dir, m5, price, atr5, maxDist));
-    return firstLimitOrder(zones, {
-      dir, liq, atrVal: atr15, ctx, kind: 'day', maxRiskAtr: DAY_MAX_RISK_ATR, rrList: rr, price, maxDist, allowNow: false,
-    });
+    const base = { dir, ctx, kind: 'day', rrList: rr, price, allowNow: false };
+    let r = firstLimitOrder(
+      strongZoneList(m15, dir, price, atr15, maxDist).map(z => refineToM5(z, dir, m5, price, atr5, maxDist)),
+      { ...base, liq: liq15, atrVal: atr15, maxRiskAtr: DAY_MAX_RISK_ATR, maxDist }
+    );
+    if (r) return { ...r, tier: 'Strong M15>M5', strong: true };
+    r = firstLimitOrder(strongZoneList(m5, dir, price, atr5, maxDistFb),
+      { ...base, liq: liqAll, atrVal: atr5, maxRiskAtr: 10, maxDist: maxDistFb });
+    if (r) return { ...r, tier: 'Strong M5', strong: true };
+    r = firstLimitOrder(continuityZones(dir, price, m5, m15, maxDistFb),
+      { ...base, liq: liqAll, atrVal: atr5, maxRiskAtr: 10, maxDist: maxDistFb });
+    if (r) return { ...r, tier: 'Kontinuitas', strong: false };
+    const ema = e21[e21.length - 1];
+    let entry = dir === 1 ? Math.min(ema, price - 0.5 * atr5) : Math.max(ema, price + 0.5 * atr5);
+    if (Math.abs(price - entry) > maxDistFb) entry = price - dir * 0.5 * atr5;
+    const order = buildManualOrder({ dir, entry, ctx, m5, atr5, atr15, rrList: rr, tag: 'Pullback M5' });
+    return { order, orderType: 'LIMIT', tier: 'Pullback M5', strong: false };
   };
   const b = build(1), s = build(-1);
-  if (!(b && s)) {
-    const miss = !b && !s ? 'kedua sisi' : !b ? 'sisi BUY' : 'sisi SELL';
-    return fail(`OCO 2 arah wajib, tetapi strong zone M15 yang valid belum ada di ${miss}.`);
-  }
-  const chartContext = 'Area strong M15 -> refine M5 -> OCO dua arah';
-  const res = buildOcoResult(asLimitLeg(b.order), asLimitLeg(s.order), { ctx, setup: 'Day Trading OCO (M15 > M5)', chartContext, confidence: 'HIGH' });
+  const tiers = b.tier === s.tier ? b.tier : `BUY ${b.tier} / SELL ${s.tier}`;
+  const chartContext = `Area ${tiers} -> OCO dua arah`;
+  const res = buildOcoResult(asLimitLeg(b.order), asLimitLeg(s.order), {
+    ctx, setup: `Day Trading OCO (${tiers})`, chartContext, confidence: b.strong && s.strong ? 'HIGH' : 'MEDIUM',
+  });
+  res.meta.reason = res.meta.reason.replace('OCO strong zone.', `OCO 2 arah (${tiers}).`);
   return { dir: 0, ...res };
 }
 
