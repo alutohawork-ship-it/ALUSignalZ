@@ -1,23 +1,18 @@
 /* autobot.js — Auto Bot XAUUSD (simulasi/paper).
    Pasang di index.html tepat sebelum </body>, SETELAH script utama:
    <script src="autobot.js"></script>
-
-   Yang ditambahkan:
-   - Opsi "Auto Bot" di dropdown pasar (grafik live tetap berjalan seperti biasa)
-   - Panel bot: START/STOP, gaya, mode, filter sesi, status, statistik
-   - Siklus: WAITING SETUP -> PENDING/RUNNING -> (TP/SL/BE ditangani engine trade yang sudah ada) -> COOLDOWN -> WAITING
-   - Perbaikan: pesan "belum ada setup" dari server sekarang terbaca (field message) */
+*/
 (function () {
   'use strict';
 
   const BOT_KEY = 'aluBot_v1';
   const BSYM = 'XAUUSD';
   const M5 = 300000;
-  const CD_WIN = 5 * 60000;     // cooldown setelah TP / BE / batal
-  const CD_LOSS = 10 * 60000;   // cooldown setelah SL
-  const MAX_LOSS = 3;           // berhenti otomatis setelah 3 SL beruntun
-  const PEND_MS = 50 * 60000;   // order limit scalping kedaluwarsa 50 menit (~10 candle M5)
-  const RUN_AWAY_ATR = 1.0;     // limit dibatalkan jika harga lari > 1 ATR searah tanpa menyentuh entry
+  const CD_WIN = 5 * 60000;
+  const CD_LOSS = 10 * 60000;
+  const MAX_LOSS = 3;
+  const PEND_MS = 50 * 60000;
+  const RUN_AWAY_ATR = 1.0;
 
   const BOT = { on: false, since: 0, mode: 'loop', style: 'Scalping', session: false, launched: false, lastScan: 0, msg: '', last: '', busy: false };
 
@@ -156,7 +151,6 @@
 
     const open = openOf(BSYM);
 
-    // Limit tunggal dibatalkan jika harga sudah lari menjauh tanpa pullback
     const pend = open.find(t => t.status === 'PENDING' && t.auto && !t.ocoId && t.px0 != null);
     if (pend) {
       const a = atr5(), px = prices[BSYM] && prices[BSYM].price;
@@ -195,7 +189,6 @@
       if (h < 7 || h >= 21) { BOT.msg = 'Di luar sesi London/NY, menunggu...'; return render(); }
     }
 
-    // Scan sekali per candle M5 baru
     const bucket = Math.floor(now / M5);
     if (BOT.lastScan === bucket) {
       BOT.msg = 'Menunggu setup · scan berikutnya ' + Math.ceil(((bucket + 1) * M5 - now) / 1000) + ' dtk' + (BOT.last ? ' · ' + BOT.last : '');
@@ -232,12 +225,31 @@
     const rowsOf = iv => seriesRows(mk, iv).slice(-300).map(c => ({ t: c.t, o: c.o, h: c.h, l: c.l, c: c.c }));
     const livePx = (prices[mk] && prices[mk].price) || 0;
 
-    const res = await post('/api/generate', {
-      email: localStorage.getItem(K.email),
-      symbol: mk, style, price: livePx, currentPrice: livePx,
-      candles: { m1: rowsOf('1m'), m5: rowsOf('5m'), m15: rowsOf('15m') },
-      lang
-    });
+    // PERBAIKAN: Tangkap response mentah untuk cek apakah JSON atau HTML
+    let res;
+    try {
+        const rawRes = await fetch('/api/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                email: localStorage.getItem(K.email),
+                symbol: mk, style, price: livePx, currentPrice: livePx,
+                candles: { m1: rowsOf('1m'), m5: rowsOf('5m'), m15: rowsOf('15m') },
+                lang
+            })
+        });
+        const text = await rawRes.text();
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (e) {
+            throw new Error('Server mengembalikan format tidak valid (bukan JSON). Cek log server/API.');
+        }
+        res = { ok: rawRes.ok, data };
+    } catch (e) {
+        return { ok: false, msg: 'Koneksi/API Error: ' + e.message };
+    }
+
     const data = res.data;
     if (!res.ok || !data || !data.ok) {
       return { ok: false, msg: (data && (data.message || data.reason || data.error || data.msg)) || 'Belum ada setup valid.' };
