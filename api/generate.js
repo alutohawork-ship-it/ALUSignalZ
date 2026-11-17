@@ -1,9 +1,11 @@
 // api/generate.js
-// v105 (Hybrid lama tetap untuk style "Scalping".
+// v106 (Hybrid lama tetap untuk style "Scalping".
 //       Scalping EMA: cross EMA 9/21 searah EMA 200, hanya di killzone,
 //       NOW saat trigger M1, rejection block opsional, LIMIT terdekat jika NOW ditahan.
 //       Day Trading: satu setup searah tren saat kontinuitas, OCO hanya dari dua zona strong
 //       tanpa kontinuitas. SL di balik invalidation M5 + buffer 0,5 ATR M5, maks 50 pip XAUUSD.
+//       TickerLayer: sampai 20 key dengan slot tetap, maksimal percobaan per request,
+//       bisa dimatikan lewat env TICKERLAYER_DISABLED=1.
 //       Vision tetap.)
 
 export const config = {
@@ -24,14 +26,16 @@ const AI_VISION_MODEL = process.env.AI_VISION_MODEL || 'gpt-6-luna';
 const VISION_TIMEOUT_MS = 50000;
 const VISION_MAX_TOKENS = 700;
 
-// Urutan tetap: utama dulu, lalu cadangan
-const API_KEYS = [
-  process.env.TICKERLAYER_API_KEY,
-  process.env.TICKERLAYER_API_KEY_1,
-  process.env.TICKERLAYER_API_KEY_2,
-  process.env.TICKERLAYER_API_KEY_3,
-  process.env.TICKERLAYER_API_KEY_4,
-].filter(Boolean);
+// ── TICKERLAYER: slot key tetap (utama + _1 sampai _19) ──
+// Slot tetap: key kosong di tengah tidak menggeser cooldown key lain.
+const TL_KEY_NAMES = [
+  'TICKERLAYER_API_KEY',
+  ...Array.from({ length: 19 }, (_, i) => `TICKERLAYER_API_KEY_${i + 1}`),
+];
+const API_KEYS = TL_KEY_NAMES.map(name => process.env[name] || '');
+const TL_KEY_COUNT = API_KEYS.filter(Boolean).length;
+const TL_MAX_TRY = Math.max(1, Number(process.env.TICKERLAYER_MAX_TRY || 6));
+const TL_DISABLED = process.env.TICKERLAYER_DISABLED === '1';
 
 const DECIMALS = {
   DXY: 2, EURUSD: 5, GBPUSD: 5, USDJPY: 3, AUDUSD: 5, USDCAD: 5, USDCHF: 5, NZDUSD: 5,
@@ -360,15 +364,18 @@ function tlCooldownFor(status, body, retryAfter) {
   return 0;
 }
 
+// Slot key yang terisi dan tidak sedang cooldown. Indeks = nomor slot, jadi cooldown tetap cocok.
 async function tlUsableKeys() {
-  const names = API_KEYS.map((_, i) => `tl_cd_${i}`);
+  const names = TL_KEY_NAMES.map((_, i) => `tl_cd_${i}`);
   let vals = names.map(() => null);
   try {
     const raw = await kv(['MGET', ...names]);
     if (Array.isArray(raw)) vals = raw;
   } catch {}
   const now = Date.now();
-  return API_KEYS.map((_, i) => i).filter(i => !vals[i] && (tlCdMem.get(names[i]) || 0) <= now);
+  return API_KEYS
+    .map((_, i) => i)
+    .filter(i => API_KEYS[i] && !vals[i] && (tlCdMem.get(names[i]) || 0) <= now);
 }
 
 async function tlSetCooldown(idx, sec) {
@@ -379,12 +386,16 @@ async function tlSetCooldown(idx, sec) {
 }
 
 async function tlFetch(url) {
-  if (!API_KEYS.length) return { response: null, status: 500, detail: 'Tidak ada TICKERLAYER_API_KEY di env' };
+  if (TL_DISABLED) {
+    return { response: null, status: 503, detail: 'TickerLayer dinonaktifkan (TICKERLAYER_DISABLED=1). Kirim candle dari chart.' };
+  }
+  if (!TL_KEY_COUNT) return { response: null, status: 500, detail: 'Tidak ada TICKERLAYER_API_KEY di env' };
+
   const order = await tlUsableKeys();
   if (!order.length) return { response: null, status: 429, detail: 'Semua key TickerLayer sedang cooldown' };
 
   let last = { status: 500, detail: '' };
-  for (const idx of order) {
+  for (const idx of order.slice(0, TL_MAX_TRY)) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 4000);
     try {
