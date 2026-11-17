@@ -39,19 +39,14 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
 .validation-progress{width:100%;height:3px;background:rgba(245,158,11,.15);border-radius:2px;overflow:hidden;margin-top:14px}
 .validation-progress-fill{height:100%;width:0%;background:linear-gradient(90deg,#f59e0b,#fbbf24);transition:width .3s ease}
-
-/* Styling tombol TF SMC */
 .smc-tf-btn { transition: all 0.2s; }
 .smc-tf-btn.active { background-color: #2962ff; color: white; border-color: #2962ff; }
-
-/* Mencegah scroll saat drag canvas */
 #smcCanvas { touch-action: none; cursor: grab; }
 #smcCanvas:active { cursor: grabbing; }
 </style>
 </head>
 <body class="bg-darkbg text-gray-200 font-sans min-h-screen flex flex-col justify-between p-2 sm:p-4">
 
-<!-- SIMBOL LOGO -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
     <linearGradient id="gGold" x1="0" y1="0" x2="0" y2="1">
@@ -147,15 +142,11 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
     </div>
 
     <div class="flex items-center gap-1.5 flex-wrap justify-end">
-
-      <!-- BADGE STATUS CLIENT -->
       <div id="userStatusBadge" class="hidden text-[9px] font-bold font-mono px-2 py-0.5 rounded border bg-darkbg text-gray-300 border-panelborder flex items-center gap-1.5 shadow-sm">
         <span id="statusType">TRIAL</span>
         <span id="statusTimer" class="text-yellow-400">--d --h left</span>
         <span id="statusUsage" class="text-emerald-400 border-l border-panelborder pl-1.5">0/5 req</span>
       </div>
-      <!-- END BADGE -->
-
       <button onclick="logout()" data-i18n="btnLogout" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40"></button>
       <button onclick="toggleLang()" id="langBtn" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-panelborder text-gray-300 border border-panelborder hover:border-accentblue">ID 🌐</button>
       <span id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40">WS: OFF</span>
@@ -167,13 +158,11 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
     <!-- KOLOM KIRI -->
     <div class="flex flex-col gap-2 min-w-0">
 
-      <!-- 1. LIVE MARKET STREAM -->
       <div id="streamPanel" class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-1">
         <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-tower-broadcast text-accentblue"></i> <span data-i18n="lblStream"></span></span>
         <div id="tickerList" class="grid grid-cols-1 gap-1"></div>
       </div>
 
-      <!-- 2. PAIR & STYLE -->
       <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 space-y-2 shadow-md">
         <div class="flex justify-between items-center">
           <span data-i18n="lblMarket" class="text-[9px] font-bold text-gray-400"></span>
@@ -186,7 +175,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
           <option value="VISION">Vision Chart (Upload)</option>
         </select>
         
-        <!-- PANEL AUTO BOT (DIINTEGRASIKAN RAPI DI SINI) -->
+        <!-- PANEL AUTO BOT -->
         <div id="botPanel" class="hidden bg-darkbg border border-panelborder rounded-xl p-2.5 space-y-2">
           <div class="flex justify-between items-center">
             <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-robot text-accentblue"></i> AUTO BOT · XAUUSD</span>
@@ -206,9 +195,8 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
           <button id="botBtn" class="w-full font-bold py-2 rounded-lg text-xs transition">START BOT</button>
           <p id="botMsg" class="text-[9px] font-mono text-gray-300 min-h-[12px] break-words"></p>
           <p id="botStats" class="text-[8px] font-mono text-gray-500"></p>
-          <p class="text-[8px] text-gray-500 leading-snug">Simulasi: hanya menggambar garis dan mencatat hasil, tidak memasang order sungguhan. Tab harus tetap terbuka.</p>
+          <p class="text-[8px] text-gray-500 leading-snug">Simulasi: menggambar garis dan mencatat hasil otomatis. Tab browser harus tetap terbuka.</p>
         </div>
-        <!-- END PANEL AUTO BOT -->
 
         <div id="styleContainer">
           <div class="flex justify-between items-center mb-1">
@@ -230,7 +218,6 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
         </div>
       </div>
 
-      <!-- PANEL UPLOAD GAMBAR (Khusus Vision) -->
       <div id="visionPanel" class="hidden bg-cardbg rounded-xl border border-panelborder p-3 shadow-md space-y-3">
         <div class="text-center">
           <label class="cursor-pointer inline-flex items-center gap-2 bg-panelborder hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition text-xs">
@@ -239,11 +226,9 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
           </label>
           <p data-i18n="visionFmt" class="text-[8px] text-gray-500 mt-1"></p>
         </div>
-        <!-- Preview Area -->
         <div id="visionPreview" class="grid grid-cols-3 gap-2"></div>
       </div>
 
-      <!-- 3. BIAS (Hanya Live) -->
       <div id="biasPanel" class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
         <div class="flex justify-between items-center border-b border-panelborder pb-1">
           <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-compass text-accentblue"></i> <span data-i18n="lblBias"></span></span>
@@ -253,14 +238,10 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
         <p id="biasInfo" class="text-[8px] font-mono text-gray-500">memuat...</p>
       </div>
 
-      <!-- 4. GENERATE BUTTON -->
       <button id="signalBtn" onclick="generateSignal()" class="w-full bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 text-darkbg font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20 transition active:scale-95"><i class="fa-solid fa-wand-magic-sparkles"></i> <span id="btnText"></span></button>
 
-      <!-- 5. SIGNAL CARD -->
       <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2 relative">
-
         <div id="standbyView" class="py-3 text-center text-xs text-gray-400" data-i18n="standby1"></div>
-
         <div id="activeCard" class="hidden space-y-3">
           <div class="bg-darkbg/80 border border-panelborder rounded-xl p-3 text-center space-y-1">
             <div class="flex justify-center items-center gap-2">
@@ -308,7 +289,6 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
           </div>
         </div>
 
-        <!-- OVERLAY LOADING -->
         <div id="validationOverlay" class="validation-overlay hidden">
           <div class="validation-box">
             <svg class="hourglass-spin" viewBox="0 0 64 96">
@@ -325,7 +305,6 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
         </div>
       </div>
 
-      <!-- 6. LIVE CHART (Hanya Live) -->
       <div id="chartPanel" class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
         <div class="flex flex-wrap justify-between items-start gap-1">
           <div class="flex items-center gap-2">
@@ -346,11 +325,9 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
         <div id="tvBox" class="hidden w-full h-[300px] mt-2 rounded-lg overflow-hidden border border-panelborder bg-darkbg"><div id="tvWidget" class="w-full h-full"></div></div>
       </div>
 
-      <!-- 7. SMC MAP (Hanya Live) -->
       <div id="smcPanel" class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
         <p id="smcInfo" class="text-[8px] font-mono text-gray-400 break-words"></p>
         <div id="smcBox" class="w-full rounded-lg overflow-hidden border border-panelborder bg-darkbg p-1 space-y-1">
-          <!-- TOMBOL TIMEFRAME & ZOOM SMC -->
           <div class="flex justify-between items-center mb-1 mt-0.5 px-1 gap-1">
             <div class="flex gap-1">
               <button onclick="setSmcTf('1m')" class="smc-tf-btn text-[9px] font-bold px-2 py-0.5 rounded border border-panelborder text-gray-400" data-tf="1m">1m</button>
@@ -389,7 +366,6 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
         </div>
       </div>
 
-      <!-- 8. MARKET SESSION (Hanya Live) -->
       <div id="sessionPanel" class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
         <div class="flex justify-between items-center border-b border-panelborder pb-2">
           <span id="lblSession" class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-clock text-accentblue"></i> MARKET SESSIONS</span>
@@ -486,7 +462,6 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
     </div>
   </main>
 
-  <!-- DISCLAIMER (2 bahasa) -->
   <footer class="mt-6 pb-4 text-center">
     <p class="text-[9px] text-gray-500 font-mono leading-relaxed px-4">
       <strong data-i18n="disclaimerLbl"></strong> <span data-i18n="disclaimerTxt"></span>
@@ -495,7 +470,6 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
 </div>
 
 <script>
-/* ================= KONFIG ================= */
 const MARKETS = {
   XAUUSD: { aliases: ['XAUUSD', 'GOLD'], min: 1000, max: 5000, pip: 0.1, tv: 'OANDA:XAUUSD', h24: false },
   BTCUSD: { aliases: ['BTCUSD', 'BTCUSDT', 'BTC'], min: 1000, max: 1000000, pip: 1, tv: 'BITSTAMP:BTCUSD', h24: true },
@@ -521,12 +495,7 @@ const STYLE_CFG = {
   'Intraday': { htf: '4h', mtf: '1h', ltf: '15m', ema: [20, 50, 100], opt: 'optIntra' },
   'Swing': { htf: '1d', mtf: '4h', ltf: '1h', ema: [20, 200], opt: 'optSwing' }
 };
-const SMC_TF_MAP = {
-  'Scalping': '1m',
-  'Day Trading': '5m',
-  'Intraday': '5m',
-  'Swing': '15m'
-};
+const SMC_TF_MAP = { 'Scalping': '1m', 'Day Trading': '5m', 'Intraday': '5m', 'Swing': '15m' };
 const BIAS_TF = [{ label: 'M5', iv: '5m' }, { label: 'M15', iv: '15m' }, { label: 'M30', iv: '30m' }, { label: 'H1', iv: '1h' }, { label: 'H4', iv: '4h' }, { label: 'Daily', iv: '1d' }];
 const CANDLE_TTL = { '1m': 30000, '5m': 60000, '15m': 120000, '30m': 180000, '1h': 300000, '4h': 600000, '1d': 900000 };
 const PRIO_IV = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
@@ -534,13 +503,6 @@ const CANDLE_LIMIT = 300;
 const SWING_L = 2;
 const BIN_SYM = { BTCUSD: 'BTCUSDT' };
 const BIN_HOSTS = ['https://api.binance.com', 'https://data-api.binance.vision'];
-const SESS = [
-  { name: 'Asia', h1: 0, h2: 8, col: '45,212,191' },
-  { name: 'London KZ', h1: 7, h2: 10, col: '239,68,68' },
-  { name: 'London', h1: 8, h2: 17, col: '59,130,246' },
-  { name: 'NY KZ', h1: 12, h2: 15, col: '239,68,68' },
-  { name: 'New York', h1: 13, h2: 21, col: '56,189,248' }
-];
 const PILL = {
   green: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40',
   yellow: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40',
@@ -599,10 +561,8 @@ const I18N = {
   }
 };
 
-/* ================= HELPER ================= */
 const $ = id => document.getElementById(id);
 const setTxt = (id, v) => { const e = $(id); if (e) e.textContent = v; };
-const setHTML = (id, v) => { const e = $(id); if (e) e.innerHTML = v; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const norm = s => String(s ?? '').toUpperCase().replace(/^XYZ:/, '').replace(/\.[A-Z]+$/, '').replace(/[^A-Z0-9]/g, '');
@@ -641,7 +601,6 @@ const toMs = v => {
   return Number.isFinite(d) ? d : NaN;
 };
 
-/* ================= REASONING 2 BAHASA ================= */
 function pickReasons(s, curLang) {
   const out = {};
   const obj = s.reasons || s.reason_i18n || {};
@@ -664,7 +623,6 @@ function reasonFor(t) {
   return from && from !== lang ? any + '\n\n' + T('reasonOtherLang') : any;
 }
 
-/* ================= STATE ================= */
 let lang = 'id', market = 'XAUUSD', ws = null, connId = 0, reconT = null, pingT = null, authFailed = false, streamStarted = false;
 let trades = [], activeId = null, tvOn = false, showSMC = true;
 let visionTrade = null;
@@ -678,22 +636,17 @@ const prices = {}, hist = {}, candles = {}, workingSym = {}, aliasIdx = {}, subA
 const SER = {}, CSYM = {}, dispCache = {};
 let pumping = false;
 const cv = $('priceChart');
-const cx = cv.getContext('2d');
+const cx = cv ? cv.getContext('2d') : null;
 const scv = $('smcCanvas');
-const sx = scv.getContext('2d');
+const sx = scv ? scv.getContext('2d') : null;
 
 function log(msg, type) { console.log(`[${type || 'info'}] ${msg}`); }
 
-/* ================= STATUS CLIENT ================= */
 async function fetchUserStatus() {
   const email = localStorage.getItem(K.email);
   if (!email) return;
   try {
-    const res = await fetch('/api/user-info', {
-      method: 'POST',
-      headers: JSON_H,
-      body: JSON.stringify({ value: email })
-    });
+    const res = await fetch('/api/user-info', { method: 'POST', headers: JSON_H, body: JSON.stringify({ value: email }) });
     if (!res.ok) return;
     const data = await res.json();
     startStatusTimer(data);
@@ -724,11 +677,7 @@ function startStatusTimer(data) {
     elType.className = 'text-yellow-400';
     elUsage.classList.remove('hidden');
     elUsage.textContent = `${data.requests_today || 0}/5 req`;
-    if ((data.requests_today || 0) >= 5) {
-      elUsage.className = 'text-red-400 border-l border-panelborder pl-1.5 font-bold';
-    } else {
-      elUsage.className = 'text-emerald-400 border-l border-panelborder pl-1.5';
-    }
+    elUsage.className = (data.requests_today || 0) >= 5 ? 'text-red-400 border-l border-panelborder pl-1.5 font-bold' : 'text-emerald-400 border-l border-panelborder pl-1.5';
   } else if (data.status === 'monthly') {
     elType.textContent = 'MONTHLY';
     elType.className = 'text-emerald-400';
@@ -749,13 +698,11 @@ function startStatusTimer(data) {
     const h = Math.floor((diff / (1000 * 60 * 60)) % 24);
     const m = Math.floor((diff / 1000 / 60) % 60);
     const s = Math.floor((diff / 1000) % 60);
-
     let parts = [];
     if (d > 0) parts.push(`${d}d`);
     if (h > 0) parts.push(`${h}h`);
     if (d === 0 && m > 0) parts.push(`${m}m`);
     if (d === 0 && h === 0) parts.push(`${s}s`);
-
     elTimer.textContent = parts.join(' ') + ' left';
     elTimer.className = 'text-yellow-400';
   };
@@ -763,7 +710,6 @@ function startStatusTimer(data) {
   statusInterval = setInterval(tick, 1000);
 }
 
-/* ================= OCO HELPER ================= */
 function ocoPending(t) {
   if (!t || !t.ocoId) return null;
   const grp = trades.filter(x => x.ocoId === t.ocoId && x.key === t.key);
@@ -778,31 +724,15 @@ const pipTxt = (tr, v) => {
   return (x > 0 ? '+' : '') + Number(x.toFixed(1));
 };
 
-/* ================= COPY SIGNAL ================= */
 function copySignal() {
   const t = activeTrade();
   if (!t) return;
-
   let text;
   const oco = ocoPending(t);
-
   if (oco) {
     const tps = tr => [tr.tp1, tr.tp2, tr.tp3].map(v => (v != null ? fmt(v) : '-')).join('/');
-    const side = (label, tr) => [
-      `${label} ${lvTxt(tr.entry)}`,
-      `SL ${lvTxt(tr.sl)}`,
-      `TP ${tps(tr)}`,
-    ].join('\n');
-
-    text = [
-      'OCO Setup',
-      t.key,
-      optOf(t.style),
-      '',
-      side('Buy', oco.buy),
-      '',
-      side('Sell', oco.sell),
-    ].join('\n');
+    const side = (label, tr) => [`${label} ${lvTxt(tr.entry)}`, `SL ${lvTxt(tr.sl)}`, `TP ${tps(tr)}`].join('\n');
+    text = ['OCO Setup', t.key, optOf(t.style), '', side('Buy', oco.buy), '', side('Sell', oco.sell)].join('\n');
   } else {
     const dirText = t.signal === 'BUY' ? 'BUY' : 'SELL';
     const orderText = t.mode === 'LIMIT' ? 'LIMIT' : 'NOW';
@@ -811,15 +741,9 @@ function copySignal() {
     const tp3 = t.tp3 ? fmt(t.tp3) : '-';
     text = `${t.key}\n${optOf(t.style)}\n${dirText} ${orderText}\nEntry: ${fmt(t.entry)}\nSL: ${fmt(t.sl)}\nTP1: ${tp1}\nTP2: ${tp2}\nTP3: ${tp3}`;
   }
-
-  navigator.clipboard.writeText(text).then(() => {
-    alert('Signal copied to clipboard!');
-  }).catch(err => {
-    alert('Gagal copy signal.');
-  });
+  navigator.clipboard.writeText(text).then(() => alert('Signal copied to clipboard!')).catch(() => alert('Gagal copy signal.'));
 }
 
-/* ================= API & SESI ================= */
 async function api(path, opts) {
   try {
     const res = await fetch(path, opts || {});
@@ -914,7 +838,6 @@ async function delClient(id) {
   loadClients();
 }
 
-/* ================= BAHASA & UI ================= */
 function toggleLang() { lang = lang === 'id' ? 'en' : 'id'; applyLang(); }
 function applyLang() {
   document.querySelectorAll('[data-i18n]').forEach(el => {
@@ -935,7 +858,6 @@ function wsBadge(text, color) {
   e.className = 'text-[8px] font-mono px-2 py-0.5 rounded border ' + PILL[color];
 }
 
-/* ================= PILIH PAIR & SETUP ================= */
 function openOf(k) { return trades.filter(x => x.key === k && x.status !== 'CLOSED'); }
 function pickTradeFor(k, preferId) {
   const list = trades.filter(x => x.key === k);
@@ -1018,7 +940,6 @@ function bindTap(el, handler) {
   el.addEventListener('pointercancel', () => { start = null; });
 }
 
-/* ================= FITUR VISION (UPLOAD) ================= */
 function handleImageUpload(e) {
   const files = e.target.files;
   if (!files.length) return;
@@ -1053,7 +974,6 @@ function removeVisionImage(idx) {
   renderVisionPreview();
 }
 
-/* ================= STREAM (XBTFX WEBSOCKET) ================= */
 async function connect() {
   clearTimeout(reconT);
   clearInterval(pingT);
@@ -1139,7 +1059,6 @@ function watchdog() {
   }
 }
 
-/* ================= TICK & CANDLE LIVE ================= */
 const lastTick = {};
 function addTick(k, p) {
   if (k === 'VISION') return;
@@ -1165,6 +1084,7 @@ function addTick(k, p) {
   }
   checkTrades(k, p);
 }
+
 function loadLive() {
   try {
     const o = JSON.parse(localStorage.getItem(LIVE_KEY) || '{}');
@@ -1183,7 +1103,6 @@ function saveLive() {
   } catch (e) {}
 }
 
-/* ================= SERI CANDLE ================= */
 const ser = (k, iv) => {
   const ck = k + '|' + iv;
   return SER[ck] || (SER[ck] = {
@@ -1297,6 +1216,7 @@ function seriesRows(k, iv) {
   }
   return out;
 }
+
 function displayRows(k, iv) {
   if (k === 'VISION') return [];
   const ck = k + '|' + iv, now = Date.now(), c = dispCache[ck];
@@ -1325,7 +1245,6 @@ function pump() {
   fetchSeries(pick.k, pick.iv, false).finally(() => { pumping = false; });
 }
 
-/* ================= TRADE ================= */
 function loadTrades() {
   try {
     return (JSON.parse(localStorage.getItem(STORE_KEY)) || [])
@@ -1389,7 +1308,6 @@ function tradeFlow(t) {
   return { main: line(live, 'RUNNING'), sub: '', pips: pipsOf(t, live) };
 }
 
-/* ================= CEK TRADE (TOUCH-BASED) ================= */
 function checkTrades(k, p) {
   if (k === 'VISION') return;
   const now = Date.now();
@@ -1522,7 +1440,6 @@ function clearHistory() {
   renderAll();
 }
 
-/* ================= RENDER ================= */
 function renderAll() {
   if (market === 'VISION') return;
   renderTickers(); renderHighlights(); renderBias(); renderHistory(); refreshCard(); renderCalendar(); renderSmcInfo(); updateSessionCard();
@@ -1611,9 +1528,7 @@ function refreshCard() {
   const t = activeTrade();
   const isVision = market === 'VISION';
   const p = prices[market];
-  const priceTxt = isVision
-    ? (t && t.last ? fmt(t.last) : '--')
-    : (p ? fmt(p.price) : '--.--');
+  const priceTxt = isVision ? (t && t.last ? fmt(t.last) : '--') : (p ? fmt(p.price) : '--.--');
   $('standbyView').classList.toggle('hidden', !!t);
   $('activeCard').classList.toggle('hidden', !t);
   $('tradeStatus').classList.toggle('hidden', !t);
@@ -1693,7 +1608,6 @@ function refreshCard() {
   }
 }
 
-/* ================= BIAS ================= */
 async function refreshBias(force) {
   if (market === 'VISION') return;
   await Promise.all(BIAS_TF.map(tf => fetchSeries(market, tf.iv, !!force)));
@@ -1716,7 +1630,6 @@ function renderBias() {
   setTxt('biasInfo', `${cnt('BULLISH')} Bullish · ${cnt('BEARISH')} Bearish · ${cnt('NETRAL')} Netral · ${cnt('WAIT')} Loading · update ${new Date().toLocaleTimeString('id-ID', { hour12: false })}`);
 }
 
-/* ================= KALENDER PNL ================= */
 const WEEKDAYS = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
 const calLoad = () => { try { return JSON.parse(localStorage.getItem(CAL_KEY)) || {}; } catch (e) { return {}; } };
 const calSave = o => { try { localStorage.setItem(CAL_KEY, JSON.stringify(o)); } catch (e) {} };
@@ -1820,7 +1733,6 @@ function calReset() {
   renderCalendar();
 }
 
-/* ================= SESSION UI ================= */
 function updateSessionCard() {
   if (market === 'VISION') return;
   const now = new Date();
@@ -1860,10 +1772,8 @@ function updateSessionCard() {
     if (!isActive && untilStart < nextIn) { nextIn = untilStart; nextS = s; }
 
     const status = isActive
-      ? `<span class="text-emerald-400 font-bold animate-pulse">Open</span>
-         <span class="text-gray-400 block">tutup ${fmtCd(endSec - nowSec)}</span>`
-      : `<span class="text-yellow-400 font-bold">Upcoming</span>
-         <span class="text-gray-400 block">dibuka ${fmtCd(untilStart)}</span>`;
+      ? `<span class="text-emerald-400 font-bold animate-pulse">Open</span><span class="text-gray-400 block">tutup ${fmtCd(endSec - nowSec)}</span>`
+      : `<span class="text-yellow-400 font-bold">Upcoming</span><span class="text-gray-400 block">dibuka ${fmtCd(untilStart)}</span>`;
 
     return `
       <div class="flex justify-between items-center bg-darkbg border ${isActive ? s.border : 'border-panelborder'} px-2 py-1.5 rounded transition-all">
@@ -1890,17 +1800,13 @@ function updateSessionCard() {
   if (list) list.innerHTML = html;
 }
 
-/* ================= SMC ================= */
 function setSmcTf(tf) {
   if (market === 'VISION') return;
   smcTfOverride = tf;
   smcPan = 0;
   document.querySelectorAll('.smc-tf-btn').forEach(btn => {
-    if (btn.dataset.tf === tf) {
-      btn.classList.add('active');
-    } else {
-      btn.classList.remove('active');
-    }
+    if (btn.dataset.tf === tf) btn.classList.add('active');
+    else btn.classList.remove('active');
   });
   fetchSeries(market, tf, false);
   renderSmcInfo();
@@ -1921,25 +1827,27 @@ function resetSMC() {
 
 let isDragging = false;
 let lastX = 0;
-scv.addEventListener('pointerdown', e => {
-  if (market === 'VISION') return;
-  isDragging = true;
-  lastX = e.clientX;
-  scv.setPointerCapture(e.pointerId);
-});
-scv.addEventListener('pointermove', e => {
-  if (market === 'VISION' || !isDragging) return;
-  const dx = e.clientX - lastX;
-  const candlesMoved = dx / 5;
-  smcPan += candlesMoved * smcZoom;
-  lastX = e.clientX;
-  renderSmcInfo();
-});
-scv.addEventListener('pointerup', e => {
-  if (market === 'VISION') return;
-  isDragging = false;
-  scv.releasePointerCapture(e.pointerId);
-});
+if (scv) {
+  scv.addEventListener('pointerdown', e => {
+    if (market === 'VISION') return;
+    isDragging = true;
+    lastX = e.clientX;
+    scv.setPointerCapture(e.pointerId);
+  });
+  scv.addEventListener('pointermove', e => {
+    if (market === 'VISION' || !isDragging) return;
+    const dx = e.clientX - lastX;
+    const candlesMoved = dx / 5;
+    smcPan += candlesMoved * smcZoom;
+    lastX = e.clientX;
+    renderSmcInfo();
+  });
+  scv.addEventListener('pointerup', e => {
+    if (market === 'VISION') return;
+    isDragging = false;
+    scv.releasePointerCapture(e.pointerId);
+  });
+}
 
 function invalidZone(rows, from, dir, bottom, top) {
   for (let j = from; j < rows.length; j++) {
@@ -2118,9 +2026,16 @@ function renderSmcInfo() {
 function sessionBoxes(rows, now) {
   const out = [];
   if (!rows.length) return out;
+  const S_ARR = [
+    { name: 'Asia', h1: 0, h2: 8, col: '45,212,191' },
+    { name: 'London KZ', h1: 7, h2: 10, col: '239,68,68' },
+    { name: 'London', h1: 8, h2: 17, col: '59,130,246' },
+    { name: 'NY KZ', h1: 12, h2: 15, col: '239,68,68' },
+    { name: 'New York', h1: 13, h2: 21, col: '56,189,248' }
+  ];
   const d = new Date(now);
   const day0 = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  for (const s of SESS) {
+  for (const s of S_ARR) {
     let a = day0 + s.h1 * 3600000, b = day0 + s.h2 * 3600000;
     if (now < a) { a -= 86400000; b -= 86400000; }
     const inS = rows.filter(c => c.t >= a && c.t < b);
@@ -2133,8 +2048,8 @@ function sessionBoxes(rows, now) {
   return out;
 }
 
-/* ================= UTIL CANVAS ================= */
 function fitCv(el, c) {
+  if (!el || !c) return null;
   const r = el.getBoundingClientRect();
   if (!r.width || !r.height) return null;
   const dpr = window.devicePixelRatio || 1;
@@ -2177,8 +2092,8 @@ function layoutX(rows, plotL, plotR, tfMs) {
 }
 function srcLabel(k, iv) { return `${k} · ${iv} · WIB · ${srcOf(k, iv)}`; }
 
-/* ================= CHART UTAMA ================= */
 function drawChart() {
+  if (!cx) return;
   const d = fitCv(cv, cx);
   if (!d || market === 'VISION') return;
   const CW = d.w, CH = d.h;
@@ -2396,8 +2311,8 @@ function drawChart() {
   }
 }
 
-/* ================= PANEL SMC ================= */
 function drawSMC() {
+  if (!sx) return;
   const d = fitCv(scv, sx);
   if (!d || market === 'VISION') return;
   const CW = d.w, CH = d.h;
@@ -2645,7 +2560,6 @@ function frame() {
   requestAnimationFrame(frame);
 }
 
-/* ================= TRADINGVIEW ================= */
 function toggleTV() {
   if (market === 'VISION') return;
   tvOn = !tvOn;
@@ -2665,7 +2579,6 @@ function toggleTV() {
   }
 }
 
-/* ================= OVERLAY ANALISA ================= */
 function showOverlay() {
   const o = $('validationOverlay');
   if (!o) return;
@@ -2703,7 +2616,6 @@ async function runSteps(ms) {
   bar.style.width = '100%';
 }
 
-/* ================= INDIKATOR ================= */
 function calcEMA(c, p) {
   if (!c || !c.length) return [];
   const k = 2 / (p + 1), out = [];
@@ -2722,7 +2634,6 @@ function calcBias(c) {
   return { bias: score > 0 ? 'BULLISH' : score < 0 ? 'BEARISH' : 'NETRAL', score };
 }
 
-/* ================= GENERATE SINYAL ================= */
 async function generateSignal() {
   if (market === 'VISION') {
     if (visionImages.length === 0) return alert('Silakan upload minimal 1 gambar chart terlebih dahulu.');
@@ -2740,9 +2651,7 @@ async function generateSignal() {
         const res = await fetch('/api/generate', {
             method: 'POST',
             headers: JSON_H,
-            body: JSON.stringify({
-                email, images: visionImages, tradingStyle: style, lang, langs: ['id', 'en']
-            })
+            body: JSON.stringify({ email, images: visionImages, tradingStyle: style, lang, langs: ['id', 'en'] })
         });
         const txt = await res.text();
         try { data = JSON.parse(txt); } catch (e) { throw new Error('Server tidak kirim JSON (HTTP ' + res.status + ')'); }
@@ -2866,9 +2775,7 @@ async function generateSignal() {
 }
 </script>
 
-<!-- ========================================== -->
-<!-- SCRIPT AUTO BOT TERINTEGRASI               -->
-<!-- ========================================== -->
+<!-- SCRIPT AUTO BOT TERINTEGRASI AMAN -->
 <script>
 (function () {
   'use strict';
@@ -2884,7 +2791,7 @@ async function generateSignal() {
 
   const BOT = { on: false, since: 0, mode: 'loop', style: 'Scalping', session: false, launched: false, lastScan: 0, msg: '', last: '', busy: false };
 
-  function load() {
+  function loadBot() {
     try { Object.assign(BOT, JSON.parse(localStorage.getItem(BOT_KEY) || '{}'), { busy: false, msg: '' }); } catch (e) {}
   }
   function saveBotState() {
@@ -2926,7 +2833,7 @@ async function generateSignal() {
     const open = openOf(BSYM)[0];
     if (open) return open.status === 'PENDING' ? { k: 'PENDING', c: 'yellow' } : { k: 'RUNNING', c: 'blue' };
     if (!BOT.on) return /^Berhenti/.test(BOT.msg) ? { k: 'STOPPED', c: 'red' } : { k: 'OFF', c: 'gray' };
-    if (cooldownLeft() > 0) { return { k: 'COOLDOWN', c: 'gray' }; }
+    if (cooldownLeft() > 0) return { k: 'COOLDOWN', c: 'gray' };
     return { k: 'WAITING SETUP', c: 'green' };
   }
 
@@ -2934,11 +2841,11 @@ async function generateSignal() {
     if($('botStyle')) $('botStyle').value = BOT.style;
     if($('botMode')) $('botMode').value = BOT.mode;
     if($('botSess')) $('botSess').checked = !!BOT.session;
-    ['botStyle', 'botMode', 'botSess'].forEach(id => { if($(id)) $(id).addEventListener('change', cfg); });
+    ['botStyle', 'botMode', 'botSess'].forEach(id => { if($(id)) $(id).addEventListener('change', cfgBot); });
     if($('botBtn')) $('botBtn').addEventListener('click', toggleBot);
   }
 
-  function cfg() {
+  function cfgBot() {
     BOT.style = $('botStyle').value;
     BOT.mode = $('botMode').value;
     BOT.session = $('botSess').checked;
@@ -2948,7 +2855,7 @@ async function generateSignal() {
   function toggleBot() {
     if (BOT.on) {
       BOT.on = false;
-      BOT.msg = 'Bot dihentikan. Trade yang berjalan tetap dipantau.';
+      BOT.msg = 'Bot dihentikan. Trade berjalan tetap dipantau.';
     } else {
       BOT.on = true;
       BOT.since = Date.now();
@@ -2959,7 +2866,7 @@ async function generateSignal() {
     }
     saveBotState();
     renderBotUI();
-    tick();
+    tickBot();
   }
 
   window.renderBotUI = function() {
@@ -2986,7 +2893,7 @@ async function generateSignal() {
     setTxt('botStats', `${w}W · ${l}L · ${be}BE · net ${fmtPips(net)} · loss beruntun ${lossStreak()}/${MAX_LOSS}`);
   }
 
-  async function tick() {
+  async function tickBot() {
     if (!BOT.on) return renderBotUI();
     const now = Date.now();
     if (!marketOpen(BSYM)) { BOT.msg = 'Market tutup (weekend).'; return renderBotUI(); }
@@ -2997,26 +2904,26 @@ async function generateSignal() {
       const a = atr5(), px = prices[BSYM] && prices[BSYM].price;
       if (a > 0 && px != null && pend.dir * (px - pend.px0) > RUN_AWAY_ATR * a) {
         cancelTrade(pend, 'Harga lari menjauh dari entry');
-        BOT.msg = 'Order dibatalkan: harga lari menjauh tanpa pullback.';
+        BOT.msg = 'Order dibatalkan: harga lari menjauh.';
         return renderBotUI();
       }
     }
 
     if (open.length) {
-      BOT.msg = open[0].status === 'PENDING' ? 'Menunggu harga menyentuh entry...' : 'Posisi berjalan, dipantau sampai TP / SL / BE.';
+      BOT.msg = open[0].status === 'PENDING' ? 'Menunggu harga menyentuh entry...' : 'Posisi berjalan, dipantau TP/SL.';
       return renderBotUI();
     }
 
     if (BOT.mode === 'once' && BOT.launched) {
       BOT.on = false; BOT.launched = false;
-      BOT.msg = 'Selesai: trade sudah ditutup. Tekan START untuk lanjut.';
+      BOT.msg = 'Selesai: trade sudah ditutup.';
       saveBotState();
       return renderBotUI();
     }
 
     if (lossStreak() >= MAX_LOSS) {
       BOT.on = false;
-      BOT.msg = `Berhenti: ${MAX_LOSS} loss beruntun. Tekan START untuk reset.`;
+      BOT.msg = `Berhenti: ${MAX_LOSS} loss beruntun.`;
       saveBotState();
       return renderBotUI();
     }
@@ -3026,7 +2933,7 @@ async function generateSignal() {
 
     if (BOT.session) {
       const h = new Date().getUTCHours();
-      if (h < 7 || h >= 21) { BOT.msg = 'Di luar sesi London/NY, menunggu...'; return renderBotUI(); }
+      if (h < 7 || h >= 21) { BOT.msg = 'Di luar sesi London/NY...'; return renderBotUI(); }
     }
 
     const bucket = Math.floor(now / M5);
@@ -3046,7 +2953,7 @@ async function generateSignal() {
     BOT.msg = 'Menganalisa...';
     saveBotState(); renderBotUI();
     try {
-      const r = await generateLive({ auto: true });
+      const r = await generateLiveBot({ auto: true });
       if (r.ok) { BOT.launched = true; BOT.last = ''; BOT.msg = 'Sinyal dibuat.'; }
       else BOT.last = r.msg || 'Belum ada setup';
     } catch (e) {
@@ -3057,7 +2964,7 @@ async function generateSignal() {
     }
   }
 
-  async function generateLive(opts) {
+  async function generateLiveBot(opts) {
     const auto = !!(opts && opts.auto);
     const mk = auto ? BSYM : market;
     const style = auto ? BOT.style : ($('tradingStyleSelect') ? $('tradingStyleSelect').value : 'Scalping');
@@ -3078,10 +2985,10 @@ async function generateSignal() {
         });
         const text = await rawRes.text();
         let data;
-        try { data = JSON.parse(text); } catch (e) { throw new Error('Server mengembalikan format tidak valid.'); }
+        try { data = JSON.parse(text); } catch (e) { throw new Error('Format server tidak valid.'); }
         res = { ok: rawRes.ok, data };
     } catch (e) {
-        return { ok: false, msg: 'Koneksi/API Error: ' + e.message };
+        return { ok: false, msg: 'API Error: ' + e.message };
     }
 
     const data = res.data;
@@ -3136,11 +3043,11 @@ async function generateSignal() {
   }
 
   function bootBot() {
-    load();
+    loadBot();
     initBotListeners();
     if (BOT.on) { if($('marketSelect')) $('marketSelect').value = 'AUTOBOT'; syncMarket(); }
     renderBotUI();
-    setInterval(tick, 2000);
+    setInterval(tickBot, 2000);
     setInterval(renderBotUI, 1000);
   }
 
@@ -3153,7 +3060,6 @@ async function generateSignal() {
 </script>
 
 <script>
-/* ================= BOOT UTAMA ================= */
 bindTap($('tickerList'), tapTicker);
 bindTap($('historyList'), viewTrade);
 loadLive();
