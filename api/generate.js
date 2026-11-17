@@ -1,6 +1,6 @@
 // api/generate.js
-// v119 — respons konsisten (reason/message/error), bot menerima satu order (auto: true),
-// vision memakai AI sungguhan, akses ditolak saat KV error, fallback candle TickerLayer.
+// v120 — bot dikenali dari flag auto, trial bot ditandai sebelum sinyal dihitung,
+// akses ditolak jika belum ada klien terdaftar, vision memakai AI, fallback candle TickerLayer.
 
 export const config = {
   maxDuration: 60,
@@ -183,7 +183,7 @@ async function checkAccess(email, isAutoBot) {
     console.error('KV access error:', e.message);
     return { ok: false, key: 'kvError' };
   }
-  if (!raw) return { ok: true, status: 'admin' }; // belum ada klien terdaftar
+  if (!raw) return { ok: false, key: 'notRegistered' }; // belum ada klien terdaftar: tolak
 
   let clients;
   try { clients = JSON.parse(raw); } catch { return { ok: false, key: 'kvError' }; }
@@ -753,12 +753,13 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
   const m5f = m5.length ? m5 : m15;
   const m15f = m15.length ? m15 : m5;
 
+  // Tandai trial bot sebelum sinyal dihitung, agar request paralel tidak lolos bersamaan
+  if (isAutoBot) await markTrialAsUsed(email);
+
   const result = await RUNNERS[style](ctx, { price, m1, m5: m5f, m15: m15f });
   if (!result || !result.plan) return fail(res, result?.reason || msg(lang, 'noSetup'));
 
   const final = isAutoBot && result.plan.isOCO ? pickSingleForBot(result, price, ctx) : result;
-
-  if (isAutoBot) await markTrialAsUsed(email);
 
   return res.status(200).json({
     ok: true, mode: 'candles', symbol, style, price,
@@ -782,7 +783,8 @@ export default async function handler(req, res) {
 
     const lang = body.lang === 'en' ? 'en' : 'id';
     const email = String(body.email || body.value || '').trim().toLowerCase();
-    const isAutoBot = !!(body.auto || body.bot);
+    // Bot dikenali dari flag auto/bot yang dikirim frontend
+    const isAutoBot = !!(body.auto || body.bot || body.mode === 'bot' || body.source === 'bot');
     const isVision = body.symbol === 'VISION' || (Array.isArray(body.images) && body.images.length > 0);
 
     const access = await checkAccess(email, isAutoBot);
