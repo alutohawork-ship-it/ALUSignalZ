@@ -2098,7 +2098,6 @@ function drawChart() {
   if (!d || market === 'VISION') return;
   const CW = d.w, CH = d.h;
   
-  // Ambil trade aktif (mendukung trade manual maupun dari bot otomatis)
   const t = activeTrade();
   const k = market;
 
@@ -2136,8 +2135,6 @@ function drawChart() {
     { label: pre + 'TP2', v: t.tp2, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp2 },
     { label: pre + 'TP3', v: t.tp3, c: '#38bdf8', bg: 'rgba(56,189,248,.14)', dash: [4, 4], hit: !!t.hits.tp3 }
   ].filter(l => Number.isFinite(l.v)) : [];
-
-  const zoneTrades = t ? [t] : [];
 
   let lo = Infinity, hi = -Infinity;
   const isRunning = t && (t.status === 'RUNNING' || (t.hits && Object.keys(t.hits).length > 0));
@@ -2182,7 +2179,6 @@ function drawChart() {
     cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
   }
 
-  // Render Candle Stick
   const bodyW = Math.max(1.5, slot * 0.62);
   cx.lineWidth = 1;
   for (const c of vis) {
@@ -2201,7 +2197,6 @@ function drawChart() {
     cx.fillRect(x - bodyW / 2, bY, bodyW, bH);
   }
 
-  // Render Garis Level Bot / Trade (Entry, TP, SL)
   if (t) {
     L.forEach(l => {
       const y = yOf(l.v);
@@ -2238,7 +2233,6 @@ function drawChart() {
     }
   }
 
-  // Label di Sisi Kanan Chart
   const tags = L.map(l => ({ text: (l.hit ? '✓ ' : '') + l.label + ' ' + fmt(l.v), c: l.c, bg: l.bg, y: yOf(l.v) }));
   if (live != null) {
     tags.push({
@@ -2629,7 +2623,7 @@ async function generateSignal() {
 }
 
 // =========================================================================
-// FITUR AUTO BOT (EA) - DITAMBAHKAN & DIPERBAIKI UNTUK XAUUSD
+// AUTO BOT (EA) DENGAN PNL REKAP & KALENDER OTOMATIS
 // =========================================================================
 let botRunning = false;
 let botTimer = null;
@@ -2638,7 +2632,6 @@ let botStatsObj = { total: 0, wins: 0, losses: 0 };
 function renderBotUI() {
   const btn = $('botBtn');
   const badge = $('botBadge');
-  const msg = $('botMsg');
   const stats = $('botStats');
   if(!btn || !badge) return;
 
@@ -2663,7 +2656,7 @@ async function toggleBot() {
   if (botRunning) {
     if(msg) msg.textContent = 'Bot diaktifkan. Memantau pasar XAUUSD secara otomatis...';
     runBotCycle();
-    botTimer = setInterval(runBotCycle, 15000); // Cek setiap 15 detik
+    botTimer = setInterval(runBotCycle, 15000);
   } else {
     if(msg) msg.textContent = 'Bot dihentikan.';
     if (botTimer) clearInterval(botTimer);
@@ -2681,7 +2674,6 @@ async function runBotCycle() {
     }
   }
 
-  // Cek apakah ada trade berjalan di XAUUSD
   const openTrades = trades.filter(x => x.key === 'XAUUSD' && x.status !== 'CLOSED');
   if (openTrades.length > 0) {
     if($('botMsg')) $('botMsg').textContent = 'Trade XAUUSD masih berjalan. Menunggu hingga selesai...';
@@ -2690,7 +2682,6 @@ async function runBotCycle() {
 
   if($('botMsg')) $('botMsg').textContent = 'Bot sedang memindai setup SMC XAUUSD...';
   
-  // Panggil API signal secara otomatis untuk XAUUSD
   const email = localStorage.getItem(K.email);
   if (!email) return;
   const style = $('botStyle') ? $('botStyle').value : 'Scalping';
@@ -2706,11 +2697,13 @@ async function runBotCycle() {
       id: 'bot_' + Math.random().toString(36).slice(2, 9),
       no, key: 'XAUUSD', status: 'RUNNING', createdAt: Date.now(), hits: {}
     }, raw));
+    
     trades.push(trade);
     activeId = trade.id;
     saveTrades();
     botStatsObj.total++;
     renderAll();
+
     if($('botMsg')) $('botMsg').textContent = `Sinyal baru dieksekusi otomatis (${trade.signal} di ${fmt(trade.entry)}).`;
     renderBotUI();
   } else {
@@ -2721,7 +2714,7 @@ async function runBotCycle() {
 const botBtn = $('botBtn');
 if (botBtn) botBtn.addEventListener('click', toggleBot);
 
-// Loop utama render & pump
+// Loop utama render & pump harga live
 setInterval(() => {
   watchdog();
   pump();
@@ -2743,3 +2736,4 @@ window.addEventListener('load', async () => {
 </script>
 </body>
 </html>
+1
