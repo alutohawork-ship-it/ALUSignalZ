@@ -41,8 +41,8 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
 .validation-progress-fill{height:100%;width:0%;background:linear-gradient(90deg,#f59e0b,#fbbf24);transition:width .3s ease}
 .smc-tf-btn { transition: all 0.2s; }
 .smc-tf-btn.active { background-color: #2962ff; color: white; border-color: #2962ff; }
-#smcCanvas { touch-action: none; cursor: grab; }
-#smcCanvas:active { cursor: grabbing; }
+#smcCanvas, #botCanvas { touch-action: none; cursor: grab; }
+#smcCanvas:active, #botCanvas:active { cursor: grabbing; }
 </style>
 </head>
 <body class="bg-darkbg text-gray-200 font-sans min-h-screen flex flex-col justify-between p-2 sm:p-4">
@@ -184,7 +184,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
           <div class="grid grid-cols-2 gap-1.5">
             <select id="botStyle" class="bg-cardbg border border-panelborder text-[10px] font-bold text-white p-1.5 rounded-lg focus:outline-none">
               <option value="Scalping">Scalping Agresif</option>
-              <option value="Day Trading">Scalping Konservatif</option>
+              <option value="Day Trading">Scalping Konservatif (Fleksibel)</option>
             </select>
             <select id="botMode" class="bg-cardbg border border-panelborder text-[10px] font-bold text-white p-1.5 rounded-lg focus:outline-none">
               <option value="loop">Auto-loop</option>
@@ -196,17 +196,24 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
           <p id="botMsg" class="text-[9px] font-mono text-gray-300 min-h-[12px] break-words"></p>
           <p id="botStats" class="text-[8px] font-mono text-gray-500">Total Bot Trade: 0 | Win: 0 | Loss: 0</p>
 
-          <!-- BOT LIVE MAP (terpisah dari chart manual) -->
+          <!-- BOT LIVE MAP DENGAN VISUAL KHUSUS SMC / SMA20 -->
           <div class="border-t border-panelborder pt-2 space-y-1.5">
             <div class="flex justify-between items-center">
-              <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-chart-line text-accentblue"></i> BOT LIVE MAP</span>
+              <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-chart-line text-accentblue"></i> BOT SMC & SMA20 LIVE MAP</span>
               <span id="botTradeStatus" class="hidden text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40 whitespace-nowrap">RUNNING</span>
             </div>
             <p id="botPnl" class="text-[10px] font-mono font-bold text-gray-400"></p>
             <p id="botLive" class="text-[8px] font-mono text-gray-400"></p>
             <div id="botLevels" class="text-[8px] font-mono text-gray-400 break-words"></div>
-            <div class="relative w-full h-[240px] sm:h-[300px]">
+            <div class="relative w-full h-[260px] sm:h-[320px]">
               <canvas id="botCanvas" class="absolute inset-0 w-full h-full"></canvas>
+            </div>
+            <div class="flex flex-wrap gap-x-2.5 gap-y-0.5 text-[7px] font-mono text-gray-400 px-1 pb-0.5">
+              <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(59,130,246,.6)"></i> FVG</span>
+              <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(16,185,129,.6)"></i> Demand/OB</span>
+              <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(239,68,68,.6)"></i> Supply/OB</span>
+              <span class="text-amber-400">┄ BSL/SSL</span>
+              <span class="text-yellow-300">SMA 20 Line</span>
             </div>
             <p class="text-[8px] font-bold text-gray-500 pt-1">RIWAYAT BOT</p>
             <div id="botHistory" class="space-y-1 max-h-[160px] overflow-y-auto pr-1"></div>
@@ -518,13 +525,6 @@ const CANDLE_LIMIT = 300;
 const SWING_L = 2;
 const BIN_SYM = { BTCUSD: 'BTCUSDT' };
 const BIN_HOSTS = ['https://api.binance.com', 'https://data-api.binance.vision'];
-const SESS = [
-  { name: 'Asia', h1: 0, h2: 8, col: '45,212,191' },
-  { name: 'London KZ', h1: 7, h2: 10, col: '239,68,68' },
-  { name: 'London', h1: 8, h2: 17, col: '59,130,246' },
-  { name: 'NY KZ', h1: 12, h2: 15, col: '239,68,68' },
-  { name: 'New York', h1: 13, h2: 21, col: '56,189,248' }
-];
 const PILL = {
   green: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40',
   yellow: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40',
@@ -542,9 +542,9 @@ const I18N = {
   id: {
     subHeader: 'SMC x ICT x Alchemist (XAUUSD & BTCUSD)', loginSub: 'Silakan masukkan email terdaftar atau kode admin',
     lblAccess: 'ACCESS LOGIN', btnLogin: 'MASUK SISTEM', btnLogout: 'LOGOUT', loginNeed: 'Isi email atau kode admin dulu.', checking: 'Mengecek...', denied: 'Login ditolak: ',
-    lblMarket: 'TARGET ASET AKTIF', lblStyle: 'GAYA TRADING / STRATEGI', optScalp: 'Scalping Agresif (High Risk)', optDay: 'Scalping Konservatif', optIntra: 'Intraday / Day Trade', optSwing: 'Swing',
-    infoScalp: 'Buy Now / Sell Now sesuai arah pasar. Jika ada di area pantulan, fokus ambil pantulan (tanpa limit order).',
-    infoDay: 'Fokus menunggu Limit Order di zona pantulan / FVG yang dekat dengan harga (zona jauh otomatis diabaikan).', infoIntra: 'Konsep Day Trade (H1/M15), menunggu retest zona yang lebih lebar.', infoSwing: 'Positioning di H4, menahan posisi lebih lama.',
+    lblMarket: 'TARGET ASET AKTIF', lblStyle: 'GAYA TRADING / STRATEGI', optScalp: 'Scalping Agresif (High Risk)', optDay: 'Scalping Konservatif (Fleksibel)', optIntra: 'Intraday / Day Trade', optSwing: 'Swing',
+    infoScalp: 'Buy Now / Sell Now sesuai arah pasar. Jika ada di area pantulan, fokus ambil pantulan.',
+    infoDay: 'Fleksibel: jika limit order kejauhan/belum tersentuh, bot otomatis membaca zona baru Reversal/SMA/Zone.', infoIntra: 'Konsep Day Trade (H1/M15), menunggu retest zona yang lebih lebar.', infoSwing: 'Positioning di H4, menahan posisi lebih lama.',
     btnGen: 'Analisa Signal', btnGenVision: 'Analisa Gambar', btnGenBusy: 'Menganalisa Gambar...',
     lblBias: 'BIAS MULTI-TIMEFRAME', lblStream: 'LIVE MARKET STREAM', lblSession: 'MARKET SESSIONS',
     standby1: 'Chart di bawah sudah aktif. Tekan Analisa Signal untuk membuat sinyal.', entryZone: 'ENTRY ZONE', lblMap: 'LIVE MAP CHART', lblReason: 'ANALYSIS REASON (CONFLUENCE SCORE):',
@@ -563,9 +563,9 @@ const I18N = {
   en: {
     subHeader: 'SMC x ICT x Alchemist (XAUUSD & BTCUSD)', loginSub: 'Enter your registered email or admin code',
     lblAccess: 'ACCESS LOGIN', btnLogin: 'LOG IN', btnLogout: 'LOGOUT', loginNeed: 'Enter your email or admin code first.', checking: 'Checking...', denied: 'Login denied: ',
-    lblMarket: 'ACTIVE TARGET ASSET', lblStyle: 'TRADING STYLE / STRATEGI', optScalp: 'Aggressive Scalping (High Risk)', optDay: 'Conservative Scalping', optIntra: 'Intraday / Day Trade', optSwing: 'Swing',
-    infoScalp: 'Buy Now / Sell Now following market direction. If in a bounce zone, focus on the bounce (no limit orders).',
-    infoDay: 'Wait for Limit Orders at retracement zones / FVG close to price (far zones are ignored).', infoIntra: 'Day Trade concept (H1/M15), waiting for retest of wider zones.', infoSwing: 'Positioning on H4, holding positions longer.',
+    lblMarket: 'ACTIVE TARGET ASSET', lblStyle: 'TRADING STYLE / STRATEGI', optScalp: 'Aggressive Scalping (High Risk)', optDay: 'Conservative Scalping (Flexible)', optIntra: 'Intraday / Day Trade', optSwing: 'Swing',
+    infoScalp: 'Buy Now / Sell Now following market direction.',
+    infoDay: 'Flexible: if limit orders are far/untouched, the bot automatically scans new Reversal/SMA/Zone.', infoIntra: 'Day Trade concept (H1/M15), waiting for retest of wider zones.', infoSwing: 'Positioning on H4, holding positions longer.',
     btnGen: 'Analyze Signal', btnGenVision: 'Analyze Image', btnGenBusy: 'Analyzing Image...',
     lblBias: 'MULTI-TIMEFRAME BIAS', lblStream: 'LIVE MARKET STREAM', lblSession: 'MARKET SESSIONS',
     standby1: 'The chart below is active. Press Analyze Signal to create a signal.', entryZone: 'ENTRY ZONE', lblMap: 'LIVE MAP CHART', lblReason: 'ANALYSIS REASON (CONFLUENCE SCORE):',
@@ -611,7 +611,7 @@ const marketOpen = k => MARKETS[k].h24 || ![0, 6].includes(new Date().getUTCDay(
 const T = k => I18N[lang][k];
 const optOf = s => T((STYLE_CFG[s] || STYLE_CFG.Scalping).opt);
 const symOf = k => workingSym[k] || MARKETS[k].aliases[aliasIdx[k] || 0];
-// activeTrade: trade manual saja (trade bot dipisah, src === 'bot')
+
 const activeTrade = () => {
   const t = market === 'VISION' ? visionTrade : (trades.find(x => x.id === activeId && x.key === market && x.src !== 'bot') || null);
   if (t && !t.hits) t.hits = {};
@@ -665,7 +665,6 @@ const sx = scv ? scv.getContext('2d') : null;
 const bcv = $('botCanvas');
 const bcx = bcv ? bcv.getContext('2d') : null;
 
-// ---- Helper bot (trade bot dipisah dari trade manual) ----
 let botActiveId = null, botBusy = false;
 const isBotView = () => !!$('marketSelect') && $('marketSelect').value === 'AUTOBOT';
 const botTrades = () => trades.filter(x => x.src === 'bot');
@@ -894,7 +893,6 @@ function wsBadge(text, color) {
   e.className = 'text-[8px] font-mono px-2 py-0.5 rounded border ' + PILL[color];
 }
 
-// openOf: trade manual yang masih berjalan (trade bot tidak dihitung)
 function openOf(k) { return trades.filter(x => x.key === k && x.status !== 'CLOSED' && x.src !== 'bot'); }
 function pickTradeFor(k, preferId) {
   const list = trades.filter(x => x.key === k && x.src !== 'bot');
@@ -919,6 +917,9 @@ function syncMarket(tradeId) {
   $('smcPanel').classList.toggle('hidden', isVision);
   $('sessionPanel').classList.toggle('hidden', isVision);
 
+  const manualSignalCard = $('standbyView')?.parentElement;
+  if (manualSignalCard) manualSignalCard.classList.toggle('hidden', isBot);
+
   const botPanel = $('botPanel');
   if (botPanel) botPanel.classList.toggle('hidden', !isBot);
 
@@ -929,7 +930,7 @@ function syncMarket(tradeId) {
   if (signalBtn) signalBtn.classList.toggle('hidden', isBot);
 
   setTxt('btnText', isVision ? T('btnGenVision') : T('btnGen'));
-  activeId = isVision ? null : pickTradeFor(market, tradeId);
+  activeId = (isVision || isBot) ? null : pickTradeFor(market, tradeId);
   refreshCard();
   renderHistory();
 
@@ -965,7 +966,6 @@ function viewTrade(id) {
   pickMarket(t.key, id);
 }
 
-// Delegasi klik untuk elemen [data-tap] (ticker & history)
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-tap]');
   if (!el) return;
@@ -1238,13 +1238,6 @@ function seriesRows(k, iv) {
       last.c = c.close;
     } else if (!last || c.time > last.t) {
       out.push({ t: c.time, o: c.open, h: c.high, l: c.low, c: c.close });
-    }
-  }
-  if (out.length > 1) {
-    const last = out[out.length - 1];
-    const prev = out[out.length - 2];
-    if (Math.abs(last.c - prev.c) / prev.c > 0.02) {
-       return [last];
     }
   }
   return out;
@@ -1559,6 +1552,13 @@ function renderHistory() {
 
 const BADGE = 'text-[8px] font-mono font-bold px-2 py-0.5 rounded border ';
 function refreshCard() {
+  if (isBotView()) {
+    $('standbyView').classList.add('hidden');
+    $('activeCard').classList.add('hidden');
+    $('tradeStatus').classList.add('hidden');
+    return;
+  }
+
   const t = activeTrade();
   const isVision = market === 'VISION';
   const p = prices[market];
@@ -1944,84 +1944,21 @@ function liquidity(rows, sw) {
   };
   check(sw.sh, true);
   check(sw.sl, false);
-  for (let a = 0; a < pools.length; a++) {
-    for (let b = 0; b < a; b++) {
-      if (pools[a].high === pools[b].high && Math.abs(pools[a].p - pools[b].p) / pools[b].p < 0.0005) {
-        pools[a].label = pools[a].high ? 'EQH' : 'EQL';
-      }
-    }
-  }
   return { pools: pools.slice(-6), sweeps: sweeps.slice(-4) };
 }
 
-function cisdOf(rows) {
-  const out = [];
-  let lastK = -1;
-  for (let i = 16; i < rows.length; i++) {
-    const c = rows[i];
-    let avg = 0;
-    for (let j = i - 10; j < i; j++) avg += Math.abs(rows[j].c - rows[j].o);
-    avg /= 10;
-    const body = Math.abs(c.c - c.o);
-    if (avg === 0 || body < avg * 1.2) continue;
-    const up = c.c > c.o;
-    let k = -1;
-    for (let j = i - 1; j >= i - 6 && j >= 0; j--) {
-      const r = rows[j];
-      if (up ? r.c < r.o : r.c > r.o) { k = j; break; }
-    }
-    if (k < 0 || k === lastK) continue;
-    const kr = rows[k];
-    const seg = rows.slice(Math.max(0, i - 16), i - 5);
-    const recent = rows.slice(i - 6, i);
-    let sweep = false;
-    if (up) sweep = recent.some(x => x.l < Math.min(...seg.map(y => y.l)));
-    else sweep = recent.some(x => x.h > Math.max(...seg.map(y => y.h)));
-    if (!sweep) continue;
-    if ((up && c.c > kr.o) || (!up && c.c < kr.o)) {
-      out.push({ dir: up ? 1 : -1, p: kr.o, t: kr.t, toT: c.t });
-      lastK = k;
-    }
-  }
-  return out.slice(-3);
-}
-
 function detectSMC(rows) {
-  const fvgs = [], obs = [], breakers = [];
+  const fvgs = [], obs = [];
   for (let i = 1; i < rows.length - 1; i++) {
     const a = rows[i - 1], b = rows[i], c = rows[i + 1];
     if (a.h < c.l && !invalidZone(rows, i + 2, 1, a.h, c.l)) fvgs.push({ dir: 1, bottom: a.h, top: c.l, t: b.t });
     if (a.l > c.h && !invalidZone(rows, i + 2, -1, c.h, a.l)) fvgs.push({ dir: -1, bottom: c.h, top: a.l, t: b.t });
-    if (b.c < b.o && c.c > b.h && !invalidZone(rows, i + 2, 1, b.c, b.o)) obs.push({ dir: 1, bottom: b.c, top: b.o, t: b.t });
-    if (b.c > b.o && c.c < b.l && !invalidZone(rows, i + 2, -1, b.o, b.c)) obs.push({ dir: -1, bottom: b.o, top: b.c, t: b.t });
+    if (b.c < b.o && c.c > b.h) obs.push({ dir: 1, bottom: b.c, top: b.o, t: b.t });
+    if (b.c > b.o && c.c < b.l) obs.push({ dir: -1, bottom: b.o, top: b.c, t: b.t });
   }
-
-  for (const ob of obs) {
-    const startIndex = rows.findIndex(r => r.t === ob.t);
-    if (startIndex === -1) continue;
-    for (let j = startIndex + 1; j < rows.length; j++) {
-      const c = rows[j];
-      if (ob.dir === -1 && c.c > ob.top) {
-        breakers.push({ dir: 1, bottom: ob.bottom, top: ob.top, t: c.t });
-        break;
-      }
-      if (ob.dir === 1 && c.c < ob.bottom) {
-        breakers.push({ dir: -1, bottom: ob.bottom, top: ob.top, t: c.t });
-        break;
-      }
-    }
-  }
-
   const sw = swings(rows);
   const st = structure(rows, sw);
-  return {
-    fvgs: fvgs.slice(-4),
-    obs: obs.slice(-4),
-    breakers: breakers.slice(-4),
-    liq: liquidity(rows, sw),
-    ev: st.ev,
-    cisd: cisdOf(rows)
-  };
+  return { fvgs: fvgs.slice(-4), obs: obs.slice(-4), liq: liquidity(rows, sw), ev: st.ev };
 }
 
 function getSmc(k, iv) {
@@ -2031,7 +1968,7 @@ function getSmc(k, iv) {
   const rows = displayRows(k, iv);
   const res = rows.length >= 20
     ? { ...detectSMC(rows), status: 'ok' }
-    : { status: 'loading', fvgs: [], obs: [], breakers: [], liq: { pools: [], sweeps: [] }, ev: [], cisd: [] };
+    : { status: 'loading', fvgs: [], obs: [], liq: { pools: [], sweeps: [] }, ev: [] };
   res.n = rows.length;
   res.err = (!s.rows.length && !s.ext.length) ? (s.err || s.extErr || '') : '';
   s.smc = res;
@@ -2043,8 +1980,7 @@ function renderSmcInfo() {
   if (market === 'VISION') return;
   const t = activeTrade();
   const k = t ? t.key : market;
-  const style = t ? t.style : $('tradingStyleSelect').value;
-  const iv = smcTfOverride || SMC_TF_MAP[style] || '5m';
+  const iv = smcTfOverride || '5m';
 
   document.querySelectorAll('.smc-tf-btn').forEach(btn => {
     if (btn.dataset.tf === iv) btn.classList.add('active');
@@ -2053,8 +1989,8 @@ function renderSmcInfo() {
 
   const s = getSmc(k, iv);
   const head = `${k} ${iv} · ${srcOf(k, iv)} · ${s.n || 0} candle`;
-  if (s.status !== 'ok') return setTxt('smcInfo', head + (s.err ? ' · ' + s.err : ' · memuat candle (min 20)...'));
-  setTxt('smcInfo', `${head} · ${s.fvgs.length} FVG · ${s.obs.length} S/D · ${s.breakers.length} BB · ${s.liq.pools.length} BSL/SSL · ${s.ev.length} BOS/CHoCH · ${s.cisd.length} CISD · ${s.liq.sweeps.length} SW`);
+  if (s.status !== 'ok') return setTxt('smcInfo', head + (s.err ? ' · ' + s.err : ' · memuat candle...'));
+  setTxt('smcInfo', `${head} · ${s.fvgs.length} FVG · ${s.obs.length} S/D · ${s.liq.pools.length} BSL/SSL`);
 }
 
 function sessionBoxes(rows, now) {
@@ -2062,15 +1998,17 @@ function sessionBoxes(rows, now) {
   if (!rows.length) return out;
   const d = new Date(now);
   const day0 = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  for (const s of SESS) {
+  const S = [
+    { name: 'Asia', h1: 0, h2: 8, col: '45,212,191' },
+    { name: 'London', h1: 8, h2: 17, col: '59,130,246' },
+    { name: 'New York', h1: 13, h2: 21, col: '56,189,248' }
+  ];
+  for (const s of S) {
     let a = day0 + s.h1 * 3600000, b = day0 + s.h2 * 3600000;
     if (now < a) { a -= 86400000; b -= 86400000; }
     const inS = rows.filter(c => c.t >= a && c.t < b);
     if (!inS.length) continue;
-    out.push({
-      name: s.name, col: s.col, a, b: Math.min(b, now),
-      hi: Math.max(...inS.map(c => c.h)), lo: Math.min(...inS.map(c => c.l))
-    });
+    out.push({ name: s.name, col: s.col, a, b: Math.min(b, now), hi: Math.max(...inS.map(c => c.h)), lo: Math.min(...inS.map(c => c.l)) });
   }
   return out;
 }
@@ -2113,14 +2051,198 @@ function layoutX(rows, plotL, plotR, tfMs) {
   const N = Math.min(rows.length, nWant);
   const vis = N ? rows.slice(rows.length - N) : [];
   const slot = plotW / (Math.max(N, 12) + CH_PAD);
-  const t0 = vis.length ? vis[0].t : Date.now() - tfMs * 12;
   const xOfT = timeToX(vis, plotL, slot);
-  return { vis, slot, t0, xOfT };
+  return { vis, slot, xOfT };
 }
 function srcLabel(k, iv) { return `${k} · ${iv} · WIB · ${srcOf(k, iv)}`; }
 
-// Parameter cv & cx sengaja menimpa variabel global agar fungsi ini
-// bisa dipakai untuk canvas manual (priceChart) dan canvas bot (botCanvas).
+// ---- Kanvas Khusus Bot (Bot Live Map dengan Visual SMC & SMA 20) ----
+function drawBotMap(cv, cx, t, k) {
+  if (!cx) return;
+  const d = fitCv(cv, cx);
+  if (!d) return;
+  const CW = d.w, CH = d.h;
+
+  const iv = '1m';
+  const tfMs = TF_MIN[iv] * 60000;
+  const rows = displayRows(k, iv);
+  const live = prices[k] ? prices[k].price : null;
+  const liveDir = prices[k] ? prices[k].dir : 0;
+  const plotL = 6, plotT = 20, plotB = CH - 14, plotR = CW - CHART_GUT;
+  const plotH = plotB - plotT;
+
+  cx.font = '8px ui-monospace, monospace';
+  cx.textAlign = 'left';
+  cx.textBaseline = 'top';
+  cx.fillStyle = 'rgba(148,163,184,.9)';
+  cx.fillText(`BOT SMC & SMA20 · ${srcLabel(k, iv)}`, plotL + 2, 3);
+
+  if (!rows.length && live == null) {
+    cx.font = 'bold 11px ui-monospace, monospace';
+    cx.fillStyle = '#94a3b8';
+    cx.textAlign = 'center';
+    cx.textBaseline = 'middle';
+    cx.fillText(T('waitTick'), CW / 2, CH / 2);
+    cx.textAlign = 'left';
+    return;
+  }
+
+  const { vis, slot, xOfT } = layoutX(rows, plotL, plotR, tfMs);
+  const smcData = getSmc(k, iv);
+
+  // Hitung SMA 20 untuk visual garis di kanvas bot
+  const closes = rows.map(c => c.c);
+  const smaPoints = [];
+  for (let i = 19; i < rows.length; i++) {
+    let sum = 0;
+    for (let j = i - 19; j <= i; j++) sum += closes[j];
+    smaPoints.push({ t: rows[i].t, v: sum / 20 });
+  }
+
+  const L = t ? [
+    { label: 'ENTRY', main: true, v: t.entry, c: '#93c5fd', bg: 'rgba(147,197,253,.14)', dash: [] },
+    { label: 'SL', v: t.sl, c: '#f87171', bg: 'rgba(248,113,113,.14)', dash: [4, 4], hit: t.result === 'SL' },
+    { label: 'TP1', v: t.tp1, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp1 },
+    { label: 'TP2', v: t.tp2, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp2 },
+    { label: 'TP3', v: t.tp3, c: '#38bdf8', bg: 'rgba(56,189,248,.14)', dash: [4, 4], hit: !!t.hits.tp3 }
+  ].filter(l => Number.isFinite(l.v)) : [];
+
+  let lo = Infinity, hi = -Infinity;
+  vis.forEach(c => {
+    if (c.h < lo) lo = c.h;
+    if (c.h > hi) hi = c.h;
+    if (c.l < lo) lo = c.l;
+    if (c.l > hi) hi = c.l;
+  });
+  if (live != null) { if (live < lo) lo = live; if (live > hi) hi = live; }
+  if (t) L.forEach(l => { if (l.v < lo) lo = l.v; if (l.v > hi) hi = l.v; });
+
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
+  if (!(hi - lo > 0)) { const dd = Math.abs(hi) * 0.001 || 1; lo -= dd; hi += dd; }
+  const pad = (hi - lo) * 0.12;
+  lo -= pad; hi += pad;
+
+  const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * plotH;
+  const clampX = x => Math.max(plotL, Math.min(plotR, x));
+
+  // Render SMC FVG & OB pada kanvas bot khusus
+  if (smcData.status === 'ok') {
+    smcData.fvgs.forEach(z => {
+      const x0 = clampX(xOfT(z.t));
+      if (plotR - x0 < 2) return;
+      const y1 = yOf(z.top), y2 = yOf(z.bottom);
+      cx.save();
+      cx.fillStyle = z.dir > 0 ? 'rgba(59,130,246,.15)' : 'rgba(168,85,247,.15)';
+      cx.fillRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
+      cx.restore();
+    });
+    smcData.obs.forEach(z => {
+      const x0 = clampX(xOfT(z.t));
+      if (plotR - x0 < 2) return;
+      const y1 = yOf(z.top), y2 = yOf(z.bottom);
+      cx.save();
+      cx.fillStyle = z.dir > 0 ? 'rgba(16,185,129,.18)' : 'rgba(239,68,68,.18)';
+      cx.fillRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
+      cx.restore();
+    });
+  }
+
+  // Render Garis SMA 20
+  if (smaPoints.length > 1) {
+    cx.save();
+    cx.strokeStyle = '#facc15';
+    cx.lineWidth = 1.5;
+    cx.beginPath();
+    let started = false;
+    for (const pt of smaPoints) {
+      const x = xOfT(pt.t), y = yOf(pt.v);
+      if (x >= plotL && x <= plotR) {
+        if (!started) { cx.moveTo(x, y); started = true; } else { cx.lineTo(x, y); }
+      }
+    }
+    cx.stroke();
+    cx.restore();
+  }
+
+  // Render Candles
+  const bodyW = Math.max(1.5, slot * 0.62);
+  cx.lineWidth = 1;
+  for (const c of vis) {
+    const x = xOfT(c.t);
+    if (x < plotL || x > plotR) continue;
+    const up = c.c >= c.o;
+    const col = up ? '#34d399' : '#f87171';
+    const yH = yOf(c.h), yL = yOf(c.l), yO = yOf(c.o), yC = yOf(c.c);
+
+    cx.strokeStyle = col;
+    cx.beginPath(); cx.moveTo(x, yH); cx.lineTo(x, yL); cx.stroke();
+
+    cx.fillStyle = col;
+    cx.fillRect(x - bodyW / 2, Math.min(yO, yC), bodyW, Math.max(1, Math.abs(yC - yO)));
+  }
+
+  // Render Level Trade Bot
+  if (t) {
+    L.forEach(l => {
+      const y = yOf(l.v);
+      cx.save();
+      cx.strokeStyle = l.c;
+      cx.globalAlpha = l.main ? .95 : .8;
+      cx.lineWidth = l.main ? 1.4 : 1;
+      cx.setLineDash(l.dash);
+      cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
+      cx.restore();
+    });
+  }
+
+  if (live != null) {
+    const y = yOf(live);
+    const lc = liveDir < 0 ? '#f87171' : '#34d399';
+    cx.save();
+    cx.strokeStyle = lc;
+    cx.globalAlpha = .6;
+    cx.lineWidth = 1;
+    cx.setLineDash([1, 3]);
+    cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
+    cx.restore();
+  }
+
+  const tags = L.map(l => ({ text: (l.hit ? '✓ ' : '') + l.label + ' ' + fmt(l.v), c: l.c, bg: l.bg, y: yOf(l.v) }));
+  if (live != null) {
+    tags.push({ text: fmt(live), c: liveDir < 0 ? '#fca5a5' : '#86efac', bg: liveDir < 0 ? 'rgba(239,68,68,.25)' : 'rgba(16,185,129,.25)', y: yOf(live) });
+  }
+  tags.sort((a, b) => a.y - b.y);
+
+  const GAP = 15, capT = plotT + 6, capB = plotB - 6;
+  tags.forEach(g => { g.y = Math.max(capT, Math.min(capB, g.y)); });
+  for (let i = 1; i < tags.length; i++) if (tags[i].y < tags[i - 1].y + GAP) tags[i].y = tags[i - 1].y + GAP;
+
+  cx.font = 'bold 8px ui-monospace, monospace';
+  cx.textAlign = 'left';
+  cx.textBaseline = 'middle';
+  for (const g of tags) {
+    const x = plotR + 6, w = CHART_GUT - 12, h = 14, y = g.y - h / 2;
+    rr(cx, x, y, w, h, 3);
+    cx.fillStyle = g.bg; cx.fill();
+    cx.strokeStyle = g.c; cx.lineWidth = .8; cx.stroke();
+    cx.fillStyle = g.c;
+    cx.fillText(g.text, x + 4, g.y + .5);
+  }
+}
+
+// Chart manual
+function drawChart() {
+  if (market === 'VISION' || isBotView()) return;
+  drawLiveMap(cv, cx, activeTrade(), market);
+}
+
+// Chart bot khusus dengan visual SMC & SMA20
+function drawBotChart() {
+  if (!isBotView()) return;
+  const activeBotSig = botRunning ? botTrade() : null;
+  drawBotMap(bcv, bcx, activeBotSig, 'XAUUSD');
+}
+
 function drawLiveMap(cv, cx, t, k) {
   if (!cx) return;
   const d = fitCv(cv, cx);
@@ -2152,7 +2274,6 @@ function drawLiveMap(cv, cx, t, k) {
   }
 
   const { vis, slot, xOfT } = layoutX(rows, plotL, plotR, tfMs);
-
   const pre = t && t.ocoId ? (t.signal === 'BUY' ? 'B ' : 'S ') : '';
   const L = t ? [
     { label: pre + 'ENTRY', main: true, v: t.entry, c: '#93c5fd', bg: 'rgba(147,197,253,.14)', dash: [] },
@@ -2163,39 +2284,17 @@ function drawLiveMap(cv, cx, t, k) {
   ].filter(l => Number.isFinite(l.v)) : [];
 
   let lo = Infinity, hi = -Infinity;
-  const isRunning = t && (t.status === 'RUNNING' || (t.hits && Object.keys(t.hits).length > 0));
-  const isZoomed = !!(t && isRunning);
-
-  if (isZoomed) {
-    const levels = [t.sl, t.entry, t.tp1, t.tp2, t.tp3, live].filter(v => v != null && Number.isFinite(v));
-    lo = Math.min(...levels);
-    hi = Math.max(...levels);
-  } else {
-    vis.forEach(c => {
-      if (c.h < lo) lo = c.h;
-      if (c.h > hi) hi = c.h;
-      if (c.l < lo) lo = c.l;
-      if (c.l > hi) hi = c.l;
-    });
-    if (live != null) {
-      if (live < lo) lo = live;
-      if (live > hi) hi = live;
-    }
-    if (t) {
-      L.forEach(l => {
-        if (l.v < lo) lo = l.v;
-        if (l.v > hi) hi = l.v;
-      });
-    }
-  }
+  vis.forEach(c => {
+    if (c.h < lo) lo = c.h; if (c.h > hi) hi = c.h;
+    if (c.l < lo) lo = c.l; if (c.l > hi) hi = c.l;
+  });
+  if (live != null) { if (live < lo) lo = live; if (live > hi) hi = live; }
+  if (t) L.forEach(l => { if (l.v < lo) lo = l.v; if (l.v > hi) hi = l.v; });
 
   if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
   if (!(hi - lo > 0)) { const dd = Math.abs(hi) * 0.001 || 1; lo -= dd; hi += dd; }
-
-  const pad = (hi - lo) * (isZoomed ? 0.05 : 0.12);
-  lo -= pad;
-  hi += pad;
-
+  const pad = (hi - lo) * 0.12;
+  lo -= pad; hi += pad;
   const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * plotH;
 
   cx.lineWidth = 1;
@@ -2218,9 +2317,7 @@ function drawLiveMap(cv, cx, t, k) {
     cx.beginPath(); cx.moveTo(x, yH); cx.lineTo(x, yL); cx.stroke();
 
     cx.fillStyle = col;
-    const bY = Math.min(yO, yC);
-    const bH = Math.max(1, Math.abs(yC - yO));
-    cx.fillRect(x - bodyW / 2, bY, bodyW, bH);
+    cx.fillRect(x - bodyW / 2, Math.min(yO, yC), bodyW, Math.max(1, Math.abs(yC - yO)));
   }
 
   if (t) {
@@ -2231,10 +2328,7 @@ function drawLiveMap(cv, cx, t, k) {
       cx.globalAlpha = l.main ? .95 : .8;
       cx.lineWidth = l.main ? 1.4 : 1;
       cx.setLineDash(l.dash);
-      cx.beginPath();
-      cx.moveTo(plotL, y);
-      cx.lineTo(plotR, y);
-      cx.stroke();
+      cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
       cx.restore();
     });
   }
@@ -2243,30 +2337,14 @@ function drawLiveMap(cv, cx, t, k) {
     const y = yOf(live);
     const lc = liveDir < 0 ? '#f87171' : '#34d399';
     cx.save();
-    cx.strokeStyle = lc;
-    cx.globalAlpha = .6;
-    cx.lineWidth = 1;
-    cx.setLineDash([1, 3]);
+    cx.strokeStyle = lc; cx.globalAlpha = .6; cx.lineWidth = 1; cx.setLineDash([1, 3]);
     cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
     cx.restore();
-    if (vis.length) {
-      const hx = xOfT(vis[vis.length - 1].t);
-      const pr = 3 + Math.sin(Date.now() / 150) * 1.5;
-      cx.save();
-      cx.beginPath(); cx.arc(hx, y, pr + 2.5, 0, Math.PI * 2); cx.fillStyle = 'rgba(41,98,255,.35)'; cx.fill();
-      cx.beginPath(); cx.arc(hx, y, 3, 0, Math.PI * 2); cx.fillStyle = '#fff'; cx.shadowColor = '#2962ff'; cx.shadowBlur = 8; cx.fill();
-      cx.restore();
-    }
   }
 
   const tags = L.map(l => ({ text: (l.hit ? '✓ ' : '') + l.label + ' ' + fmt(l.v), c: l.c, bg: l.bg, y: yOf(l.v) }));
   if (live != null) {
-    tags.push({
-      text: fmt(live),
-      c: liveDir < 0 ? '#fca5a5' : '#86efac',
-      bg: liveDir < 0 ? 'rgba(239,68,68,.25)' : 'rgba(16,185,129,.25)',
-      y: yOf(live)
-    });
+    tags.push({ text: fmt(live), c: liveDir < 0 ? '#fca5a5' : '#86efac', bg: liveDir < 0 ? 'rgba(239,68,68,.25)' : 'rgba(16,185,129,.25)', y: yOf(live) });
   }
   tags.sort((a, b) => a.y - b.y);
 
@@ -2285,17 +2363,6 @@ function drawLiveMap(cv, cx, t, k) {
     cx.fillStyle = g.c;
     cx.fillText(g.text, x + 4, g.y + .5);
   }
-}
-
-// Chart manual (mengikuti trade manual aktif)
-function drawChart() {
-  if (market === 'VISION' || isBotView()) return;
-  drawLiveMap(cv, cx, activeTrade(), market);
-}
-// Chart bot (mengikuti trade bot, terpisah dari chart manual)
-function drawBotChart() {
-  if (!isBotView()) return;
-  drawLiveMap(bcv, bcx, botTrade(), 'XAUUSD');
 }
 
 function drawSMC() {
@@ -2351,25 +2418,22 @@ function drawSMC() {
 
   const fvgs = s.fvgs.filter(z => inBand(z.bottom, z.top));
   const obs = s.obs.filter(z => inBand(z.bottom, z.top));
-  const breakers = s.breakers.filter(z => inBand(z.bottom, z.top));
   const pools = s.liq.pools.filter(p => near(p.p));
   const sweeps = s.liq.sweeps.filter(p => near(p.p));
   const ev = s.ev.filter(e => near(e.p) && e.toT >= t0);
-  const cis = s.cisd.filter(c => near(c.p) && c.toT >= t0);
   const sess = sessionBoxes(rows, Date.now()).filter(se => se.b > t0);
 
   let lo = Infinity, hi = -Infinity;
   const grow = v => { if (Number.isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; } };
   vis.forEach(c => { grow(c.h); grow(c.l); });
   if (live != null) grow(live);
-  fvgs.concat(obs).concat(breakers).forEach(z => { grow(z.bottom); grow(z.top); });
+  fvgs.concat(obs).forEach(z => { grow(z.bottom); grow(z.top); });
   pools.forEach(p => grow(p.p));
   sess.forEach(se => { grow(se.hi); grow(se.lo); });
   if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
   if (!(hi - lo > 0)) { const dd = Math.abs(hi) * 0.001 || 1; lo -= dd; hi += dd; }
   const pad = (hi - lo) * 0.1;
-  lo -= pad;
-  hi += pad;
+  lo -= pad; hi += pad;
   const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * plotH;
 
   sx.lineWidth = 1;
@@ -2388,22 +2452,7 @@ function drawSMC() {
     sx.fillRect(x0, Math.min(yh, yl), x1 - x0, Math.abs(yl - yh));
     sx.strokeStyle = `rgba(${se.col},.85)`;
     sx.lineWidth = 1;
-    sx.beginPath();
-    sx.moveTo(x0, yh); sx.lineTo(x1, yh);
-    sx.moveTo(x0, yl); sx.lineTo(x1, yl);
-    sx.stroke();
-    sx.setLineDash([2, 3]);
-    sx.strokeStyle = 'rgba(250,204,21,.6)';
-    sx.beginPath();
-    sx.moveTo(x1, yh); sx.lineTo(plotR, yh);
-    sx.moveTo(x1, yl); sx.lineTo(plotR, yl);
-    sx.stroke();
-    sx.setLineDash([]);
-    sx.font = 'bold 8px ui-monospace, monospace';
-    sx.fillStyle = `rgba(${se.col},1)`;
-    sx.textAlign = 'left';
-    sx.textBaseline = 'top';
-    sx.fillText(se.name, x0 + 3, Math.min(yh, yl) + 2);
+    sx.beginPath(); sx.moveTo(x0, yh); sx.lineTo(x1, yh); sx.moveTo(x0, yl); sx.lineTo(x1, yl); sx.stroke();
     sx.restore();
   });
 
@@ -2427,7 +2476,6 @@ function drawSMC() {
   };
   fvgs.forEach(z => zone(z, z.dir > 0 ? 'FVG ▲' : 'FVG ▼', z.dir > 0 ? '59,130,246' : '168,85,247'));
   obs.forEach(z => zone(z, z.dir > 0 ? 'Demand' : 'Supply', z.dir > 0 ? '16,185,129' : '239,68,68'));
-  breakers.forEach(z => zone(z, z.dir > 0 ? 'BB ▲' : 'BB ▼', z.dir > 0 ? '34,211,238' : '244,114,182'));
 
   pools.forEach(p => {
     const y = yOf(p.p), x0 = clampX(xOfT(p.t));
@@ -2442,18 +2490,6 @@ function drawSMC() {
     sx.textAlign = 'right';
     sx.textBaseline = p.high ? 'bottom' : 'top';
     sx.fillText(p.label, plotR - 4, y + (p.high ? -2 : 2));
-    sx.restore();
-  });
-
-  sweeps.forEach(w => {
-    const x = clampX(xOfT(w.t)), y = yOf(w.p);
-    sx.save();
-    sx.fillStyle = '#fbbf24';
-    sx.beginPath(); sx.arc(x, y, 2.5, 0, Math.PI * 2); sx.fill();
-    sx.font = 'bold 8px ui-monospace, monospace';
-    sx.textAlign = 'center';
-    sx.textBaseline = w.high ? 'bottom' : 'top';
-    sx.fillText('SW', x, y + (w.high ? -4 : 4));
     sx.restore();
   });
 
@@ -2472,22 +2508,6 @@ function drawSMC() {
     sx.restore();
   });
 
-  cis.forEach(c => {
-    const x0 = clampX(xOfT(c.t)), x1 = clampX(xOfT(c.toT)), y = yOf(c.p);
-    sx.save();
-    sx.strokeStyle = 'rgba(232,121,249,.95)';
-    sx.lineWidth = 1;
-    sx.setLineDash([1, 2]);
-    sx.beginPath(); sx.moveTo(x0, y); sx.lineTo(x1, y); sx.stroke();
-    sx.setLineDash([]);
-    sx.font = 'bold 8px ui-monospace, monospace';
-    sx.fillStyle = 'rgba(232,121,249,1)';
-    sx.textAlign = 'left';
-    sx.textBaseline = 'middle';
-    sx.fillText('CISD', x1 + 3, y);
-    sx.restore();
-  });
-
   const bodyW = Math.max(1.5, slot * 0.62);
   sx.lineWidth = 1;
   sx.globalAlpha = .9;
@@ -2496,8 +2516,7 @@ function drawSMC() {
     const up = c.c >= c.o;
     const col = up ? '#34d399' : '#f87171';
     const yH = yOf(c.h), yL = yOf(c.l), yO = yOf(c.o), yC = yOf(c.c);
-    sx.strokeStyle = col;
-    sx.fillStyle = col;
+    sx.strokeStyle = col; sx.fillStyle = col;
     sx.beginPath(); sx.moveTo(x, yH); sx.lineTo(x, yL); sx.stroke();
     sx.fillRect(x - bodyW / 2, Math.min(yO, yC), bodyW, Math.max(1, Math.abs(yC - yO)));
   }
@@ -2510,33 +2529,6 @@ function drawSMC() {
     sx.save();
     sx.beginPath(); sx.arc(hx, y, pr + 2.5, 0, Math.PI * 2); sx.fillStyle = 'rgba(41,98,255,.35)'; sx.fill();
     sx.beginPath(); sx.arc(hx, y, 3, 0, Math.PI * 2); sx.fillStyle = '#fff'; sx.shadowColor = '#2962ff'; sx.shadowBlur = 8; sx.fill();
-    sx.restore();
-  }
-
-  if (vis.length) {
-    const step = Math.max(1, Math.round(vis.length / 5));
-    sx.font = '8px ui-monospace, monospace';
-    sx.fillStyle = 'rgba(148,163,184,.85)';
-    sx.textAlign = 'center';
-    sx.textBaseline = 'bottom';
-    for (let i = 0; i < vis.length; i += step) {
-      const c = vis[i];
-      const hm = new Date(c.t + 7 * 3600000).toISOString().slice(11, 16);
-      sx.fillText(hm, xOfT(c.t), CH - 1);
-    }
-  }
-
-  if (live != null) {
-    const y = yOf(live), x = plotR + 6, w = CHART_GUT - 12, h = 14, yy = y - h / 2;
-    sx.save();
-    rr(sx, x, yy, w, h, 3);
-    sx.fillStyle = 'rgba(41,98,255,.25)'; sx.fill();
-    sx.strokeStyle = '#2962ff'; sx.lineWidth = .8; sx.stroke();
-    sx.font = 'bold 8px ui-monospace, monospace';
-    sx.fillStyle = '#93c5fd';
-    sx.textAlign = 'left';
-    sx.textBaseline = 'middle';
-    sx.fillText(fmt(live), x + 4, y);
     sx.restore();
   }
 }
@@ -2615,7 +2607,15 @@ async function generateSignal() {
     setTxt('btnText', T('btnGenBusy'));
     await runValidationSteps();
 
-    const r = await post('/api/vision', { value: email, email, images: visionImages, style: $('tradingStyleSelect').value, lang });
+    const r = await post('/api/generate', {
+      value: email,
+      email,
+      symbol: 'VISION',
+      mode: 'vision',
+      images: visionImages,
+      style: $('tradingStyleSelect').value,
+      lang
+    });
     btn.disabled = false;
     setTxt('btnText', T('btnGenVision'));
     if (!r.ok || !r.data || !r.data.ok) return alert(errOf(r, 'Analisis vision gagal.'));
@@ -2646,7 +2646,15 @@ async function generateSignal() {
       style: style,
       price: livePx,
       currentPrice: livePx,
-      candles: { m1: rowsOf('1m'), m5: rowsOf('5m'), m15: rowsOf('15m') },
+      candles: {
+        m1: rowsOf('1m'),
+        m5: rowsOf('5m'),
+        m15: rowsOf('15m'),
+        m30: rowsOf('30m'),
+        h1: rowsOf('1h'),
+        h4: rowsOf('4h'),
+        d1: rowsOf('1d')
+      },
       lang: lang
     };
 
@@ -2671,7 +2679,7 @@ async function generateSignal() {
         dir: o.signal === 'BUY' ? 1 : -1,
         mode: isLimit ? 'LIMIT' : 'MARKET',
         orderType: o.orderType || (isLimit ? 'LIMIT' : 'MARKET'),
-        fill: o.fill || 'LIMIT',
+        fill: o.fill || (isLimit ? 'LIMIT' : 'NOW'),
         entry: Number(o.entry), sl: Number(o.sl),
         tp1: num(o.tp1), tp2: num(o.tp2), tp3: num(o.tp3),
         status: (isLimit || o.status === 'PENDING') ? 'PENDING' : 'RUNNING',
@@ -2721,9 +2729,6 @@ async function generateSignal() {
   }
 }
 
-// =========================================================================
-// AUTO BOT (EA) — trade bot terpisah (src:'bot'), live map chart sendiri
-// =========================================================================
 let botRunning = false;
 let botTimer = null;
 let audioCtx = null;
@@ -2790,12 +2795,28 @@ function renderBotUI() {
 function stopBot(text) {
   botRunning = false;
   if (botTimer) { clearInterval(botTimer); botTimer = null; }
+
+  let cancelledAny = false;
+  for (const t of trades) {
+    if (t.src === 'bot' && t.status !== 'CLOSED') {
+      cancelTrade(t, 'Bot dinonaktifkan (Setup batal)');
+      cancelledAny = true;
+    }
+  }
+  botActiveId = null;
+  if (cancelledAny) {
+    saveTrades();
+    renderHistory();
+  }
+
   renderBotUI();
+  refreshBotPanel();
+  drawBotChart();
   if (text && $('botMsg')) $('botMsg').textContent = text;
 }
 
 async function toggleBot() {
-  getAudioContext(); // buka izin audio lewat klik user
+  getAudioContext();
   if (botRunning) return stopBot('Bot dihentikan.');
   botRunning = true;
   renderBotUI();
@@ -2822,7 +2843,7 @@ async function runBotCycle() {
 
   botBusy = true;
   try {
-    say('Bot sedang memindai setup SMC XAUUSD...');
+    say('Bot sedang memindai setup SMC & SMA20 XAUUSD...');
     const style = $('botStyle') ? $('botStyle').value : 'Scalping';
     const rowsOf = iv => seriesRows('XAUUSD', iv).slice(-300).map(c => ({ t: c.t, o: c.o, h: c.h, l: c.l, c: c.c }));
 
@@ -2847,7 +2868,6 @@ async function runBotCycle() {
     }
 
     let sig = data.signal;
-    // Pengaman: bila backend tetap mengirim OCO, pilih sisi terdekat dari harga
     if (Array.isArray(sig.orders) && sig.orders.length) {
       const o = sig.orders.reduce((a, b) => Math.abs(b.entry - livePx) < Math.abs(a.entry - livePx) ? b : a);
       sig = { ...sig, ...o };
@@ -2883,7 +2903,7 @@ async function runBotCycle() {
     };
 
     trades.push(trade);
-    botActiveId = trade.id;   // bukan activeId -> chart & kartu manual tidak terganggu
+    botActiveId = trade.id;
     saveTrades();
     renderAll();
     playTradeAlert();
@@ -2899,18 +2919,17 @@ async function runBotCycle() {
   }
 }
 
-// Panel status + riwayat khusus bot (dipanggil tiap 1 detik saat mode Auto Bot)
 function refreshBotPanel() {
   if (!isBotView()) return;
-  const t = botTrade();
+  const t = botRunning ? botTrade() : null;
   const st = $('botTradeStatus'), pnl = $('botPnl'), live = $('botLive'), lv = $('botLevels');
   if (!st || !pnl || !live || !lv) return;
 
-  if (!t) {
+  if (!botRunning || !t) {
     st.classList.add('hidden');
     pnl.textContent = '';
     live.textContent = '';
-    lv.textContent = 'Belum ada trade bot.';
+    lv.textContent = botRunning ? 'Bot fleksibel memindai zona baru (Reversal/SMA/Zone)...' : 'Bot nonaktif. Sinyal bot mati / tidak ada setup.';
   } else {
     const s = statusOf(t), f = tradeFlow(t);
     st.classList.remove('hidden');
