@@ -769,205 +769,328 @@ async function runTopDownLimit(ctx, d, styleName) {
   };
 }
 
-// ── 3) BOT EA ENGINE (FLEKSIBEL: REVERSAL / SMA / ZONE M1) ──
-async function runBotSma20(ctx, d, botStyleRaw) {
-  const { price, m1, m5 } = d;
-  const candles = (m1 && m1.length >= 30) ? m1 : m5;
-  if (!candles || candles.length < 30) {
-    return { reason: 'Bot menunggu data candle M1 mencukupi...' };
+// ── 3) BOT EA ENGINE — SMC/ICT (mengacu Modul_Bot_SMC_ICT v1.0) ──
+// Alur: SCANNING → SETUP_FORMING → LIMIT_PLACED / ZONE_OCCUPIED → CONFIRMED.
+// Entry TIDAK lagi bergantung pada SMA20: sweep → displacement → MSS → zona (FVG/OB/OTE/IFVG) + konfirmasi.
+const BOT_CFG = {
+  minScore: 7,            // skor >= 7 = setup penuh (HIGH)
+  relaxedMinScore: 5,     // 5-6 = setup searah bias HTF, confidence MEDIUM (agar bot tidak diam terus)
+  splitScore: 9,
+  minRR: 2.0, minRRCisd: 1.5,
+  dispBodyAtr: 1.2, fvgMinAtr: 0.15,
+  bufAtr: 0.10, minSlAtr: 0.3, maxSlAtrAggr: 1.5, maxSlAtrCons: 3.0,
+  maxConfirmM5: 3, missedAtr: 1.5, lookback: 60,
+  killzonesNY: [[2, 5, 'London KZ'], [7, 10, 'New York KZ'], [10, 11, 'Silver Bullet']],
+  requireKillzone: false, // true = hard rule 7 (limit hanya di killzone). false = killzone hanya +1 skor
+};
+
+const tsMs = t => (t < 1e12 ? t * 1000 : t);
+function closedOnly(c, ms) {
+  if (!c || !c.length) return c || [];
+  return Date.now() < tsMs(c[c.length - 1].t) + ms ? c.slice(0, -1) : c;
+}
+function nyHour() {
+  try {
+    const p = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: 'numeric', hour12: false }).formatToParts(new Date());
+    return (Number(p.find(x => x.type === 'hour').value) % 24) + Number(p.find(x => x.type === 'minute').value) / 60;
+  } catch { const d = new Date(); return (d.getUTCHours() + d.getUTCMinutes() / 60 + 19) % 24; }
+}
+const killzoneNow = () => { const h = nyHour(); const k = BOT_CFG.killzonesNY.find(([a, b]) => h >= a && h < b); return k ? k[2] : null; };
+
+const mkZone = (type, dir, upper, lower, extra = {}) => ({ type, direction: dir, upper, lower, mid: (upper + lower) / 2, ...extra });
+const inZone = (p, z) => p >= z.lower && p <= z.upper;
+const overlaps = (a, b) => a.lower <= b.upper && b.lower <= a.upper;
+
+function zoneMitigation(z, candles, fromIdx) {
+  const size = z.upper - z.lower; if (size <= 0) return 1;
+  let pct = 0;
+  for (let i = Math.max(0, fromIdx); i < candles.length; i++) {
+    const c = candles[i];
+    if (c.h < z.lower || c.l > z.upper) continue;
+    const depth = z.direction === 1 ? (z.upper - Math.max(c.l, z.lower)) : (Math.min(c.h, z.upper) - z.lower);
+    pct = Math.max(pct, depth / size);
   }
+  return Math.min(1, pct);
+}
+const zoneBroken = (z, candles, fromIdx) => candles.slice(Math.max(0, fromIdx)).some(c => z.direction === 1 ? c.c < z.lower : c.c > z.upper);
 
-  const isConservative = /konserv|conserv|day/i.test(String(botStyleRaw || ''));
-  const atrVal = atrOf(candles, ctx.pip);
-  const closes = candles.map(c => c.c);
-  const sma20 = smaLast(closes, 20);
-  const sma20Prev = smaPrev(closes, 20, 1);
-  if (!sma20 || !sma20Prev) return { reason: 'Bot menghitung SMA20 M1...' };
-
-  const last = candles[candles.length - 1];
-  const st = readStructure(candles, price);
-  const reversal = detectReversalSetup(candles, atrVal, price);
-  const rrList = [1, 2]; // SOP Bot: RR 1:1 & 1:2
-
-  // ════════════════════════════════════════════════════════
-  // BOT KONSERVATIF FLEKSIBEL:
-  // Jika limit order sebelumnya kejauhan atau belum tersentuh, bot secara dinamis
-  // membaca zona baru (Reversal / SMA20 / S&D Zone terdekat) secara real-time.
-  // ════════════════════════════════════════════════════════
-  if (isConservative) {
-    // 1. Cek Reversal fresh (Sweep + CISD + Displacement di S&D)
-    if (reversal) {
-      const dir = reversal.dir;
-      const entry = reversal.limitEntry;
-      const order = buildOrderFromLevels({ dir, entry, invLevel: reversal.sweepLevel, atrVal, ctx, kind: 'bot', rrList });
-      const side = dir === 1 ? 'BUY' : 'SELL';
-      const setup = 'Bot Konservatif · Fleksibel Reversal';
-      return {
-        dir,
-        plan: {
-          isOCO: false, orderType: 'LIMIT', status: 'PENDING',
-          entry: order.entry, sl: order.sl, tps: order.tps, setup,
-          chartContext: `${setup}: ${side} LIMIT ${ctx.f(order.entry)} (SL ${ctx.f(order.sl)})`,
-          zone: { min: order.entry - 0.2 * atrVal, max: order.entry + 0.2 * atrVal },
-          tag: 'Reversal Zone',
-        },
-        meta: {
-          setup, confidence: 'HIGH', riskLabel: 'MEDIUM',
-          reason: withPair(ctx.symbol, `[BOT KONSERVATIF FLEKSIBEL] ${side} LIMIT @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2). Membaca zona baru Reversal: ${reversal.note}.`),
-          sma20,
-        },
-      };
+function findIFVG(c, dir, fromIdx, ctx, atrV) {
+  const minSize = Math.max(3 * ctx.pip, BOT_CFG.fvgMinAtr * atrV);
+  let best = null;
+  for (let i = Math.max(2, fromIdx); i < c.length - 1; i++) {
+    if (dir === 1 && c[i].h < c[i - 2].l) {            // FVG bearish -> ditembus ke atas = BUY ZONE
+      const up = c[i - 2].l, lo = c[i].h; if (up - lo < minSize) continue;
+      const q = c.findIndex((x, k) => k > i && x.c > up);
+      if (q > 0) best = mkZone('IFVG', 1, (up + lo) / 2, lo, { label: 'BUY ZONE', createdIdx: q });
     }
+    if (dir === -1 && c[i].l > c[i - 2].h) {           // FVG bullish -> ditembus ke bawah = SELL ZONE
+      const lo = c[i - 2].h, up = c[i].l; if (up - lo < minSize) continue;
+      const q = c.findIndex((x, k) => k > i && x.c < lo);
+      if (q > 0) best = mkZone('IFVG', -1, up, (up + lo) / 2, { label: 'SELL ZONE', createdIdx: q });
+    }
+  }
+  return best;
+}
 
-    // 2. Baca Zona S&D fresh atau SMA20 terdekat yang realistis dengan harga berjalan
-    const dir = st ? st.dir : (price > sma20 ? 1 : -1);
-    const sdZones = findSDZones(candles, dir, price);
-    const validSD = sdZones.find(z => Math.abs((z.top + z.bottom) / 2 - price) <= 3.5 * atrVal);
-    
-    let targetEntry = sma20;
-    let inv = dir === 1 ? sma20 - 0.8 * atrVal : sma20 + 0.8 * atrVal;
-    let zoneTag = 'SMA20 Dynamic';
+function scanSetups(c, atrV, ctx, price, biasDir, eq) {
+  const out = []; const n = c.length; if (n < 30) return out;
+  const { highs, lows } = findSwings(c, 2);
+  const kz = killzoneNow();
+  const startK = Math.max(6, n - BOT_CFG.lookback);
+  const minFvg = Math.max(3 * ctx.pip, BOT_CFG.fvgMinAtr * atrV);
 
-    if (validSD) {
-      targetEntry = (validSD.top + validSD.bottom) / 2;
-      inv = validSD.sl;
-      zoneTag = validSD.kind;
-    } else {
-      const fvg = findFVGs(candles, dir, price)[0];
-      if (fvg && fvg.dist <= 3.0 * atrVal) {
-        targetEntry = (fvg.top + fvg.bottom) / 2;
-        inv = fvg.sl;
-        zoneTag = fvg.kind;
+  for (let k = startK; k < n; k++) {
+    const d = c[k];
+    if (Math.abs(d.c - d.o) < BOT_CFG.dispBodyAtr * atrV) continue;
+    const dir = d.c > d.o ? 1 : -1;
+
+    // ── MSS / BOS: close menembus swing lawan terakhir sebelum displacement
+    const opp = (dir === 1 ? highs : lows).filter(s => s.i < k && s.i >= k - 25);
+    if (!opp.length) continue;
+    const mssLvl = opp[opp.length - 1].p;
+    let mssIdx = -1;
+    for (let m = k; m <= Math.min(k + 4, n - 1); m++) {
+      if (dir === 1 ? c[m].c > mssLvl : c[m].c < mssLvl) { mssIdx = m; break; }
+    }
+    if (mssIdx < 0) continue;
+
+    // ── Liquidity sweep sebelum displacement (wick menembus swing, close kembali)
+    let sweep = null;
+    const own = dir === 1 ? lows : highs;
+    for (let j = k; j >= Math.max(2, k - 10) && !sweep; j--) {
+      for (let q = own.length - 1; q >= 0; q--) {
+        const s = own[q]; if (s.i >= j || s.i < j - 30) continue;
+        const pen = dir === 1 ? s.p - c[j].l : c[j].h - s.p;
+        const back = dir === 1 ? (c[j].c > s.p || (j + 1 <= k && c[j + 1].c > s.p)) : (c[j].c < s.p || (j + 1 <= k && c[j + 1].c < s.p));
+        if (pen >= ctx.pip && back) {
+          const rg = c[j].h - c[j].l || 1;
+          const wick = dir === 1 ? (Math.min(c[j].o, c[j].c) - c[j].l) / rg : (c[j].h - Math.max(c[j].o, c[j].c)) / rg;
+          sweep = { index: j, level: s.p, extreme: dir === 1 ? c[j].l : c[j].h, wickRatio: Number(wick.toFixed(2)) };
+          break;
+        }
       }
     }
 
-    // Jika target limit terlalu jauh di atas/bawah harga berjalan, bot secara fleksibel menyesuaikan ke pantulan terdekat
-    const distToTarget = Math.abs(price - targetEntry);
-    if (distToTarget > 4.0 * atrVal) {
-      targetEntry = dir === 1 ? price - 0.6 * atrVal : price + 0.6 * atrVal;
-      zoneTag = 'Dynamic Pullback';
+    // ── Zona kandidat
+    const cands = [];
+    let ob = null;
+    for (let o = k - 1; o >= Math.max(0, k - 6); o--) {          // OB: candle lawan terakhir sebelum displacement
+      if (dir === 1 ? c[o].c < c[o].o : c[o].c > c[o].o) {
+        if (dir === 1 ? d.c > c[o].h : d.c < c[o].l) {
+          ob = mkZone('OB', dir, c[o].h, c[o].l, { createdIdx: k, distal: dir === 1 ? c[o].l : c[o].h });
+        }
+        break;
+      }
     }
+    if (ob) cands.push(ob);
+    let fvg = null;
+    for (let i = k; i <= Math.min(k + 2, n - 1); i++) {
+      if (i < 2) continue;
+      if (dir === 1 && c[i].l > c[i - 2].h && c[i].l - c[i - 2].h >= minFvg) { const z = mkZone('FVG', 1, c[i].l, c[i - 2].h, { createdIdx: i }); if (!fvg || (z.upper - z.lower) > (fvg.upper - fvg.lower)) fvg = z; }
+      if (dir === -1 && c[i].h < c[i - 2].l && c[i - 2].l - c[i].h >= minFvg) { const z = mkZone('FVG', -1, c[i - 2].l, c[i].h, { createdIdx: i }); if (!fvg || (z.upper - z.lower) > (fvg.upper - fvg.lower)) fvg = z; }
+    }
+    if (fvg) cands.push(fvg);
+    const legLo = dir === 1 ? (sweep ? sweep.extreme : Math.min(...c.slice(Math.max(0, k - 6), k + 1).map(x => x.l))) : null;
+    const legHi = dir === -1 ? (sweep ? sweep.extreme : Math.max(...c.slice(Math.max(0, k - 6), k + 1).map(x => x.h))) : null;
+    let ote = null;
+    if (dir === 1) {
+      const hi = Math.max(...c.slice(k).map(x => x.h)), rg = hi - legLo;
+      if (rg >= 1.5 * atrV) ote = mkZone('OTE', 1, hi - 0.618 * rg, hi - 0.79 * rg, { createdIdx: mssIdx });
+    } else {
+      const lo = Math.min(...c.slice(k).map(x => x.l)), rg = legHi - lo;
+      if (rg >= 1.5 * atrV) ote = mkZone('OTE', -1, lo + 0.79 * rg, lo + 0.618 * rg, { createdIdx: mssIdx });
+    }
+    if (ote) cands.push(ote);
+    const ifvg = findIFVG(c, dir, k - 30, ctx, atrV);
+    if (ifvg) cands.push(ifvg);
 
-    const order = buildOrderFromLevels({ dir, entry: targetEntry, invLevel: inv, atrVal, ctx, kind: 'bot', rrList });
-    const side = dir === 1 ? 'BUY' : 'SELL';
-    const setup = 'Bot Konservatif · Fleksibel Zone/SMA';
-    return {
-      dir,
-      plan: {
-        isOCO: false, orderType: 'LIMIT', status: 'PENDING',
-        entry: order.entry, sl: order.sl, tps: order.tps, setup,
-        chartContext: `${setup}: ${side} LIMIT ${ctx.f(order.entry)} (SL ${ctx.f(order.sl)})`,
-        zone: { min: order.entry - 0.2 * atrVal, max: order.entry + 0.2 * atrVal },
-        tag: zoneTag,
-      },
-      meta: {
-        setup, confidence: 'HIGH', riskLabel: 'MEDIUM',
-        reason: withPair(ctx.symbol, `[BOT KONSERVATIF FLEKSIBEL] ${side} LIMIT @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2). Membaca zona baru ${zoneTag} & SMA20 (${ctx.f(sma20)}) secara dinamis.`),
-        sma20,
-      },
-    };
+    // ── Filter: fresh, belum rusak, belum missed
+    const live = cands.filter(z => {
+      const from = (z.createdIdx ?? k) + 1;
+      if (zoneMitigation(z, c, from) >= 0.8) return false;
+      if (zoneBroken(z, c, from)) return false;
+      if (dir === 1 ? price - z.upper > BOT_CFG.missedAtr * atrV : z.lower - price > BOT_CFG.missedAtr * atrV) return false; // MISSED
+      if (dir === 1 ? price < z.lower : price > z.upper) return false;
+      return true;
+    });
+    if (!live.length) continue;
+
+    // Pilih zona dengan overlap terbanyak, lalu terdekat ke harga
+    const ranked = live.map(z => ({ z, ov: live.filter(o => o !== z && overlaps(o, z)).length })).sort((a, b) => b.ov - a.ov || Math.abs(a.z.mid - price) - Math.abs(b.z.mid - price));
+    const zone = ranked[0].z;
+    const touching = live.filter(o => o === zone || overlaps(o, zone));
+    const has = t => touching.some(o => o.type === t);
+
+    const bd = [];
+    if (biasDir === dir) bd.push(['Bias HTF searah', 2]);
+    const kzNow = killzoneNow(); if (kzNow) bd.push([kzNow, 1]);
+    if (sweep) bd.push(['Liquidity sweep', 2]);
+    bd.push(['Displacement', 1]);
+    bd.push([sweep ? 'MSS/CHoCH' : 'BOS', 2]);
+    if (has('FVG')) bd.push(['FVG fresh', 1]);
+    if (has('OB')) bd.push(['OB fresh', 1]);
+    if (has('OTE')) bd.push(['OTE 61.8-79%', 1]);
+    if (has('IFVG')) bd.push(['IFVG', 2]);
+    if (eq != null && (dir === 1 ? zone.mid < eq : zone.mid > eq)) bd.push([dir === 1 ? 'Discount' : 'Premium', 1]);
+    if (atrV >= 3 * ctx.pip) bd.push(['ATR normal', 1]);
+    const score = bd.reduce((s, x) => s + x[1], 0);
+
+    out.push({
+      dir, type: sweep ? 'SWEEP_MSS' : 'BOS_CONT', score, breakdown: bd, zone, sweep,
+      mss: { index: mssIdx, level: mssLvl }, dispIdx: k, formedIdx: mssIdx,
+      obDistal: ob ? ob.distal : null,
+      sweepExtreme: sweep ? sweep.extreme : (dir === 1 ? legLo : legHi),
+    });
+  }
+  return out;
+}
+
+function botTargets(dir, entry, risk, c5, c15, atrV) {
+  const lv = [];
+  const addSw = arr => { const s = findSwings(arr, 2); (dir === 1 ? s.highs : s.lows).forEach(x => lv.push(x.p)); };
+  addSw(c5.slice(-150));
+  if (c15 && c15.length >= 20) addSw(c15.slice(-120));
+  const day = c5.slice(-288);
+  if (day.length) lv.push(dir === 1 ? Math.max(...day.map(x => x.h)) : Math.min(...day.map(x => x.l)));   // PDH/PDL proxy (ERL)
+  const beyond = lv.filter(p => (dir === 1 ? p > entry : p < entry)).sort((a, b) => (dir === 1 ? a - b : b - a));
+  const uniq = [];
+  beyond.forEach(p => { if (!uniq.length || Math.abs(p - uniq[uniq.length - 1]) > 0.25 * atrV) uniq.push(p); });
+  const R = p => Math.abs(p - entry) / risk;
+  const pick = (minR, maxR, after) => uniq.find(p => R(p) >= minR && R(p) <= maxR && (after == null || (dir === 1 ? p > after : p < after)));
+  let synth = false;
+  let t1 = pick(0.9, 2.2), t2, t3;
+  if (t1 == null) { t1 = entry + dir * risk; synth = true; }
+  t2 = pick(1.5, 4.5, t1);
+  if (t2 == null) { t2 = dir === 1 ? Math.max(entry + 2 * risk, t1 + 0.5 * risk) : Math.min(entry - 2 * risk, t1 - 0.5 * risk); synth = true; }
+  t3 = pick(2.5, 8, t2);
+  let synth3 = false;
+  if (t3 == null) { t3 = dir === 1 ? Math.max(entry + 3 * risk, t2 + risk) : Math.min(entry - 3 * risk, t2 - risk); synth3 = true; }
+  return { tps: [t1, t2, t3], rr3: R(t3), synthetic: synth, synth3 };
+}
+
+function calcBotSL({ dir, mode, entry, setup, atrV, ctx }) {
+  const buf = Math.max(2 * ctx.pip, BOT_CFG.bufAtr * atrV);
+  const minD = Math.max(BOT_CFG.minSlAtr * atrV, slFloor('bot', ctx));
+  let maxD = (mode === 'AGGRESSIVE' ? BOT_CFG.maxSlAtrAggr : BOT_CFG.maxSlAtrCons) * atrV;
+  if (maxD < minD * 1.6) maxD = minD * 1.6;
+  const z = setup.zone;
+  const zoneEdge = dir === 1 ? z.lower : z.upper;
+  const order = mode === 'AGGRESSIVE'
+    ? [['zona', zoneEdge], ['OB distal', setup.obDistal], ['sweep', setup.sweepExtreme]]
+    : [['OB distal', setup.obDistal], ['sweep', setup.sweepExtreme], ['zona distal', zoneEdge]];
+  let tooWide = false, tight = false;
+  for (const [src, L] of order) {
+    if (!Number.isFinite(L)) continue;
+    const sl = dir === 1 ? L - buf : L + buf;
+    const dist = Math.abs(entry - sl);
+    if ((dir === 1 && sl >= entry) || (dir === -1 && sl <= entry)) continue;
+    if (dist < minD) { tight = true; continue; }
+    if (dist > maxD) { tooWide = true; continue; }
+    return { sl, dist, src };
+  }
+  if (tooWide && !tight) return null;
+  return { sl: entry - dir * minD, dist: minD, src: 'min-ATR' };
+}
+
+function detectConfirmation(dir, m, zone, atrV) {
+  const n = m.length; if (n < 8) return null;
+  const c = m[n - 1], rec = m.slice(-15);
+  if (!rec.some(x => x.l <= zone.upper && x.h >= zone.lower)) return { none: true, why: 'harga belum menyentuh zona (M1)' };
+  if (dir === 1 ? rec.some(x => x.c < zone.lower) : rec.some(x => x.c > zone.upper)) return { invalid: true };
+  const prev5 = m.slice(-6, -1);
+  if (dir === 1 ? c.c > Math.max(...prev5.map(x => x.h)) : c.c < Math.min(...prev5.map(x => x.l))) return { type: 'CHoCH' };
+  let i = n - 2, ext = dir === 1 ? -Infinity : Infinity, cnt = 0;
+  while (i >= 0 && (dir === 1 ? m[i].c < m[i].o : m[i].c > m[i].o)) { ext = dir === 1 ? Math.max(ext, m[i].o) : Math.min(ext, m[i].o); cnt++; i--; }
+  if (cnt >= 3 && (dir === 1 ? c.c > ext : c.c < ext)) return { type: 'CISD' };
+  const rg = c.h - c.l;
+  if (rg > 0) {
+    const lw = Math.min(c.o, c.c) - c.l, uw = c.h - Math.max(c.o, c.c), mid = (c.h + c.l) / 2;
+    if (dir === 1 && lw >= 0.6 * rg && c.c > mid && c.c > c.o) return { type: 'REJECTION' };
+    if (dir === -1 && uw >= 0.6 * rg && c.c < mid && c.c < c.o) return { type: 'REJECTION' };
+  }
+  const p = m[n - 2];
+  if (dir === 1 && c.c > c.o && p.c < p.o && c.c >= p.o && c.o <= p.c) return { type: 'ENGULFING' };
+  if (dir === -1 && c.c < c.o && p.c > p.o && c.c <= p.o && c.o >= p.c) return { type: 'ENGULFING' };
+  return { none: true, why: 'belum ada candle konfirmasi close' };
+}
+
+async function runBotSma20(ctx, d, botStyleRaw) {
+  const { price, m1, m5, m15 } = d;
+  const c5 = closedOnly(m5, 300000);
+  if (!c5 || c5.length < 30) return { reason: 'Bot menunggu data candle M5 mencukupi (min 30)...' };
+  const m1c = closedOnly(m1, 60000);
+  const confTF = m1c.length >= 10 ? m1c : c5;
+
+  const isConservative = /konserv|conserv|day/i.test(String(botStyleRaw || ''));
+  const modeName = isConservative ? 'KONSERVATIF' : 'AGRESIF';
+  const atrV = atrOf(c5, ctx.pip);
+  const bias = multiTfBias({ m15: m15 && m15.length >= 20 ? m15 : null, m5: c5 }, ['m15', 'm5']);
+  const ref = (m15 && m15.length >= 30 ? m15 : c5).slice(-80);
+  const eq = (Math.max(...ref.map(x => x.h)) + Math.min(...ref.map(x => x.l))) / 2;
+  const biasTxt = `${bias.bias} (${Object.entries(bias.details).map(([k, v]) => `${k.toUpperCase()}:${v}`).join(' | ') || 'n/a'})`;
+
+  const kz = killzoneNow();
+  if (BOT_CFG.requireKillzone && !kz) return { reason: `[${modeName}] State: SCANNING · di luar killzone (London/NY/Silver Bullet). Bias ${biasTxt}.` };
+
+  let setups = scanSetups(c5, atrV, ctx, price, bias.dir, eq);
+  setups = setups.filter(s => s.score >= BOT_CFG.minScore || (s.score >= BOT_CFG.relaxedMinScore && bias.dir !== 0 && s.dir === bias.dir));
+  setups.sort((a, b) => b.score - a.score || b.formedIdx - a.formedIdx);
+  const setup = setups[0];
+  if (!setup) {
+    return { reason: `[BOT ${modeName}] State: SCANNING · belum ada sweep → displacement → MSS dengan zona fresh (FVG/OB/OTE/IFVG) yang valid. Bias ${biasTxt}. Bot tidak mengejar harga; terus memantau.` };
   }
 
-  // ════════════════════════════════════════════════════════
-  // BOT AGRESIF (ENTRY NOW — OPSI 1, OPSI 2, OPSI 3)
-  // ════════════════════════════════════════════════════════
-  if (reversal) {
-    const dir = reversal.dir;
-    const order = buildOrderFromLevels({ dir, entry: price, invLevel: reversal.sweepLevel, atrVal, ctx, kind: 'bot', rrList });
-    const side = dir === 1 ? 'BUY' : 'SELL';
-    const setup = 'Bot Agresif · Opsi 3 Reversal (CISD+Disp)';
-    return {
-      dir,
-      plan: {
-        isOCO: false, orderType: 'MARKET', status: 'RUNNING',
-        entry: order.entry, sl: order.sl, tps: order.tps, setup,
-        chartContext: `${setup}: ${side} NOW ${ctx.f(order.entry)} (SL ${ctx.f(order.sl)})`,
-        zone: null, tag: 'Reversal CISD',
-      },
-      meta: {
-        setup, confidence: 'HIGH', riskLabel: 'HIGH',
-        reason: withPair(ctx.symbol, `[BOT AGRESIF - OPSI 3 REVERSAL] ${side} NOW @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2). ${reversal.note}.`),
-        sma20,
-      },
-    };
+  const dir = setup.dir, side = dir === 1 ? 'BUY' : 'SELL';
+  const z = setup.zone;
+  const zLabel = z.label || `${z.type} ${dir === 1 ? 'BUY' : 'SELL'}`;
+  const zTxt = `${zLabel} ${ctx.f(z.lower)}-${ctx.f(z.upper)}`;
+  const scoreTxt = `${setup.score} (${setup.breakdown.map(x => `${x[0]} +${x[1]}`).join(', ')})`;
+  const flow = setup.sweep
+    ? `Sweep ${ctx.f(setup.sweep.level)} (wick ${Math.round(setup.sweep.wickRatio * 100)}%) → Displacement → MSS ${ctx.f(setup.mss.level)}`
+    : `Displacement → BOS ${ctx.f(setup.mss.level)} (continuation/mitigation)`;
+  const confidence = setup.score >= BOT_CFG.minScore ? 'HIGH' : 'MEDIUM';
+
+  const priceInZone = inZone(price, z);
+  const pullbackSide = dir === 1 ? price > z.upper : price < z.lower;
+
+  let mode, entry, conf = null, state;
+  if (priceInZone) {
+    const cf = detectConfirmation(dir, confTF, z, atrV);
+    if (cf && cf.invalid) return { reason: `[BOT ${modeName}] State: CANCELLED · harga close menembus sisi distal zona ${zTxt} (invalidasi). Mencari setup baru.` };
+    if (!cf || cf.none) return { reason: `[BOT ${modeName}] State: ZONE_OCCUPIED ⚡ ${side} di ${zTxt} · menunggu konfirmasi close M1 (CHoCH/CISD/Rejection/Engulfing) — ${cf?.why || ''}. Score ${setup.score}. Bias ${biasTxt}.` };
+    mode = 'MARKET'; entry = price; conf = cf.type; state = 'CONFIRMED';
+  } else if (isConservative && pullbackSide) {
+    mode = 'LIMIT'; entry = z.mid; state = 'LIMIT_PLACED';
+  } else if (!isConservative && pullbackSide) {
+    return { reason: `[BOT AGRESIF] State: SETUP_FORMING · ${side} setup ${flow}. Menunggu harga masuk ${zTxt} lalu konfirmasi close (harga ${ctx.f(price)}). Score ${setup.score}. Bias ${biasTxt}.` };
+  } else {
+    return { reason: `[BOT ${modeName}] State: MISSED · harga sudah melewati zona ${zTxt}. Tidak mengejar; mencari setup baru.` };
   }
 
-  // Agresif = Buy Now / Sell Now searah pasar. Jika struktur belum jelas, pakai posisi harga vs SMA20 + slope.
-  const stx = st || {
-    dir: (price >= sma20 && sma20 >= sma20Prev) ? 1 : (price < sma20 && sma20 < sma20Prev) ? -1 : (price >= sma20 ? 1 : -1),
-    src: 'SMA20 Bias', bos: false,
-    l1: { p: Math.min(...candles.slice(-6).map(c => c.l)) },
-    h1: { p: Math.max(...candles.slice(-6).map(c => c.h)) },
+  const slr = calcBotSL({ dir, mode: isConservative && mode === 'LIMIT' ? 'CONSERVATIVE' : 'AGGRESSIVE', entry, setup, atrV, ctx });
+  if (!slr) return { reason: `[BOT ${modeName}] SKIP · SL struktural terlalu lebar (> batas ATR) untuk ${zTxt}. Menunggu setup lebih ideal.` };
+  const tg = botTargets(dir, entry, slr.dist, c5, m15, atrV);
+  const minRR = conf === 'CISD' ? BOT_CFG.minRRCisd : BOT_CFG.minRR;
+  if (!tg.synth3 && tg.rr3 < minRR) return { reason: `[BOT ${modeName}] SKIP · RR ke target likuiditas 1:${tg.rr3.toFixed(2)} < 1:${minRR}. SL tidak diubah demi RR.` };
+
+  const sl = ctx.f(slr.sl), tps = tg.tps.map(ctx.f);
+  const rrTxt = `1:${(tg.synth3 ? 3 : tg.rr3).toFixed(1)}`;
+  const setupName = `Bot SMC/ICT ${modeName === 'AGRESIF' ? 'Agresif' : 'Konservatif'} · ${setup.type === 'SWEEP_MSS' ? 'Sweep+MSS' : 'BOS Mitigation'} · ${z.type}`;
+  const orderTxt = mode === 'LIMIT' ? `${side} LIMIT @ CE ${ctx.f(entry)}` : `${side} NOW @ ${ctx.f(entry)} (konfirmasi ${conf})`;
+  const reason = withPair(ctx.symbol,
+    `[BOT SMC/ICT ${modeName}] State: ${state} · ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} · TP2 ${tps[1]} · TP3 ${tps[2]} | RR ${rrTxt}${tg.synthetic ? ' (sebagian TP = kelipatan R, likuiditas minim)' : ' (target likuiditas)'} | Zona: ${zTxt} | ${flow} | Score ${scoreTxt} | Bias HTF ${biasTxt}${kz ? ' | ' + kz : ''}.`);
+
+  return {
+    dir,
+    plan: {
+      isOCO: false, orderType: mode, status: mode === 'LIMIT' ? 'PENDING' : 'RUNNING',
+      entry: ctx.f(entry), sl, tps, setup: setupName,
+      chartContext: `${setupName}: ${orderTxt} (SL ${sl})`,
+      zone: { min: z.lower, max: z.upper },
+      tag: zLabel,
+    },
+    meta: { setup: setupName, confidence, riskLabel: isConservative ? 'MEDIUM' : 'HIGH', reason, topDown: bias, state, score: setup.score },
   };
-  const dir = stx.dir;
-  const distSma = Math.abs(price - sma20);
-  const touchedSma = (dir === 1 && last.l <= sma20 + 0.15 * atrVal && last.c > sma20)
-                  || (dir === -1 && last.h >= sma20 - 0.15 * atrVal && last.c < sma20);
-  const paConfirm = confirmPriceAction(candles, dir);
-
-  if ((touchedSma || distSma <= 0.35 * atrVal) && ((dir === 1 && price > sma20) || (dir === -1 && price < sma20))) {
-    const invLevel = dir === 1 ? Math.min(last.l, sma20 - 0.45 * atrVal) : Math.max(last.h, sma20 + 0.45 * atrVal);
-    const order = buildOrderFromLevels({ dir, entry: price, invLevel, atrVal, ctx, kind: 'bot', rrList });
-    const side = dir === 1 ? 'BUY' : 'SELL';
-    const setup = 'Bot Agresif · Opsi 2 SMA20 Continuation';
-    return {
-      dir,
-      plan: {
-        isOCO: false, orderType: 'MARKET', status: 'RUNNING',
-        entry: order.entry, sl: order.sl, tps: order.tps, setup,
-        chartContext: `${setup}: ${side} NOW ${ctx.f(order.entry)} (SL ${ctx.f(order.sl)})`,
-        zone: null, tag: 'SMA20 Continuation',
-      },
-      meta: {
-        setup, confidence: 'HIGH', riskLabel: 'HIGH',
-        reason: withPair(ctx.symbol, `[BOT AGRESIF - OPSI 2 SMA20] ${side} NOW @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2). Kontinuitas SMA20 (${ctx.f(sma20)}) searah struktur ${stx.src}.`),
-        sma20,
-      },
-    };
-  }
-
-  if (paConfirm && ((dir === 1 && price > sma20) || (dir === -1 && price < sma20)) && distSma <= 1.5 * atrVal) {
-    const invLevel = dir === 1 ? Math.min(last.l, stx.l1.p) : Math.max(last.h, stx.h1.p);
-    const order = buildOrderFromLevels({ dir, entry: price, invLevel, atrVal, ctx, kind: 'bot', rrList });
-    const side = dir === 1 ? 'BUY' : 'SELL';
-    const setup = 'Bot Agresif · Opsi 1 Structure + Price Action';
-    return {
-      dir,
-      plan: {
-        isOCO: false, orderType: 'MARKET', status: 'RUNNING',
-        entry: order.entry, sl: order.sl, tps: order.tps, setup,
-        chartContext: `${setup}: ${side} NOW ${ctx.f(order.entry)} (SL ${ctx.f(order.sl)})`,
-        zone: null, tag: 'Structure + PA',
-      },
-      meta: {
-        setup, confidence: 'HIGH', riskLabel: 'HIGH',
-        reason: withPair(ctx.symbol, `[BOT AGRESIF - OPSI 1 STRUCTURE+PA] ${side} NOW @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2). Struktur ${stx.src} + konfirmasi ${paConfirm} di jalur SMA20 (${ctx.f(sma20)}).`),
-        sma20,
-      },
-    };
-  }
-
-  // Fallback: tidak ada trigger sempurna -> tetap NOW searah arah pasar (sesuai SOP Agresif)
-  {
-    const invLevel = dir === 1 ? Math.min(last.l, stx.l1.p, sma20 - 0.3 * atrVal) : Math.max(last.h, stx.h1.p, sma20 + 0.3 * atrVal);
-    const order = buildOrderFromLevels({ dir, entry: price, invLevel, atrVal, ctx, kind: 'bot', rrList });
-    const side = dir === 1 ? 'BUY' : 'SELL';
-    const setup = 'Bot Agresif · Market Direction NOW';
-    return {
-      dir,
-      plan: {
-        isOCO: false, orderType: 'MARKET', status: 'RUNNING',
-        entry: order.entry, sl: order.sl, tps: order.tps, setup,
-        chartContext: `${setup}: ${side} NOW ${ctx.f(order.entry)} (SL ${ctx.f(order.sl)})`,
-        zone: null, tag: 'Market Direction',
-      },
-      meta: {
-        setup, confidence: 'MEDIUM', riskLabel: 'HIGH',
-        reason: withPair(ctx.symbol, `[BOT AGRESIF - MARKET NOW] ${side} NOW @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2). Arah ${stx.src}, harga ${price >= sma20 ? 'di atas' : 'di bawah'} SMA20 (${ctx.f(sma20)}).`),
-        sma20,
-      },
-    };
-  }
 }
 
 const RUNNERS = {
@@ -1239,7 +1362,7 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
     f: v => Number(Number(v).toFixed(dec)),
   };
 
-  const tfsWanted = isAutoBot ? ['m1', 'm5'] : (STYLES[styleName]?.tfs || ['h1', 'm15', 'm5']);
+  const tfsWanted = isAutoBot ? ['m1', 'm5', 'm15'] : (STYLES[styleName]?.tfs || ['h1', 'm15', 'm5']);
   const candleMap = {};
   for (const tf of ['m1', 'm5', 'm15', 'm30', 'h1', 'h4', 'd1']) {
     candleMap[tf] = clientCandles(body, tf);
