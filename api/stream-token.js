@@ -9,6 +9,8 @@
 // - Role admin juga diizinkan (sebelumnya hanya 'client', sehingga admin selalu 401).
 
 const LOGIN_RETRY = 2;
+const SESSION_TTL_MS = 5 * 60 * 1000;   // hasil verifikasi disimpan 5 menit → hemat command KV
+const sessionCache = new Map();          // value(email) -> { t, role }
 
 async function verifySession(host, value) {
     let lastErr = null;
@@ -47,6 +49,14 @@ module.exports = async (req, res) => {
         return res.status(401).json({ msg: 'Sesi tidak valid, silakan login ulang.' });
     }
 
+    const cached = sessionCache.get(value);
+    if (cached && Date.now() - cached.t < SESSION_TTL_MS) {
+        const token = process.env.XBTFX_TOKEN;
+        if (!token) return res.status(500).json({ msg: 'XBTFX_TOKEN belum diisi di Vercel.' });
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(200).json({ token });
+    }
+
     const check = await verifySession(req.headers.host, value);
     if (!check.ok) {
         return res.status(503).json({ msg: 'Layanan verifikasi sedang gangguan, coba lagi sebentar.' });
@@ -62,6 +72,8 @@ module.exports = async (req, res) => {
     if (!session.ok || !['client', 'admin'].includes(session.role)) {
         return res.status(401).json({ msg: 'Sesi tidak valid, silakan login ulang.' });
     }
+
+    sessionCache.set(value, { t: Date.now(), role: session.role });
 
     const token = process.env.XBTFX_TOKEN;
     if (!token) {
