@@ -194,6 +194,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
           <label class="flex items-center gap-1.5 text-[9px] text-gray-400 cursor-pointer"><input type="checkbox" id="botSess" class="rounded bg-cardbg border-panelborder"> Hanya sesi London/NY (07–21 UTC)</label>
           <button id="botBtn" onclick="toggleBot()" class="w-full font-bold py-2 rounded-lg text-xs transition bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20">START SCANNER BOT</button>
 
+          <p id="botCloseTimer" class="text-[10px] font-mono font-bold text-amber-300"></p>
           <div class="grid grid-cols-2 gap-2 items-stretch">
             <!-- KOLOM 1: SCANNING ASLI DARI BOT -->
             <div class="bg-cardbg border border-panelborder rounded-lg p-2 space-y-1 min-w-0">
@@ -520,6 +521,7 @@ const MARKETS = {
 const KEYS = Object.keys(MARKETS);
 const WS_URL = 'wss://ws.xbtfx.com/v1/ws';
 const STORE_KEY = 'aluGold_history_v1';
+const BOT_STATE_KEY = 'aluGold_bot_state_v1';
 const CAL_KEY = 'aluGold_calendar_v1';
 const CAL_SINCE_KEY = 'aluGold_calendar_since';
 const LIVE_KEY = 'aluLive_v1';
@@ -865,7 +867,7 @@ const post = (path, body, extra) => api(path, { method: 'POST', headers: Object.
 const adminH = () => ({ 'x-admin-code': localStorage.getItem(K.admin) || '' });
 const errOf = (r, fb) => (r.data && (r.data.msg || r.data.error)) || fb;
 function say(t, cls) { const s = $('loginStatus'); if(s) { s.textContent = t; s.className = 'text-[10px] text-center font-mono min-h-[14px] ' + (cls || TXT.gray); } }
-function clearSession() { Object.values(K).forEach(k => localStorage.removeItem(k)); }
+function clearSession() { Object.values(K).forEach(k => localStorage.removeItem(k)); localStorage.removeItem(BOT_STATE_KEY); }
 function logout() { clearSession(); location.reload(); }
 
 async function handleLogin(e) {
@@ -898,6 +900,7 @@ async function checkSession() {
 
 function showApp() {
   $('authScreen').classList.add('hidden');
+  setTimeout(resumeBotIfNeeded, 300);
   $('registerDashboard').classList.add('hidden');
   $('mainApp').classList.remove('hidden');
   $('mainApp').classList.add('flex');
@@ -3069,6 +3072,7 @@ function renderBotUI() {
 
 function stopBot(text) {
   botRunning = false;
+  saveBotState();
   if (botTimer) { clearInterval(botTimer); botTimer = null; }
 
   let cancelledAny = false;
@@ -3092,7 +3096,43 @@ function stopBot(text) {
   if (text && $('botMsg')) $('botMsg').textContent = text;
 }
 
-async function toggleBot() {
+function saveBotState() {
+  try {
+    localStorage.setItem(BOT_STATE_KEY, JSON.stringify({
+      running: botRunning,
+      style: $('botStyle') ? $('botStyle').value : 'Scalping',
+      mode: $('botMode') ? $('botMode').value : 'loop',
+      sess: $('botSess') ? $('botSess').checked : false,
+    }));
+  } catch (e) {}
+}
+
+// Dipanggil saat aplikasi dibuka: kalau sebelumnya bot ON, lanjutkan tanpa reset trade yang masih jalan
+function resumeBotIfNeeded() {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(BOT_STATE_KEY) || 'null'); } catch (e) {}
+  if (!s || !s.running || botRunning) return;
+  if ($('botStyle') && s.style) $('botStyle').value = s.style;
+  if ($('botMode') && s.mode) $('botMode').value = s.mode;
+  if ($('botSess')) $('botSess').checked = !!s.sess;
+  toggleBot(true);
+}
+
+// Simpan pilihan gaya/mode/sesi begitu diubah, supaya ikut tersimpan
+setInterval(() => {
+  const el = $('botCloseTimer');
+  if (!el) return;
+  const t = window.__botNextClose;
+  if (!botRunning || !t) { el.textContent = ''; return; }
+  const s = Math.max(0, Math.floor((t - Date.now()) / 1000));
+  el.textContent = `⏱ Close M1 berikutnya: ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}, 1000);
+
+document.addEventListener('change', e => {
+  if (['botStyle', 'botMode', 'botSess'].includes(e.target.id)) saveBotState();
+});
+
+async function toggleBot(resume = false) {
   getAudioContext();
   
   if (botRunning) {
@@ -3100,16 +3140,22 @@ async function toggleBot() {
     return;
   }
 
-  for (const t of trades) {
-    if (t.src === 'bot' && t.status !== 'CLOSED') {
-      cancelTrade(t, 'Reset untuk memulai scan baru');
+  if (!resume) {
+    for (const t of trades) {
+      if (t.src === 'bot' && t.status !== 'CLOSED') {
+        cancelTrade(t, 'Reset untuk memulai scan baru');
+      }
     }
+    botActiveId = null;
+    saveTrades();
+    renderHistory();
+  } else {
+    const open = botTrades().find(x => x.status !== 'CLOSED');
+    botActiveId = open ? open.id : null;
   }
-  botActiveId = null;
-  saveTrades();
-  renderHistory();
 
   botRunning = true;
+  saveBotState();
   renderBotUI();
   
   const style = $('botStyle') ? $('botStyle').value : 'Scalping';
@@ -3177,6 +3223,7 @@ async function runBotCycle() {
       source: 'bot'
     });
     const data = res.data;
+    window.__botNextClose = data && data.signal ? data.signal.nextCloseAt : null;
     const showAiReason = txt => { const el = $('botAiReason'); if (el && txt) el.textContent = txt; };
     if (data && data.signal && data.signal.reason) showAiReason(cleanReason(data.signal.reason));
     if (data && data.signal && data.signal.scanSummary) {
