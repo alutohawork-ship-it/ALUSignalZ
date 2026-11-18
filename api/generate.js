@@ -1,7 +1,6 @@
 // api/generate.js
-// v132 — Active Structure Analyzer + Multi-TF Fallback + Tuned Filters
-// Update: minScore 7→5, minRR 2.0→1.8, scanSetups multi-TF, live structure block.
-// 4 scoring baru: strongDisp, zoneFresh, cleanSweep, recentSetup.
+// v133 — Active Structure Analyzer + Agressive TPs + Tolerant Filters
+// Update: minRR 1.8→1.5, minRRCisd 1.5→1.2, maxZoneBars 5→8, smarter botTargets.
 
 export const config = { maxDuration: 60 };
 
@@ -210,7 +209,6 @@ function clientCandles(body, tf) {
   return Array.isArray(rows) ? cleanCandles(rows) : [];
 }
 
-// ── KILLZONE ──
 function getKillzoneStatus(nowMs = Date.now()) {
   try {
     const ny = new Date(new Date(nowMs).toLocaleString('en-US', { timeZone: 'America/New_York' }));
@@ -222,7 +220,6 @@ function getKillzoneStatus(nowMs = Date.now()) {
   } catch { return { active: true, name: 'ACTIVE SESSION' }; }
 }
 
-// ── MATH / STRUCTURE ──
 function atr(c, period = 14) {
   if (!c || c.length < 2) return 15;
   const trs = [];
@@ -395,7 +392,6 @@ function buildOrderFromLevels({ dir, entry, invLevel, atrVal, ctx, kind, rrList 
   return { dir, entry, sl: entry - dir * risk, risk, tps: rrList.map(m => entry + dir * risk * m) };
 }
 
-// ── MANUAL STYLES ──
 async function runAggressiveScalp(ctx, d) {
   const { price, m1, m5, m15, m30 } = d;
   const base = m5.length >= 30 ? m5 : m15;
@@ -418,7 +414,7 @@ async function runAggressiveScalp(ctx, d) {
   const origin = dir === 1 ? (structConf.obLow ?? stM1?.l1?.p ?? price - 1.2 * atr5) : (structConf.obHigh ?? stM1?.h1?.p ?? price + 1.2 * atr5);
 
   const order = buildOrderFromLevels({ dir, entry: price, invLevel: dir === 1 ? Math.min(origin, sma20 - 0.4 * atr5) : Math.max(origin, sma20 + 0.4 * atr5), atrVal: atr5, ctx, kind: 'scalp', rrList: STYLES['Scalping'].rr });
-  const minRR = isCisd ? 1.5 : 1.8;
+  const minRR = isCisd ? 1.2 : 1.5;
   const actualRR = Math.abs(order.tps[2] - order.entry) / Math.abs(order.entry - order.sl);
 
   if (actualRR < minRR) return { reason: withPair(ctx.symbol, `[SKIP] RR ${actualRR.toFixed(2)} < ${minRR}.`), reasonEn: withPair(ctx.symbol, `[SKIP] RR ${actualRR.toFixed(2)} < ${minRR}.`) };
@@ -493,23 +489,23 @@ async function runTopDownLimit(ctx, d, styleName) {
   };
 }
 
-// ── BOT ENGINE ──
+// ── BOT ENGINE (AGGRESSIVE v133) ──
 const BOT_CFG = {
-  minScore: 5,           // was 7 — lebih permisif
-  confidentScore: 8,     // was 9
-  splitScore: 8,         // was 9
-  minRR: 1.8,            // was 2.0
-  minRRCisd: 1.5,        // tetap
-  dispBodyAtr: 1.0,      // was 1.2
-  strongDispAtr: 1.5,    // bonus kalau displacement kencang
+  minScore: 5,           
+  confidentScore: 8,     
+  splitScore: 8,         
+  minRR: 1.5,            // DIUBAH: 1.8 -> 1.5
+  minRRCisd: 1.2,        // DIUBAH: 1.5 -> 1.2
+  dispBodyAtr: 1.0,      
+  strongDispAtr: 1.5,    
   fvgMinAtr: 0.15,
   bufAtr: 0.10,
   minSlAtr: 0.30,
   maxSlAtrScalp: 1.50,
-  maxChaseAtr: 2.0,      // was 1.5
-  lookback: 80,          // was 60
-  maxZoneBars: 5,        // was 3
-  recentBars: 5,         // bonus kalau setup baru jadi
+  maxChaseAtr: 2.0,      
+  lookback: 80,          
+  maxZoneBars: 8,        // DIUBAH: 5 -> 8 (Beri waktu 40 menit di M5)
+  recentBars: 5,         
 };
 
 const tsMs = t => (t < 1e12 ? t * 1000 : t);
@@ -644,13 +640,12 @@ function scanSetups(c, atrV, ctx, price, biasDir, kzActive, tfLabel = 'M5') {
     const touching = live.filter(o => o === zone || overlaps(o, zone));
     const has = t => touching.some(o => o.type === t);
 
-    // ── SCORING ──
     const bd = [];
     if (biasDir === dir) bd.push(['Bias HTF searah', 2]);
     if (kzActive) bd.push(['Dalam Killzone', 1]);
     if (sweep) bd.push(['Liquidity sweep', 2]);
     bd.push(['Displacement ≥1.0xATR', 1]);
-    if (bodySize >= BOT_CFG.strongDispAtr * atrV) bd.push(['Strong displacement ≥1.5xATR', 1]);  // NEW
+    if (bodySize >= BOT_CFG.strongDispAtr * atrV) bd.push(['Strong displacement ≥1.5xATR', 1]);
     bd.push([sweep ? 'MSS/CHoCH valid' : 'BOS valid', 2]);
     if (has('FVG')) bd.push(['FVG fresh', 1]);
     if (has('OB')) bd.push(['OB fresh', 1]);
@@ -658,9 +653,9 @@ function scanSetups(c, atrV, ctx, price, biasDir, kzActive, tfLabel = 'M5') {
     if (has('IFVG')) bd.push(['IFVG terkonfirmasi', 2]);
     if (has('BREAKER') || has('MITIGATION')) bd.push(['Breaker/Mitigation', 1]);
     bd.push(['ATR normal', 1]);
-    if (zoneMitigation(zone, c, (zone.createdIdx ?? k) + 1) < 0.1) bd.push(['Zone fresh (0-10%)', 1]);  // NEW
-    if (sweep && sweep.wickRatio >= 0.5) bd.push(['Sweep wick bersih', 1]);  // NEW
-    if (k >= n - BOT_CFG.recentBars) bd.push(['Setup recent ≤5 bar', 1]);  // NEW
+    if (zoneMitigation(zone, c, (zone.createdIdx ?? k) + 1) < 0.1) bd.push(['Zone fresh (0-10%)', 1]);
+    if (sweep && sweep.wickRatio >= 0.5) bd.push(['Sweep wick bersih', 1]);
+    if (k >= n - BOT_CFG.recentBars) bd.push(['Setup recent ≤5 bar', 1]);
 
     out.push({
       dir, tf: tfLabel, score: bd.reduce((s, x) => s + x[1], 0), breakdown: bd, zone, sweep,
@@ -673,6 +668,7 @@ function scanSetups(c, atrV, ctx, price, biasDir, kzActive, tfLabel = 'M5') {
   return out;
 }
 
+// DIUBAH: BotTargets lebih pintar agar tidak skip setup karena swing terlalu dekat
 function botTargets(dir, entry, risk, c5, c15, atrV) {
   const lv = [];
   const addSw = arr => { const s = findSwings(arr, 2); (dir === 1 ? s.highs : s.lows).forEach(x => lv.push(x.p)); };
@@ -682,10 +678,18 @@ function botTargets(dir, entry, risk, c5, c15, atrV) {
   const uniq = [];
   beyond.forEach(p => { if (!uniq.length || Math.abs(p - uniq[uniq.length-1]) > 0.2 * atrV) uniq.push(p); });
   const R = p => Math.abs(p - entry) / risk;
+  
   const pick = (mn, mx, after) => uniq.find(p => R(p) >= mn && R(p) <= mx && (after == null || (dir === 1 ? p > after : p < after)));
-  let t1 = pick(0.8, 1.8); if (t1 == null) t1 = entry + dir * risk;
-  let t2 = pick(1.5, 3.0, t1); if (t2 == null) t2 = dir === 1 ? Math.max(entry + 2*risk, t1 + 0.5*risk) : Math.min(entry - 2*risk, t1 - 0.5*risk);
-  let t3 = pick(2.2, 5.5, t2); if (t3 == null) t3 = dir === 1 ? Math.max(entry + 3*risk, t2 + risk) : Math.min(entry - 3*risk, t2 - risk);
+  
+  let t1 = pick(1.0, 1.5); 
+  if (t1 == null) t1 = entry + dir * risk * 1.0; // Fallback TP1 1:1
+  
+  let t2 = pick(1.5, 2.5, t1); 
+  if (t2 == null) t2 = entry + dir * risk * 1.8; // Fallback TP2 1:1.8
+  
+  let t3 = pick(2.0, 4.0, t2); 
+  if (t3 == null) t3 = entry + dir * risk * 2.5; // Fallback TP3 1:2.5
+
   return { tps: [t1, t2, t3], rr3: R(t3) };
 }
 
