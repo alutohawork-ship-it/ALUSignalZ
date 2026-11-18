@@ -1,5 +1,6 @@
 // api/generate.js
-// v128 — Top-Down SMC/ICT + Strict Structure & CISD Reversal Engine (100% Modul Compliant)
+// v129 — Top-Down SMC/ICT + Strict Structure & CISD Reversal Engine (100% Modul Compliant)
+// Update: Killzone sebagai filter bonus, Direct Entry untuk High Confidence, & Zone Expiry (Anti-Macet).
 
 export const config = { maxDuration: 60 };
 
@@ -874,6 +875,7 @@ async function runTopDownLimit(ctx, d, styleName) {
 const BOT_CFG = {
   minScore: 7,          // Modul Part 6 & Part 10: Skor < 7 -> SKIP
   splitScore: 9,        // Modul Part 5 & Part 6: Skor >= 9 -> Split 40/40/20
+  confidentScore: 9,    // PERUBAHAN: Skor >= 9 -> Langsung entry tanpa ragu (tanpa konfirmasi CHoCH)
   minRR: 2.0,           // Modul Part 7.3: Model standar min 2.0
   minRRCisd: 1.5,       // Modul Part 7.3: CISD scalp min 1.5
   dispBodyAtr: 1.2,     // Modul Part 3.3 & Part 6: Displacement >= 1.2 * ATR
@@ -883,6 +885,7 @@ const BOT_CFG = {
   maxSlAtrScalp: 1.50,  // Modul Part 7.1: Max SL aggressive 1.5 * ATR
   maxChaseAtr: 1.50,    // Modul Part 1.2 Hard-Rule 5: Chase protection > 1.5 * ATR
   lookback: 60,         // Deep scan window
+  maxZoneBars: 3,       // PERUBAHAN: Max 3 candle di zona tanpa konfirmasi -> Batalkan & cari setup baru
 };
 
 const tsMs = t => (t < 1e12 ? t * 1000 : t);
@@ -1149,8 +1152,8 @@ async function runBotSma20(ctx, d, botStyleRaw) {
   // JIKA TIDAK ADA SETUP VALID (SKOR < 7) -> STANDBY / SCANNING (HARD-RULE 3: JANGAN GEGABAH ENTRY)
   if (!setup) {
     return {
-      reason: withPair(ctx.symbol, `[SCANNING / STANDBY] Deep Scan selesai (${kz.name}). Belum ditemukan setup dengan Confluence Score >= 7 (Sweep + Displacement + MSS + Zona POI). Bot menunggu setup valid sesuai SOP.`),
-      reasonEn: withPair(ctx.symbol, `[SCANNING / STANDBY] Deep Scan complete (${kz.name}). No setup found with Confluence Score >= 7 (Sweep + Displacement + MSS + POI Zone). Bot waiting for valid SOP setup.`)
+      reason: withPair(ctx.symbol, `[SCANNING / STANDBY] Deep Scan selesai. Belum ditemukan setup dengan Confluence Score >= 7 (Sweep + Displacement + MSS + Zona POI). Bot menunggu setup valid sesuai SOP.`),
+      reasonEn: withPair(ctx.symbol, `[SCANNING / STANDBY] Deep Scan complete. No setup found with Confluence Score >= 7 (Sweep + Displacement + MSS + POI Zone). Bot waiting for valid SOP setup.`)
     };
   }
 
@@ -1175,14 +1178,9 @@ async function runBotSma20(ctx, d, botStyleRaw) {
 
   // 3. JIKA HARGA BELUM MASUK ZONA -> MODE CONSERVATIVE LIMIT ORDER (MODUL PART 5)
   if (!priceInZone) {
-    // Hard-Rule 7: Limit order hanya dipasang jika dalam Killzone
-    if (!kz.active) {
-      return {
-        reason: withPair(ctx.symbol, `[SETUP_FORMING / WAIT KZ] Setup valid (Score ${setup.score}) di zona ${zTxt}, menunggu Killzone aktif atau harga masuk zona + konfirmasi struktur/CISD.`),
-        reasonEn: withPair(ctx.symbol, `[SETUP_FORMING / WAIT KZ] Valid setup (Score ${setup.score}) at zone ${zTxt}, waiting for active Killzone or price entering zone + structure/CISD confirmation.`)
-      };
-    }
-
+    // PERUBAHAN: Killzone TIDAK LAGI MEMBLOKIR. Hanya menjadi catatan (Killzone = bonus score).
+    // Setup tetap bisa dipasang Limit meskipun di luar Killzone.
+    
     const slr = calcBotSL({ dir, entry: z.mid, setup, atrV, ctx, mode: 'CONSERVATIVE' });
     const tg = botTargets(dir, z.mid, slr.dist, c5, m15, atrV);
 
@@ -1199,9 +1197,10 @@ async function runBotSma20(ctx, d, botStyleRaw) {
     const rrTxt = `1:${tg.rr3.toFixed(1)}`;
     const setupName = `SMC/ICT Bot · ${isSplit ? 'LIMIT SPLIT (40/40/20)' : 'CONSERVATIVE LIMIT'} · ${z.type}`;
     const orderTxt = `${side} LIMIT @ ${ctx.f(z.mid)}`;
+    const kzTxt = kz.active ? kz.name : 'OUTSIDE KZ (Limit Allowed)';
 
-    const reasonId = withPair(ctx.symbol, `[LIMIT_PLACED] ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} (40%) · TP2 ${tps[1]} (30%) · TP3 ${tps[2]} (30%) | RR ${rrTxt} | Zona: ${zTxt} | ${kz.name} | Score ${scoreTxt} | Bias ${biasTxt}.`);
-    const reasonEn = withPair(ctx.symbol, `[LIMIT_PLACED] ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} (40%) · TP2 ${tps[1]} (30%) · TP3 ${tps[2]} (30%) | RR ${rrTxt} | Zone: ${zTxt} | ${kz.name} | Score ${scoreTxt} | Bias ${biasTxt}.`);
+    const reasonId = withPair(ctx.symbol, `[LIMIT_PLACED] ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} (40%) · TP2 ${tps[1]} (30%) · TP3 ${tps[2]} (30%) | RR ${rrTxt} | Zona: ${zTxt} | ${kzTxt} | Score ${scoreTxt} | Bias ${biasTxt}.`);
+    const reasonEn = withPair(ctx.symbol, `[LIMIT_PLACED] ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} (40%) · TP2 ${tps[1]} (30%) · TP3 ${tps[2]} (30%) | RR ${rrTxt} | Zone: ${zTxt} | ${kzTxt} | Score ${scoreTxt} | Bias ${biasTxt}.`);
 
     return {
       dir,
@@ -1221,18 +1220,74 @@ async function runBotSma20(ctx, d, botStyleRaw) {
     };
   }
 
-  // 4. HARGA SUDAH DI ZONA (ZONE_OCCUPIED) -> MODE AGGRESSIVE: WAJIB KONFIRMASI STRUKTUR (CHoCH/BOS) ATAU CISD (MODUL PART 4)
+  // 4. HARGA SUDAH DI ZONA (ZONE_OCCUPIED)
+  // PERUBAHAN LOGIKA: 
+  // - Jika Score >= 9 (confidentScore) -> LANGSUNG ENTRY (Tidak perlu konfirmasi CHoCH/CISD)
+  // - Jika Score 7 - 8.9 -> WAJIB KONFIRMASI (CHoCH/BOS/CISD)
+  
+  const isHighConfidence = setup.score >= BOT_CFG.confidentScore;
+
+  if (isHighConfidence) {
+    // --- LOGIKA ENTRY TANPA RAGU (HIGH CONFIDENCE) ---
+    const slr = calcBotSL({ dir, entry: price, setup, atrV, ctx, mode: 'AGGRESSIVE' });
+    const tg = botTargets(dir, price, slr.dist, c5, m15, atrV);
+
+    if (tg.rr3 < BOT_CFG.minRR) {
+       return {
+        reason: withPair(ctx.symbol, `[CANCELLED · RR TOO LOW] High Confidence Zone, namun RR 1:${tg.rr3.toFixed(1)} < 2.0. Setup dibatalkan.`),
+        reasonEn: withPair(ctx.symbol, `[CANCELLED · RR TOO LOW] High Confidence Zone, but RR 1:${tg.rr3.toFixed(1)} < 2.0. Setup cancelled.`)
+      };
+    }
+
+    const sl = ctx.f(slr.sl), tps = tg.tps.map(ctx.f);
+    const rrTxt = `1:${tg.rr3.toFixed(1)}`;
+    const setupName = `SMC/ICT Bot · HIGH CONFIDENCE ENTRY · ${z.type}`;
+    const orderTxt = `${side} NOW @ ${ctx.f(price)} (Direct Entry - High Score)`;
+    const kzTxt = kz.active ? kz.name : 'OUTSIDE KZ';
+
+    const reasonId = withPair(ctx.symbol, `[CONFIRMED · DIRECT ENTRY] ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} (40%→BE) · TP2 ${tps[1]} (30%) · TP3 ${tps[2]} (30%) | RR ${rrTxt} | Zona: ${zTxt} | ${kzTxt} | Score ${scoreTxt} | Bias ${biasTxt}.`);
+    const reasonEn = withPair(ctx.symbol, `[CONFIRMED · DIRECT ENTRY] ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} (40%→BE) · TP2 ${tps[1]} (30%) · TP3 ${tps[2]} (30%) | RR ${rrTxt} | Zone: ${zTxt} | ${kzTxt} | Score ${scoreTxt} | Bias ${biasTxt}.`);
+
+    return {
+      dir,
+      plan: {
+        isOCO: false, orderType: 'MARKET', status: 'RUNNING',
+        entry: ctx.f(price), sl, tps, setup: setupName,
+        chartContext: `${setupName}: ${orderTxt} (SL ${sl})`,
+        zone: { min: z.lower, max: z.upper },
+        tag: zLabel,
+      },
+      meta: {
+        setup: setupName, confidence: 'HIGH', riskLabel: 'MEDIUM',
+        reason: reasonId,
+        reasons: { id: reasonId, en: reasonEn },
+        topDown: bias, state: 'CONFIRMED_DIRECT', score: setup.score
+      },
+    };
+  }
+
+  // --- LOGIKA ENTRY RAGU (BUTUH KONFIRMASI CHoCH/CISD) ---
   const structConf = validateStructureAndCISD(confTF, atrConf);
 
   // HARD-RULE 1 & 3: Tanpa konfirmasi struktur/CISD dengan candle CLOSE, DILARANG ENTRY!
   if (!structConf.valid || structConf.dir !== dir) {
+    // Cek apakah sudah terlalu lama di zona tanpa konfirmasi
+    const barsInZone = Math.max(0, c5.length - 1 - setup.formedIdx);
+    
+    if (barsInZone > BOT_CFG.maxZoneBars) {
+       return {
+        reason: withPair(ctx.symbol, `[ZONE_EXPIRED] Harga sudah ${barsInZone} candle di zona ${zTxt} namun tidak ada konfirmasi CHoCH/CISD. Setup dibatalkan, scanning area baru.`),
+        reasonEn: withPair(ctx.symbol, `[ZONE_EXPIRED] Price has been ${barsInZone} candles in zone ${zTxt} without CHoCH/CISD confirmation. Setup cancelled, scanning new area.`)
+      };
+    }
+
     return {
-      reason: withPair(ctx.symbol, `[ZONE_OCCUPIED · WAITING CONFIRMATION] Harga berada di zona ${zTxt}, namun belum muncul konfirmasi Micro CHoCH/BOS ataupun CISD ${side} dengan candle close valid. Menunggu konfirmasi struktur!`),
-      reasonEn: withPair(ctx.symbol, `[ZONE_OCCUPIED · WAITING CONFIRMATION] Price is inside zone ${zTxt}, but no close-confirmed ${side} Micro CHoCH/BOS or CISD yet. Waiting for structure confirmation!`)
+      reason: withPair(ctx.symbol, `[ZONE_OCCUPIED · WAITING CONFIRMATION] Harga berada di zona ${zTxt} (Score ${setup.score}), belum muncul konfirmasi Micro CHoCH/BOS atau CISD ${side}. Menunggu konfirmasi struktur! (${barsInZone}/${BOT_CFG.maxZoneBars} candles)`),
+      reasonEn: withPair(ctx.symbol, `[ZONE_OCCUPIED · WAITING CONFIRMATION] Price is inside zone ${zTxt} (Score ${setup.score}), no close-confirmed ${side} Micro CHoCH/BOS or CISD yet. Waiting for structure confirmation! (${barsInZone}/${BOT_CFG.maxZoneBars} candles)`)
     };
   }
 
-  // 5. KONFIRMASI STRUKTUR / CISD MUNCUL -> HITUNG SL & VALIDASI RR (PART 4.1 & 7.3)
+  // Konfirmasi struktur muncul -> Eksekusi
   const isCisd = structConf.model === 'CISD';
   const minRRRequired = isCisd ? BOT_CFG.minRRCisd : BOT_CFG.minRR;
 
@@ -1250,9 +1305,10 @@ async function runBotSma20(ctx, d, botStyleRaw) {
   const rrTxt = `1:${tg.rr3.toFixed(1)}`;
   const setupName = `SMC/ICT Bot · ${isCisd ? 'CISD Reversal' : 'Structure Confirmed'} · ${z.type}`;
   const orderTxt = `${side} NOW @ ${ctx.f(price)} (${structConf.type})`;
+  const kzTxt = kz.active ? kz.name : 'OUTSIDE KZ';
 
-  const reasonId = withPair(ctx.symbol, `[CONFIRMED · EXECUTE MARKET] ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} (40%→BE) · TP2 ${tps[1]} (30%) · TP3 ${tps[2]} (30%) | RR ${rrTxt} | Zona: ${zTxt} | ${kz.name} | Score ${scoreTxt} | Bias ${biasTxt}.`);
-  const reasonEn = withPair(ctx.symbol, `[CONFIRMED · EXECUTE MARKET] ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} (40%→BE) · TP2 ${tps[1]} (30%) · TP3 ${tps[2]} (30%) | RR ${rrTxt} | Zone: ${zTxt} | ${kz.name} | Score ${scoreTxt} | Bias ${biasTxt}.`);
+  const reasonId = withPair(ctx.symbol, `[CONFIRMED · EXECUTE MARKET] ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} (40%→BE) · TP2 ${tps[1]} (30%) · TP3 ${tps[2]} (30%) | RR ${rrTxt} | Zona: ${zTxt} | ${kzTxt} | Score ${scoreTxt} | Bias ${biasTxt}.`);
+  const reasonEn = withPair(ctx.symbol, `[CONFIRMED · EXECUTE MARKET] ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} (40%→BE) · TP2 ${tps[1]} (30%) · TP3 ${tps[2]} (30%) | RR ${rrTxt} | Zone: ${zTxt} | ${kzTxt} | Score ${scoreTxt} | Bias ${biasTxt}.`);
 
   return {
     dir,
