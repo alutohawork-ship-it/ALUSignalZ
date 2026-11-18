@@ -227,24 +227,25 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
           </div>
         </div>
 
-        <!-- PANEL INTERACTIVE CHAT BOT (TERPISAH SEPENUHNYA) -->
+        <!-- PANEL INTERACTIVE CHAT BOT / AI MENTOR (TERPISAH SEPENUHNYA) -->
         <div id="chatBotPanel" class="hidden bg-darkbg border border-panelborder rounded-xl p-2.5 space-y-2">
           <div class="flex justify-between items-center">
-            <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-comments text-accentblue"></i> INTERACTIVE CHAT BOT (AI)</span>
-            <span class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-emerald-500/20 text-emerald-400 border-emerald-500/40">READY</span>
+            <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-comments text-accentblue"></i> INTERACTIVE CHAT BOT (AI MENTOR)</span>
+            <span class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-emerald-500/20 text-emerald-400 border-emerald-500/40">ONLINE</span>
           </div>
           <div class="bg-cardbg border border-panelborder rounded-xl p-3 space-y-2">
-            <div id="chatLog" class="h-[220px] overflow-y-auto space-y-2 pr-1 text-[10px] font-mono">
-              <div class="bg-darkbg p-2 rounded-lg border border-panelborder text-gray-300">
-                <span class="text-yellow-400 font-bold">AI Chat Bot:</span> Halo! Saya adalah modul Chat & AI Interaktif khusus. Tanyakan apa saja mengenai analisa market, level trading, atau edukasi SMC/ICT!
+            <div id="chatLog" class="h-[230px] overflow-y-auto space-y-2.5 pr-1 text-[10px] font-mono">
+              <div class="bg-darkbg p-2.5 rounded-lg border border-panelborder text-gray-300 leading-relaxed">
+                <span class="text-yellow-400 font-bold block mb-1">🤖 AI Mentor / Chat Bot:</span>
+                Halo trader! Saya siap mendampingi Anda berdiskusi. Tanyakan apa saja: mengapa posisi tertentu terkena SL, bagaimana membaca struktur market terkini, atau setup apa yang sedang kita tunggu!
               </div>
             </div>
             <div class="flex gap-1.5">
-              <input type="text" id="chatInput" placeholder="Ketik pertanyaan / perintah chat..." onkeydown="if(event.key==='Enter') sendChatMessage()" class="flex-1 bg-darkbg border border-panelborder rounded-lg px-2.5 py-2 text-xs text-white focus:outline-none focus:border-accentblue">
+              <input type="text" id="chatInput" placeholder="Tanyakan kondisi market, alasan SL, atau setup..." onkeydown="if(event.key==='Enter') sendChatMessage()" class="flex-1 bg-darkbg border border-panelborder rounded-lg px-2.5 py-2 text-xs text-white focus:outline-none focus:border-accentblue">
               <button onclick="sendChatMessage()" class="bg-accentblue hover:bg-blue-600 text-white font-bold px-3 py-2 rounded-lg text-xs transition"><i class="fa-solid fa-paper-plane"></i></button>
             </div>
           </div>
-          <div class="relative w-full h-[160px]">
+          <div class="relative w-full h-[150px]">
             <canvas id="chatBotCanvas" class="absolute inset-0 w-full h-full"></canvas>
           </div>
         </div>
@@ -2393,7 +2394,7 @@ function drawChatBotMap(cv, cx, k) {
   cx.textAlign = 'left';
   cx.textBaseline = 'top';
   cx.fillStyle = 'rgba(148,163,184,.9)';
-  cx.fillText(`AI CHAT BOT LIVE PULSE · ${k} (${iv})`, plotL + 2, 2);
+  cx.fillText(`AI MENTOR CHAT LIVE PULSE · ${k} (${iv})`, plotL + 2, 2);
 
   if (!rows.length) return;
   const { vis, slot, xOfT } = layoutX(rows, plotL, plotR, 300000);
@@ -2425,6 +2426,7 @@ function drawChatBotMap(cv, cx, k) {
   }
 }
 
+// ---- AI Mentor / Chat Bot Dynamic Narrative Logic ----
 function sendChatMessage() {
   const input = $('chatInput');
   const logBox = $('chatLog');
@@ -2432,23 +2434,32 @@ function sendChatMessage() {
   const text = input.value.trim();
   if(!text) return;
 
-  // Append user bubble
-  logBox.innerHTML += `<div class="text-right"><span class="inline-block bg-accentblue/20 text-blue-300 border border-blue-500/30 p-2 rounded-lg text-left max-w-[85%]"><span class="font-bold text-white">Anda:</span> ${esc(text)}</span></div>`;
+  // Tampilkan bubble chat User
+  logBox.innerHTML += `<div class="text-right"><span class="inline-block bg-accentblue/20 text-blue-300 border border-blue-500/30 p-2.5 rounded-xl text-left max-w-[85%] leading-relaxed"><span class="font-bold text-white block mb-0.5">👤 Anda:</span> ${esc(text)}</span></div>`;
   input.value = '';
   logBox.scrollTop = logBox.scrollHeight;
 
-  // Simulate AI response for Chat Bot
+  // Analisa dinamis kondisi pasar terkini untuk merespons layaknya manusia / mentor
   setTimeout(() => {
-    let reply = "Analisis chat interaktif: Berdasarkan struktur SMC saat ini pada XAUUSD, market sedang menguji area konfluensi support. Pastikan manajemen risiko tetap terjaga.";
+    const smc = getSmc('XAUUSD', '5m');
+    const livePx = prices['XAUUSD'] ? prices['XAUUSD'].price : 2650;
     const lower = text.toLowerCase();
-    if(lower.includes('buy') || lower.includes('sell')) {
-      reply = "Untuk setup entry, gunakan menu Analisa Signal utama atau aktifkan Scanner Bot di atas untuk eksekusi otomatis.";
-    } else if(lower.includes('halo') || lower.includes('hi')) {
-      reply = "Halo trader! Ada yang bisa saya bantu jelaskan terkait setup atau kondisi market hari ini?";
+    let aiResponse = "";
+
+    if (lower.includes('sl') || lower.includes('kenapa') || lower.includes('rugi') || lower.includes('loss')) {
+      aiResponse = `Begini trader, jika sebuah posisi terkena Stop Loss (SL), biasanya disebabkan oleh volatilitas sesi aktif (seperti London/NY Kill Zone) yang melakukan *liquidity sweep* menembus swing sebelumnya sebelum membalikkan arah. Market bersifat dinamis, jadi kita tidak perlu emosi, cukup evaluasi ulang apakah konfluensi FVG atau CHoCH di timeframe lebih besar sudah terkonfirmasi.`;
+    } else if (lower.includes('tunggu') || lower.includes('setup') || lower.includes('analisa') || lower.includes('market') || lower.includes('kondisi')) {
+      const fvgs = smc.fvgs ? smc.fvgs.length : 0;
+      aiResponse = `Kondisi XAUUSD saat ini di harga live sekitar ${fmt(livePx)}. Berdasarkan pembacaan struktur M5, kita mendeteksi ada sekitar ${fvgs} zona Fair Value Gap (FVG) yang masih fresh. Saran saya, sabar menunggu retest bersih atau konfirmasi Change of Character (CHoCH) sebelum memutuskan masuk posisi agar rasio risk-to-reward optimal.`;
+    } else if (lower.includes('halo') || lower.includes('hi') || lower.includes('pagi') || lower.includes('siang') || lower.includes('malam')) {
+      aiResponse = `Halo! Senang bisa berdiskusi dengan Anda. Market XAUUSD sedang bergerak aktif. Ada hal teknikal atau psikologi trading yang ingin kita bedah bersama saat ini?`;
+    } else {
+      aiResponse = `Pertanyaan yang bagus! Dalam konsep SMC/ICT, kedisiplinan membaca struktur harga dan sabar menunggu setup di zona Order Block atau FVG adalah kunci utamanya. Terus pantau pergerakan harga dan sesuaikan risk management Anda ya!`;
     }
-    logBox.innerHTML += `<div class="text-left"><span class="inline-block bg-darkbg text-gray-200 border border-panelborder p-2 rounded-lg max-w-[85%]"><span class="text-yellow-400 font-bold">AI Chat Bot:</span> ${esc(reply)}</span></div>`;
+
+    logBox.innerHTML += `<div class="text-left"><span class="inline-block bg-darkbg text-gray-200 border border-panelborder p-2.5 rounded-xl max-w-[85%] leading-relaxed"><span class="text-yellow-400 font-bold block mb-0.5">🤖 AI Mentor:</span> ${esc(aiResponse)}</span></div>`;
     logBox.scrollTop = logBox.scrollHeight;
-  }, 600);
+  }, 700);
 }
 
 function drawChart() {
