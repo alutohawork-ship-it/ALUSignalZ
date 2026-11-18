@@ -1,6 +1,6 @@
 // api/generate.js
-// v129 — Top-Down SMC/ICT + Strict Structure & CISD Reversal Engine (100% Modul Compliant)
-// Update: Killzone sebagai filter bonus, Direct Entry untuk High Confidence, & Zone Expiry (Anti-Macet).
+// v130 — Top-Down SMC/ICT + Interactive Analyst Voice (Human-Readable Reasoning)
+// Update: Narasi HTF→LTF per-timeframe, explain-why-no-setup, state-aware messaging.
 
 export const config = { maxDuration: 60 };
 
@@ -617,9 +617,9 @@ async function runAggressiveScalp(ctx, d) {
   const { price, m1, m5, m15, m30 } = d;
   const base = m5.length >= 30 ? m5 : m15;
   if (!base || base.length < 25) {
-    return { 
-      reason: withPair(ctx.symbol, '[DEEP SCAN] Data M5/M15 belum cukup untuk scanning mendalam.'), 
-      reasonEn: withPair(ctx.symbol, '[DEEP SCAN] M5/M15 data insufficient for deep scanning.') 
+    return {
+      reason: withPair(ctx.symbol, '[DEEP SCAN] Data M5/M15 belum cukup untuk scanning mendalam.'),
+      reasonEn: withPair(ctx.symbol, '[DEEP SCAN] M5/M15 data insufficient for deep scanning.')
     };
   }
 
@@ -627,11 +627,11 @@ async function runAggressiveScalp(ctx, d) {
   const atr5 = atrOf(base, ctx.pip);
   const closes = base.map(c => c.c);
   const sma20 = smaLast(closes, 20);
-  
+
   if (!sma20) {
-    return { 
-      reason: withPair(ctx.symbol, '[DEEP SCAN] SMA20 belum terbentuk sempurna. Menunggu stabilitas harga.'), 
-      reasonEn: withPair(ctx.symbol, '[DEEP SCAN] SMA20 not fully formed. Waiting for price stability.') 
+    return {
+      reason: withPair(ctx.symbol, '[DEEP SCAN] SMA20 belum terbentuk sempurna. Menunggu stabilitas harga.'),
+      reasonEn: withPair(ctx.symbol, '[DEEP SCAN] SMA20 not fully formed. Waiting for price stability.')
     };
   }
 
@@ -773,11 +773,11 @@ async function runTopDownLimit(ctx, d, styleName) {
     const dir = st.dir;
     const entryFallback = dir === 1 ? price - 0.5 * atrVal : price + 0.5 * atrVal;
     const invFallback = dir === 1 ? st.l1.p : st.h1.p;
-    
+
     const fallbackOrd = buildOrderFromLevels({ dir, entry: entryFallback, invLevel: invFallback, atrVal, ctx, kind, rrList: rr });
     const side = dir === 1 ? 'BUY' : 'SELL';
     const fallbackSetup = `${setup} · Zona S&D Dinamis`;
-    
+
     const reasonId = withPair(ctx.symbol, `${side} LIMIT @ ${ctx.f(fallbackOrd.entry)}, SL ${ctx.f(fallbackOrd.sl)}, TP1 ${ctx.f(fallbackOrd.tps[0])} (1:1), TP2 ${ctx.f(fallbackOrd.tps[1])} (1:2), TP3 ${ctx.f(fallbackOrd.tps[2])} (1:3). Analisis Top-Down ${setup} berdasarkan struktur ${st.src}. [${tdStr}].`);
     const reasonEn = withPair(ctx.symbol, `${side} LIMIT @ ${ctx.f(fallbackOrd.entry)}, SL ${ctx.f(fallbackOrd.sl)}, TP1 ${ctx.f(fallbackOrd.tps[0])} (1:1), TP2 ${ctx.f(fallbackOrd.tps[1])} (1:2), TP3 ${ctx.f(fallbackOrd.tps[2])} (1:3). Top-Down Analysis ${setup} based on ${st.src} structure. [${tdStr}].`);
 
@@ -820,7 +820,7 @@ async function runTopDownLimit(ctx, d, styleName) {
   const side = o.dir === 1 ? 'BUY' : 'SELL';
   const oneSetup = `${setup} · Zona Terkuat`;
   const chartContext = `${oneSetup}: ${side} Limit ${ctx.f(o.entry)} (SL ${ctx.f(o.sl)}). Bias ${bias.bias}.`;
-  
+
   const reasonId = withPair(ctx.symbol, `${oneSetup}. ${side} LIMIT @ ${ctx.f(o.entry)}, SL ${ctx.f(o.sl)}, TP1 ${ctx.f(o.tps[0])} (1:1), TP2 ${ctx.f(o.tps[1])} (1:2), TP3 ${ctx.f(o.tps[2])} (1:3). Zona ${o.tag} terkuat hasil top-down [${tdStr}].`);
   const reasonEn = withPair(ctx.symbol, `${oneSetup}. ${side} LIMIT @ ${ctx.f(o.entry)}, SL ${ctx.f(o.sl)}, TP1 ${ctx.f(o.tps[0])} (1:1), TP2 ${ctx.f(o.tps[1])} (1:2), TP3 ${ctx.f(o.tps[2])} (1:3). Strongest ${o.tag} zone from top-down [${tdStr}].`);
 
@@ -1082,24 +1082,103 @@ function calcBotSL({ dir, entry, setup, atrV, ctx, mode }) {
   return { sl: entry - dir * Math.max(minD, 1.0 * atrV), dist: Math.max(minD, 1.0 * atrV), src: 'structural-fallback' };
 }
 
+// ─── INTERACTIVE ANALYST NARRATIVE HELPERS ───
+const TF_ORDER_FULL = ['d1', 'h4', 'h1', 'm30', 'm15', 'm5', 'm1'];
+const TF_LABEL = { d1: 'Daily', h4: 'H4', h1: 'H1', m30: 'M30', m15: 'M15', m5: 'M5', m1: 'M1' };
+
+function describeTF(tf, candles, lang) {
+  const lbl = TF_LABEL[tf] || tf.toUpperCase();
+  if (!candles || candles.length < 20) {
+    return lang === 'en' ? `${lbl} — waiting for data` : `${lbl} — menunggu data`;
+  }
+  const price = candles[candles.length - 1].c;
+  const st = readStructure(candles, price);
+  if (!st) {
+    return lang === 'en'
+      ? `${lbl} — ranging, no clear structure`
+      : `${lbl} — ranging, struktur belum jelas`;
+  }
+  const dirId = st.dir === 1 ? 'bullish' : 'bearish';
+  if (st.bos) {
+    return lang === 'en' ? `${lbl} — BOS ${dirId} confirmed` : `${lbl} — BOS ${dirId} terkonfirmasi`;
+  }
+  return lang === 'en' ? `${lbl} — trend ${st.src}` : `${lbl} — tren ${st.src}`;
+}
+
+function buildTopDownStory(tfMap, lang, order = TF_ORDER_FULL) {
+  return order
+    .filter(tf => tfMap[tf] && tfMap[tf].length >= 20)
+    .map(tf => '  • ' + describeTF(tf, tfMap[tf], lang))
+    .join('\n');
+}
+
+function biasWord(bias, lang) {
+  if (bias.dir === 1) return 'bullish';
+  if (bias.dir === -1) return 'bearish';
+  return lang === 'en' ? 'neutral' : 'netral';
+}
+
+function fmtScore(bias) {
+  return (bias.score >= 0 ? '+' : '') + bias.score.toFixed(2);
+}
+
+function buildAnalystView(ctx, { bias, tfStory, kz, body }) {
+  const lang = ctx.lang;
+  const header = lang === 'en' ? `[ANALYST — ${ctx.symbol}]` : `[ANALIS — ${ctx.symbol}]`;
+  const kzTxt = kz.active ? kz.name : (lang === 'en' ? 'Outside KZ' : 'Di luar KZ');
+  const synthLine = lang === 'en'
+    ? `HTF bias is ${biasWord(bias, lang)} (score ${fmtScore(bias)}). Killzone: ${kzTxt}.`
+    : `Bias HTF ${biasWord(bias, lang)} (skor ${fmtScore(bias)}). Killzone: ${kzTxt}.`;
+
+  return [
+    header,
+    ``,
+    lang === 'en' ? `📊 TOP-DOWN SCAN (HTF → LTF):` : `📊 SCAN TOP-DOWN (HTF → LTF):`,
+    tfStory || (lang === 'en' ? '  (insufficient TF data)' : '  (data TF belum cukup)'),
+    ``,
+    `🎯 ${lang === 'en' ? 'SYNTHESIS' : 'SINTESIS'}: ${synthLine}`,
+    ``,
+    body,
+  ].join('\n');
+}
+
 async function runBotSma20(ctx, d, botStyleRaw) {
   const { price, m1, m5, m15, h1 } = d;
+  const lang = ctx.lang;
   const c5 = closedOnly(m5, 180000);
+
+  const tfSnapshot = {
+    d1: d.d1, h4: d.h4, h1,
+    m30: d.m30, m15, m5: c5,
+    m1: closedOnly(m1, 60000),
+  };
+  const tfStory = buildTopDownStory(tfSnapshot, lang);
+
   if (!c5 || c5.length < 25) {
-    return {
-      reason: '[SCANNING] Menunggu data candle M5/M15/M1 mencukupi untuk Deep Scanning...',
-      reasonEn: '[SCANNING] Waiting for sufficient M5/M15/M1 candles for Deep Scanning...'
-    };
+    const bodyTxt = lang === 'en'
+      ? `⏳ I still need more M5 candles (currently ${c5?.length || 0}/25) before I can run deep scan. Standby.`
+      : `⏳ Saya masih butuh candle M5 lebih lengkap (saat ini ${c5?.length || 0}/25) sebelum deep scan. Standby.`;
+    const full = withPair(ctx.symbol, buildAnalystView(ctx, {
+      bias: { dir: 0, bias: 'NEUTRAL', score: 0, details: {} },
+      tfStory,
+      kz: { active: false, name: '—' },
+      body: bodyTxt,
+    }));
+    return { reason: full, reasonEn: full };
   }
 
-  const m1c = closedOnly(m1, 60000);
+  const m1c = tfSnapshot.m1;
   const confTF = m1c.length >= 10 ? m1c : c5;
   const atrV = atrOf(c5, ctx.pip);
   const atrConf = atrOf(confTF, ctx.pip);
   const kz = getKillzoneStatus();
+  const kzTxt = kz.active ? kz.name : (lang === 'en' ? 'Outside KZ' : 'Di luar KZ');
 
-  const bias = multiTfBias({ h1: h1 && h1.length >= 20 ? h1 : null, m15: m15 && m15.length >= 15 ? m15 : null, m5: c5 }, ['h1', 'm15', 'm5']);
-  const biasTxt = `${bias.bias} (${Object.entries(bias.details).map(([k, v]) => `${k.toUpperCase()}:${v}`).join(' | ') || 'n/a'})`;
+  const bias = multiTfBias({
+    h1: h1 && h1.length >= 20 ? h1 : null,
+    m15: m15 && m15.length >= 15 ? m15 : null,
+    m5: c5,
+  }, ['h1', 'm15', 'm5']);
 
   let setups = scanSetups(c5, atrV, ctx, price, bias.dir, kz.active);
   setups = setups.filter(s => s.score >= BOT_CFG.minScore);
@@ -1107,69 +1186,153 @@ async function runBotSma20(ctx, d, botStyleRaw) {
 
   const setup = setups[0];
 
+  // ═══════════ NO SETUP — EXPLAIN WHY ═══════════
   if (!setup) {
-    return {
-      reason: withPair(ctx.symbol, `[SCANNING / STANDBY] Deep Scan selesai. Belum ditemukan setup dengan Confluence Score >= 7 (Sweep + Displacement + MSS + Zona POI). Bot menunggu setup valid sesuai SOP.`),
-      reasonEn: withPair(ctx.symbol, `[SCANNING / STANDBY] Deep Scan complete. No setup found with Confluence Score >= 7 (Sweep + Displacement + MSS + POI Zone). Bot waiting for valid SOP setup.`)
-    };
+    const nearDemand = findSDZones(c5, 1, price).slice(0, 1)[0];
+    const nearSupply = findSDZones(c5, -1, price).slice(0, 1)[0];
+    const nearDesc = [nearDemand, nearSupply]
+      .filter(Boolean)
+      .map(z => `${z.kind} ${ctx.f(z.bottom)}–${ctx.f(z.top)} (${(z.dist / atrV).toFixed(1)}x ATR)`)
+      .join('  |  ')
+      || (lang === 'en' ? 'no clear POI nearby' : 'tidak ada POI jelas dekat harga');
+
+    const body = lang === 'en'
+      ? [
+          `❓ WHY NO SETUP YET:`,
+          `I scanned the last ${c5.length} M5 candles. No structure met our minimum SOP (Confluence ≥ ${BOT_CFG.minScore}).`,
+          ``,
+          `What's still missing:`,
+          `  • Displacement ≥ ${BOT_CFG.dispBodyAtr}x ATR on a delivery candle`,
+          `  • MSS/CHoCH confirmed by close`,
+          `  • Sweep of liquidity (BSL/SSL) preceding the leg`,
+          `  • Fresh POI zone (OB/FVG/Breaker/IFVG) not yet mitigated`,
+          ``,
+          `🔍 Nearest POI: ${nearDesc}`,
+          `⏳ What I'm watching: structure confirmation after a liquidity sweep at a fresh zone.`,
+        ].join('\n')
+      : [
+          `❓ MENGAPA BELUM ADA SETUP:`,
+          `Saya sudah scan ${c5.length} candle M5 terakhir. Belum ada yang lolos SOP minimal (Confluence ≥ ${BOT_CFG.minScore}).`,
+          ``,
+          `Syarat yang belum terpenuhi:`,
+          `  • Displacement ≥ ${BOT_CFG.dispBodyAtr}x ATR pada candle delivery`,
+          `  • MSS/CHoCH close-confirmed`,
+          `  • Sweep likuiditas (BSL/SSL) sebelum leg displacement`,
+          `  • Zona POI fresh (OB/FVG/Breaker/IFVG) yang belum dimitigasi`,
+          ``,
+          `🔍 POI terdekat: ${nearDesc}`,
+          `⏳ Yang saya tunggu: konfirmasi struktur setelah sweep likuiditas di zona fresh.`,
+        ].join('\n');
+
+    const full = withPair(ctx.symbol, buildAnalystView(ctx, { bias, tfStory, kz, body }));
+    return { reason: full, reasonEn: full };
   }
 
-  const dir = setup.dir, side = dir === 1 ? 'BUY' : 'SELL';
+  const dir = setup.dir;
+  const side = dir === 1 ? 'BUY' : 'SELL';
   const z = setup.zone;
   const zLabel = z.label || `${z.type} ${dir === 1 ? 'BUY' : 'SELL'}`;
-  const zTxt = `${zLabel} ${ctx.f(z.lower)}-${ctx.f(z.upper)}`;
-  const scoreTxt = `${setup.score} (${setup.breakdown.map(x => `${x[0]} +${x[1]}`).join(', ')})`;
-
+  const zTxt = `${zLabel} ${ctx.f(z.lower)}–${ctx.f(z.upper)}`;
   const distToZone = price < z.lower ? (z.lower - price) : (price > z.upper ? (price - z.upper) : 0);
 
+  const scoreTxt = lang === 'en'
+    ? `Confluence Score ${setup.score} — ${setup.breakdown.map(x => `${x[0]} +${x[1]}`).join(', ')}`
+    : `Confluence Score ${setup.score} — ${setup.breakdown.map(x => `${x[0]} +${x[1]}`).join(', ')}`;
+
+  const sweepTxt = setup.sweep
+    ? (lang === 'en'
+        ? `Sweep ${setup.sweep.wickRatio >= 0.4 ? 'clean' : 'shallow'} of ${dir === 1 ? 'SSL' : 'BSL'} at ${ctx.f(setup.sweep.level)}`
+        : `Sweep ${setup.sweep.wickRatio >= 0.4 ? 'bersih' : 'tipis'} ${dir === 1 ? 'SSL' : 'BSL'} di ${ctx.f(setup.sweep.level)}`)
+    : (lang === 'en' ? 'BOS continuation (no prior sweep)' : 'BOS continuation (tanpa sweep sebelumnya)');
+
+  // ═══════════ CHASE BLOCK ═══════════
   if (distToZone > BOT_CFG.maxChaseAtr * atrV) {
-    return {
-      reason: withPair(ctx.symbol, `[MISSED / CHASE BLOCKED] Harga (${ctx.f(price)}) sudah menjauh > 1.5x ATR dari zona ${zTxt}. Dilarang mengejar harga (Hard-Rule 5), mencari setup baru.`),
-      reasonEn: withPair(ctx.symbol, `[MISSED / CHASE BLOCKED] Price (${ctx.f(price)}) moved > 1.5x ATR away from zone ${zTxt}. Chasing blocked (Hard-Rule 5), scanning new setup.`)
-    };
+    const body = lang === 'en'
+      ? [
+          `🚫 SETUP FOUND — BUT I WON'T CHASE:`,
+          `${scoreTxt}`,
+          `Zone ${zTxt} is already ${(distToZone / atrV).toFixed(1)}x ATR away from live price.`,
+          `Hard-Rule 5 blocks chasing. I'll only enter if price returns to the zone.`,
+          ``,
+          `⏳ Re-scanning for a fresher zone.`,
+        ].join('\n')
+      : [
+          `🚫 SETUP ADA — TAPI TIDAK DIEJAR:`,
+          `${scoreTxt}`,
+          `Zona ${zTxt} sudah ${(distToZone / atrV).toFixed(1)}x ATR dari harga live.`,
+          `Hard-Rule 5 melarang mengejar harga. Entry hanya jika harga balik ke zona.`,
+          ``,
+          `⏳ Saya rescan untuk zona yang lebih fresh.`,
+        ].join('\n');
+    const full = withPair(ctx.symbol, buildAnalystView(ctx, { bias, tfStory, kz, body }));
+    return { reason: full, reasonEn: full };
   }
 
   const priceInZone = inZone(price, z) || distToZone <= 0.15 * atrV;
 
+  // ═══════════ LIMIT PLACED (harga di luar zona) ═══════════
   if (!priceInZone) {
     const slr = calcBotSL({ dir, entry: z.mid, setup, atrV, ctx, mode: 'CONSERVATIVE' });
     const tg = botTargets(dir, z.mid, slr.dist, c5, m15, atrV);
 
     if (tg.rr3 < BOT_CFG.minRR) {
-      return {
-        reason: withPair(ctx.symbol, `[SKIP / RR LOW] Setup ${zTxt} memiliki RR 1:${tg.rr3.toFixed(1)} (< 1:2.0). Sesuai SOP, setup di-skip.`),
-        reasonEn: withPair(ctx.symbol, `[SKIP / RR LOW] Setup ${zTxt} has RR 1:${tg.rr3.toFixed(1)} (< 1:2.0). Skipped per SOP.`)
-      };
+      const body = lang === 'en'
+        ? `⚠️ Setup ${zTxt} valid but RR 1:${tg.rr3.toFixed(1)} < 1:${BOT_CFG.minRR.toFixed(1)}. SL will NOT be shrunk — setup skipped per SOP.`
+        : `⚠️ Setup ${zTxt} valid tapi RR 1:${tg.rr3.toFixed(1)} < 1:${BOT_CFG.minRR.toFixed(1)}. SL tidak akan diperkecil — setup di-skip sesuai SOP.`;
+      const full = withPair(ctx.symbol, buildAnalystView(ctx, { bias, tfStory, kz, body }));
+      return { reason: full, reasonEn: full };
     }
 
     const isSplit = setup.score >= BOT_CFG.splitScore;
-    const sl = ctx.f(slr.sl), tps = tg.tps.map(ctx.f);
-    const rrTxt = `1:${tg.rr3.toFixed(1)}`;
-    const setupName = `SMC/ICT Bot · ${isSplit ? 'LIMIT SPLIT (40/40/20)' : 'CONSERVATIVE LIMIT'} · ${z.type}`;
-    const orderTxt = `${side} LIMIT @ ${ctx.f(z.mid)}`;
-    const kzTxt = kz.active ? kz.name : 'OUTSIDE KZ (Limit Allowed)';
+    const body = lang === 'en'
+      ? [
+          `💡 SETUP FOUND — LIMIT ORDERS:`,
+          `${scoreTxt}`,
+          ``,
+          `📍 Zone: ${zTxt}`,
+          `📐 ${sweepTxt}`,
+          ``,
+          `🛒 ${side} LIMIT @ ${ctx.f(z.mid)} ${isSplit ? '(split 40/40/20)' : '(conservative single fill)'}`,
+          `🛡️ SL: ${ctx.f(slr.sl)} — ${slr.src} (structure invalidation)`,
+          `🎯 TP1 ${ctx.f(tg.tps[0])}  |  TP2 ${ctx.f(tg.tps[1])}  |  TP3 ${ctx.f(tg.tps[2])}   (RR 1:${tg.rr3.toFixed(1)})`,
+          ``,
+          `Why SL sits at ${slr.src}: protects the entry from false wick sweeps. If ${slr.src} is broken by close, this setup is invalid.`,
+        ].join('\n')
+      : [
+          `💡 SETUP DITEMUKAN — LIMIT ORDER:`,
+          `${scoreTxt}`,
+          ``,
+          `📍 Zona: ${zTxt}`,
+          `📐 ${sweepTxt}`,
+          ``,
+          `🛒 ${side} LIMIT @ ${ctx.f(z.mid)} ${isSplit ? '(split 40/40/20)' : '(konservatif, single fill)'}`,
+          `🛡️ SL: ${ctx.f(slr.sl)} — ${slr.src} (invalidasi struktur)`,
+          `🎯 TP1 ${ctx.f(tg.tps[0])}  |  TP2 ${ctx.f(tg.tps[1])}  |  TP3 ${ctx.f(tg.tps[2])}   (RR 1:${tg.rr3.toFixed(1)})`,
+          ``,
+          `Alasan SL di ${slr.src}: melindungi entry dari sapuan wick semu. Jika ${slr.src} ditembus close, setup invalid.`,
+        ].join('\n');
 
-    const reasonId = withPair(ctx.symbol, `[INTERACTIVE BOT] Struktur market mendeteksi ${z.type} di area ${zTxt}. Bot memasang ${orderTxt} karena harga mendekati zona institusional dengan Confluence Score ${scoreTxt}. Alasan Stop Loss di ${sl} adalah mengamankan area invalidasi di balik ${slr.src} untuk menghindari sapuan likuiditas semu. Arah struktur HTF dominan ${biasTxt}.`);
-    const reasonEn = withPair(ctx.symbol, `[INTERACTIVE BOT] Market structure detected ${z.type} at ${zTxt}. Bot placed ${orderTxt} as price approaches institutional zone with Confluence Score ${scoreTxt}. Stop Loss is set at ${sl} behind ${slr.src} to protect against false sweep. HTF structure bias is ${biasTxt}.`);
+    const full = withPair(ctx.symbol, buildAnalystView(ctx, { bias, tfStory, kz, body }));
+    const setupName = `SMC/ICT Bot · ${isSplit ? 'LIMIT SPLIT (40/40/20)' : 'CONSERVATIVE LIMIT'} · ${z.type}`;
 
     return {
       dir,
       plan: {
         isOCO: false, orderType: 'LIMIT', status: 'PENDING',
-        entry: ctx.f(z.mid), sl, tps, setup: setupName,
-        chartContext: `${setupName}: ${orderTxt} (SL ${sl})`,
-        zone: { min: z.lower, max: z.upper },
-        tag: zLabel,
+        entry: ctx.f(z.mid), sl: ctx.f(slr.sl), tps: tg.tps.map(ctx.f),
+        setup: setupName,
+        chartContext: `${setupName}: ${side} Limit ${ctx.f(z.mid)} (SL ${ctx.f(slr.sl)})`,
+        zone: { min: z.lower, max: z.upper }, tag: zLabel,
       },
       meta: {
         setup: setupName, confidence: 'HIGH', riskLabel: 'LOW',
-        reason: reasonId,
-        reasons: { id: reasonId, en: reasonEn },
-        topDown: bias, state: 'LIMIT_PLACED', score: setup.score
+        reason: full, reasons: { id: full, en: full },
+        topDown: bias, state: 'LIMIT_PLACED', score: setup.score,
       },
     };
   }
 
+  // ═══════════ HIGH CONFIDENCE — DIRECT ENTRY ═══════════
   const isHighConfidence = setup.score >= BOT_CFG.confidentScore;
 
   if (isHighConfidence) {
@@ -1177,57 +1340,106 @@ async function runBotSma20(ctx, d, botStyleRaw) {
     const tg = botTargets(dir, price, slr.dist, c5, m15, atrV);
 
     if (tg.rr3 < BOT_CFG.minRR) {
-       return {
-        reason: withPair(ctx.symbol, `[CANCELLED · RR TOO LOW] High Confidence Zone, namun RR 1:${tg.rr3.toFixed(1)} < 2.0. Setup dibatalkan.`),
-        reasonEn: withPair(ctx.symbol, `[CANCELLED · RR TOO LOW] High Confidence Zone, but RR 1:${tg.rr3.toFixed(1)} < 2.0. Setup cancelled.`)
-      };
+      const body = lang === 'en'
+        ? `⚠️ High-confluence zone (Score ${setup.score}) but RR 1:${tg.rr3.toFixed(1)} < 2.0. Skipping — SL integrity preserved.`
+        : `⚠️ Zona confluence tinggi (Score ${setup.score}) tapi RR 1:${tg.rr3.toFixed(1)} < 2.0. Skip — integritas SL dijaga.`;
+      const full = withPair(ctx.symbol, buildAnalystView(ctx, { bias, tfStory, kz, body }));
+      return { reason: full, reasonEn: full };
     }
 
-    const sl = ctx.f(slr.sl), tps = tg.tps.map(ctx.f);
-    const rrTxt = `1:${tg.rr3.toFixed(1)}`;
-    const setupName = `SMC/ICT Bot · HIGH CONFIDENCE ENTRY · ${z.type}`;
-    const orderTxt = `${side} NOW @ ${ctx.f(price)} (Direct Entry - High Score)`;
-    const kzTxt = kz.active ? kz.name : 'OUTSIDE KZ';
+    const body = lang === 'en'
+      ? [
+          `🔥 HIGH CONFLUENCE — DIRECT ENTRY:`,
+          `${scoreTxt}`,
+          `📍 Price already at ${zTxt} — ${sweepTxt}`,
+          `⏱ Killzone: ${kzTxt}`,
+          ``,
+          `🛒 ${side} NOW @ ${ctx.f(price)} (direct, no confirmation lag)`,
+          `🛡️ SL: ${ctx.f(slr.sl)} — ${slr.src}`,
+          `🎯 TP1 ${ctx.f(tg.tps[0])}  |  TP2 ${ctx.f(tg.tps[1])}  |  TP3 ${ctx.f(tg.tps[2])}   (RR 1:${tg.rr3.toFixed(1)})`,
+          ``,
+          `Why direct entry: score ≥ ${BOT_CFG.confidentScore} + price already at POI + displacement already confirmed.`,
+          `If ${slr.src} is broken by close, I cut — no averaging.`,
+        ].join('\n')
+      : [
+          `🔥 HIGH CONFLUENCE — DIRECT ENTRY:`,
+          `${scoreTxt}`,
+          `📍 Harga sudah di ${zTxt} — ${sweepTxt}`,
+          `⏱ Killzone: ${kzTxt}`,
+          ``,
+          `🛒 ${side} NOW @ ${ctx.f(price)} (direct, tanpa lag konfirmasi)`,
+          `🛡️ SL: ${ctx.f(slr.sl)} — ${slr.src}`,
+          `🎯 TP1 ${ctx.f(tg.tps[0])}  |  TP2 ${ctx.f(tg.tps[1])}  |  TP3 ${ctx.f(tg.tps[2])}   (RR 1:${tg.rr3.toFixed(1)})`,
+          ``,
+          `Alasan entry langsung: skor ≥ ${BOT_CFG.confidentScore} + harga di POI + displacement terbaca.`,
+          `Jika ${slr.src} ditembus close, saya cut — tidak ada averaging.`,
+        ].join('\n');
 
-    const reasonId = withPair(ctx.symbol, `[INTERACTIVE BOT] Confluence sangat tinggi (${scoreTxt}). Bot mengeksekusi ${side} secara langsung di zona ${zTxt}. Alasan Stop Loss diletakkan di ${sl} (${slr.src}) untuk melindungi posisi dari volatilitas mikro. Target TP dirancang bertahap hingga RR ${rrTxt}. Bias HTF: ${biasTxt}.`);
-    const reasonEn = withPair(ctx.symbol, `[INTERACTIVE BOT] High confluence score (${scoreTxt}). Bot executed ${side} directly at zone ${zTxt}. Stop Loss placed at ${sl} (${slr.src}) to protect against micro volatility. Target TPs scaled up to RR ${rrTxt}. HTF Bias: ${biasTxt}.`);
+    const full = withPair(ctx.symbol, buildAnalystView(ctx, { bias, tfStory, kz, body }));
+    const setupName = `SMC/ICT Bot · HIGH CONFIDENCE ENTRY · ${z.type}`;
 
     return {
       dir,
       plan: {
         isOCO: false, orderType: 'MARKET', status: 'RUNNING',
-        entry: ctx.f(price), sl, tps, setup: setupName,
-        chartContext: `${setupName}: ${orderTxt} (SL ${sl})`,
-        zone: { min: z.lower, max: z.upper },
-        tag: zLabel,
+        entry: ctx.f(price), sl: ctx.f(slr.sl), tps: tg.tps.map(ctx.f),
+        setup: setupName,
+        chartContext: `${setupName}: ${side} NOW ${ctx.f(price)}`,
+        zone: { min: z.lower, max: z.upper }, tag: zLabel,
       },
       meta: {
         setup: setupName, confidence: 'HIGH', riskLabel: 'MEDIUM',
-        reason: reasonId,
-        reasons: { id: reasonId, en: reasonEn },
-        topDown: bias, state: 'CONFIRMED_DIRECT', score: setup.score
+        reason: full, reasons: { id: full, en: full },
+        topDown: bias, state: 'CONFIRMED_DIRECT', score: setup.score,
       },
     };
   }
 
+  // ═══════════ IN-ZONE WAITING FOR CONFIRMATION ═══════════
   const structConf = validateStructureAndCISD(confTF, atrConf);
+  const barsInZone = Math.max(0, c5.length - 1 - setup.formedIdx);
 
   if (!structConf.valid || structConf.dir !== dir) {
-    const barsInZone = Math.max(0, c5.length - 1 - setup.formedIdx);
-    
     if (barsInZone > BOT_CFG.maxZoneBars) {
-       return {
-        reason: withPair(ctx.symbol, `[ZONE_EXPIRED] Harga sudah ${barsInZone} candle di zona ${zTxt} namun tidak ada konfirmasi CHoCH/CISD. Setup dibatalkan, scanning area baru.`),
-        reasonEn: withPair(ctx.symbol, `[ZONE_EXPIRED] Price has been ${barsInZone} candles in zone ${zTxt} without CHoCH/CISD confirmation. Setup cancelled, scanning new area.`)
-      };
+      const body = lang === 'en'
+        ? `⏰ ZONE EXPIRED — ${barsInZone} candles inside ${zTxt} without a close-confirmed MSS/CHoCH/CISD.\nCancelling and re-scanning. No chase.`
+        : `⏰ ZONA EXPIRED — ${barsInZone} candle di ${zTxt} tanpa MSS/CHoCH/CISD close-confirmed.\nDibatalkan, rescan. Tanpa chase.`;
+      const full = withPair(ctx.symbol, buildAnalystView(ctx, { bias, tfStory, kz, body }));
+      return { reason: full, reasonEn: full };
     }
 
-    return {
-      reason: withPair(ctx.symbol, `[INTERACTIVE BOT] Harga sedang menguji zona ${zTxt} (Score ${setup.score}). Struktur HTF terpantau ${bias.bias}. Bot sedang memantau konfirmasi Micro CHoCH/BOS atau CISD ${side} sebelum melakukan entry. (${barsInZone}/${BOT_CFG.maxZoneBars} candles)`),
-      reasonEn: withPair(ctx.symbol, `[INTERACTIVE BOT] Price testing zone ${zTxt} (Score ${setup.score}). HTF structure is ${bias.bias}. Bot is monitoring for Micro CHoCH/BOS or CISD ${side} confirmation before entry. (${barsInZone}/${BOT_CFG.maxZoneBars} candles)`)
-    };
+    const triggerSide = dir === 1 ? 'Micro CHoCH/BOS bullish' : 'Micro CHoCH/BOS bearish';
+    const body = lang === 'en'
+      ? [
+          `⏳ PRICE IS IN ZONE — WAITING FOR TRIGGER:`,
+          `${scoreTxt}`,
+          `📍 ${zTxt} — price inside/touching`,
+          `⏱ ${barsInZone}/${BOT_CFG.maxZoneBars} candles in zone — zone expires soon`,
+          ``,
+          `What I need before pulling the trigger:`,
+          `  • ${triggerSide} close-confirmed on M1/M5, OR`,
+          `  • CISD (Change in State of Delivery) reversal close`,
+          ``,
+          `No confirmation yet — no entry. Discipline over FOMO.`,
+        ].join('\n')
+      : [
+          `⏳ HARGA DI ZONA — MENUNGGU TRIGGER:`,
+          `${scoreTxt}`,
+          `📍 ${zTxt} — harga di dalam/menyentuh`,
+          `⏱ ${barsInZone}/${BOT_CFG.maxZoneBars} candle di zona — zona segera expire`,
+          ``,
+          `Yang saya butuh sebelum entry:`,
+          `  • ${triggerSide} close-confirmed di M1/M5, ATAU`,
+          `  • CISD (Change in State of Delivery) reversal close`,
+          ``,
+          `Belum ada konfirmasi — tidak entry. Disiplin di atas FOMO.`,
+        ].join('\n');
+
+    const full = withPair(ctx.symbol, buildAnalystView(ctx, { bias, tfStory, kz, body }));
+    return { reason: full, reasonEn: full };
   }
 
+  // ═══════════ CONFIRMED ENTRY ═══════════
   const isCisd = structConf.model === 'CISD';
   const minRRRequired = isCisd ? BOT_CFG.minRRCisd : BOT_CFG.minRR;
 
@@ -1235,35 +1447,57 @@ async function runBotSma20(ctx, d, botStyleRaw) {
   const tg = botTargets(dir, price, slr.dist, c5, m15, atrV);
 
   if (tg.rr3 < minRRRequired) {
-    return {
-      reason: withPair(ctx.symbol, `[CANCELLED · RR TOO LOW] Konfirmasi ${structConf.type} muncul, namun RR 1:${tg.rr3.toFixed(1)} < ${minRRRequired}. Dilarang mengubah SL, setup dibatalkan.`),
-      reasonEn: withPair(ctx.symbol, `[CANCELLED · RR TOO LOW] ${structConf.type} appeared, but RR 1:${tg.rr3.toFixed(1)} < ${minRRRequired}. Altering SL forbidden, setup cancelled.`)
-    };
+    const body = lang === 'en'
+      ? `⚠️ ${structConf.type} appeared but RR 1:${tg.rr3.toFixed(1)} < ${minRRRequired}. SL not altered — setup cancelled.`
+      : `⚠️ ${structConf.type} muncul tapi RR 1:${tg.rr3.toFixed(1)} < ${minRRRequired}. SL tidak diubah — setup dibatalkan.`;
+    const full = withPair(ctx.symbol, buildAnalystView(ctx, { bias, tfStory, kz, body }));
+    return { reason: full, reasonEn: full };
   }
 
-  const sl = ctx.f(slr.sl), tps = tg.tps.map(ctx.f);
-  const rrTxt = `1:${tg.rr3.toFixed(1)}`;
-  const setupName = `SMC/ICT Bot · ${isCisd ? 'CISD Reversal' : 'Structure Confirmed'} · ${z.type}`;
-  const orderTxt = `${side} NOW @ ${ctx.f(price)} (${structConf.type})`;
-  const kzTxt = kz.active ? kz.name : 'OUTSIDE KZ';
+  const body = lang === 'en'
+    ? [
+        `✅ CONFIRMED — EXECUTING ${side}:`,
+        `${scoreTxt}`,
+        `📍 Zone ${zTxt} + trigger: ${structConf.type}`,
+        `📐 ${sweepTxt}`,
+        ``,
+        `🛒 ${side} NOW @ ${ctx.f(price)}`,
+        `🛡️ SL: ${ctx.f(slr.sl)} — ${slr.src} (structure invalidation)`,
+        `🎯 TP1 ${ctx.f(tg.tps[0])}  |  TP2 ${ctx.f(tg.tps[1])}  |  TP3 ${ctx.f(tg.tps[2])}   (RR 1:${tg.rr3.toFixed(1)})`,
+        ``,
+        `Why now: close-candle confirmation just printed at the zone, direction aligned with HTF bias.`,
+        `SL at ${slr.src} — if the zone breaks, setup is invalid, I'm out.`,
+      ].join('\n')
+    : [
+        `✅ TERKONFIRMASI — EKSEKUSI ${side}:`,
+        `${scoreTxt}`,
+        `📍 Zona ${zTxt} + trigger: ${structConf.type}`,
+        `📐 ${sweepTxt}`,
+        ``,
+        `🛒 ${side} NOW @ ${ctx.f(price)}`,
+        `🛡️ SL: ${ctx.f(slr.sl)} — ${slr.src} (invalidasi struktur)`,
+        `🎯 TP1 ${ctx.f(tg.tps[0])}  |  TP2 ${ctx.f(tg.tps[1])}  |  TP3 ${ctx.f(tg.tps[2])}   (RR 1:${tg.rr3.toFixed(1)})`,
+        ``,
+        `Alasan entry sekarang: close-candle konfirmasi sudah muncul di zona, arah sejalan bias HTF.`,
+        `SL di ${slr.src} — jika zona break, setup invalid, saya keluar.`,
+      ].join('\n');
 
-  const reasonId = withPair(ctx.symbol, `[INTERACTIVE BOT] Konfirmasi valid terdeteksi: ${structConf.type} di dalam zona ${zTxt}. Bot mengeksekusi ${side} karena struktur harga memenuhi aturan konfirmasi close candle. Stop Loss dipasang di ${sl} (${slr.src}) sebagai batas invalidasi struktur. Target TP1-TP3 disesuaikan dengan likuiditas luar dengan RR ${rrTxt}. Bias HTF: ${biasTxt}.`);
-  const reasonEn = withPair(ctx.symbol, `[INTERACTIVE BOT] Valid confirmation detected: ${structConf.type} inside zone ${zTxt}. Bot executed ${side} as price action met close-candle confirmation rules. Stop Loss set at ${sl} (${slr.src}) as structure invalidation limit. TP targets scaled with RR ${rrTxt}. HTF Bias: ${biasTxt}.`);
+  const full = withPair(ctx.symbol, buildAnalystView(ctx, { bias, tfStory, kz, body }));
+  const setupName = `SMC/ICT Bot · ${isCisd ? 'CISD Reversal' : 'Structure Confirmed'} · ${z.type}`;
 
   return {
     dir,
     plan: {
       isOCO: false, orderType: 'MARKET', status: 'RUNNING',
-      entry: ctx.f(price), sl, tps, setup: setupName,
-      chartContext: `${setupName}: ${orderTxt} (SL ${sl})`,
-      zone: { min: z.lower, max: z.upper },
-      tag: zLabel,
+      entry: ctx.f(price), sl: ctx.f(slr.sl), tps: tg.tps.map(ctx.f),
+      setup: setupName,
+      chartContext: `${setupName}: ${side} NOW ${ctx.f(price)} (${structConf.type})`,
+      zone: { min: z.lower, max: z.upper }, tag: zLabel,
     },
     meta: {
       setup: setupName, confidence: 'HIGH', riskLabel: 'MEDIUM',
-      reason: reasonId,
-      reasons: { id: reasonId, en: reasonEn },
-      topDown: bias, state: 'CONFIRMED', score: setup.score
+      reason: full, reasons: { id: full, en: full },
+      topDown: bias, state: 'CONFIRMED', score: setup.score,
     },
   };
 }
@@ -1590,9 +1824,7 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
   const final = isAutoBot ? pickSingleForBot(result, price) : result;
 
   const signal = buildSignal(final, lang);
-  
-  // Jika mode manual, gunakan Qwen untuk membuat alasan yang singkat dan padat.
-  // Jika mode bot, gunakan penjelasan terperinci (interaktif) dari runBotSma20 secara langsung.
+
   if (!isAutoBot) {
     const dual = await qwenReasonDual(signal, ctx, styleName, lang);
     if (dual) {
