@@ -9,8 +9,15 @@ const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
 // ── AI (VISION) ──
 const OPENAI_BASE_URL = (process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/$/, '');
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const AI_VISION_MODEL = process.env.AI_VISION_MODEL || 'claude-sonnet-5.5';
+const AI_VISION_MODEL = process.env.AI_VISION_MODEL || 'gpt-6-luna';
 const VISION_TIMEOUT_MS = 55000;
+
+// ── AI REASONING MANUAL (QWEN) ── hanya menulis alasan; entry/SL/TP tetap dari aturan SMC
+const QWEN_BASE_URL = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/$/, '');
+const QWEN_KEYS = [process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
+const QWEN_MODELS = [process.env.QWEN_MODEL || 'qwen-3.8-max', process.env.QWEN_MODEL_2].filter(Boolean);
+const QWEN_TIMEOUT_MS = 15000;
+const QWEN_MAX_TOKENS = 700;
 const VISION_MAX_TOKENS = 2600;
 
 // ── TICKERLAYER ──
@@ -1188,6 +1195,34 @@ async function handleVision(body, lang, res) {
   return res.status(200).json({ ok: true, mode: 'vision', symbol: 'VISION', style, signal: out.signal });
 }
 
+async function qwenReason(signal, ctx, styleName, lang) {
+  if (!QWEN_KEYS.length) return null;
+  const sys = lang === 'en'
+    ? 'You are an institutional SMC/ICT trading analyst. Write a concise reasoning (max 5 sentences) for the given trade plan. Do NOT change or invent any price level. Plain text only.'
+    : 'Kamu analis trading institusional SMC/ICT. Tulis reasoning ringkas (maksimal 5 kalimat) untuk rencana trade yang diberikan. JANGAN mengubah atau mengarang level harga. Teks biasa saja.';
+  const user = JSON.stringify({
+    symbol: ctx.symbol, style: styleName, signal: signal.signal, order: signal.fill,
+    entry: signal.entry, sl: signal.sl, tp1: signal.tp1, tp2: signal.tp2, tp3: signal.tp3,
+    setup: signal.setup, ruleReason: signal.reason, topDown: signal.topDown || null,
+  });
+  const attempts = [];
+  for (const model of QWEN_MODELS) for (const key of QWEN_KEYS.slice(0, 2)) attempts.push({ model, key });
+  for (const { model, key } of attempts) {
+    try {
+      const r = await httpJson(`${QWEN_BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, max_tokens: QWEN_MAX_TOKENS, temperature: 0.2,
+          messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] }),
+      }, QWEN_TIMEOUT_MS);
+      if (!r.ok) continue;
+      const txt = extractContent(r.data).replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+      if (txt.length > 20) return txt;
+    } catch (e) { console.warn('qwenReason:', e.message); }
+  }
+  return null;
+}
+
 async function handleCandles(body, lang, res, { email, isAutoBot }) {
   const symbol = String(body.symbol || 'XAUUSD').toUpperCase();
   const rawStyle = body.style || body.mode || 'Day Trading';
@@ -1248,9 +1283,19 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
   if (isAutoBot) await markTrialAsUsed(email);
   const final = isAutoBot ? pickSingleForBot(result, price) : result;
 
+  const signal = buildSignal(final, lang);
+  if (!isAutoBot) {
+    const ai = await qwenReason(signal, ctx, styleName, lang);
+    if (ai) {
+      signal.reason = `${signal.reason}\n\n[AI Reasoning]\n${ai}`;
+      signal.reasons = { [lang]: signal.reason };
+      signal.aiReasoning = true;
+    }
+  }
+
   return res.status(200).json({
     ok: true, mode: isAutoBot ? 'bot' : 'candles', symbol, style: styleName, price,
-    signal: buildSignal(final, lang),
+    signal,
   });
 }
 
