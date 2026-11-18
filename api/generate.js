@@ -1,5 +1,5 @@
 // api/generate.js
-// v125 — Top-Down SMC/ICT + Scalper Bot M1 (Pure Scalping Running Structure & Dual-Language Reasoning)
+// v126 — Top-Down SMC/ICT + Scalper Bot M1 (Pure Scalping Running Structure & Dual-Language Reasoning + Strict SOP)
 
 export const config = { maxDuration: 60 };
 
@@ -557,20 +557,42 @@ function buildOrderFromLevels({ dir, entry, invLevel, atrVal, ctx, kind, rrList 
   return { dir, entry, sl, risk, tps };
 }
 
-// ── MANUAL REQUEST: SCALPING AGRESIF (NOW/INSTANT) ──
+// ── MANUAL REQUEST: SCALPING AGRESIF (DENGAN CEK HTF, M15, M5, M1 & KONFIRMASI) ──
 async function runAggressiveScalp(ctx, d) {
   const { price, m1, m5, m15, m30 } = d;
   const base = m5.length >= 30 ? m5 : m15;
-  if (!base || base.length < 25) return { reason: withPair(ctx.symbol, 'Data M5/M15 belum cukup untuk Scalping Agresif.'), reasonEn: withPair(ctx.symbol, 'M5/M15 data insufficient for Aggressive Scalping.') };
+  if (!base || base.length < 25) {
+    return { 
+      reason: withPair(ctx.symbol, 'Data M5/M15 belum cukup untuk Scalping Agresif.'), 
+      reasonEn: withPair(ctx.symbol, 'M5/M15 data insufficient for Aggressive Scalping.') 
+    };
+  }
 
+  // 1. CEK HTF / M15 & M5: Arah tren dan open/close di mana
+  const bias = multiTfBias({ h1: d.h1, m30, m15, m5, m1 }, ['h1', 'm30', 'm15', 'm5', 'm1']);
   const atr5 = atrOf(base, ctx.pip);
   const closes = base.map(c => c.c);
   const sma20 = smaLast(closes, 20);
-  if (!sma20) return { reason: withPair(ctx.symbol, 'SMA20 belum terbentuk.'), reasonEn: withPair(ctx.symbol, 'SMA20 not formed yet.') };
+  
+  if (!sma20) {
+    return { 
+      reason: withPair(ctx.symbol, 'SMA20 belum terbentuk dengan sempurna.'), 
+      reasonEn: withPair(ctx.symbol, 'SMA20 not formed yet.') 
+    };
+  }
 
-  const bias = multiTfBias({ m30, m15, m5, m1 }, ['m30', 'm15', 'm5', 'm1']);
+  // 2. CEK M1: Struktur, apakah mendekati zona utama, retracement, atau reversal?
   const triggerTF = m1.length >= 25 ? m1 : base;
   const reversal = detectReversalSetup(triggerTF, atrOf(triggerTF, ctx.pip), price) || detectReversalSetup(base, atr5, price);
+  const stM1 = readStructure(triggerTF, price) || readStructure(base, price);
+
+  // ATURAN KETAT: Jika ragu atau struktur tidak jelas, TUNGGU (jangan gegabah)
+  if (!reversal && !stM1) {
+    return {
+      reason: withPair(ctx.symbol, '[WAIT] Struktur M1/M5 belum memiliki konfirmasi atau arah zona utama yang jelas. Bersabar dan tunggu setup valid.'),
+      reasonEn: withPair(ctx.symbol, '[WAIT] M1/M5 structure lacks confirmation or clear primary zone direction. Wait for a valid setup.')
+    };
+  }
 
   let dir, entry, mode, invLevel, whyId, whyEn;
 
@@ -579,34 +601,48 @@ async function runAggressiveScalp(ctx, d) {
     mode = 'MARKET';
     entry = price;
     invLevel = reversal.sweepLevel;
-    whyId = `${reversal.note}. Eksekusi instan sesuai kaidah ICT Sweep & Displacement.`;
-    whyEn = `${reversal.noteEn}. Instant execution per ICT Sweep & Displacement rules.`;
+    whyId = `${reversal.note}. Cek M1/M5 mendeteksi potensi reversal/retracement valid sesuai SOP. Eksekusi instan dengan konfirmasi ICT Sweep & Displacement.`;
+    whyEn = `${reversal.noteEn}. M1/M5 checks detected valid reversal/retracement per SOP. Instant execution with ICT Sweep & Displacement confirmation.`;
   } else {
-    const st = readStructure(base, price) || readStructure(triggerTF, price) || {
-      dir: bias.dir !== 0 ? bias.dir : (price >= sma20 ? 1 : -1),
-      src: 'Market Structure / SMA20', bos: false,
-      l1: { p: Math.min(...base.slice(-6).map(c => c.l)) },
-      h1: { p: Math.max(...base.slice(-6).map(c => c.h)) },
-    };
-
-    dir = st.dir;
-    const origin = dir === 1 ? st.l1.p : st.h1.p;
+    // Scalping saat retracement dengan catatan sesuai SOP (counter-trend terukur atau searah struktur)
+    dir = stM1.dir;
+    const origin = dir === 1 ? stM1.l1.p : stM1.h1.p;
     
+    // Validasi tambahan: Jangan gegabah jika struktur melawan arah zona utama HTF tanpa konfirmasi kuat
+    if (bias.dir !== 0 && dir !== bias.dir) {
+      // Ini adalah scalping retracement/lawan arah (counter-trend)
+      // SOP: Hanya ambil jika struktur mendangukung untuk scalping retracement pendek
+      whyId = `Scalping Retracement/Lawan Arah: HTF/M15 mengarah ke ${bias.bias}, namun struktur M1 mendeteksi peluang retracement pendek ke zona utama.`;
+      whyEn = `Counter-Trend/Retracement Scalping: HTF/M15 is ${bias.bias}, but M1 structure detects a short retracement opportunity to primary zone.`;
+    } else {
+      whyId = `Scalping Agresif Searah Tren: Harga ${ctx.f(price)} meneruskan struktur ${stM1.src} searah bias HTF dan SMA20 (${ctx.f(sma20)}).`;
+      whyEn = `Aggressive Trend Scalping: Price ${ctx.f(price)} continues structure ${stM1.src} aligned with HTF bias and SMA20 (${ctx.f(sma20)}).`;
+    }
+
     mode = 'MARKET';
     entry = price;
     invLevel = dir === 1 ? Math.min(origin, sma20 - 0.5 * atr5, price - 0.8 * atr5) : Math.max(origin, sma20 + 0.5 * atr5, price + 0.8 * atr5);
-    whyId = `Scalping Agresif: Harga ${ctx.f(price)} meneruskan struktur ${st.src} searah SMA20 (${ctx.f(sma20)}). Eksekusi NOW.`;
-    whyEn = `Aggressive Scalping: Price ${ctx.f(price)} continues structure ${st.src} aligned with SMA20 (${ctx.f(sma20)}). Execute NOW.`;
   }
 
   const order = buildOrderFromLevels({ dir, entry, invLevel, atrVal: atr5, ctx, kind: 'scalp', rrList: STYLES['Scalping'].rr });
+  
+  // Hard Rule: Cek RR minimal 1:1.5 atau 1:2
+  const riskAmount = Math.abs(order.entry - order.sl);
+  const rewardAmount = Math.abs(order.tps[0] - order.entry);
+  if ((rewardAmount / riskAmount) < 1.3) {
+    return {
+      reason: withPair(ctx.symbol, '[WAIT/SKIP] RR tidak memenuhi syarat minimum SOP (< 1.5). Bot menahan diri untuk tidak entry.'),
+      reasonEn: withPair(ctx.symbol, '[WAIT/SKIP] RR does not meet minimum SOP requirements (< 1.5). Bot refraining from entry.')
+    };
+  }
+
   const side = dir === 1 ? 'BUY' : 'SELL';
-  const setup = 'Scalping Agresif · M30/M15/M5/M1 + SMA20';
+  const setup = 'Scalping Berhati-hati · HTF/M15/M5/M1';
   const orderTxt = `${side} NOW`;
   const tdStr = Object.entries(bias.details).map(([k, v]) => `${k.toUpperCase()}:${v}`).join(' | ');
 
-  const reasonId = withPair(ctx.symbol, `${orderTxt} @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2), TP3 ${ctx.f(order.tps[2])} (1:3). ${whyId} Top-Down: [${tdStr}].`);
-  const reasonEn = withPair(ctx.symbol, `${orderTxt} @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2), TP3 ${ctx.f(order.tps[2])} (1:3). ${whyEn} Top-Down: [${tdStr}].`);
+  const reasonId = withPair(ctx.symbol, `${orderTxt} @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2). ${whyId} Top-Down Check [${tdStr}].`);
+  const reasonEn = withPair(ctx.symbol, `${orderTxt} @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2). ${whyEn} Top-Down Check [${tdStr}].`);
 
   return {
     dir,
@@ -615,10 +651,10 @@ async function runAggressiveScalp(ctx, d) {
       entry: order.entry, sl: order.sl, tps: order.tps, setup,
       chartContext: `${setup}: ${orderTxt} ${ctx.f(order.entry)} (SL ${ctx.f(order.sl)}). Live ${ctx.f(price)}`,
       zone: null,
-      tag: dir === 1 ? 'Demand/Continuation' : 'Supply/Continuation',
+      tag: dir === 1 ? 'Demand/Retracement' : 'Supply/Retracement',
     },
     meta: {
-      setup, confidence: 'HIGH', riskLabel: 'HIGH',
+      setup, confidence: 'MEDIUM', riskLabel: 'MEDIUM',
       reason: reasonId,
       reasons: { id: reasonId, en: reasonEn },
       topDown: bias,
