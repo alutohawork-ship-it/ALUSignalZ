@@ -1,18 +1,20 @@
-// api/candles.js
-// v8: FIX akses (frontend mengirim { value: email } -> sekarang menerima value ATAU email).
-//     satu tarikan M1 dipakai untuk semua interval di bawah 1 hari (5m, 15m, 30m, 1h, 4h),
-//     lalu tiap interval disimpan di cache sendiri. 1m dan 1d native (satu panggilan).
-//     Cek akses klien (fail closed). Slot key tetap, cooldown kompatibel dengan generate.js v106.
+// api/candles.js — v9
+// Perubahan dari v8:
+// - Cek akses lewat lib/access.js (Postgres), bukan KV lama. Klien baru yang didaftarkan
+//   lewat dashboard sekarang langsung bisa mengakses chart.
+// - Cache candle dan cooldown key TickerLayer disimpan di memori server (tanpa Upstash).
+// - Kontrak request dan response sama dengan v8, jadi frontend tidak perlu diubah.
 //
-// Env: TICKERLAYER_API_KEY, TICKERLAYER_API_KEY_1 .. _19, KV_REST_API_URL, KV_REST_API_TOKEN
+// Env: TICKERLAYER_API_KEY, TICKERLAYER_API_KEY_1 .. _19, DATABASE_URL
 // Opsional: TICKERLAYER_MAX_TRY (default 6), TICKERLAYER_DISABLED=1
+
+import { checkAccess } from '../lib/access.js';
 
 export const config = { maxDuration: 60 };
 
 const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
-const KV_KEY = 'alu_clients';
 
-// Slot tetap seperti generate.js v106: key kosong di tengah tidak menggeser cooldown
+// Slot tetap: key kosong di tengah tidak menggeser cooldown
 const TL_KEY_NAMES = [
   'TICKERLAYER_API_KEY',
   ...Array.from({ length: 19 }, (_, i) => `TICKERLAYER_API_KEY_${i + 1}`),
@@ -32,10 +34,10 @@ const SYMBOL_MAP = {
 
 const MIN_MS = 60 * 1000;
 const DAY_MS = 24 * 60 * MIN_MS;
-const PAGE_LIMIT = 5000;   // kalau API membatasi lebih kecil, samakan dengan batas itu
+const PAGE_LIMIT = 5000;
 const MAX_PAGES = 4;
-const WINDOW_DAYS = 10;    // satu tarikan M1 per miss, dipakai untuk semua interval turunan
-const FALLBACK_DAYS = 3;   // dipakai kalau API menolak rentang (HTTP 400)
+const WINDOW_DAYS = 10;
+const FALLBACK_DAYS = 3;
 
 const DERIVED = { '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240 }; // menit
 const NATIVE = { '1m': { span: 'minute' }, '1d': { span: 'day' } };
@@ -43,50 +45,23 @@ const TTL = { '1m': 60, '5m': 120, '15m': 180, '30m': 240, '1h': 300, '4h': 600,
 const VALID = new Set(Object.keys(TTL));
 
 const CD = { quota: 600, rate: 5, invalid: 6 * 3600 };
-const memCooldown = new Map();
+
+// ── Cache & cooldown di memori (per instance, tanpa Upstash) ──
+const memCache = new Map();    // key -> { exp, value }
+const memCooldown = new Map(); // slot name -> expiry ms
+
+function cacheGet(key) {
+  const hit = memCache.get(key);
+  if (!hit) return null;
+  if (Date.now() > hit.exp) { memCache.delete(key); return null; }
+  return hit.value;
+}
+function cacheSet(key, value, ttlSec) {
+  memCache.set(key, { exp: Date.now() + ttlSec * 1000, value });
+}
 
 const fmtDate = d => d.toISOString().slice(0, 10);
 
-// ── KV ──
-async function kvRaw(command) {
-  if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) return null;
-  const r = await fetch(process.env.KV_REST_API_URL, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.KV_REST_API_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(command),
-  });
-  const data = await r.json();
-  if (!r.ok || data.error) throw new Error(data.error || `KV HTTP ${r.status}`);
-  return data.result;
-}
-
-const kvSafe = async cmd => { try { return await kvRaw(cmd); } catch { return null; } };
-
-async function cacheGet(key) {
-  const raw = await kvSafe(['GET', key]);
-  try { return raw ? JSON.parse(raw) : null; } catch { return null; }
-}
-
-async function cacheSet(key, value, ttl) {
-  await kvSafe(['SET', key, JSON.stringify(value), 'EX', ttl]);
-}
-
-// ── Akses (sama dengan generate.js, tapi gagal membaca KV = ditolak) ──
-async function checkAccess(email) {
-  if (!email) return { ok: false, status: 401, msg: 'Email tidak ditemukan. Silakan login ulang.' };
-  try {
-    const raw = await kvRaw(['GET', KV_KEY]);
-    if (!raw) return { ok: true };
-    const c = JSON.parse(raw).find(x => x.email === email);
-    if (!c) return { ok: false, status: 403, msg: 'Email ini belum terdaftar sebagai klien.' };
-    if (new Date(c.expires_at) <= new Date()) return { ok: false, status: 403, msg: 'Masa akses sudah berakhir. Hubungi admin.' };
-    return { ok: true };
-  } catch {
-    return { ok: false, status: 503, msg: 'Akses tidak bisa diverifikasi. Coba lagi.' };
-  }
-}
-
-// ── Cooldown key (slot tetap, prefix sama dengan generate.js) ──
 function cooldownFor(status, body, retryAfter) {
   if (status === 401) return CD.invalid;
   if (status === 429) {
@@ -97,21 +72,16 @@ function cooldownFor(status, body, retryAfter) {
   return 0;
 }
 
-async function setCooldown(idx, sec) {
+function setCooldown(idx, sec) {
   if (sec <= 0) return;
-  const name = `tl_cd_${idx}`;
-  memCooldown.set(name, Date.now() + sec * 1000);
-  await kvSafe(['SET', name, '1', 'EX', sec]);
+  memCooldown.set(`tl_cd_${idx}`, Date.now() + sec * 1000);
 }
 
-async function usableSlots() {
-  const names = TL_KEY_NAMES.map((_, i) => `tl_cd_${i}`);
-  const raw = await kvSafe(['MGET', ...names]);
-  const vals = Array.isArray(raw) ? raw : names.map(() => null);
+function usableSlots() {
   const now = Date.now();
   return API_KEYS
     .map((_, i) => i)
-    .filter(i => API_KEYS[i] && !vals[i] && (memCooldown.get(names[i]) || 0) <= now);
+    .filter(i => API_KEYS[i] && (memCooldown.get(`tl_cd_${i}`) || 0) <= now);
 }
 
 // ── Satu panggilan ke TickerLayer, dengan timeout ──
@@ -131,7 +101,7 @@ async function requestBars(apiKey, target, p) {
     const rows = (Array.isArray(raw) ? raw : raw.results || [])
       .map(bar => {
         let t = Number(bar.t ?? bar.timestamp ?? bar.time);
-        if (Number.isFinite(t) && t < 1e12) t *= 1000; // detik -> milidetik
+        if (Number.isFinite(t) && t < 1e12) t *= 1000;
         return {
           t,
           o: Number(bar.o ?? bar.open),
@@ -162,7 +132,7 @@ async function fetchBars(target, p) {
   if (TL_DISABLED) throw httpError(503, 'TickerLayer dinonaktifkan (TICKERLAYER_DISABLED=1).');
   if (!API_KEYS.some(Boolean)) throw httpError(500, 'Tidak ada TICKERLAYER_API_KEY di env');
 
-  const order = await usableSlots();
+  const order = usableSlots();
   if (!order.length) throw httpError(429, 'Semua key TickerLayer sedang cooldown');
 
   let last = { status: 500, detail: '' };
@@ -172,7 +142,7 @@ async function fetchBars(target, p) {
 
     last = r;
     if (r.status === 429 || r.status === 401) {
-      await setCooldown(idx, cooldownFor(r.status, r.body, r.retryAfter));
+      setCooldown(idx, cooldownFor(r.status, r.body, r.retryAfter));
       continue;
     }
     if (r.status === 403) continue;
@@ -197,7 +167,6 @@ async function fetchM1Window(target) {
     try {
       r = await fetchBars(target, { mult: 1, span: 'minute', from, to: fmtDate(to), limit: PAGE_LIMIT });
     } catch (e) {
-      // 400 di halaman pertama: rentang kemungkinan terlalu panjang, coba lebih pendek sekali
       if (!all.size && e.status === 400 && !retried) {
         retried = true;
         spanDays = FALLBACK_DAYS;
@@ -206,7 +175,7 @@ async function fetchM1Window(target) {
         continue;
       }
       if (!all.size) throw e;
-      break; // halaman lanjutan gagal: pakai yang sudah ada
+      break;
     }
 
     keyNo = r.keyNo;
@@ -214,7 +183,6 @@ async function fetchM1Window(target) {
     for (const b of r.rows) all.set(b.t, b);
     if (r.rows.length < PAGE_LIMIT) break;
 
-    // rows sudah urut naik, jadi rows[0] adalah bar tertua di halaman ini
     let next = new Date(r.rows[0].t);
     if (fmtDate(next) >= fmtDate(to)) next = new Date(r.rows[0].t - DAY_MS);
     if (fmtDate(next) < from) break;
@@ -224,7 +192,6 @@ async function fetchM1Window(target) {
   return { rows: [...all.values()].sort((a, b) => a.t - b.t), keyNo };
 }
 
-// Gabung bar M1 (urut naik) ke bucket UTC
 function aggregate(rows, bucketMs) {
   const map = new Map();
   for (const r of rows) {
@@ -241,17 +208,16 @@ function aggregate(rows, bucketMs) {
 }
 
 // Dari satu tarikan M1, bangun semua interval turunan dan simpan cache masing-masing
-async function cacheDerived(sym, m1) {
+function cacheDerived(sym, m1) {
   const out = {};
   for (const [tf, mins] of Object.entries(DERIVED)) {
     const bars = aggregate(m1, mins * MIN_MS).slice(-1000);
     out[tf] = bars;
-    if (bars.length) await cacheSet(`candles_v7_${sym}_${tf}`, bars, TTL[tf]);
+    if (bars.length) cacheSet(`candles_v9_${sym}_${tf}`, bars, TTL[tf]);
   }
   return out;
 }
 
-// Native: 1m dan 1d, satu panggilan
 async function fetchNative(target, interval, lim) {
   const now = new Date();
   const days = interval === '1m' ? WINDOW_DAYS : Math.ceil(lim * 1.6);
@@ -262,13 +228,28 @@ async function fetchNative(target, interval, lim) {
   return { rows: r.rows.slice(-lim), keyNo: r.keyNo };
 }
 
+// Pesan akses dibuat sama dengan sebelumnya supaya frontend tetap menampilkannya dengan benar
+const ACCESS_MSG = {
+  noEmail: { status: 401, msg: 'Email tidak ditemukan. Silakan login ulang.' },
+  notRegistered: { status: 403, msg: 'Email ini belum terdaftar sebagai klien.' },
+  expired: { status: 403, msg: 'Masa akses sudah berakhir. Hubungi admin.' },
+  kvError: { status: 503, msg: 'Akses tidak bisa diverifikasi. Coba lagi.' },
+  trialLimit: { status: 403, msg: 'Batas trial habis.' },
+};
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const body = req.body || {};
-  // FIX: frontend mengirim "value" (email), bukan "email"
-  const access = await checkAccess(String(body.email || body.value || '').trim());
-  if (!access.ok) return res.status(access.status).json({ error: access.msg });
+  let body = req.body || {};
+  if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
+
+  // Frontend mengirim "value" (email), bukan "email"
+  const email = String(body.email || body.value || '').trim().toLowerCase();
+  const access = await checkAccess(email, false);
+  if (!access.ok) {
+    const m = ACCESS_MSG[access.key] || { status: 403, msg: 'Akses ditolak.' };
+    return res.status(m.status).json({ error: m.msg });
+  }
 
   const { symbol, interval, limit } = body;
   if (!symbol || !interval) return res.status(400).json({ error: 'Symbol & interval required' });
@@ -279,11 +260,11 @@ export default async function handler(req, res) {
   if (!target) return res.status(400).json({ error: `Simbol tidak dikenal: ${symbol}` });
 
   const lim = Math.min(Math.max(parseInt(limit, 10) || 200, 10), 1000);
-  const cacheKey = `candles_v7_${target.sym}_${interval}`;
+  const cacheKey = `candles_v9_${target.sym}_${interval}`;
   const minOk = Math.min(lim, 60);
 
-  // 1. Cache per interval (dipakai bersama semua client)
-  const hit = await cacheGet(cacheKey);
+  // 1. Cache memori
+  const hit = cacheGet(cacheKey);
   if (Array.isArray(hit) && hit.length >= minOk) {
     return res.status(200).json({ ok: true, candles: hit.slice(-lim), source: 'cache' });
   }
@@ -292,12 +273,12 @@ export default async function handler(req, res) {
   try {
     if (NATIVE[interval]) {
       const n = await fetchNative(target, interval, lim);
-      if (n.rows.length) await cacheSet(cacheKey, n.rows, TTL[interval]);
+      if (n.rows.length) cacheSet(cacheKey, n.rows, TTL[interval]);
       return res.status(200).json({ ok: true, candles: n.rows, source: 'tickerlayer', keyNo: n.keyNo });
     }
 
     const w = await fetchM1Window(target);
-    const derived = await cacheDerived(target.sym, w.rows);
+    const derived = cacheDerived(target.sym, w.rows);
     const bars = (derived[interval] || []).slice(-lim);
     return res.status(200).json({ ok: true, candles: bars, source: 'tickerlayer-m1', keyNo: w.keyNo });
   } catch (err) {
