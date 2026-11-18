@@ -369,6 +369,16 @@ function buildTps(dir, entry, risk, liq) {
   return [t1, t2, t3];
 }
 // Validasi SL/TP/RR: SL tidak pernah diubah demi RR. Jika terlalu lebar → skip.
+// Bot: TP1 = 1R, TP2 = 2R, TP3 = level likuiditas terdekat di atas 2R (fallback 3R bila tidak ada)
+function botTps(dir, entry, risk, liq) {
+  const R = p => Math.abs(p - entry) / risk;
+  const beyond = liq
+    .filter(p => (dir === 1 ? p > entry : p < entry))
+    .sort((a, b) => (dir === 1 ? a - b : b - a));
+  const tp3Liq = beyond.find(p => R(p) > 2.0);
+  return [entry + dir * risk * 1, entry + dir * risk * 2, tp3Liq ?? entry + dir * risk * 3];
+}
+
 function planFrom(o) {
   let risk = Math.abs(o.entry - o.sl);
   if (!(risk > 0)) return { ok: false, reason: 'SL tidak valid.' };
@@ -377,7 +387,9 @@ function planFrom(o) {
   if (risk < o.minRisk) { sl = o.entry - o.dir * o.minRisk; risk = o.minRisk; }
   const tps = o.fixedR
     ? [1, 2, 3].map(k => o.entry + o.dir * risk * k)   // manual & vision: RR tetap 1:1, 1:2, 1:3
-    : buildTps(o.dir, o.entry, risk, o.liq);           // bot: target likuiditas
+    : o.botTps
+      ? botTps(o.dir, o.entry, risk, o.liq)            // bot: TP1 1:1, TP2 1:2, TP3 likuiditas
+      : buildTps(o.dir, o.entry, risk, o.liq);
   const rr = Math.abs(tps[2] - o.entry) / risk;
   if (rr < o.minRR) return { ok: false, reason: `RR 1:${rr.toFixed(2)} di bawah minimal 1:${o.minRR}. Skip.` };
   return { ok: true, plan: { dir: o.dir, entry: o.entry, sl, tps, rr, orderType: o.orderType, setup: o.setup, zone: o.zone || null } };
@@ -732,7 +744,7 @@ function runBot(ctx, d, styleName) {
   else { orderType = 'LIMIT'; entry = entryClose; entryNote = 'limit di close M1'; }
 
   const p = planFrom({
-    dir, entry, sl: sl0, orderType, minRR, liq,
+    dir, entry, sl: sl0, orderType, minRR, liq, botTps: true,
     maxRisk: zoneHit ? BOT_CFG.maxSlAtr15 * atr15 : BOT_CFG.maxSlAtr5 * atr5,
     minRisk: BOT_CFG.minSlAtr1 * atr1, atrRef: atr5 || atr1,
     setup: `SMC/ICT Bot · ${zoneHit ? 'WNS ' + zone.label : 'LTF Scalp'} · ${trigger} · ${entryNote}`,
