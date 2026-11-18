@@ -2121,8 +2121,9 @@ function layoutX(rows, plotL, plotR, tfMs) {
   return { vis, slot, xOfT };
 }
 function srcLabel(k, iv) { return `${k} · ${iv} · WIB · ${srcOf(k, iv)}`; }
+const clampX = (x, plotL, plotR) => Math.max(plotL, Math.min(plotR, x));
 
-// ---- Kanvas Khusus Bot (Bot Live Map dengan Visual SMC & SMA 20 Lengkap Sweep, CISD, MSS, BOS) ----
+// ---- Kanvas Khusus Bot (Bot Live Map dengan Visual SMC & SMA20 Lengkap Sweep, CISD, MSS, BOS) ----
 function drawBotMap(cv, cx, t, k) {
   if (!cx) return;
   const d = fitCv(cv, cx);
@@ -2188,12 +2189,11 @@ function drawBotMap(cv, cx, t, k) {
   lo -= pad; hi += pad;
 
   const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * plotH;
-  const clampX = x => Math.max(plotL, Math.min(plotR, x));
 
   if (smcData.status === 'ok') {
     // Render FVG Zones
     smcData.fvgs.forEach(z => {
-      const x0 = clampX(xOfT(z.t));
+      const x0 = clampX(xOfT(z.t), plotL, plotR);
       if (plotR - x0 < 2) return;
       const y1 = yOf(z.top), y2 = yOf(z.bottom);
       cx.save();
@@ -2203,7 +2203,7 @@ function drawBotMap(cv, cx, t, k) {
     });
     // Render Supply / Demand / OB Zones
     smcData.obs.forEach(z => {
-      const x0 = clampX(xOfT(z.t));
+      const x0 = clampX(xOfT(z.t), plotL, plotR);
       if (plotR - x0 < 2) return;
       const y1 = yOf(z.top), y2 = yOf(z.bottom);
       cx.save();
@@ -2214,7 +2214,7 @@ function drawBotMap(cv, cx, t, k) {
     // Render Liquidity Sweep Pools (BSL/SSL)
     if (smcData.liq && smcData.liq.pools) {
       smcData.liq.pools.forEach(p => {
-        const y = yOf(p.p), x0 = clampX(xOfT(p.t));
+        const y = yOf(p.p), x0 = clampX(xOfT(p.t), plotL, plotR);
         cx.save();
         cx.strokeStyle = 'rgba(245,158,11,.85)';
         cx.lineWidth = 1;
@@ -2232,7 +2232,7 @@ function drawBotMap(cv, cx, t, k) {
     // Render Structure Events (BOS / MSS / CHoCH)
     if (smcData.ev) {
       smcData.ev.forEach(e => {
-        const x0 = clampX(xOfT(e.fromT)), x1 = clampX(xOfT(e.toT)), y = yOf(e.p);
+        const x0 = clampX(xOfT(e.fromT), plotL, plotR), x1 = clampX(xOfT(e.toT), plotL, plotR), y = yOf(e.p);
         const col = e.dir > 0 ? '125,211,252' : '251,146,60';
         cx.save();
         cx.strokeStyle = `rgba(${col},.95)`;
@@ -2408,7 +2408,7 @@ function drawLiveMap(cv, cx, t, k) {
   if (smcData.status === 'ok') {
     // Render FVG Zones
     smcData.fvgs.forEach(z => {
-      const x0 = clampX(xOfT(z.t));
+      const x0 = clampX(xOfT(z.t), plotL, plotR);
       if (plotR - x0 < 2) return;
       const y1 = yOf(z.top), y2 = yOf(z.bottom);
       cx.save();
@@ -2418,7 +2418,7 @@ function drawLiveMap(cv, cx, t, k) {
     });
     // Render Supply / Demand / OB Zones
     smcData.obs.forEach(z => {
-      const x0 = clampX(xOfT(z.t));
+      const x0 = clampX(xOfT(z.t), plotL, plotR);
       if (plotR - x0 < 2) return;
       const y1 = yOf(z.top), y2 = yOf(z.bottom);
       cx.save();
@@ -2429,7 +2429,7 @@ function drawLiveMap(cv, cx, t, k) {
     // Render Liquidity Sweep Pools (BSL/SSL)
     if (smcData.liq && smcData.liq.pools) {
       smcData.liq.pools.forEach(p => {
-        const y = yOf(p.p), x0 = clampX(xOfT(p.t));
+        const y = yOf(p.p), x0 = clampX(xOfT(p.t), plotL, plotR);
         cx.save();
         cx.strokeStyle = 'rgba(245,158,11,.85)';
         cx.lineWidth = 1;
@@ -2447,7 +2447,7 @@ function drawLiveMap(cv, cx, t, k) {
     // Render Structure Events (BOS / MSS / CHoCH)
     if (smcData.ev) {
       smcData.ev.forEach(e => {
-        const x0 = clampX(xOfT(e.fromT)), x1 = clampX(xOfT(e.toT)), y = yOf(e.p);
+        const x0 = clampX(xOfT(e.fromT), plotL, plotR), x1 = clampX(xOfT(e.toT), plotL, plotR), y = yOf(e.p);
         const col = e.dir > 0 ? '125,211,252' : '251,146,60';
         cx.save();
         cx.strokeStyle = `rgba(${col},.95)`;
@@ -2570,7 +2570,6 @@ function drawSMC() {
 
   const t0 = vis.length ? vis[0].t : 0;
   const xOfT = timeToX(vis, plotL, slot);
-  const clampX = x => Math.max(plotL, Math.min(plotR, x));
   const ref = live != null ? live : (vis.length ? vis[vis.length - 1].c : 0);
   const near = p => Math.abs(p - ref) / ref < 0.03;
   const inBand = (a, b) => b >= ref * 0.97 && a <= ref * 1.03;
@@ -2603,7 +2602,7 @@ function drawSMC() {
   }
 
   sess.forEach(se => {
-    const x0 = clampX(xOfT(se.a)), x1 = clampX(xOfT(se.b));
+    const x0 = clampX(xOfT(se.a), plotL, plotR), x1 = clampX(xOfT(se.b), plotL, plotR);
     if (x1 <= x0) return;
     const yh = yOf(se.hi), yl = yOf(se.lo);
     sx.save();
@@ -2616,7 +2615,7 @@ function drawSMC() {
   });
 
   const zone = (z, label, rgb) => {
-    const x0 = clampX(xOfT(z.t));
+    const x0 = clampX(xOfT(z.t), plotL, plotR);
     if (plotR - x0 < 2) return;
     const y1 = yOf(z.top), y2 = yOf(z.bottom);
     const y = Math.min(y1, y2), h = Math.abs(y2 - y1);
@@ -2637,7 +2636,7 @@ function drawSMC() {
   obs.forEach(z => zone(z, z.dir > 0 ? 'Demand' : 'Supply', z.dir > 0 ? '16,185,129' : '239,68,68'));
 
   pools.forEach(p => {
-    const y = yOf(p.p), x0 = clampX(xOfT(p.t));
+    const y = yOf(p.p), x0 = clampX(xOfT(p.t), plotL, plotR);
     sx.save();
     sx.strokeStyle = 'rgba(245,158,11,.85)';
     sx.lineWidth = 1;
@@ -2653,7 +2652,7 @@ function drawSMC() {
   });
 
   ev.forEach(e => {
-    const x0 = clampX(xOfT(e.fromT)), x1 = clampX(xOfT(e.toT)), y = yOf(e.p);
+    const x0 = clampX(xOfT(e.fromT), plotL, plotR), x1 = clampX(xOfT(e.toT), plotL, plotR), y = yOf(e.p);
     const col = e.dir > 0 ? '125,211,252' : '251,146,60';
     sx.save();
     sx.strokeStyle = `rgba(${col},.95)`;
