@@ -95,18 +95,39 @@ async function kvCmd(command) {
   if (!r.ok || !r.data || r.data.error) throw new Error((r.data && r.data.error) || `KV HTTP ${r.status}`);
   return r.data.result;
 }
+let clientsCache = { t: 0, list: null };
+async function loadClients() {
+  if (clientsCache.list && Date.now() - clientsCache.t < 60000) return clientsCache.list;
+  let raw = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try { raw = await kvCmd(['GET', KV_KEY]); break; }
+    catch (e) {
+      if (attempt === 1) {
+        if (clientsCache.list) return clientsCache.list; // KV gagal: pakai cache lama
+        throw e;
+      }
+      await new Promise(r => setTimeout(r, 400));
+    }
+  }
+  const list = raw ? JSON.parse(raw) : [];
+  clientsCache = { t: Date.now(), list };
+  return list;
+}
+
 async function checkAccess(email, isAutoBot) {
   if (!email) return { ok: false, key: 'noEmail' };
   if (!kvEnabled()) return { ok: true, status: 'dev' };
-  let raw; try { raw = await kvCmd(['GET', KV_KEY]); } catch { return { ok: false, key: 'kvError' }; }
-  if (!raw) return { ok: false, key: 'notRegistered' };
-  let clients; try { clients = JSON.parse(raw); } catch { return { ok: false, key: 'kvError' }; }
+  let clients;
+  try { clients = await loadClients(); }
+  catch (e) { console.error('KV:', e.message); return { ok: false, key: 'kvError' }; }
+  if (!clients.length) return { ok: false, key: 'notRegistered' };
   const c = clients.find(x => String(x.email || '').toLowerCase() === email);
   if (!c) return { ok: false, key: 'notRegistered' };
   if (new Date(c.expires_at) <= new Date()) return { ok: false, key: 'expired' };
   if (c.status === 'trial' && isAutoBot && c.trialBotUsed) return { ok: false, key: 'trialLimit' };
   return { ok: true, status: c.status };
 }
+
 async function markTrialAsUsed(email) {
   if (!kvEnabled()) return;
   try {
@@ -117,6 +138,7 @@ async function markTrialAsUsed(email) {
     if (idx !== -1 && clients[idx].status === 'trial') {
       clients[idx].trialBotUsed = true;
       await kvCmd(['SET', KV_KEY, JSON.stringify(clients)]);
+      clientsCache = { t: 0, list: null };
     }
   } catch (e) { console.error('markTrialAsUsed:', e.message); }
 }
