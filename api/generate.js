@@ -11,7 +11,7 @@ const OPENAI_BASE_URL = (process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const AI_VISION_MODEL = process.env.AI_VISION_MODEL || 'claude-sonnet-5.5';
 const VISION_TIMEOUT_MS = 55000;
-const VISION_MAX_TOKENS = 1800;
+const VISION_MAX_TOKENS = 2600;
 
 // ── TICKERLAYER ──
 const TL_KEY_NAMES = ['TICKERLAYER_API_KEY', ...Array.from({ length: 19 }, (_, i) => `TICKERLAYER_API_KEY_${i + 1}`)];
@@ -599,39 +599,24 @@ async function runAggressiveScalp(ctx, d) {
     invLevel = reversal.sweepLevel;
     why = `${reversal.note}. Eksekusi cepat sesuai kaidah ICT.`;
   } else {
-    const st = readStructure(base, price) || readStructure(triggerTF, price);
-    if (!st) return { reason: withPair(ctx.symbol, 'Scalping Agresif: struktur M1/M5 belum jelas. Tunggu BOS/CHoCH.') };
-
-    if (bias.dir !== 0 && st.dir !== bias.dir) {
-      return { reason: withPair(ctx.symbol, `Scalping Agresif: struktur M5 (${st.dir === 1 ? 'Bull' : 'Bear'}) berlawanan dengan bias M30/M15 (${bias.bias}). Tunggu sinkron.`) };
-    }
+    const st = readStructure(base, price) || readStructure(triggerTF, price) || {
+      dir: bias.dir !== 0 ? bias.dir : (price >= sma20 ? 1 : -1),
+      src: 'SMA20/Bias', bos: false,
+      l1: { p: Math.min(...base.slice(-6).map(c => c.l)) },
+      h1: { p: Math.max(...base.slice(-6).map(c => c.h)) },
+    };
 
     dir = st.dir;
     const origin = dir === 1 ? st.l1.p : st.h1.p;
     const smaAligned = (dir === 1 && price >= sma20 - 0.25 * atr5) || (dir === -1 && price <= sma20 + 0.25 * atr5);
 
-    if (smaAligned && dist <= 0.65 * atr5) {
-      mode = 'MARKET';
-      entry = price;
-      invLevel = dir === 1 ? Math.min(origin, sma20 - 0.5 * atr5) : Math.max(origin, sma20 + 0.5 * atr5);
-      why = `Harga ${ctx.f(price)} menempel jalur SMA20 (${ctx.f(sma20)}) & searah struktur ${st.src}. Entry NOW.`;
-    } else {
-      const fvg = findFVGs(base, dir, price)[0];
-      const sd = findSDZones(base, dir, price)[0];
-      const poiMid = fvg ? (fvg.top + fvg.bottom) / 2 : (sd ? (sd.top + sd.bottom) / 2 : sma20);
-      const limEntry = (sma20 + poiMid) / 2;
-
-      if ((dir === 1 && limEntry >= price) || (dir === -1 && limEntry <= price)) {
-        return { reason: withPair(ctx.symbol, `Scalping Agresif: harga terlalu jauh dari SMA20 (${ctx.f(sma20)}) dan belum membentuk jalur limit valid. Tunggu pullback.`) };
-      }
-
-      mode = 'LIMIT';
-      entry = limEntry;
-      invLevel = dir === 1
-        ? Math.min(origin, fvg ? fvg.sl : sma20 - 0.6 * atr5)
-        : Math.max(origin, fvg ? fvg.sl : sma20 + 0.6 * atr5);
-      why = `Jarak harga ke SMA20 (${ctx.f(sma20)}) lebar. Pasang LIMIT di jalur SMA20 + ${fvg ? fvg.kind : (sd ? sd.kind : 'Structure ' + st.src)}.`;
-    }
+    // Agresif = selalu Buy Now / Sell Now searah pasar (tanpa limit)
+    mode = 'MARKET';
+    entry = price;
+    invLevel = dir === 1 ? Math.min(origin, sma20 - 0.5 * atr5, price - 0.8 * atr5) : Math.max(origin, sma20 + 0.5 * atr5, price + 0.8 * atr5);
+    why = smaAligned && dist <= 0.65 * atr5
+      ? `Harga ${ctx.f(price)} menempel jalur SMA20 (${ctx.f(sma20)}) & searah struktur ${st.src}. Entry NOW.`
+      : `Eksekusi NOW searah ${st.src}; SMA20 di ${ctx.f(sma20)}.`;
   }
 
   const order = buildOrderFromLevels({ dir, entry, invLevel, atrVal: atr5, ctx, kind: 'scalp', rrList: STYLES['Scalping'].rr });
@@ -828,7 +813,8 @@ async function runBotSma20(ctx, d, botStyleRaw) {
     }
 
     // 2. Baca Zona S&D fresh atau SMA20 terdekat yang realistis dengan harga berjalan
-    const sdZones = findSDZones(candles, dir = (st ? st.dir : (price > sma20 ? 1 : -1)), price);
+    const dir = st ? st.dir : (price > sma20 ? 1 : -1);
+    const sdZones = findSDZones(candles, dir, price);
     const validSD = sdZones.find(z => Math.abs((z.top + z.bottom) / 2 - price) <= 3.5 * atrVal);
     
     let targetEntry = sma20;
@@ -899,11 +885,14 @@ async function runBotSma20(ctx, d, botStyleRaw) {
     };
   }
 
-  if (!st) {
-    return { reason: 'Bot Agresif memindai M1: belum ada struktur BOS/HH-HL/LH-LL maupun setup Reversal. Menunggu...' };
-  }
-
-  const dir = st.dir;
+  // Agresif = Buy Now / Sell Now searah pasar. Jika struktur belum jelas, pakai posisi harga vs SMA20 + slope.
+  const stx = st || {
+    dir: (price >= sma20 && sma20 >= sma20Prev) ? 1 : (price < sma20 && sma20 < sma20Prev) ? -1 : (price >= sma20 ? 1 : -1),
+    src: 'SMA20 Bias', bos: false,
+    l1: { p: Math.min(...candles.slice(-6).map(c => c.l)) },
+    h1: { p: Math.max(...candles.slice(-6).map(c => c.h)) },
+  };
+  const dir = stx.dir;
   const distSma = Math.abs(price - sma20);
   const touchedSma = (dir === 1 && last.l <= sma20 + 0.15 * atrVal && last.c > sma20)
                   || (dir === -1 && last.h >= sma20 - 0.15 * atrVal && last.c < sma20);
@@ -924,14 +913,14 @@ async function runBotSma20(ctx, d, botStyleRaw) {
       },
       meta: {
         setup, confidence: 'HIGH', riskLabel: 'HIGH',
-        reason: withPair(ctx.symbol, `[BOT AGRESIF - OPSI 2 SMA20] ${side} NOW @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2). Kontinuitas SMA20 (${ctx.f(sma20)}) searah struktur ${st.src}.`),
+        reason: withPair(ctx.symbol, `[BOT AGRESIF - OPSI 2 SMA20] ${side} NOW @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2). Kontinuitas SMA20 (${ctx.f(sma20)}) searah struktur ${stx.src}.`),
         sma20,
       },
     };
   }
 
   if (paConfirm && ((dir === 1 && price > sma20) || (dir === -1 && price < sma20)) && distSma <= 1.5 * atrVal) {
-    const invLevel = dir === 1 ? Math.min(last.l, st.l1.p) : Math.max(last.h, st.h1.p);
+    const invLevel = dir === 1 ? Math.min(last.l, stx.l1.p) : Math.max(last.h, stx.h1.p);
     const order = buildOrderFromLevels({ dir, entry: price, invLevel, atrVal, ctx, kind: 'bot', rrList });
     const side = dir === 1 ? 'BUY' : 'SELL';
     const setup = 'Bot Agresif · Opsi 1 Structure + Price Action';
@@ -945,15 +934,33 @@ async function runBotSma20(ctx, d, botStyleRaw) {
       },
       meta: {
         setup, confidence: 'HIGH', riskLabel: 'HIGH',
-        reason: withPair(ctx.symbol, `[BOT AGRESIF - OPSI 1 STRUCTURE+PA] ${side} NOW @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2). Struktur ${st.src} + konfirmasi ${paConfirm} di jalur SMA20 (${ctx.f(sma20)}).`),
+        reason: withPair(ctx.symbol, `[BOT AGRESIF - OPSI 1 STRUCTURE+PA] ${side} NOW @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2). Struktur ${stx.src} + konfirmasi ${paConfirm} di jalur SMA20 (${ctx.f(sma20)}).`),
         sma20,
       },
     };
   }
 
-  return {
-    reason: `Bot Agresif memindai M1: struktur ${st.src}, SMA20 di ${ctx.f(sma20)}. Menunggu trigger...`,
-  };
+  // Fallback: tidak ada trigger sempurna -> tetap NOW searah arah pasar (sesuai SOP Agresif)
+  {
+    const invLevel = dir === 1 ? Math.min(last.l, stx.l1.p, sma20 - 0.3 * atrVal) : Math.max(last.h, stx.h1.p, sma20 + 0.3 * atrVal);
+    const order = buildOrderFromLevels({ dir, entry: price, invLevel, atrVal, ctx, kind: 'bot', rrList });
+    const side = dir === 1 ? 'BUY' : 'SELL';
+    const setup = 'Bot Agresif · Market Direction NOW';
+    return {
+      dir,
+      plan: {
+        isOCO: false, orderType: 'MARKET', status: 'RUNNING',
+        entry: order.entry, sl: order.sl, tps: order.tps, setup,
+        chartContext: `${setup}: ${side} NOW ${ctx.f(order.entry)} (SL ${ctx.f(order.sl)})`,
+        zone: null, tag: 'Market Direction',
+      },
+      meta: {
+        setup, confidence: 'MEDIUM', riskLabel: 'HIGH',
+        reason: withPair(ctx.symbol, `[BOT AGRESIF - MARKET NOW] ${side} NOW @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2). Arah ${stx.src}, harga ${price >= sma20 ? 'di atas' : 'di bawah'} SMA20 (${ctx.f(sma20)}).`),
+        sma20,
+      },
+    };
+  }
 }
 
 const RUNNERS = {
@@ -1134,22 +1141,32 @@ async function runVisionAnalysis(images, style, lang) {
   const langName = lang === 'en' ? 'English' : 'Indonesian';
   const userContent = [
     { type: 'text', text: `Jumlah gambar diupload: ${imgs.length}. Style: ${style}. Analisa setiap gambar tanpa terkecuali.` },
-    ...imgs.map(url => ({ type: 'image_url', image_url: { url } })),
+    ...imgs.flatMap((url, i) => [
+      { type: 'text', text: `Gambar ${i + 1} dari ${imgs.length}:` },
+      { type: 'image_url', image_url: { url } },
+    ]),
   ];
 
-  const r = await httpJson(`${OPENAI_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const callAI = (variant) => {
+    const body = {
       model: AI_VISION_MODEL,
-      max_tokens: VISION_MAX_TOKENS,
-      temperature: 0.15,
       messages: [
         { role: 'system', content: buildVisionSystem(style) },
         { role: 'user', content: userContent },
       ],
-    }),
-  }, VISION_TIMEOUT_MS);
+    };
+    // Model GPT baru: pakai max_completion_tokens & tanpa temperature. Gateway lama: max_tokens.
+    if (variant === 'new') body.max_completion_tokens = VISION_MAX_TOKENS;
+    else { body.max_tokens = VISION_MAX_TOKENS; body.temperature = 0.15; }
+    return httpJson(`${OPENAI_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }, VISION_TIMEOUT_MS);
+  };
+
+  let r = await callAI('new');
+  if (!r.ok && r.status === 400) r = await callAI('legacy'); // fallback jika gateway menolak parameter baru
 
   if (!r.ok) {
     const detail = r.data?.error?.message || (typeof r.data?.error === 'string' ? r.data.error : '') || r.text.slice(0, 160);
@@ -1164,6 +1181,7 @@ async function runVisionAnalysis(images, style, lang) {
 
 async function handleVision(body, lang, res) {
   const images = Array.isArray(body.images) ? body.images.slice(0, 3) : [];
+  if (!images.length) return fail(res, msg(lang, 'badImage'));
   const style = normStyle(body.style || body.mode);
   const out = await runVisionAnalysis(images, style, lang);
   if (!out.ok) return fail(res, out.reason);
@@ -1258,8 +1276,8 @@ export default async function handler(req, res) {
     const access = await checkAccess(email, isAutoBot);
     if (!access.ok) return fail(res, msg(lang, access.key));
 
-    if (isVision) return handleVision(body, lang, res);
-    return handleCandles(body, lang, res, { email, isAutoBot });
+    if (isVision) return await handleVision(body, lang, res);
+    return await handleCandles(body, lang, res, { email, isAutoBot });
   } catch (err) {
     console.error('Fatal API Error:', err);
     if (!res.headersSent) return fail(res, `Server error: ${err.message || 'tidak diketahui'}`, 500);
