@@ -193,7 +193,13 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
           </div>
           <label class="flex items-center gap-1.5 text-[9px] text-gray-400 cursor-pointer"><input type="checkbox" id="botSess" class="rounded bg-cardbg border-panelborder"> Hanya sesi London/NY (07–21 UTC)</label>
           <button id="botBtn" onclick="toggleBot()" class="w-full font-bold py-2 rounded-lg text-xs transition bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20">START BOT (EA)</button>
-          <p id="botMsg" class="text-[9px] font-mono text-gray-300 min-h-[12px] break-words"></p>
+          
+          <!-- Interaktif Bot Reasoning / Structure Log -->
+          <div class="bg-cardbg border border-panelborder rounded-lg p-2 space-y-1">
+            <p class="text-[8px] font-bold text-accentblue uppercase tracking-wider"><i class="fa-solid fa-comments"></i> Live Structure & Bot Analysis</p>
+            <p id="botMsg" class="text-[9px] font-mono text-gray-300 min-h-[24px] break-words leading-relaxed">Bot siap memindai struktur pasar...</p>
+          </div>
+          
           <p id="botStats" class="text-[8px] font-mono text-gray-500">Total Bot Trade: 0 | Win: 0 | Loss: 0</p>
 
           <!-- BOT LIVE MAP DENGAN VISUAL KHUSUS SMC / SMA20 -->
@@ -671,26 +677,37 @@ const toMs = v => {
   return Number.isFinite(d) ? d : NaN;
 };
 
+// --- Format Concise/Clean Reasoning ---
+function cleanReason(text) {
+  if (!text) return 'Setup valid terdeteksi berdasarkan konfluensi struktur SMC/ICT.';
+  let clean = String(text).trim();
+  // Potong atau ringkas jika terlalu panjang (> 300 karakter)
+  if (clean.length > 320) {
+    clean = clean.substring(0, 315) + '...';
+  }
+  return clean;
+}
+
 function pickReasons(s, curLang) {
   const out = {};
   const obj = s.reasons || s.reason_i18n || {};
   ['id', 'en'].forEach(l => {
     const cap = l === 'id' ? 'Id' : 'En';
     const v = obj[l] || s['reason_' + l] || s['reason' + cap];
-    if (v) out[l] = String(v);
+    if (v) out[l] = cleanReason(v);
   });
-  if (!out[curLang] && s.reason) out[curLang] = String(s.reason);
+  if (!out[curLang] && s.reason) out[curLang] = cleanReason(s.reason);
   return out;
 }
 function reasonFor(t) {
   const c = t && t.card;
-  if (!c) return '---';
+  if (!c) return 'Setup valid terdeteksi berdasarkan konfluensi struktur SMC/ICT.';
   const r = c.reasons || {};
-  if (r[lang]) return r[lang];
+  if (r[lang]) return cleanReason(r[lang]);
   const any = r.id || r.en || c.reason;
-  if (!any) return '---';
+  if (!any) return 'Setup valid terdeteksi.';
   const from = c.reasonLang || (r.id ? 'id' : r.en ? 'en' : null);
-  return from && from !== lang ? any + '\n\n' + T('reasonOtherLang') : any;
+  return from && from !== lang ? cleanReason(any) + '\n\n' + T('reasonOtherLang') : cleanReason(any);
 }
 
 let lang = 'id', market = 'XAUUSD', ws = null, connId = 0, reconT = null, pingT = null, authFailed = false, streamStarted = false;
@@ -1352,7 +1369,7 @@ function loadTrades() {
 function normalize(t) {
   t.hits = t.hits || {};
   if (t.dir !== 1 && t.dir !== -1) t.dir = t.signal === 'BUY' ? 1 : -1;
-  if (!t.card && t.reason) t.card = { reason: t.reason, reasons: {}, reasonLang: lang };
+  if (!t.card && t.reason) t.card = { reason: cleanReason(t.reason), reasons: {}, reasonLang: lang };
   for (const k of TP_KEYS) if (typeof t.hits[k] === 'number') t.hits[k] = { at: t.hits[k], price: t[k] };
   if (t.status === 'CLOSED') {
     t.maxTp = maxHit(t);
@@ -1674,7 +1691,7 @@ function refreshCard() {
   br.textContent = 'RISK ' + (t.risk || '--');
   br.className = BADGE + (RISK_CLS[t.risk] || 'bg-darkbg text-gray-300 border-panelborder');
   setTxt('cardLive', priceTxt);
-  setTxt('cardReason', reasonFor(t));
+  setTxt('cardReason', cleanReason(reasonFor(t)));
 
   const LV = ['sl', 'tp1', 'tp2', 'tp3'];
   if (oco) {
@@ -2031,13 +2048,11 @@ function detectSMC(rows) {
     if (b.c < b.o && c.c > b.h) obs.push({ dir: 1, bottom: b.c, top: b.o, t: b.t });
     if (b.c > b.o && c.c < b.l) obs.push({ dir: -1, bottom: b.o, top: b.c, t: b.t });
     
-    // CISD Detection: Change in State of Delivery
     if (Math.abs(b.c - b.o) > (b.h - b.l) * 0.7 && Math.abs(b.c - b.o) > (rows[i-2] ? Math.abs(rows[i-2].c - rows[i-2].o) * 1.5 : 0)) {
       cisd.push({ dir: b.c >= b.o ? 1 : -1, price: (b.o + b.c) / 2, t: b.t });
     }
   }
 
-  // SMT & Trendline logic calculation
   const sw = swings(rows);
   if (sw.sh.length >= 2) {
     const h1 = sw.sh[sw.sh.length - 2], h2 = sw.sh[sw.sh.length - 1];
@@ -2149,7 +2164,7 @@ function layoutX(rows, plotL, plotR, tfMs) {
 }
 const clampX = (x, plotL, plotR) => Math.max(plotL, Math.min(plotR, x));
 
-// ---- Kanvas Khusus Bot (Bot Live Map dengan Visual Lengkap Sweep, CISD, SMT, Trendline) ----
+// ---- Kanvas Khusus Bot ----
 function drawBotMap(cv, cx, t, k) {
   if (!cx) return;
   const d = fitCv(cv, cx);
@@ -2217,7 +2232,6 @@ function drawBotMap(cv, cx, t, k) {
   const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * plotH;
 
   if (smcData.status === 'ok') {
-    // Render FVG Zones
     smcData.fvgs.forEach(z => {
       const x0 = clampX(xOfT(z.t), plotL, plotR);
       if (plotR - x0 < 2) return;
@@ -2227,7 +2241,6 @@ function drawBotMap(cv, cx, t, k) {
       cx.fillRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
       cx.restore();
     });
-    // Render Supply / Demand / OB Zones
     smcData.obs.forEach(z => {
       const x0 = clampX(xOfT(z.t), plotL, plotR);
       if (plotR - x0 < 2) return;
@@ -2237,10 +2250,9 @@ function drawBotMap(cv, cx, t, k) {
       cx.fillRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
       cx.restore();
     });
-    // Render Liquidity Sweep Pools & Panjang Garis Sweep dengan Tulisan Sweep
     if (smcData.liq && smcData.liq.pools) {
       smcData.liq.pools.forEach(p => {
-        const y = yOf(p.p), x0 = clampX(xOfT(p.t), plotL, plotR);
+        const y = yOf(p.p);
         cx.save();
         cx.strokeStyle = 'rgba(245,158,11,.85)';
         cx.lineWidth = 1.2;
@@ -2257,11 +2269,11 @@ function drawBotMap(cv, cx, t, k) {
     }
     if (smcData.liq && smcData.liq.sweeps) {
       smcData.liq.sweeps.forEach(swp => {
-        const y = yOf(swp.p), x0 = clampX(xOfT(swp.t), plotL, plotR), x1 = clampX(xOfT(swp.hitT), plotL, plotR);
+        const y = yOf(swp.p), x1 = clampX(xOfT(swp.hitT), plotL, plotR);
         cx.save();
         cx.strokeStyle = '#f97316';
         cx.lineWidth = 2;
-        cx.beginPath(); cx.moveTo(x0, y); cx.lineTo(plotR, y); cx.stroke();
+        cx.beginPath(); cx.moveTo(clampX(xOfT(swp.t), plotL, plotR), y); cx.lineTo(plotR, y); cx.stroke();
         cx.font = 'bold 9px ui-monospace, monospace';
         cx.fillStyle = '#f97316';
         cx.textAlign = 'left';
@@ -2270,7 +2282,6 @@ function drawBotMap(cv, cx, t, k) {
         cx.restore();
       });
     }
-    // Render CISD Lines
     if (smcData.cisd) {
       smcData.cisd.forEach(cd => {
         const y = yOf(cd.price), x0 = clampX(xOfT(cd.t), plotL, plotR);
@@ -2288,7 +2299,6 @@ function drawBotMap(cv, cx, t, k) {
         cx.restore();
       });
     }
-    // Render SMT Buy/Sell & Trendline
     if (smcData.smt) {
       smcData.smt.forEach(sm => {
         const y = yOf(sm.p), x = clampX(xOfT(sm.t), plotL, plotR);
@@ -2311,7 +2321,6 @@ function drawBotMap(cv, cx, t, k) {
         cx.restore();
       });
     }
-    // Render Structure Events (BOS / MSS / CHoCH)
     if (smcData.ev) {
       smcData.ev.forEach(e => {
         const x0 = clampX(xOfT(e.fromT), plotL, plotR), x1 = clampX(xOfT(e.toT), plotL, plotR), y = yOf(e.p);
@@ -2330,7 +2339,6 @@ function drawBotMap(cv, cx, t, k) {
     }
   }
 
-  // Render SMA 20 Line
   if (smaPoints.length > 1) {
     cx.save();
     cx.strokeStyle = '#facc15';
@@ -2347,7 +2355,6 @@ function drawBotMap(cv, cx, t, k) {
     cx.restore();
   }
 
-  // Render Candlesticks
   const bodyW = Math.max(1.5, slot * 0.62);
   cx.lineWidth = 1;
   for (const c of vis) {
@@ -2359,7 +2366,6 @@ function drawBotMap(cv, cx, t, k) {
 
     cx.strokeStyle = col;
     cx.beginPath(); cx.moveTo(x, yH); cx.lineTo(x, yL); cx.stroke();
-
     cx.fillStyle = col;
     cx.fillRect(x - bodyW / 2, Math.min(yO, yC), bodyW, Math.max(1, Math.abs(yC - yO)));
   }
@@ -2423,7 +2429,7 @@ function drawBotChart() {
   drawBotMap(bcv, bcx, activeBotSig, 'XAUUSD');
 }
 
-// ---- Live Map Chart Standar dengan Visual Lengkap SMC/ICT (Sweep, CISD, SMT, Trendline) ----
+// ---- Live Map Chart Standar ----
 function drawLiveMap(cv, cx, t, k) {
   if (!cx) return;
   const d = fitCv(cv, cx);
@@ -2488,7 +2494,6 @@ function drawLiveMap(cv, cx, t, k) {
   }
 
   if (smcData.status === 'ok') {
-    // Render FVG Zones
     smcData.fvgs.forEach(z => {
       const x0 = clampX(xOfT(z.t), plotL, plotR);
       if (plotR - x0 < 2) return;
@@ -2498,7 +2503,6 @@ function drawLiveMap(cv, cx, t, k) {
       cx.fillRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
       cx.restore();
     });
-    // Render Supply / Demand / OB Zones
     smcData.obs.forEach(z => {
       const x0 = clampX(xOfT(z.t), plotL, plotR);
       if (plotR - x0 < 2) return;
@@ -2508,10 +2512,9 @@ function drawLiveMap(cv, cx, t, k) {
       cx.fillRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
       cx.restore();
     });
-    // Render Liquidity Sweep Pools & Panjang Garis Sweep dengan Tulisan Sweep
     if (smcData.liq && smcData.liq.pools) {
       smcData.liq.pools.forEach(p => {
-        const y = yOf(p.p), x0 = clampX(xOfT(p.t), plotL, plotR);
+        const y = yOf(p.p);
         cx.save();
         cx.strokeStyle = 'rgba(245,158,11,.85)';
         cx.lineWidth = 1.2;
@@ -2528,11 +2531,11 @@ function drawLiveMap(cv, cx, t, k) {
     }
     if (smcData.liq && smcData.liq.sweeps) {
       smcData.liq.sweeps.forEach(swp => {
-        const y = yOf(swp.p), x0 = clampX(xOfT(swp.t), plotL, plotR), x1 = clampX(xOfT(swp.hitT), plotL, plotR);
+        const y = yOf(swp.p), x1 = clampX(xOfT(swp.hitT), plotL, plotR);
         cx.save();
         cx.strokeStyle = '#f97316';
         cx.lineWidth = 2;
-        cx.beginPath(); cx.moveTo(x0, y); cx.lineTo(plotR, y); cx.stroke();
+        cx.beginPath(); cx.moveTo(clampX(xOfT(swp.t), plotL, plotR), y); cx.lineTo(plotR, y); cx.stroke();
         cx.font = 'bold 9px ui-monospace, monospace';
         cx.fillStyle = '#f97316';
         cx.textAlign = 'left';
@@ -2541,7 +2544,6 @@ function drawLiveMap(cv, cx, t, k) {
         cx.restore();
       });
     }
-    // Render CISD Lines
     if (smcData.cisd) {
       smcData.cisd.forEach(cd => {
         const y = yOf(cd.price), x0 = clampX(xOfT(cd.t), plotL, plotR);
@@ -2559,7 +2561,6 @@ function drawLiveMap(cv, cx, t, k) {
         cx.restore();
       });
     }
-    // Render SMT Buy/Sell & Trendline
     if (smcData.smt) {
       smcData.smt.forEach(sm => {
         const y = yOf(sm.p), x = clampX(xOfT(sm.t), plotL, plotR);
@@ -2582,7 +2583,6 @@ function drawLiveMap(cv, cx, t, k) {
         cx.restore();
       });
     }
-    // Render Structure Events (BOS / MSS / CHoCH)
     if (smcData.ev) {
       smcData.ev.forEach(e => {
         const x0 = clampX(xOfT(e.fromT), plotL, plotR), x1 = clampX(xOfT(e.toT), plotL, plotR), y = yOf(e.p);
@@ -2612,7 +2612,6 @@ function drawLiveMap(cv, cx, t, k) {
 
     cx.strokeStyle = col;
     cx.beginPath(); cx.moveTo(x, yH); cx.lineTo(x, yL); cx.stroke();
-
     cx.fillStyle = col;
     cx.fillRect(x - bodyW / 2, Math.min(yO, yC), bodyW, Math.max(1, Math.abs(yC - yO)));
   }
@@ -2777,7 +2776,7 @@ function drawSMC() {
   obs.forEach(z => zone(z, z.dir > 0 ? 'Demand' : 'Supply', z.dir > 0 ? '16,185,129' : '239,68,68'));
 
   pools.forEach(p => {
-    const y = yOf(p.p), x0 = clampX(xOfT(p.t), plotL, plotR);
+    const y = yOf(p.p);
     sx.save();
     sx.strokeStyle = 'rgba(245,158,11,.85)';
     sx.lineWidth = 1.2;
@@ -2793,11 +2792,11 @@ function drawSMC() {
   });
 
   sweeps.forEach(swp => {
-    const y = yOf(swp.p), x0 = clampX(xOfT(swp.t), plotL, plotR), x1 = clampX(xOfT(swp.hitT), plotL, plotR);
+    const y = yOf(swp.p), x1 = clampX(xOfT(swp.hitT), plotL, plotR);
     sx.save();
     sx.strokeStyle = '#f97316';
     sx.lineWidth = 2;
-    sx.beginPath(); sx.moveTo(x0, y); sx.lineTo(plotR, y); sx.stroke();
+    sx.beginPath(); sx.moveTo(clampX(xOfT(swp.t), plotL, plotR), y); sx.lineTo(plotR, y); sx.stroke();
     sx.font = 'bold 9px ui-monospace, monospace';
     sx.fillStyle = '#f97316';
     sx.textAlign = 'left';
@@ -2995,6 +2994,9 @@ async function generateSignal() {
     setTxt('btnText', T('btnGenVision'));
     if (!r.ok || !r.data || !r.data.ok) return alert(errOf(r, 'Analisis vision gagal.'));
     visionTrade = r.data.signal;
+    if (visionTrade && visionTrade.card) {
+      visionTrade.card.reason = cleanReason(visionTrade.card.reason);
+    }
     refreshCard();
     return;
   }
@@ -3043,6 +3045,8 @@ async function generateSignal() {
 
     fetchUserStatus();
     const sig = data.signal;
+    if (sig && sig.reason) sig.reason = cleanReason(sig.reason);
+
     const num = v => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
     const expireAfter = EXPIRY_MS[style] || 4 * 3600 * 1000;
 
@@ -3067,7 +3071,7 @@ async function generateSignal() {
         risk: o.risk || sig.risk,
         pip: MARKETS[market]?.pip || 0.1,
         hits: {},
-        card: { reason: sig.reason, reasons: pickReasons(sig, lang), reasonLang: lang }
+        card: { reason: cleanReason(sig.reason), reasons: pickReasons(sig, lang), reasonLang: lang }
       };
     };
 
@@ -3213,7 +3217,7 @@ async function toggleBot() {
   renderBotUI();
   
   const style = $('botStyle') ? $('botStyle').value : 'Scalping';
-  if ($('botMsg')) $('botMsg').textContent = `Bot diaktifkan dengan style [${style}]. Memulai pemindaian analisa baru...`;
+  if ($('botMsg')) $('botMsg').textContent = `Bot aktif [${style}]. Memindai struktur & FVG terbaru...`;
   
   await runBotCycle();
   
@@ -3221,25 +3225,47 @@ async function toggleBot() {
   botTimer = setInterval(runBotCycle, 15000);
 }
 
+// --- Bot Interaktif Menjelaskan Kondisi Struktur Pasar (SMC / ICT) ---
+function updateBotInteractiveReason() {
+  if (!botRunning) return;
+  const smc = getSmc('XAUUSD', '5m');
+  const msgEl = $('botMsg');
+  if (!msgEl) return;
+
+  if (smc.status === 'ok') {
+    const fvgCount = smc.fvgs.length;
+    const sweepCount = smc.liq.sweeps.length;
+    const lastEv = smc.ev && smc.ev.length ? smc.ev[smc.ev.length - 1] : null;
+    const trendText = lastEv ? `${lastEv.type} ${lastEv.dir > 0 ? 'Bullish ▲' : 'Bearish ▼'}` : 'Konsolidasi / Range';
+    
+    let report = `Struktur: ${trendText} | FVG: ${fvgCount} zona fresh`;
+    if (sweepCount > 0) report += ` | ⚡ Liquidity Sweep Terdeteksi!`;
+    msgEl.textContent = report;
+  }
+}
+
 async function runBotCycle() {
   if (!botRunning || botBusy) return;
-  const say = t => { const m = $('botMsg'); if (m) m.textContent = t; };
+  const sayBot = t => { const m = $('botMsg'); if (m) m.textContent = t; };
 
   if ($('botSess') && $('botSess').checked) {
     const h = new Date().getUTCHours();
-    if (h < 7 || h >= 21) return say('Di luar sesi London/NY (07-21 UTC). Bot menunggu...');
+    if (h < 7 || h >= 21) return sayBot('Di luar sesi London/NY (07-21 UTC). Bot menunggu...');
   }
-  if (botTrades().some(x => x.status !== 'CLOSED')) return say('Trade bot masih berjalan. Menunggu hingga selesai...');
-  if (!marketOpen('XAUUSD')) return say(T('weekend'));
+  if (botTrades().some(x => x.status !== 'CLOSED')) {
+    updateBotInteractiveReason();
+    return;
+  }
+  if (!marketOpen('XAUUSD')) return sayBot(T('weekend'));
 
   const email = localStorage.getItem(K.email);
   if (!email) return;
   const livePx = prices.XAUUSD ? prices.XAUUSD.price : 0;
-  if (!livePx) { say('Menunggu harga live XAUUSD...'); setTimeout(runBotCycle, 2000); return; }
+  if (!livePx) { sayBot('Menunggu harga live XAUUSD...'); setTimeout(runBotCycle, 2000); return; }
 
   botBusy = true;
   try {
-    say('Bot sedang memindai setup SMC & SMA20 XAUUSD...');
+    sayBot('Memindai sweep likuiditas, FVG, dan struktur M5...');
     const style = $('botStyle') ? $('botStyle').value : 'Scalping';
     const rowsOf = iv => seriesRows('XAUUSD', iv).slice(-300).map(c => ({ t: c.t, o: c.o, h: c.h, l: c.l, c: c.c }));
 
@@ -3257,20 +3283,23 @@ async function runBotCycle() {
     const data = res.data;
 
     if (!(res.ok && data && data.ok)) {
-      const why = errOf(res, 'Belum ada setup valid yang terdeteksi bot.');
-      say(why);
+      const why = errOf(res, 'Mencari setup konfluensi optimal...');
+      updateBotInteractiveReason();
       if (/trial/i.test(why)) { stopBot(why); return; }
       return;
     }
 
     let sig = data.signal;
+    if (sig && sig.reason) sig.reason = cleanReason(sig.reason);
+
     if (Array.isArray(sig.orders) && sig.orders.length) {
       const o = sig.orders.reduce((a, b) => Math.abs(b.entry - livePx) < Math.abs(a.entry - livePx) ? b : a);
       sig = { ...sig, ...o };
       delete sig.orders;
     }
     if (!sig.signal || !Number.isFinite(Number(sig.entry)) || !Number.isFinite(Number(sig.sl))) {
-      return say('Sinyal bot tidak valid, dilewati.');
+      updateBotInteractiveReason();
+      return;
     }
 
     const num = v => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
@@ -3295,7 +3324,7 @@ async function runBotCycle() {
       risk: sig.risk || 'HIGH',
       pip: 0.1,
       hits: {},
-      card: { reason: sig.reason, reasons: pickReasons(sig, lang), reasonLang: lang }
+      card: { reason: cleanReason(sig.reason), reasons: pickReasons(sig, lang), reasonLang: lang }
     };
 
     trades.push(trade);
@@ -3303,13 +3332,13 @@ async function runBotCycle() {
     saveTrades();
     renderAll();
     playTradeAlert();
-    say(`Sinyal bot baru: ${trade.signal} ${trade.mode === 'LIMIT' ? 'LIMIT' : 'NOW'} @ ${fmt(trade.entry)}.`);
+    sayBot(`Eksekusi ${trade.signal} @ ${fmt(trade.entry)} (${trade.setup || 'SMC Setup'})`);
 
     if ($('botMode') && $('botMode').value === 'once') {
-      stopBot('Mode sekali: bot berhenti setelah 1 sinyal. Lanjut manual.');
+      stopBot('Mode sekali: bot berhenti setelah 1 sinyal.');
     }
   } catch (e) {
-    say('Bot error: ' + e.message);
+    sayBot('Bot error: ' + e.message);
   } finally {
     botBusy = false;
   }
@@ -3325,7 +3354,11 @@ function refreshBotPanel() {
     st.classList.add('hidden');
     pnl.textContent = '';
     live.textContent = '';
-    lv.textContent = botRunning ? 'Bot fleksibel memindai zona baru (Reversal/SMA/Zone)...' : 'Bot nonaktif. Sinyal bot mati / tidak ada setup.';
+    if (botRunning) {
+      updateBotInteractiveReason();
+    } else {
+      setTxt('botMsg', 'Bot nonaktif.');
+    }
   } else {
     const s = statusOf(t), f = tradeFlow(t);
     st.classList.remove('hidden');
