@@ -84,10 +84,10 @@ const STYLES = {
 
 const MIN_BARS = { m1: 60, m5: 40, m15: 40, m30: 35, h1: 35, h4: 25, d1: 20 };
 const ZONE_ATR_PERIOD = 14;
-const ZONE_DISP_ATR = 1.2; // Modul Part 3.3 & Part 6: Displacement >= 1.2 * ATR
-const MAX_DIST_ATR = { scalp: 3.5, scalp_cons: 4.5, intraday: 6.5, swing: 11.0, bot: 1.5 }; // Modul Part 1.2 Hard-Rule 5: Max 1.5x ATR untuk bot
+const ZONE_DISP_ATR = 1.2;
+const MAX_DIST_ATR = { scalp: 3.5, scalp_cons: 4.5, intraday: 6.5, swing: 11.0, bot: 1.5 };
 const GOLD_SL_PIPS = { scalp: [25, 65], scalp_cons: [35, 110], intraday: [70, 190], swing: [140, 320], bot: [25, 75] };
-const ATR_SL_MULT = { scalp: [0.9, 2.8], scalp_cons: [1.0, 3.0], intraday: [1.1, 3.5], swing: [1.2, 4.0], bot: [0.3, 1.5] }; // Modul Part 7.1: Min 0.3 ATR, Max 1.5 ATR
+const ATR_SL_MULT = { scalp: [0.9, 2.8], scalp_cons: [1.0, 3.0], intraday: [1.1, 3.5], swing: [1.2, 4.0], bot: [0.3, 1.5] };
 
 const TL_SPAN = {
   '1m':  { mult: 1,  span: 'minute', minutes: 1    },
@@ -271,14 +271,14 @@ function clientCandles(body, tf) {
   return Array.isArray(rows) ? cleanCandles(rows) : [];
 }
 
-// ── KILLZONE CHECKER (MODUL PART 10) ──
+// ── KILLZONE CHECKER ──
 function getKillzoneStatus(nowMs = Date.now()) {
   try {
     const nyTime = new Date(new Date(nowMs).toLocaleString('en-US', { timeZone: 'America/New_York' }));
     const mins = nyTime.getHours() * 60 + nyTime.getMinutes();
-    if (mins >= 120 && mins <= 300) return { active: true, name: 'LONDON KZ' };         // 02:00 - 05:00 NY
-    if (mins >= 420 && mins <= 600) return { active: true, name: 'NEWYORK KZ' };        // 07:00 - 10:00 NY
-    if (mins >= 600 && mins <= 660) return { active: true, name: 'SILVER BULLET KZ' };  // 10:00 - 11:00 NY
+    if (mins >= 120 && mins <= 300) return { active: true, name: 'LONDON KZ' };
+    if (mins >= 420 && mins <= 600) return { active: true, name: 'NEWYORK KZ' };
+    if (mins >= 600 && mins <= 660) return { active: true, name: 'SILVER BULLET KZ' };
     return { active: false, name: 'OUTSIDE KZ' };
   } catch {
     return { active: true, name: 'ACTIVE SESSION' };
@@ -422,15 +422,11 @@ function lastDisplacement(candles, atrVal, lookback = 4) {
   return null;
 }
 
-// ── CISD (CHANGE IN STATE OF DELIVERY) SESUAI MODUL PART 4.2 K2 ──
-// Bullish CISD: rangkaian candle bearish terakhir -> catat highest_open -> candle close > highest_open
-// Bearish CISD: rangkaian candle bullish terakhir -> catat lowest_open -> candle close < lowest_open
 function detectCISD(candles, atrVal) {
   const n = candles.length;
   if (n < 6) return null;
   const lastC = candles[n - 1];
 
-  // 1. Cek Bullish CISD (Reversal ke atas)
   if (lastC.c > lastC.o) {
     let bearSeries = [];
     for (let i = n - 2; i >= Math.max(0, n - 8); i--) {
@@ -444,19 +440,11 @@ function detectCISD(candles, atrVal) {
       const highestOpen = Math.max(...bearSeries.map(c => c.o));
       const lowestLow = Math.min(...bearSeries.map(c => c.l));
       if (lastC.c > highestOpen) {
-        return {
-          dir: 1,
-          level: highestOpen,
-          obLow: lowestLow,
-          obHigh: highestOpen,
-          dispIdx: n - 1,
-          seriesCount: bearSeries.length,
-        };
+        return { dir: 1, level: highestOpen, obLow: lowestLow, obHigh: highestOpen, dispIdx: n - 1, seriesCount: bearSeries.length };
       }
     }
   }
 
-  // 2. Cek Bearish CISD (Reversal ke bawah)
   if (lastC.c < lastC.o) {
     let bullSeries = [];
     for (let i = n - 2; i >= Math.max(0, n - 8); i--) {
@@ -470,22 +458,13 @@ function detectCISD(candles, atrVal) {
       const lowestOpen = Math.min(...bullSeries.map(c => c.o));
       const highestHigh = Math.max(...bullSeries.map(c => c.h));
       if (lastC.c < lowestOpen) {
-        return {
-          dir: -1,
-          level: lowestOpen,
-          obHigh: highestHigh,
-          obLow: lowestOpen,
-          dispIdx: n - 1,
-          seriesCount: bullSeries.length,
-        };
+        return { dir: -1, level: lowestOpen, obHigh: highestHigh, obLow: lowestOpen, dispIdx: n - 1, seriesCount: bullSeries.length };
       }
     }
   }
-
   return null;
 }
 
-// ── STRICT STRUCTURE & CISD CONFIRMATION ENGINE (MODUL PART 4.2: CHoCH > CISD) ──
 function validateStructureAndCISD(triggerCandles, atrVal) {
   if (!triggerCandles || triggerCandles.length < 10) {
     return { valid: false, reason: 'Data candle trigger tidak cukup untuk validasi struktur.' };
@@ -496,7 +475,6 @@ function validateStructureAndCISD(triggerCandles, atrVal) {
   const recentHigh = highs.length ? highs[highs.length - 1].p : null;
   const recentLow = lows.length ? lows[lows.length - 1].p : null;
 
-  // Prioritas 1 (K1 Modul): Micro CHoCH / BOS dengan Candle CLOSE (bukan wick)
   if (recentHigh && lastC.c > recentHigh && lastC.c > lastC.o) {
     const body = Math.abs(lastC.c - lastC.o);
     if (body >= 0.75 * atrVal) {
@@ -510,7 +488,6 @@ function validateStructureAndCISD(triggerCandles, atrVal) {
     }
   }
 
-  // Prioritas 2 (K2 Modul): CISD (Change in State of Delivery) untuk Pembalikan Arah
   const cisd = detectCISD(triggerCandles, atrVal);
   if (cisd) {
     return {
@@ -533,13 +510,12 @@ function detectReversalSetup(candles, atrVal, price) {
   if (!sweep && !cisd) return null;
 
   const dir = cisd ? cisd.dir : sweep.dir;
-  if (sweep && cisd && sweep.dir !== cisd.dir) return null; // Konflik arah antara sweep dan CISD -> Tunggu
+  if (sweep && cisd && sweep.dir !== cisd.dir) return null;
 
   const refExtreme = sweep ? sweep.sweepExtreme : (dir === 1 ? cisd.obLow : cisd.obHigh);
   const sdZones = findSDZones(candles.slice(0, -2), dir, refExtreme);
   const nearSD = sdZones.find(z => Math.abs((z.top + z.bottom) / 2 - refExtreme) <= 2.5 * atrVal);
 
-  // Wajib ada CISD atau Displacement untuk mengonfirmasi pembalikan arah
   const disp = lastDisplacement(candles, atrVal, 3);
   if (!cisd && (!disp || disp.dir !== dir)) return null;
 
@@ -637,7 +613,6 @@ function buildOrderFromLevels({ dir, entry, invLevel, atrVal, ctx, kind, rrList 
   return { dir, entry, sl, risk, tps };
 }
 
-// ── MANUAL REQUEST: SCALPING AGRESIF (DEEP SCANNING + STRUCTURE & CISD CONFIRMATION) ──
 async function runAggressiveScalp(ctx, d) {
   const { price, m1, m5, m15, m30 } = d;
   const base = m5.length >= 30 ? m5 : m15;
@@ -648,7 +623,6 @@ async function runAggressiveScalp(ctx, d) {
     };
   }
 
-  // 1. DEEP SCANNING: HTF -> M15 -> M5 -> M1
   const bias = multiTfBias({ h1: d.h1, m30, m15, m5, m1 }, ['h1', 'm30', 'm15', 'm5', 'm1']);
   const atr5 = atrOf(base, ctx.pip);
   const closes = base.map(c => c.c);
@@ -661,13 +635,11 @@ async function runAggressiveScalp(ctx, d) {
     };
   }
 
-  // 2. CEK STRUKTUR & CISD DI M1 / M5 (Wajib Close Candle sesuai Modul Part 1.2 & Part 4.2)
   const triggerTF = m1.length >= 25 ? m1 : base;
   const triggerAtr = atrOf(triggerTF, ctx.pip);
   const structConf = validateStructureAndCISD(triggerTF, triggerAtr);
   const reversal = detectReversalSetup(triggerTF, triggerAtr, price) || detectReversalSetup(base, atr5, price);
 
-  // JIKA RAGU / BELUM ADA KONFIRMASI STRUKTUR ATAU CISD -> TUNGGU
   if (!structConf.valid && !reversal) {
     return {
       reason: withPair(ctx.symbol, '[WAIT / STANDBY] Deep Scan selesai: Belum ada konfirmasi CHoCH/BOS maupun CISD pembalikan arah dengan candle close valid. Bot menunggu.'),
@@ -707,11 +679,9 @@ async function runAggressiveScalp(ctx, d) {
   }
 
   const order = buildOrderFromLevels({ dir, entry, invLevel, atrVal: atr5, ctx, kind: 'scalp', rrList: STYLES['Scalping'].rr });
-
-  // MODUL PART 4.1 & 7.3: Validasi RR (CISD minimal 1.5, Model Standar minimal 2.0)
   const minRRRequired = isCisdModel ? 1.5 : 2.0;
   const riskAmount = Math.abs(order.entry - order.sl);
-  const rewardMax = Math.abs(order.tps[2] - order.entry); // TP3 sebagai target RR maksimal
+  const rewardMax = Math.abs(order.tps[2] - order.entry);
   const actualRR = riskAmount > 0 ? (rewardMax / riskAmount) : 0;
 
   if (actualRR < minRRRequired) {
@@ -748,7 +718,6 @@ async function runAggressiveScalp(ctx, d) {
   };
 }
 
-// ── MANUAL REQUEST: KONSERVATIF, INTRADAY, & SWING (LIMIT ORDER + SOP MODUL) ──
 async function runTopDownLimit(ctx, d, styleName) {
   const cfg = STYLES[styleName];
   const kind = cfg.kind;
@@ -871,21 +840,21 @@ async function runTopDownLimit(ctx, d, styleName) {
   };
 }
 
-// ── BOT EA ENGINE — 100% MODUL SMC/ICT (DEEP SCANNING, STRICT CONFLUENCE >= 7, STRUCTURE & CISD) ──
+// ── BOT EA ENGINE — INTERACTIVE STRUCTURE & REASONING ──
 const BOT_CFG = {
-  minScore: 7,          // Modul Part 6 & Part 10: Skor < 7 -> SKIP
-  splitScore: 9,        // Modul Part 5 & Part 6: Skor >= 9 -> Split 40/40/20
-  confidentScore: 9,    // PERUBAHAN: Skor >= 9 -> Langsung entry tanpa ragu (tanpa konfirmasi CHoCH)
-  minRR: 2.0,           // Modul Part 7.3: Model standar min 2.0
-  minRRCisd: 1.5,       // Modul Part 7.3: CISD scalp min 1.5
-  dispBodyAtr: 1.2,     // Modul Part 3.3 & Part 6: Displacement >= 1.2 * ATR
-  fvgMinAtr: 0.15,      // Modul Part 3.1 & Part 10: FVG min 0.15 * ATR
-  bufAtr: 0.10,         // Modul Part 7.1: Buffer 0.10 * ATR
-  minSlAtr: 0.30,       // Modul Part 7.1: Min SL 0.3 * ATR
-  maxSlAtrScalp: 1.50,  // Modul Part 7.1: Max SL aggressive 1.5 * ATR
-  maxChaseAtr: 1.50,    // Modul Part 1.2 Hard-Rule 5: Chase protection > 1.5 * ATR
-  lookback: 60,         // Deep scan window
-  maxZoneBars: 3,       // PERUBAHAN: Max 3 candle di zona tanpa konfirmasi -> Batalkan & cari setup baru
+  minScore: 7,
+  splitScore: 9,
+  confidentScore: 9,
+  minRR: 2.0,
+  minRRCisd: 1.5,
+  dispBodyAtr: 1.2,
+  fvgMinAtr: 0.15,
+  bufAtr: 0.10,
+  minSlAtr: 0.30,
+  maxSlAtrScalp: 1.50,
+  maxChaseAtr: 1.50,
+  lookback: 60,
+  maxZoneBars: 3,
 };
 
 const tsMs = t => (t < 1e12 ? t * 1000 : t);
@@ -929,10 +898,8 @@ function findIFVG(c, dir, fromIdx, ctx, atrV) {
   return best;
 }
 
-// ── BREAKER BLOCK & MITIGATION BLOCK (MODUL PART 3.5 & 3.6) ──
 function findBreakerAndMitigation(c, dir, k, hasSweep) {
   const zones = [];
-  // Mitigation Block: OB asal impuls tanpa sweep sebelumnya (Part 3.6)
   if (!hasSweep && k >= 1) {
     const ob = c[k - 1];
     if (dir === 1 && ob.c < ob.o) {
@@ -942,7 +909,6 @@ function findBreakerAndMitigation(c, dir, k, hasSweep) {
       zones.push(mkZone('MITIGATION', -1, ob.h, ob.l, { label: 'MITIGATION SELL', createdIdx: k, distal: ob.h }));
     }
   }
-  // Breaker Block: OB berlawanan yang gagal / ditembus (Part 3.5)
   for (let b = k - 2; b >= Math.max(1, k - 12); b--) {
     const cand = c[b];
     if (dir === 1 && cand.c > cand.o && c[k].c > cand.h) {
@@ -1031,7 +997,6 @@ function scanSetups(c, atrV, ctx, price, biasDir, kzActive) {
     const bmZones = findBreakerAndMitigation(c, dir, k, !!sweep);
     cands.push(...bmZones);
 
-    // Modul Part 3.1: Mitigated >= 0.8 -> Hapus dari active zones
     const live = cands.filter(z => {
       const from = (z.createdIdx ?? k) + 1;
       if (zoneMitigation(z, c, from) >= 0.8) return false;
@@ -1040,7 +1005,6 @@ function scanSetups(c, atrV, ctx, price, biasDir, kzActive) {
     });
     if (!live.length) continue;
 
-    // Prioritas zona modul Part 8: IFVG > FVG+OB overlap > FVG > OB > Breaker/Mitigation/OTE
     const prio = { IFVG: 5, FVG: 3, OB: 2, BREAKER: 2, MITIGATION: 2, OTE: 1 };
     const ranked = live
       .map(z => ({ z, ov: live.filter(o => o !== z && overlaps(o, z)).length, p: prio[z.type] || 1 }))
@@ -1050,7 +1014,6 @@ function scanSetups(c, atrV, ctx, price, biasDir, kzActive) {
     const touching = live.filter(o => o === zone || overlaps(o, zone));
     const has = t => touching.some(o => o.type === t);
 
-    // ── CONFLUENCE SCORING SESUAI MODUL PART 6 ──
     const bd = [];
     if (biasDir === dir) bd.push(['Bias HTF searah', 2]);
     if (kzActive) bd.push(['Dalam Killzone', 1]);
@@ -1087,7 +1050,6 @@ function botTargets(dir, entry, risk, c5, c15, atrV) {
   const R = p => Math.abs(p - entry) / risk;
   const pick = (minR, maxR, after) => uniq.find(p => R(p) >= minR && R(p) <= maxR && (after == null || (dir === 1 ? p > after : p < after)));
   let synth = false;
-  // Modul Part 7.2: TP1 (IRL ~1R), TP2 (EQH/EQL 1.5-2.5R), TP3 (ERL/Swing Mayor 2.5-5R)
   let t1 = pick(0.8, 1.8), t2, t3;
   if (t1 == null) { t1 = entry + dir * risk; synth = true; }
   t2 = pick(1.5, 3.0, t1);
@@ -1105,7 +1067,6 @@ function calcBotSL({ dir, entry, setup, atrV, ctx, mode }) {
   const z = setup.zone;
   const zoneEdge = dir === 1 ? z.lower : z.upper;
 
-  // Modul Part 7.1: Conservative SL tidak boleh memakai zoneEdge jika limit di zoneEdge; pakai OB distal / Sweep
   const order = mode === 'CONSERVATIVE'
     ? [['OB distal', setup.obDistal], ['sweep', setup.sweepExtreme]]
     : [['zona', zoneEdge], ['OB distal', setup.obDistal], ['sweep', setup.sweepExtreme]];
@@ -1121,7 +1082,6 @@ function calcBotSL({ dir, entry, setup, atrV, ctx, mode }) {
   return { sl: entry - dir * Math.max(minD, 1.0 * atrV), dist: Math.max(minD, 1.0 * atrV), src: 'structural-fallback' };
 }
 
-// ── BOT EA RUNNER — 100% MODUL SMC/ICT (SCANNING -> SETUP_FORMING -> ZONE_OCCUPIED / LIMIT -> CONFIRMED) ──
 async function runBotSma20(ctx, d, botStyleRaw) {
   const { price, m1, m5, m15, h1 } = d;
   const c5 = closedOnly(m5, 180000);
@@ -1138,18 +1098,15 @@ async function runBotSma20(ctx, d, botStyleRaw) {
   const atrConf = atrOf(confTF, ctx.pip);
   const kz = getKillzoneStatus();
 
-  // 1. DEEP SCANNING: Bias HTF (H1/M15/M5) & Pemetaan Likuiditas
   const bias = multiTfBias({ h1: h1 && h1.length >= 20 ? h1 : null, m15: m15 && m15.length >= 15 ? m15 : null, m5: c5 }, ['h1', 'm15', 'm5']);
   const biasTxt = `${bias.bias} (${Object.entries(bias.details).map(([k, v]) => `${k.toUpperCase()}:${v}`).join(' | ') || 'n/a'})`;
 
   let setups = scanSetups(c5, atrV, ctx, price, bias.dir, kz.active);
-  // Modul Part 6: Skor < 7 -> SKIP (Hanya loloskan setup dengan skor >= 7)
   setups = setups.filter(s => s.score >= BOT_CFG.minScore);
   setups.sort((a, b) => b.score - a.score || b.formedIdx - a.formedIdx);
 
   const setup = setups[0];
 
-  // JIKA TIDAK ADA SETUP VALID (SKOR < 7) -> STANDBY / SCANNING (HARD-RULE 3: JANGAN GEGABAH ENTRY)
   if (!setup) {
     return {
       reason: withPair(ctx.symbol, `[SCANNING / STANDBY] Deep Scan selesai. Belum ditemukan setup dengan Confluence Score >= 7 (Sweep + Displacement + MSS + Zona POI). Bot menunggu setup valid sesuai SOP.`),
@@ -1163,10 +1120,8 @@ async function runBotSma20(ctx, d, botStyleRaw) {
   const zTxt = `${zLabel} ${ctx.f(z.lower)}-${ctx.f(z.upper)}`;
   const scoreTxt = `${setup.score} (${setup.breakdown.map(x => `${x[0]} +${x[1]}`).join(', ')})`;
 
-  // 2. CEK JARAK HARGA TERHADAP ZONA (MODUL PART 1.2 HARD-RULE 2 & HARD-RULE 5)
   const distToZone = price < z.lower ? (z.lower - price) : (price > z.upper ? (price - z.upper) : 0);
 
-  // HARD-RULE 5: Jika harga sudah menjauh > 1.5 * ATR dari zona -> MISSED / CHASE BLOCKED
   if (distToZone > BOT_CFG.maxChaseAtr * atrV) {
     return {
       reason: withPair(ctx.symbol, `[MISSED / CHASE BLOCKED] Harga (${ctx.f(price)}) sudah menjauh > 1.5x ATR dari zona ${zTxt}. Dilarang mengejar harga (Hard-Rule 5), mencari setup baru.`),
@@ -1176,15 +1131,10 @@ async function runBotSma20(ctx, d, botStyleRaw) {
 
   const priceInZone = inZone(price, z) || distToZone <= 0.15 * atrV;
 
-  // 3. JIKA HARGA BELUM MASUK ZONA -> MODE CONSERVATIVE LIMIT ORDER (MODUL PART 5)
   if (!priceInZone) {
-    // PERUBAHAN: Killzone TIDAK LAGI MEMBLOKIR. Hanya menjadi catatan (Killzone = bonus score).
-    // Setup tetap bisa dipasang Limit meskipun di luar Killzone.
-    
     const slr = calcBotSL({ dir, entry: z.mid, setup, atrV, ctx, mode: 'CONSERVATIVE' });
     const tg = botTargets(dir, z.mid, slr.dist, c5, m15, atrV);
 
-    // Hard-Rule 4: RR minimal 2.0 untuk Limit Order
     if (tg.rr3 < BOT_CFG.minRR) {
       return {
         reason: withPair(ctx.symbol, `[SKIP / RR LOW] Setup ${zTxt} memiliki RR 1:${tg.rr3.toFixed(1)} (< 1:2.0). Sesuai SOP, setup di-skip.`),
@@ -1199,8 +1149,8 @@ async function runBotSma20(ctx, d, botStyleRaw) {
     const orderTxt = `${side} LIMIT @ ${ctx.f(z.mid)}`;
     const kzTxt = kz.active ? kz.name : 'OUTSIDE KZ (Limit Allowed)';
 
-    const reasonId = withPair(ctx.symbol, `[LIMIT_PLACED] ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} (40%) · TP2 ${tps[1]} (30%) · TP3 ${tps[2]} (30%) | RR ${rrTxt} | Zona: ${zTxt} | ${kzTxt} | Score ${scoreTxt} | Bias ${biasTxt}.`);
-    const reasonEn = withPair(ctx.symbol, `[LIMIT_PLACED] ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} (40%) · TP2 ${tps[1]} (30%) · TP3 ${tps[2]} (30%) | RR ${rrTxt} | Zone: ${zTxt} | ${kzTxt} | Score ${scoreTxt} | Bias ${biasTxt}.`);
+    const reasonId = withPair(ctx.symbol, `[INTERACTIVE BOT] Struktur market mendeteksi ${z.type} di area ${zTxt}. Bot memasang ${orderTxt} karena harga mendekati zona institusional dengan Confluence Score ${scoreTxt}. Alasan Stop Loss di ${sl} adalah mengamankan area invalidasi di balik ${slr.src} untuk menghindari sapuan likuiditas semu. Arah struktur HTF dominan ${biasTxt}.`);
+    const reasonEn = withPair(ctx.symbol, `[INTERACTIVE BOT] Market structure detected ${z.type} at ${zTxt}. Bot placed ${orderTxt} as price approaches institutional zone with Confluence Score ${scoreTxt}. Stop Loss is set at ${sl} behind ${slr.src} to protect against false sweep. HTF structure bias is ${biasTxt}.`);
 
     return {
       dir,
@@ -1220,15 +1170,9 @@ async function runBotSma20(ctx, d, botStyleRaw) {
     };
   }
 
-  // 4. HARGA SUDAH DI ZONA (ZONE_OCCUPIED)
-  // PERUBAHAN LOGIKA: 
-  // - Jika Score >= 9 (confidentScore) -> LANGSUNG ENTRY (Tidak perlu konfirmasi CHoCH/CISD)
-  // - Jika Score 7 - 8.9 -> WAJIB KONFIRMASI (CHoCH/BOS/CISD)
-  
   const isHighConfidence = setup.score >= BOT_CFG.confidentScore;
 
   if (isHighConfidence) {
-    // --- LOGIKA ENTRY TANPA RAGU (HIGH CONFIDENCE) ---
     const slr = calcBotSL({ dir, entry: price, setup, atrV, ctx, mode: 'AGGRESSIVE' });
     const tg = botTargets(dir, price, slr.dist, c5, m15, atrV);
 
@@ -1245,8 +1189,8 @@ async function runBotSma20(ctx, d, botStyleRaw) {
     const orderTxt = `${side} NOW @ ${ctx.f(price)} (Direct Entry - High Score)`;
     const kzTxt = kz.active ? kz.name : 'OUTSIDE KZ';
 
-    const reasonId = withPair(ctx.symbol, `[CONFIRMED · DIRECT ENTRY] ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} (40%→BE) · TP2 ${tps[1]} (30%) · TP3 ${tps[2]} (30%) | RR ${rrTxt} | Zona: ${zTxt} | ${kzTxt} | Score ${scoreTxt} | Bias ${biasTxt}.`);
-    const reasonEn = withPair(ctx.symbol, `[CONFIRMED · DIRECT ENTRY] ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} (40%→BE) · TP2 ${tps[1]} (30%) · TP3 ${tps[2]} (30%) | RR ${rrTxt} | Zone: ${zTxt} | ${kzTxt} | Score ${scoreTxt} | Bias ${biasTxt}.`);
+    const reasonId = withPair(ctx.symbol, `[INTERACTIVE BOT] Confluence sangat tinggi (${scoreTxt}). Bot mengeksekusi ${side} secara langsung di zona ${zTxt}. Alasan Stop Loss diletakkan di ${sl} (${slr.src}) untuk melindungi posisi dari volatilitas mikro. Target TP dirancang bertahap hingga RR ${rrTxt}. Bias HTF: ${biasTxt}.`);
+    const reasonEn = withPair(ctx.symbol, `[INTERACTIVE BOT] High confluence score (${scoreTxt}). Bot executed ${side} directly at zone ${zTxt}. Stop Loss placed at ${sl} (${slr.src}) to protect against micro volatility. Target TPs scaled up to RR ${rrTxt}. HTF Bias: ${biasTxt}.`);
 
     return {
       dir,
@@ -1266,12 +1210,9 @@ async function runBotSma20(ctx, d, botStyleRaw) {
     };
   }
 
-  // --- LOGIKA ENTRY RAGU (BUTUH KONFIRMASI CHoCH/CISD) ---
   const structConf = validateStructureAndCISD(confTF, atrConf);
 
-  // HARD-RULE 1 & 3: Tanpa konfirmasi struktur/CISD dengan candle CLOSE, DILARANG ENTRY!
   if (!structConf.valid || structConf.dir !== dir) {
-    // Cek apakah sudah terlalu lama di zona tanpa konfirmasi
     const barsInZone = Math.max(0, c5.length - 1 - setup.formedIdx);
     
     if (barsInZone > BOT_CFG.maxZoneBars) {
@@ -1282,12 +1223,11 @@ async function runBotSma20(ctx, d, botStyleRaw) {
     }
 
     return {
-      reason: withPair(ctx.symbol, `[ZONE_OCCUPIED · WAITING CONFIRMATION] Harga berada di zona ${zTxt} (Score ${setup.score}), belum muncul konfirmasi Micro CHoCH/BOS atau CISD ${side}. Menunggu konfirmasi struktur! (${barsInZone}/${BOT_CFG.maxZoneBars} candles)`),
-      reasonEn: withPair(ctx.symbol, `[ZONE_OCCUPIED · WAITING CONFIRMATION] Price is inside zone ${zTxt} (Score ${setup.score}), no close-confirmed ${side} Micro CHoCH/BOS or CISD yet. Waiting for structure confirmation! (${barsInZone}/${BOT_CFG.maxZoneBars} candles)`)
+      reason: withPair(ctx.symbol, `[INTERACTIVE BOT] Harga sedang menguji zona ${zTxt} (Score ${setup.score}). Struktur HTF terpantau ${bias.bias}. Bot sedang memantau konfirmasi Micro CHoCH/BOS atau CISD ${side} sebelum melakukan entry. (${barsInZone}/${BOT_CFG.maxZoneBars} candles)`),
+      reasonEn: withPair(ctx.symbol, `[INTERACTIVE BOT] Price testing zone ${zTxt} (Score ${setup.score}). HTF structure is ${bias.bias}. Bot is monitoring for Micro CHoCH/BOS or CISD ${side} confirmation before entry. (${barsInZone}/${BOT_CFG.maxZoneBars} candles)`)
     };
   }
 
-  // Konfirmasi struktur muncul -> Eksekusi
   const isCisd = structConf.model === 'CISD';
   const minRRRequired = isCisd ? BOT_CFG.minRRCisd : BOT_CFG.minRR;
 
@@ -1307,8 +1247,8 @@ async function runBotSma20(ctx, d, botStyleRaw) {
   const orderTxt = `${side} NOW @ ${ctx.f(price)} (${structConf.type})`;
   const kzTxt = kz.active ? kz.name : 'OUTSIDE KZ';
 
-  const reasonId = withPair(ctx.symbol, `[CONFIRMED · EXECUTE MARKET] ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} (40%→BE) · TP2 ${tps[1]} (30%) · TP3 ${tps[2]} (30%) | RR ${rrTxt} | Zona: ${zTxt} | ${kzTxt} | Score ${scoreTxt} | Bias ${biasTxt}.`);
-  const reasonEn = withPair(ctx.symbol, `[CONFIRMED · EXECUTE MARKET] ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} (40%→BE) · TP2 ${tps[1]} (30%) · TP3 ${tps[2]} (30%) | RR ${rrTxt} | Zone: ${zTxt} | ${kzTxt} | Score ${scoreTxt} | Bias ${biasTxt}.`);
+  const reasonId = withPair(ctx.symbol, `[INTERACTIVE BOT] Konfirmasi valid terdeteksi: ${structConf.type} di dalam zona ${zTxt}. Bot mengeksekusi ${side} karena struktur harga memenuhi aturan konfirmasi close candle. Stop Loss dipasang di ${sl} (${slr.src}) sebagai batas invalidasi struktur. Target TP1-TP3 disesuaikan dengan likuiditas luar dengan RR ${rrTxt}. Bias HTF: ${biasTxt}.`);
+  const reasonEn = withPair(ctx.symbol, `[INTERACTIVE BOT] Valid confirmation detected: ${structConf.type} inside zone ${zTxt}. Bot executed ${side} as price action met close-candle confirmation rules. Stop Loss set at ${sl} (${slr.src}) as structure invalidation limit. TP targets scaled with RR ${rrTxt}. HTF Bias: ${biasTxt}.`);
 
   return {
     dir,
@@ -1556,10 +1496,10 @@ async function handleVision(body, lang, res) {
   return res.status(200).json({ ok: true, mode: 'vision', symbol: 'VISION', style, signal: out.signal });
 }
 
-// ── QWEN REASONING & DUAL LANGUAGE ──
+// ── QWEN REASONING (SINGKAT & PADAT UNTUK MANUAL) ──
 async function qwenReasonDual(signal, ctx, styleName, lang) {
   if (!QWEN_KEYS.length) return null;
-  const sys = 'You are an institutional SMC/ICT trading analyst. Provide two concise reasonings in a single JSON: {"id": "...", "en": "..."}. Do not change price levels.';
+  const sys = 'You are an institutional SMC/ICT trading analyst. Provide a concise, punchy, and professional reasoning (short and dense / singkat padat) explaining the market structure, entry reason, and SL rationale in valid JSON format: {"id": "...", "en": "..."}. Do not change price levels.';
   const user = JSON.stringify({
     symbol: ctx.symbol, style: styleName, signal: signal.signal, order: signal.fill,
     entry: signal.entry, sl: signal.sl, tp1: signal.tp1, tp2: signal.tp2, tp3: signal.tp3,
@@ -1650,6 +1590,9 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
   const final = isAutoBot ? pickSingleForBot(result, price) : result;
 
   const signal = buildSignal(final, lang);
+  
+  // Jika mode manual, gunakan Qwen untuk membuat alasan yang singkat dan padat.
+  // Jika mode bot, gunakan penjelasan terperinci (interaktif) dari runBotSma20 secara langsung.
   if (!isAutoBot) {
     const dual = await qwenReasonDual(signal, ctx, styleName, lang);
     if (dual) {
