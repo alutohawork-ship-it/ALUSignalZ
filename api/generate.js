@@ -621,8 +621,19 @@ function botTrigger(c1, ms5, dir, zone) {
   if (ms1 && ms1.dir === dir && ms1.event === 'BOS' && ms5 && ms5.trend === dir) return 'BOS continuity M1';
   return null;
 }
+// Trend micro dari SMA20: harga di atas SMA dan SMA sedang naik (BUY), atau sebaliknya (SELL). 0 = tidak jelas.
+function smaMicroDir(c, period = 20, lookback = 3) {
+  if (!c || c.length < period + lookback + 1) return 0;
+  const smaAt = end => c.slice(0, end).slice(-period).reduce((a, x) => a + x.c, 0) / period;
+  const smaNow = smaAt(c.length), smaPrev = smaAt(c.length - lookback);
+  const px = c[c.length - 1].c;
+  if (px > smaNow && smaNow > smaPrev) return 1;
+  if (px < smaNow && smaNow < smaPrev) return -1;
+  return 0;
+}
+
 function runBot(ctx, d, styleName) {
-  const requireHtf = styleName === 'Day Trading';
+  const requireHtf = false; // bot hanya Scalping (Konservatif dihapus dari bot)
   const price = ctx.price, pip = ctx.pip, F = v => ctx.f(v);
   const c1 = closedOnly(d.m1, TF_MS.m1), c5 = closedOnly(d.m5, TF_MS.m5);
   const c15 = closedOnly(d.m15, TF_MS.m15), c30 = closedOnly(d.m30, TF_MS.m30), h1 = closedOnly(d.h1, TF_MS.h1);
@@ -640,12 +651,22 @@ function runBot(ctx, d, styleName) {
 
   let dir = 0;
   if (zoneHit) dir = zone.dir;
-  else if (!requireHtf && ltfDir) dir = ltfDir; // Scalping: pakai struktur M5 + trigger M1, HTF tidak memblokir
+  else if (!requireHtf && ltfDir && (!ctx.useSma || smaMicroDir(c5) === ltfDir)) dir = ltfDir; // Scalping: struktur M5 + trigger M1 (+ SMA20 M5 bila aktif)
 
   const swRaw = sweepOf(c5) || sweepOf(c1);
   const sw = swRaw && dir && swRaw.dir === dir ? swRaw : null;
   const disp = dir ? (dispOf(c1, atr1, dir) || dispOf(c5, atr5, dir)) : null;
   const trigger = dir ? botTrigger(c1, ms5, dir, zone) : null;
+
+  // KONFIRMASI WAJIB: candle M1 terakhir (sudah close) harus searah dan belum memantul jauh.
+  // Kalau ada zona: harus close DI LUAR zona, bukan sekadar menyentuh zona.
+  const lastC = c1[c1.length - 1];
+  const confirmSide = dir === 1 ? lastC.c > lastC.o : dir === -1 ? lastC.c < lastC.o : false;
+  const notBounced = dir === 1 ? price >= lastC.c - 0.5 * atr1 : dir === -1 ? price <= lastC.c + 0.5 * atr1 : false;
+  const closeOutside = zoneHit ? (dir === -1 ? lastC.c < zone.lower : lastC.c > zone.upper) : true;
+  const confirmed = !!dir && confirmSide && notBounced && closeOutside;
+  const smaDir = smaMicroDir(c5);
+  const smaOk = !ctx.useSma || smaDir === dir;
 
   const T = (ok, txt) => `${ok ? '✅' : '⬜'} ${txt}`;
   const checklist = [
@@ -656,6 +677,8 @@ function runBot(ctx, d, styleName) {
     T(!!sw, sw ? `Sweep likuiditas ${sw.dir === 1 ? 'SSL' : 'BSL'} @ ${F(sw.level)}` : 'Sweep likuiditas: belum ada yang searah'),
     T(!!disp, disp ? 'Displacement: ada' : 'Displacement: belum ada'),
     T(!!trigger, trigger ? `Trigger close-confirmed: ${trigger}` : 'Trigger: belum ada CHoCH / CISD / Breaker / BOS continuity'),
+    T(confirmed, `Konfirmasi M1 close ${dir === -1 ? 'bearish' : dir === 1 ? 'bullish' : '-'}${zoneHit ? ' di luar zona' : ''}`),
+    ...(ctx.useSma ? [T(smaOk, `SMA20 M5 trend micro: ${smaDir === 1 ? 'BULLISH (harga di atas SMA, SMA naik)' : smaDir === -1 ? 'BEARISH (harga di bawah SMA, SMA turun)' : 'DATAR / belum jelas'}`)] : []),
   ];
   const facts = {
     mode: 'bot', symbol: ctx.symbol, style: styleName, kz: ctx.kz.name,
@@ -668,12 +691,15 @@ function runBot(ctx, d, styleName) {
   const topDown = facts.bias;
 
   // Sweep/displacement diutamakan, tapi trigger CHoCH M1 / CISD / Breaker sudah cukup (kontinuitas fleksibel)
-  const ready = dir && trigger && (zoneHit || (ms5 && ms5.trend === dir && (sw || disp || /CHoCH M1|CISD|Breaker/.test(trigger))));
+  const ready = dir && trigger && confirmed && smaOk && (zoneHit || (ms5 && ms5.trend === dir && (sw || disp || /CHoCH M1|CISD|Breaker/.test(trigger))));
   if (!ready) {
     let why;
     if (!dir) why = requireHtf ? 'Belum ada zona WNS HTF searah.' : 'Struktur M5 belum searah / HTF belum sejalan.';
     else if (!trigger) why = `Struktur ${dir === 1 ? 'bullish' : 'bearish'} sudah terbaca, menunggu trigger close-confirmed di M1.`;
     else if (zone && !zoneHit && requireHtf) why = `Zona WNS ${zone.label} masih ${(zone.dist / atr15).toFixed(1)}x ATR dari harga. Gaya Konservatif menunggu harga masuk zona.`;
+    else if (zoneHit && !closeOutside) why = `Harga sudah masuk zona ${zone.label}, tapi belum ada M1 close di luar zona. Saya tunggu konfirmasi, tidak masuk di dalam zona.`;
+    else if (!confirmSide || !notBounced) why = `Trigger ${trigger} sudah terbaca, tapi candle M1 belum close searah atau harga sudah memantul. Menunggu konfirmasi.`;
+    else if (!smaOk) why = `SMA20 M5 belum searah dengan arah ${dir === 1 ? 'BUY' : 'SELL'}. Menunggu trend micro sejalan.`;
     else why = 'Sweep / displacement searah belum lengkap.';
     return standbyOut(facts, why, checklist, topDown);
   }
@@ -893,12 +919,12 @@ function manualTfs(styleName) {
 
 async function handleCandles(body, lang, res, { email, isAutoBot }) {
   const symbol = String(body.symbol || 'XAUUSD').toUpperCase();
-  const styleName = normStyle(body.style || body.mode || 'Day Trading');
+  const styleName = isAutoBot ? 'Scalping' : normStyle(body.style || body.mode || 'Day Trading');
   const price = Number(body.price ?? body.livePrice ?? body.currentPrice ?? 0);
   if (!(price > 0)) return fail(res, msg(lang, 'noPrice'));
 
   const dec = DECIMALS[symbol] ?? 2;
-  const ctx = { symbol, lang, dec, price, pip: pipSizeOf(symbol, dec), gold: isGold(symbol), kz: getKillzoneStatus(), f: v => Number(Number(v).toFixed(dec)) };
+  const ctx = { symbol, lang, dec, price, pip: pipSizeOf(symbol, dec), gold: isGold(symbol), kz: getKillzoneStatus(), useSma: !!isAutoBot && !!body.useSma, f: v => Number(Number(v).toFixed(dec)) };
 
   const candleMap = {};
   for (const tf of ['m1', 'm5', 'm15', 'm30', 'h1', 'h4', 'd1']) candleMap[tf] = clientCandles(body, tf);
