@@ -183,8 +183,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
           </div>
           <div class="grid grid-cols-2 gap-1.5">
             <select id="botStyle" class="bg-cardbg border border-panelborder text-[10px] font-bold text-white p-1.5 rounded-lg focus:outline-none">
-              <option value="Scalping">Scalping Agresif</option>
-              <option value="Day Trading">Scalping Konservatif (Fleksibel)</option>
+              <option value="Scalping">Scalping (M5 + M1)</option>
             </select>
             <select id="botMode" class="bg-cardbg border border-panelborder text-[10px] font-bold text-white p-1.5 rounded-lg focus:outline-none">
               <option value="loop">Auto-loop</option>
@@ -192,6 +191,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
             </select>
           </div>
           <label class="flex items-center gap-1.5 text-[9px] text-gray-400 cursor-pointer"><input type="checkbox" id="botSess" class="rounded bg-cardbg border-panelborder"> Hanya sesi London/NY (07–21 UTC)</label>
+          <label class="flex items-center gap-1.5 text-[9px] text-gray-400 cursor-pointer"><input type="checkbox" id="botSma" class="rounded bg-cardbg border-panelborder"> Pakai SMA 20 M5 (trend micro)</label>
           <button id="botBtn" onclick="toggleBot()" class="w-full font-bold py-2 rounded-lg text-xs transition bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20">START SCANNER BOT</button>
 
           <p id="botCloseTimer" class="text-[10px] font-mono font-bold text-amber-300"></p>
@@ -3103,6 +3103,7 @@ function saveBotState() {
       style: $('botStyle') ? $('botStyle').value : 'Scalping',
       mode: $('botMode') ? $('botMode').value : 'loop',
       sess: $('botSess') ? $('botSess').checked : false,
+      sma: $('botSma') ? $('botSma').checked : false,
     }));
   } catch (e) {}
 }
@@ -3112,9 +3113,10 @@ function resumeBotIfNeeded() {
   let s = null;
   try { s = JSON.parse(localStorage.getItem(BOT_STATE_KEY) || 'null'); } catch (e) {}
   if (!s || !s.running || botRunning) return;
-  if ($('botStyle') && s.style) $('botStyle').value = s.style;
+  if ($('botStyle')) $('botStyle').value = 'Scalping'; // bot hanya Scalping
   if ($('botMode') && s.mode) $('botMode').value = s.mode;
   if ($('botSess')) $('botSess').checked = !!s.sess;
+  if ($('botSma')) $('botSma').checked = !!s.sma;
   toggleBot(true);
 }
 
@@ -3129,7 +3131,7 @@ setInterval(() => {
 }, 1000);
 
 document.addEventListener('change', e => {
-  if (['botStyle', 'botMode', 'botSess'].includes(e.target.id)) saveBotState();
+  if (['botStyle', 'botMode', 'botSess', 'botSma'].includes(e.target.id)) saveBotState();
 });
 
 async function toggleBot(resume = false) {
@@ -3219,6 +3221,7 @@ async function runBotCycle() {
       currentPrice: livePx,
       candles: { m1: rowsOf('1m'), m5: rowsOf('5m'), m15: rowsOf('15m'), m30: rowsOf('30m'), h1: rowsOf('1h') },
       lang: lang,
+      useSma: !!($('botSma') && $('botSma').checked),
       auto: true,
       source: 'bot'
     });
