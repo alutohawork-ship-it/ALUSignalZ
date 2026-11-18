@@ -374,7 +374,9 @@ function planFrom(o) {
   if (risk > o.maxRisk) return { ok: false, reason: `SL struktural ${(risk / o.atrRef).toFixed(1)}x ATR, melebihi batas ${(o.maxRisk / o.atrRef).toFixed(1)}x ATR. Skip, SL tidak saya utak-atik.` };
   let sl = o.sl;
   if (risk < o.minRisk) { sl = o.entry - o.dir * o.minRisk; risk = o.minRisk; }
-  const tps = buildTps(o.dir, o.entry, risk, o.liq);
+  const tps = o.fixedR
+    ? [1, 2, 3].map(k => o.entry + o.dir * risk * k)   // manual & vision: RR tetap 1:1, 1:2, 1:3
+    : buildTps(o.dir, o.entry, risk, o.liq);           // bot: target likuiditas
   const rr = Math.abs(tps[2] - o.entry) / risk;
   if (rr < o.minRR) return { ok: false, reason: `RR 1:${rr.toFixed(2)} di bawah minimal 1:${o.minRR}. Skip.` };
   return { ok: true, plan: { dir: o.dir, entry: o.entry, sl, tps, rr, orderType: o.orderType, setup: o.setup, zone: o.zone || null } };
@@ -473,7 +475,7 @@ function runAggressive(ctx, d) {
   const sl0 = dir === 1 ? inv - buf : inv + buf;
 
   const p = planFrom({
-    dir, entry, sl: sl0, orderType, minRR: 2.0, liq: liquidityLevels(c5),
+    dir, entry, sl: sl0, orderType, minRR: 2.0, fixedR: true, liq: liquidityLevels(c5),
     maxRisk: 1.5 * atr5, minRisk: 0.3 * atr1, atrRef: atr5 || atr1,
     setup: `Manual · Scalping Agresif · ${trig} · ${note}`,
     zone: z ? { lower: z.lower, upper: z.upper, label: z.label, mid: z.mid } : null,
@@ -521,7 +523,7 @@ function runManual(ctx, d, styleName) {
   const minRR = trig === 'CISD' || trig === 'Breaker' ? 1.5 : cfg.minRR;
   const common = {
     dir: z.dir, sl: sl0, maxRisk: (MAX_SL_ATR[cfg.kind] || 1.5) * atrZ, atrRef: atrZ, minRisk: 0.3 * atrT,
-    minRR, liq: liquidityLevels(ltfC), zone: { ...z, label: z.label }, topDown: facts.bias,
+    minRR, fixedR: true, liq: liquidityLevels(ltfC), zone: { ...z, label: z.label }, topDown: facts.bias,
   };
   const zoneTxt = `${z.label} ${ctx.f(z.lower)}–${ctx.f(z.upper)} (${cfg.zone.toUpperCase()})`;
   facts.zone = { type: z.type, label: z.label, lower: ctx.f(z.lower), upper: ctx.f(z.upper), tf: cfg.zone.toUpperCase(), distAtr: Number((z.dist / atrZ).toFixed(1)) };
@@ -793,7 +795,10 @@ function buildVisionSignal(j, style, lang, imgCount) {
   const perImg = Array.isArray(j.perImageAnalyses) && j.perImageAnalyses.length ? j.perImageAnalyses.map(item => `• ${String(item).trim()}`).join('\n') : '';
   const summary = String(j.reason || '').trim() || 'Analisis AI dari chart.';
   const fullReason = perImg ? `[Analisa ${imgCount} Gambar]\n${perImg}\n\n[Setup]\n${summary}` : summary;
-  return { signal: sig, orderType: isLimit ? 'LIMIT' : 'MARKET', fill: isLimit ? 'LIMIT' : 'NOW', status: isLimit ? 'PENDING' : 'RUNNING', entry: Number(j.entry), sl: Number(j.sl), tp1: num(j.tp1), tp2: num(j.tp2), tp3: num(j.tp3), setup: String(j.setup || `Vision ${style}`), confidence: lvl(j.confidence, ['HIGH', 'MEDIUM', 'LOW'], 'MEDIUM'), risk: lvl(j.risk, ['LOW', 'MEDIUM', 'HIGH'], 'MEDIUM'), reason: fullReason, reasons: { id: fullReason, en: fullReason }, chartContext: '', zone: j.zone ? { label: String(j.zone) } : null, zoneLabel: '', zoneNote: '', topDown: j.topDown ? String(j.topDown) : null, source: 'VISION_AI', aiReasoning: true };
+  const vEntry = Number(j.entry), vSl = Number(j.sl), vDir = sig === 'BUY' ? 1 : -1;
+  const vRisk = Math.abs(vEntry - vSl);
+  const [vTp1, vTp2, vTp3] = [1, 2, 3].map(k => vEntry + vDir * vRisk * k); // RR tetap 1:1, 1:2, 1:3
+  return { signal: sig, orderType: isLimit ? 'LIMIT' : 'MARKET', fill: isLimit ? 'LIMIT' : 'NOW', status: isLimit ? 'PENDING' : 'RUNNING', entry: vEntry, sl: vSl, tp1: vTp1, tp2: vTp2, tp3: vTp3, setup: String(j.setup || `Vision ${style}`), confidence: lvl(j.confidence, ['HIGH', 'MEDIUM', 'LOW'], 'MEDIUM'), risk: lvl(j.risk, ['LOW', 'MEDIUM', 'HIGH'], 'MEDIUM'), reason: fullReason, reasons: { id: fullReason, en: fullReason }, chartContext: '', zone: j.zone ? { label: String(j.zone) } : null, zoneLabel: '', zoneNote: '', topDown: j.topDown ? String(j.topDown) : null, source: 'VISION_AI', aiReasoning: true };
 }
 async function runVisionAnalysis(images, style, lang) {
   if (!OPENAI_API_KEY) return { ok: false, reason: msg(lang, 'noKey') };
