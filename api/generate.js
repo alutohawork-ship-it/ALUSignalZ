@@ -580,11 +580,22 @@ function runBot(ctx, d, styleName) {
   const sl0 = dir === 1 ? inv - buf : inv + buf;
   const minRR = /CISD|Breaker/.test(trigger) ? 1.5 : 2.0;
   const liq = [...liquidityLevels(c5), ...liquidityLevels(c15)];
+  // Entry mengikuti close candle konfirmasi M1, bukan harga yang sudah lari
+  const trig1 = c1[c1.length - 1];
+  const bHi = Math.max(trig1.o, trig1.c), bLo = Math.min(trig1.o, trig1.c);
+  const entryClose = trig1.c;
+  const nearClose = Math.abs(price - entryClose) <= 0.25 * atr1;
+  const ranAway = dir === 1 ? price > entryClose : price < entryClose;
+  let orderType, entry, entryNote;
+  if (nearClose) { orderType = 'MARKET'; entry = entryClose; entryNote = 'entry close M1'; }
+  else if (ranAway) { orderType = 'LIMIT'; entry = (bHi + bLo) / 2; entryNote = 'limit pullback ke body M1'; }
+  else { orderType = 'LIMIT'; entry = entryClose; entryNote = 'limit di close M1'; }
+
   const p = planFrom({
-    dir, entry: price, sl: sl0, orderType: 'MARKET', minRR, liq,
+    dir, entry, sl: sl0, orderType, minRR, liq,
     maxRisk: zoneHit ? BOT_CFG.maxSlAtr15 * atr15 : BOT_CFG.maxSlAtr5 * atr5,
     minRisk: BOT_CFG.minSlAtr1 * atr1, atrRef: atr5 || atr1,
-    setup: `SMC/ICT Bot · ${zoneHit ? 'WNS ' + zone.label : 'LTF Scalp'} · ${trigger}`,
+    setup: `SMC/ICT Bot · ${zoneHit ? 'WNS ' + zone.label : 'LTF Scalp'} · ${trigger} · ${entryNote}`,
     zone: zoneHit ? { ...zone, lower: zone.lower, upper: zone.upper, label: zone.label } : null,
   });
   if (!p.ok) {
@@ -796,6 +807,10 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
   if (isAutoBot && out.signal.status === 'RUNNING') await markTrialAsUsed(email);
 
   const cacheKey = isAutoBot ? `${symbol}|${styleName}|${out.facts.status}|${out.facts.signal || ''}|${out.facts.trigger || ''}|${out.facts.zoneType || ''}|${out.facts.bias}` : null;
+  if (isAutoBot) {
+    const last = data.m1 && data.m1.length ? data.m1[data.m1.length - 1] : null;
+    out.signal.nextCloseAt = last ? tsMs(last.t) + TF_MS.m1 : null;
+  }
   const story = await getStory(out.facts, cacheKey);
   const signal = {
     ...out.signal,
