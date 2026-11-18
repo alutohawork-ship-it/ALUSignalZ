@@ -3,9 +3,10 @@
 // BOT (AUTOBOT Xauusd)           : scalping berbasis struktur LTF (M5 arah, M1 trigger), zona HTF opsional.
 // AI REASONING                   : konsultan analis yang ngobrol santai, fallback narasi manusiawi jika AI gagal.
 
+import { checkAccess, markTrialBotUsed } from '../lib/access.js';
+
 export const config = { maxDuration: 60 };
 
-const KV_KEY = 'alu_clients';
 const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
 
 const OPENAI_BASE_URL = (process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/$/, '');
@@ -85,63 +86,7 @@ const MSG = {
 };
 const msg = (lang, key) => ((MSG[lang] || MSG.id)[key] || key);
 
-const kvEnabled = () => !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
-async function kvCmd(command) {
-  const r = await httpJson(process.env.KV_REST_API_URL, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.KV_REST_API_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(command),
-  }, 5000);
-  if (!r.ok || !r.data || r.data.error) throw new Error((r.data && r.data.error) || `KV HTTP ${r.status}`);
-  return r.data.result;
-}
-let clientsCache = { t: 0, list: null };
-async function loadClients() {
-  if (clientsCache.list && Date.now() - clientsCache.t < 60000) return clientsCache.list;
-  let raw = null;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try { raw = await kvCmd(['GET', KV_KEY]); break; }
-    catch (e) {
-      if (attempt === 1) {
-        if (clientsCache.list) return clientsCache.list; // KV gagal: pakai cache lama
-        throw e;
-      }
-      await new Promise(r => setTimeout(r, 400));
-    }
-  }
-  const list = raw ? JSON.parse(raw) : [];
-  clientsCache = { t: Date.now(), list };
-  return list;
-}
-
-async function checkAccess(email, isAutoBot) {
-  if (!email) return { ok: false, key: 'noEmail' };
-  if (!kvEnabled()) return { ok: true, status: 'dev' };
-  let clients;
-  try { clients = await loadClients(); }
-  catch (e) { console.error('KV:', e.message); return { ok: false, key: 'kvError' }; }
-  if (!clients.length) return { ok: false, key: 'notRegistered' };
-  const c = clients.find(x => String(x.email || '').toLowerCase() === email);
-  if (!c) return { ok: false, key: 'notRegistered' };
-  if (new Date(c.expires_at) <= new Date()) return { ok: false, key: 'expired' };
-  if (c.status === 'trial' && isAutoBot && c.trialBotUsed) return { ok: false, key: 'trialLimit' };
-  return { ok: true, status: c.status };
-}
-
-async function markTrialAsUsed(email) {
-  if (!kvEnabled()) return;
-  try {
-    const raw = await kvCmd(['GET', KV_KEY]);
-    if (!raw) return;
-    const clients = JSON.parse(raw);
-    const idx = clients.findIndex(x => String(x.email || '').toLowerCase() === email);
-    if (idx !== -1 && clients[idx].status === 'trial') {
-      clients[idx].trialBotUsed = true;
-      await kvCmd(['SET', KV_KEY, JSON.stringify(clients)]);
-      clientsCache = { t: 0, list: null };
-    }
-  } catch (e) { console.error('markTrialAsUsed:', e.message); }
-}
+const markTrialAsUsed = markTrialBotUsed;
 
 // ── DATA CANDLE ──
 const tlCooldown = new Map();
