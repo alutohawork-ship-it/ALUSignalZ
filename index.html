@@ -213,9 +213,13 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
               <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(16,185,129,.6)"></i> Demand/OB</span>
               <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(239,68,68,.6)"></i> Supply/OB</span>
               <span class="text-amber-400">┄ BSL/SSL</span>
+              <span class="text-orange-400 font-bold"> Sweep Line</span>
               <span class="text-yellow-300">SMA 20 Line</span>
               <span class="text-sky-300">BOS / MSS / CHoCH</span>
               <span class="text-fuchsia-300">┈ CISD</span>
+              <span class="text-emerald-300">SMT Buy</span>
+              <span class="text-red-300">SMT Sell</span>
+              <span class="text-indigo-300">Trendline</span>
             </div>
             <p class="text-[8px] font-bold text-gray-500 pt-1">RIWAYAT BOT</p>
             <div id="botHistory" class="space-y-1 max-h-[160px] overflow-y-auto pr-1"></div>
@@ -376,9 +380,13 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
             <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(16,185,129,.6)"></i> Demand</span>
             <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(239,68,68,.6)"></i> Supply</span>
             <span class="text-amber-400">┄ BSL/SSL</span>
+            <span class="text-orange-400 font-bold"> Sweep Line</span>
             <span class="text-yellow-300">SW sweep</span>
             <span class="text-sky-300">BOS / MSS / CHoCH</span>
             <span class="text-fuchsia-300">┈ CISD</span>
+            <span class="text-emerald-300">SMT Buy</span>
+            <span class="text-red-300">SMT Sell</span>
+            <span class="text-indigo-300">Trendline</span>
             <span class="text-teal-300">Asia</span>
             <span class="text-red-400">London KZ</span>
             <span class="text-blue-400">London</span>
@@ -2005,7 +2013,7 @@ function liquidity(rows, sw) {
         if (high ? c.h > s.p : c.l < s.p) { hit = { j, closeBack: high ? c.c < s.p : c.c > s.p }; break; }
       }
       if (!hit) pools.push({ high, p: s.p, t: s.t, toT: last.t, label: high ? 'BSL' : 'SSL' });
-      else if (hit.closeBack) sweeps.push({ high, p: s.p, t: rows[hit.j].t });
+      else if (hit.closeBack) sweeps.push({ high, p: s.p, t: s.t, hitT: rows[hit.j].t, label: high ? 'Sweep BSL' : 'Sweep SSL' });
     }
   };
   check(sw.sh, true);
@@ -2014,17 +2022,35 @@ function liquidity(rows, sw) {
 }
 
 function detectSMC(rows) {
-  const fvgs = [], obs = [];
+  const fvgs = [], obs = [], cisd = [], smt = [], trendlines = [];
   for (let i = 1; i < rows.length - 1; i++) {
     const a = rows[i - 1], b = rows[i], c = rows[i + 1];
     if (a.h < c.l && !invalidZone(rows, i + 2, 1, a.h, c.l)) fvgs.push({ dir: 1, bottom: a.h, top: c.l, t: b.t });
     if (a.l > c.h && !invalidZone(rows, i + 2, -1, c.h, a.l)) fvgs.push({ dir: -1, bottom: c.h, top: a.l, t: b.t });
     if (b.c < b.o && c.c > b.h) obs.push({ dir: 1, bottom: b.c, top: b.o, t: b.t });
     if (b.c > b.o && c.c < b.l) obs.push({ dir: -1, bottom: b.o, top: b.c, t: b.t });
+    
+    // CISD Detection: Change in State of Delivery (sudden impulse breakout of prior range)
+    if (Math.abs(b.c - b.o) > (b.h - b.l) * 0.7 && Math.abs(b.c - b.o) > (rows[i-2] ? Math.abs(rows[i-2].c - rows[i-2].o) * 1.5 : 0)) {
+      cisd.push({ dir: b.c >= b.o ? 1 : -1, price: (b.o + b.c) / 2, t: b.t });
+    }
   }
+
+  // SMT & Trendline logic calculation
   const sw = swings(rows);
+  if (sw.sh.length >= 2) {
+    const h1 = sw.sh[sw.sh.length - 2], h2 = sw.sh[sw.sh.length - 1];
+    trendlines.push({ x1: h1.t, y1: h1.p, x2: h2.t, y2: h2.p, type: 'RESISTANCE' });
+    if (h2.p < h1.p) smt.push({ dir: -1, p: h2.p, t: h2.t, label: 'SMT Sell' });
+  }
+  if (sw.sl.length >= 2) {
+    const l1 = sw.sl[sw.sl.length - 2], l2 = sw.sl[sw.sl.length - 1];
+    trendlines.push({ x1: l1.t, y1: l1.p, x2: l2.t, y2: l2.p, type: 'SUPPORT' });
+    if (l2.p > l1.p) smt.push({ dir: 1, p: l2.p, t: l2.t, label: 'SMT Buy' });
+  }
+
   const st = structure(rows, sw);
-  return { fvgs: fvgs.slice(-4), obs: obs.slice(-4), liq: liquidity(rows, sw), ev: st.ev };
+  return { fvgs: fvgs.slice(-4), obs: obs.slice(-4), liq: liquidity(rows, sw), ev: st.ev, cisd: cisd.slice(-3), smt: smt.slice(-2), trendlines: trendlines.slice(-2) };
 }
 
 function getSmc(k, iv) {
@@ -2034,7 +2060,7 @@ function getSmc(k, iv) {
   const rows = displayRows(k, iv);
   const res = rows.length >= 20
     ? { ...detectSMC(rows), status: 'ok' }
-    : { status: 'loading', fvgs: [], obs: [], liq: { pools: [], sweeps: [] }, ev: [] };
+    : { status: 'loading', fvgs: [], obs: [], liq: { pools: [], sweeps: [] }, ev: [], cisd: [], smt: [], trendlines: [] };
   res.n = rows.length;
   res.err = (!s.rows.length && !s.ext.length) ? (s.err || s.extErr || '') : '';
   s.smc = res;
@@ -2120,10 +2146,9 @@ function layoutX(rows, plotL, plotR, tfMs) {
   const xOfT = timeToX(vis, plotL, slot);
   return { vis, slot, xOfT };
 }
-function srcLabel(k, iv) { return `${k} · ${iv} · WIB · ${srcOf(k, iv)}`; }
 const clampX = (x, plotL, plotR) => Math.max(plotL, Math.min(plotR, x));
 
-// ---- Kanvas Khusus Bot (Bot Live Map dengan Visual SMC & SMA20 Lengkap Sweep, CISD, MSS, BOS) ----
+// ---- Kanvas Khusus Bot (Bot Live Map dengan Visual Lengkap Sweep, CISD, SMT, Trendline) ----
 function drawBotMap(cv, cx, t, k) {
   if (!cx) return;
   const d = fitCv(cv, cx);
@@ -2142,7 +2167,7 @@ function drawBotMap(cv, cx, t, k) {
   cx.textAlign = 'left';
   cx.textBaseline = 'top';
   cx.fillStyle = 'rgba(148,163,184,.9)';
-  cx.fillText(`BOT SMC & SMA20 · ${srcLabel(k, iv)}`, plotL + 2, 3);
+  cx.fillText(`BOT SMC, SWEEP, CISD & SMT · ${srcLabel(k, iv)}`, plotL + 2, 3);
 
   if (!rows.length && live == null) {
     cx.font = 'bold 11px ui-monospace, monospace';
@@ -2211,21 +2236,77 @@ function drawBotMap(cv, cx, t, k) {
       cx.fillRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
       cx.restore();
     });
-    // Render Liquidity Sweep Pools (BSL/SSL)
+    // Render Liquidity Sweep Pools & Panjang Garis Sweep dengan Tulisan Sweep
     if (smcData.liq && smcData.liq.pools) {
       smcData.liq.pools.forEach(p => {
         const y = yOf(p.p), x0 = clampX(xOfT(p.t), plotL, plotR);
         cx.save();
         cx.strokeStyle = 'rgba(245,158,11,.85)';
-        cx.lineWidth = 1;
-        cx.setLineDash([3, 3]);
-        cx.beginPath(); cx.moveTo(x0, y); cx.lineTo(plotR, y); cx.stroke();
+        cx.lineWidth = 1.2;
+        cx.setLineDash([4, 4]);
+        cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
         cx.setLineDash([]);
         cx.font = 'bold 8px ui-monospace, monospace';
         cx.fillStyle = 'rgba(245,158,11,1)';
         cx.textAlign = 'right';
         cx.textBaseline = p.high ? 'bottom' : 'top';
         cx.fillText(p.label, plotR - 4, y + (p.high ? -2 : 2));
+        cx.restore();
+      });
+    }
+    if (smcData.liq && smcData.liq.sweeps) {
+      smcData.liq.sweeps.forEach(swp => {
+        const y = yOf(swp.p), x0 = clampX(xOfT(swp.t), plotL, plotR), x1 = clampX(xOfT(swp.hitT), plotL, plotR);
+        cx.save();
+        cx.strokeStyle = '#f97316';
+        cx.lineWidth = 2;
+        cx.beginPath(); cx.moveTo(x0, y); cx.lineTo(plotR, y); cx.stroke();
+        cx.font = 'bold 9px ui-monospace, monospace';
+        cx.fillStyle = '#f97316';
+        cx.textAlign = 'left';
+        cx.textBaseline = 'bottom';
+        cx.fillText('⚡ SWEEP', x1 + 4, y - 2);
+        cx.restore();
+      });
+    }
+    // Render CISD Lines
+    if (smcData.cisd) {
+      smcData.cisd.forEach(cd => {
+        const y = yOf(cd.price), x0 = clampX(xOfT(cd.t), plotL, plotR);
+        cx.save();
+        cx.strokeStyle = '#e879f9';
+        cx.lineWidth = 1.5;
+        cx.setLineDash([2, 4]);
+        cx.beginPath(); cx.moveTo(x0, y); cx.lineTo(plotR, y); cx.stroke();
+        cx.setLineDash([]);
+        cx.font = 'bold 8px ui-monospace, monospace';
+        cx.fillStyle = '#e879f9';
+        cx.textAlign = 'right';
+        cx.textBaseline = 'middle';
+        cx.fillText('CISD', plotR - 6, y);
+        cx.restore();
+      });
+    }
+    // Render SMT Buy/Sell & Trendline
+    if (smcData.smt) {
+      smcData.smt.forEach(sm => {
+        const y = yOf(sm.p), x = clampX(xOfT(sm.t), plotL, plotR);
+        cx.save();
+        cx.font = 'bold 8px ui-monospace, monospace';
+        cx.fillStyle = sm.dir > 0 ? '#34d399' : '#f87171';
+        cx.textAlign = 'center';
+        cx.textBaseline = sm.dir > 0 ? 'top' : 'bottom';
+        cx.fillText(sm.label, x, y + (sm.dir > 0 ? 4 : -4));
+        cx.restore();
+      });
+    }
+    if (smcData.trendlines) {
+      smcData.trendlines.forEach(tl => {
+        const x1 = xOfT(tl.x1), y1 = yOf(tl.y1), x2 = xOfT(tl.x2), y2 = yOf(tl.y2);
+        cx.save();
+        cx.strokeStyle = '#818cf8';
+        cx.lineWidth = 1.5;
+        cx.beginPath(); cx.moveTo(x1, y1); cx.lineTo(x2, y2); cx.stroke();
         cx.restore();
       });
     }
@@ -2341,7 +2422,7 @@ function drawBotChart() {
   drawBotMap(bcv, bcx, activeBotSig, 'XAUUSD');
 }
 
-// ---- Live Map Chart Standar dengan Visual Lengkap SMC/ICT (Sweep, CISD, MSS, BOS) ----
+// ---- Live Map Chart Standar dengan Visual Lengkap SMC/ICT (Sweep, CISD, SMT, Trendline) ----
 function drawLiveMap(cv, cx, t, k) {
   if (!cx) return;
   const d = fitCv(cv, cx);
@@ -2426,21 +2507,77 @@ function drawLiveMap(cv, cx, t, k) {
       cx.fillRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
       cx.restore();
     });
-    // Render Liquidity Sweep Pools (BSL/SSL)
+    // Render Liquidity Sweep Pools & Panjang Garis Sweep dengan Tulisan Sweep
     if (smcData.liq && smcData.liq.pools) {
       smcData.liq.pools.forEach(p => {
         const y = yOf(p.p), x0 = clampX(xOfT(p.t), plotL, plotR);
         cx.save();
         cx.strokeStyle = 'rgba(245,158,11,.85)';
-        cx.lineWidth = 1;
-        cx.setLineDash([3, 3]);
-        cx.beginPath(); cx.moveTo(x0, y); cx.lineTo(plotR, y); cx.stroke();
+        cx.lineWidth = 1.2;
+        cx.setLineDash([4, 4]);
+        cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
         cx.setLineDash([]);
         cx.font = 'bold 8px ui-monospace, monospace';
         cx.fillStyle = 'rgba(245,158,11,1)';
         cx.textAlign = 'right';
         cx.textBaseline = p.high ? 'bottom' : 'top';
         cx.fillText(p.label, plotR - 4, y + (p.high ? -2 : 2));
+        cx.restore();
+      });
+    }
+    if (smcData.liq && smcData.liq.sweeps) {
+      smcData.liq.sweeps.forEach(swp => {
+        const y = yOf(swp.p), x0 = clampX(xOfT(swp.t), plotL, plotR), x1 = clampX(xOfT(swp.hitT), plotL, plotR);
+        cx.save();
+        cx.strokeStyle = '#f97316';
+        cx.lineWidth = 2;
+        cx.beginPath(); cx.moveTo(x0, y); cx.lineTo(plotR, y); cx.stroke();
+        cx.font = 'bold 9px ui-monospace, monospace';
+        cx.fillStyle = '#f97316';
+        cx.textAlign = 'left';
+        cx.textBaseline = 'bottom';
+        cx.fillText('⚡ SWEEP', x1 + 4, y - 2);
+        cx.restore();
+      });
+    }
+    // Render CISD Lines
+    if (smcData.cisd) {
+      smcData.cisd.forEach(cd => {
+        const y = yOf(cd.price), x0 = clampX(xOfT(cd.t), plotL, plotR);
+        cx.save();
+        cx.strokeStyle = '#e879f9';
+        cx.lineWidth = 1.5;
+        cx.setLineDash([2, 4]);
+        cx.beginPath(); cx.moveTo(x0, y); cx.lineTo(plotR, y); cx.stroke();
+        cx.setLineDash([]);
+        cx.font = 'bold 8px ui-monospace, monospace';
+        cx.fillStyle = '#e879f9';
+        cx.textAlign = 'right';
+        cx.textBaseline = 'middle';
+        cx.fillText('CISD', plotR - 6, y);
+        cx.restore();
+      });
+    }
+    // Render SMT Buy/Sell & Trendline
+    if (smcData.smt) {
+      smcData.smt.forEach(sm => {
+        const y = yOf(sm.p), x = clampX(xOfT(sm.t), plotL, plotR);
+        cx.save();
+        cx.font = 'bold 8px ui-monospace, monospace';
+        cx.fillStyle = sm.dir > 0 ? '#34d399' : '#f87171';
+        cx.textAlign = 'center';
+        cx.textBaseline = sm.dir > 0 ? 'top' : 'bottom';
+        cx.fillText(sm.label, x, y + (sm.dir > 0 ? 4 : -4));
+        cx.restore();
+      });
+    }
+    if (smcData.trendlines) {
+      smcData.trendlines.forEach(tl => {
+        const x1 = xOfT(tl.x1), y1 = yOf(tl.y1), x2 = xOfT(tl.x2), y2 = yOf(tl.y2);
+        cx.save();
+        cx.strokeStyle = '#818cf8';
+        cx.lineWidth = 1.5;
+        cx.beginPath(); cx.moveTo(x1, y1); cx.lineTo(x2, y2); cx.stroke();
         cx.restore();
       });
     }
@@ -2578,6 +2715,9 @@ function drawSMC() {
   const obs = s.obs.filter(z => inBand(z.bottom, z.top));
   const pools = s.liq.pools.filter(p => near(p.p));
   const sweeps = s.liq.sweeps.filter(p => near(p.p));
+  const cisd = s.cisd || [];
+  const smt = s.smt || [];
+  const trendlines = s.trendlines || [];
   const ev = s.ev.filter(e => near(e.p) && e.toT >= t0);
   const sess = sessionBoxes(rows, Date.now()).filter(se => se.b > t0);
 
@@ -2639,15 +2779,65 @@ function drawSMC() {
     const y = yOf(p.p), x0 = clampX(xOfT(p.t), plotL, plotR);
     sx.save();
     sx.strokeStyle = 'rgba(245,158,11,.85)';
-    sx.lineWidth = 1;
-    sx.setLineDash([3, 3]);
-    sx.beginPath(); sx.moveTo(x0, y); sx.lineTo(plotR, y); sx.stroke();
+    sx.lineWidth = 1.2;
+    sx.setLineDash([4, 4]);
+    sx.beginPath(); sx.moveTo(plotL, y); sx.lineTo(plotR, y); sx.stroke();
     sx.setLineDash([]);
     sx.font = 'bold 8px ui-monospace, monospace';
     sx.fillStyle = 'rgba(245,158,11,1)';
     sx.textAlign = 'right';
     sx.textBaseline = p.high ? 'bottom' : 'top';
     sx.fillText(p.label, plotR - 4, y + (p.high ? -2 : 2));
+    sx.restore();
+  });
+
+  sweeps.forEach(swp => {
+    const y = yOf(swp.p), x0 = clampX(xOfT(swp.t), plotL, plotR), x1 = clampX(xOfT(swp.hitT), plotL, plotR);
+    sx.save();
+    sx.strokeStyle = '#f97316';
+    sx.lineWidth = 2;
+    sx.beginPath(); sx.moveTo(x0, y); sx.lineTo(plotR, y); sx.stroke();
+    sx.font = 'bold 9px ui-monospace, monospace';
+    sx.fillStyle = '#f97316';
+    sx.textAlign = 'left';
+    sx.textBaseline = 'bottom';
+    sx.fillText('⚡ SWEEP', x1 + 4, y - 2);
+    sx.restore();
+  });
+
+  cisd.forEach(cd => {
+    const y = yOf(cd.price), x0 = clampX(xOfT(cd.t), plotL, plotR);
+    sx.save();
+    sx.strokeStyle = '#e879f9';
+    sx.lineWidth = 1.5;
+    sx.setLineDash([2, 4]);
+    sx.beginPath(); sx.moveTo(x0, y); sx.lineTo(plotR, y); sx.stroke();
+    sx.setLineDash([]);
+    sx.font = 'bold 8px ui-monospace, monospace';
+    sx.fillStyle = '#e879f9';
+    sx.textAlign = 'right';
+    sx.textBaseline = 'middle';
+    sx.fillText('CISD', plotR - 6, y);
+    sx.restore();
+  });
+
+  smt.forEach(sm => {
+    const y = yOf(sm.p), x = clampX(xOfT(sm.t), plotL, plotR);
+    sx.save();
+    sx.font = 'bold 8px ui-monospace, monospace';
+    sx.fillStyle = sm.dir > 0 ? '#34d399' : '#f87171';
+    sx.textAlign = 'center';
+    sx.textBaseline = sm.dir > 0 ? 'top' : 'bottom';
+    sx.fillText(sm.label, x, y + (sm.dir > 0 ? 4 : -4));
+    sx.restore();
+  });
+
+  trendlines.forEach(tl => {
+    const x1 = xOfT(tl.x1), y1 = yOf(tl.y1), x2 = xOfT(tl.x2), y2 = yOf(tl.y2);
+    sx.save();
+    sx.strokeStyle = '#818cf8';
+    sx.lineWidth = 1.5;
+    sx.beginPath(); sx.moveTo(x1, y1); sx.lineTo(x2, y2); sx.stroke();
     sx.restore();
   });
 
