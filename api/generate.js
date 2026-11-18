@@ -4,6 +4,7 @@
 // AI REASONING                   : konsultan analis yang ngobrol santai, fallback narasi manusiawi jika AI gagal.
 
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
+import { generateManualPlan } from '../lib/manual_scalp.js';
 
 export const config = { maxDuration: 60 };
 
@@ -52,7 +53,7 @@ const MIN_BARS = { m1: 60, m5: 40, m15: 40, m30: 35, h1: 35, h4: 25, d1: 20 };
 
 // ── Gaya MANUAL (zona-based) ──
 const MANUAL_STYLES = {
-  'Scalping':    { label: 'Scalping Agresif · arah M30, entry M5+M1', kind: 'scalp',      htf: 'm30', zone: 'm5', ltf: 'm5', trig: 'm1', maxDistAtr: 1.5, minRR: 2.0 },
+  'Scalping':    { label: 'Scalping Agresif · arah M15, entry M5', kind: 'scalp',      htf: 'm15', zone: 'm5', ltf: 'm5', trig: 'm5', maxDistAtr: 1.5, minRR: 2.0 },
   'Day Trading': { label: 'Scalping Konservatif · arah H1, zona M5, trigger M1', kind: 'scalp_cons', htf: 'h1', zone: 'm5', ltf: 'm5', trig: 'm1', maxDistAtr: 1.5, minRR: 2.0 },
   'Intraday':    { label: 'Intraday · H4+H1+M15+M5',          kind: 'intraday',   htf: 'h4',  zone: 'h1',  ltf: 'm15', trig: 'm5',  maxDistAtr: 3.0, minRR: 2.0 },
   'Swing':       { label: 'Swing · Daily+H4+H1+M15',          kind: 'swing',      htf: 'd1',  zone: 'h4',  ltf: 'h1',  trig: 'm15', maxDistAtr: 4.0, minRR: 2.0 },
@@ -491,8 +492,56 @@ function runAggressive(ctx, d) {
   return { signal: toSignal(p.plan, ctx, { confidence: 'MEDIUM', risk: 'MEDIUM', topDown: facts.bias }), facts: { ...facts, status } };
 }
 
+// Manual Scalping Agresif & Konservatif: logika dari lib/manual_scalp.js (order LIMIT, RR 1:1/1:2/1:3)
+const DOC_STYLE_LABEL = {
+  'Scalping': 'Scalping Agresif', 'Day Trading': 'Scalping Konservatif', 'Intraday': 'Intraday', 'Swing': 'Swing',
+};
+const DOC_STYLE_TF = {
+  'Scalping':    { htf: 'M15', zone: 'M5',         trig: 'M5' },
+  'Day Trading': { htf: 'H1',  zone: 'M5',         trig: 'M5' },
+  'Intraday':    { htf: 'H4',  zone: 'VWAP M15',   trig: 'M15' },
+  'Swing':       { htf: 'D1',  zone: 'H4/D1',      trig: 'H4' },
+};
+
+function runDocManual(ctx, d, styleName) {
+  const tf = DOC_STYLE_TF[styleName] || DOC_STYLE_TF['Scalping'];
+  const facts = {
+    mode: 'manual', symbol: ctx.symbol, style: styleName, kz: ctx.kz.name, price: ctx.f(ctx.price),
+    htfTf: tf.htf, zoneTf: tf.zone, trigTf: tf.trig,
+  };
+  const out = generateManualPlan({
+    m5: closedOnly(d.m5, TF_MS.m5), m15: closedOnly(d.m15, TF_MS.m15), m30: closedOnly(d.m30, TF_MS.m30),
+    h1: closedOnly(d.h1, TF_MS.h1), h4: closedOnly(d.h4, TF_MS.h4), d1: closedOnly(d.d1, TF_MS.d1),
+    tickSize: 10 ** -ctx.dec,
+  }, styleName);
+  const regimeTxt = out.regime ? out.regime.replace('_', ' ') : 'netral';
+  facts.bias = regimeTxt;
+  if (!out.ok) {
+    facts.standbyReason = out.reason;
+    return standbyOut(facts, out.reason, [], regimeTxt);
+  }
+  const o = out.order;
+  const dir = o.side === 'buy' ? 1 : -1;
+  const z = out.zone;
+  const plan = {
+    dir, entry: o.entryPrice, sl: o.sl, orderType: 'LIMIT',
+    tps: [o.tp1, o.tp2, o.tp3], rr: 3,
+    setup: `Manual · ${DOC_STYLE_LABEL[styleName] || styleName} · ${o.reason}`,
+    zone: z ? { lower: z.bottom, upper: z.top, label: `${z.timeframe} ${z.type}`, mid: (z.top + z.bottom) / 2 } : null,
+  };
+  const sig = toSignal(plan, ctx, { confidence: 'MEDIUM', risk: 'MEDIUM', topDown: regimeTxt });
+  sig.expiresAt = o.expiryTime;
+  facts.signal = dir === 1 ? 'BUY' : 'SELL';
+  facts.orderType = 'LIMIT';
+  facts.entry = sig.entry; facts.sl = sig.sl;
+  facts.tp = [sig.tp1, sig.tp2, sig.tp3];
+  facts.rr = '3.00';
+  facts.trigger = o.reason;
+  return { signal: sig, facts: { ...facts, status: 'PENDING' } };
+}
+
 function runManual(ctx, d, styleName) {
-  if (styleName === 'Scalping') return runAggressive(ctx, d);
+  if (['Scalping', 'Day Trading', 'Intraday', 'Swing'].includes(styleName)) return runDocManual(ctx, d, styleName);
   const cfg = MANUAL_STYLES[styleName] || MANUAL_STYLES['Day Trading'];
   const C = tf => closedOnly(d[tf], TF_MS[tf]);
   const price = ctx.price, pip = ctx.pip;
