@@ -3126,6 +3126,7 @@ function updateBotInteractiveReason() {
   const smc = getSmc('XAUUSD', '5m');
   const msgEl = $('botMsg');
   if (!msgEl) return;
+  if (window.__botScan) { msgEl.style.whiteSpace = 'pre-line'; msgEl.textContent = window.__botScan; return; }
 
   if (smc.status === 'ok') {
     const fvgCount = smc.fvgs.length;
@@ -3178,6 +3179,11 @@ async function runBotCycle() {
     const data = res.data;
     const showAiReason = txt => { const el = $('botAiReason'); if (el && txt) el.textContent = txt; };
     if (data && data.signal && data.signal.reason) showAiReason(cleanReason(data.signal.reason));
+    if (data && data.signal && data.signal.scanSummary) {
+      window.__botScan = data.signal.scanSummary;
+      const bm = $('botMsg');
+      if (bm) { bm.style.whiteSpace = 'pre-line'; bm.textContent = window.__botScan; }
+    }
 
     if (!(res.ok && data && data.ok)) {
       const why = errOf(res, 'Mencari setup konfluensi optimal...');
