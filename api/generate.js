@@ -52,8 +52,8 @@ const MIN_BARS = { m1: 60, m5: 40, m15: 40, m30: 35, h1: 35, h4: 25, d1: 20 };
 
 // ── Gaya MANUAL (zona-based) ──
 const MANUAL_STYLES = {
-  'Scalping':    { label: 'Scalping Agresif · M30+M15+M5+M1', kind: 'scalp',      htf: 'm30', zone: 'm15', ltf: 'm5',  trig: 'm1',  maxDistAtr: 2.0, minRR: 2.0 },
-  'Day Trading': { label: 'Scalping Konservatif · H1+M15+M5', kind: 'scalp_cons', htf: 'h1',  zone: 'm15', ltf: 'm5',  trig: 'm5',  maxDistAtr: 2.5, minRR: 2.0 },
+  'Scalping':    { label: 'Scalping Agresif · arah M30, entry M5+M1', kind: 'scalp',      htf: 'm30', zone: 'm5', ltf: 'm5', trig: 'm1', maxDistAtr: 1.5, minRR: 2.0 },
+  'Day Trading': { label: 'Scalping Konservatif · arah H1, zona M5, trigger M1', kind: 'scalp_cons', htf: 'h1', zone: 'm5', ltf: 'm5', trig: 'm1', maxDistAtr: 1.5, minRR: 2.0 },
   'Intraday':    { label: 'Intraday · H4+H1+M15+M5',          kind: 'intraday',   htf: 'h4',  zone: 'h1',  ltf: 'm15', trig: 'm5',  maxDistAtr: 3.0, minRR: 2.0 },
   'Swing':       { label: 'Swing · Daily+H4+H1+M15',          kind: 'swing',      htf: 'd1',  zone: 'h4',  ltf: 'h1',  trig: 'm15', maxDistAtr: 4.0, minRR: 2.0 },
 };
@@ -427,7 +427,70 @@ function detectManualTrigger(c, dir) {
   if (breakerTrigger(c, dir)) return 'Breaker';
   return null;
 }
+function runAggressive(ctx, d) {
+  const price = ctx.price, pip = ctx.pip, F = v => ctx.f(v);
+  const c1 = closedOnly(d.m1, TF_MS.m1), c5 = closedOnly(d.m5, TF_MS.m5), c30 = closedOnly(d.m30, TF_MS.m30);
+  const atr1 = atr(c1), atr5 = atr(c5);
+  const facts = { mode: 'manual', symbol: ctx.symbol, style: 'Scalping', kz: ctx.kz.name, price: F(price), htfTf: 'M30', zoneTf: 'M5', trigTf: 'M1' };
+  if (!c1 || c1.length < 25 || !c5 || c5.length < 25) return standbyOut(facts, 'Data M1/M5 belum cukup.', [], null);
+
+  // HTF hanya menentukan arah, bukan zona
+  const bias = biasOf({ m30: c30 }, ['m30']);
+  const ms5 = marketStructure(c5);
+  const dir = bias.dir || (ms5 && ms5.trend) || 0;
+  facts.bias = bias.dir === 1 ? 'BULLISH' : bias.dir === -1 ? 'BEARISH' : 'NETRAL';
+  if (!dir) return standbyOut(facts, 'Arah M30 netral dan struktur M5 belum searah.', [], facts.bias);
+  facts.dirTxt = dir === 1 ? 'BUY' : 'SELL';
+
+  const trig = detectManualTrigger(c1, dir);
+  facts.trigger = trig;
+  if (!trig) {
+    const why = `Arah ${facts.dirTxt} (M30 ${facts.bias}). Harga berjalan, tapi belum ada trigger M1 (CHoCH / CISD / Breaker). Saya tunggu.`;
+    return standbyOut(facts, why, [], facts.bias);
+  }
+
+  // Area pullback M5/M1 searah, diambil yang terdekat dengan harga
+  const zs = [...zonesOf(c5, dir, price, atr5, 1.5), ...zonesOf(c1, dir, price, atr1, 1.5)].sort((a, b) => a.dist - b.dist);
+  const z = zs[0] || null;
+  const inZ = !!z && price >= z.lower && price <= z.upper;
+  facts.zone = z ? { type: z.type, label: z.label, lower: F(z.lower), upper: F(z.upper), tf: z.label.includes('M1') ? 'M1' : 'M5', distAtr: Number((z.dist / atr5).toFixed(1)) } : null;
+  facts.inZone = inZ;
+
+  const trC = c1[c1.length - 1];
+  const bHi = Math.max(trC.o, trC.c), bLo = Math.min(trC.o, trC.c);
+  const nearTrig = Math.abs(price - trC.c) <= 0.25 * atr1;
+  let orderType, entry, note;
+  if (inZ) { orderType = 'MARKET'; entry = price; note = 'market di area pullback M5/M1'; }
+  else if (z) { orderType = 'LIMIT'; entry = z.mid; note = 'limit pullback ke area M5/M1'; }
+  else if (nearTrig) { orderType = 'MARKET'; entry = trC.c; note = 'market di close trigger M1'; }
+  else { orderType = 'LIMIT'; entry = (bHi + bLo) / 2; note = 'limit pullback ke body trigger M1'; }
+
+  // SL: di balik swing M1 terbaru (dan area pullback bila ada)
+  const recent = c1.slice(-4);
+  let inv = dir === 1 ? Math.min(...recent.map(x => x.l)) : Math.max(...recent.map(x => x.h));
+  if (z) inv = dir === 1 ? Math.min(inv, z.lower) : Math.max(inv, z.upper);
+  const buf = Math.max(2 * pip, 0.1 * atr1);
+  const sl0 = dir === 1 ? inv - buf : inv + buf;
+
+  const p = planFrom({
+    dir, entry, sl: sl0, orderType, minRR: 2.0, liq: liquidityLevels(c5),
+    maxRisk: 1.5 * atr5, minRisk: 0.3 * atr1, atrRef: atr5 || atr1,
+    setup: `Manual · Scalping Agresif · ${trig} · ${note}`,
+    zone: z ? { lower: z.lower, upper: z.upper, label: z.label, mid: z.mid } : null,
+  });
+  if (!p.ok) { facts.standbyReason = p.reason; return standbyOut(facts, p.reason, [], facts.bias); }
+
+  facts.signal = dir === 1 ? 'BUY' : 'SELL';
+  facts.orderType = orderType;
+  facts.entry = F(p.plan.entry); facts.sl = F(p.plan.sl);
+  facts.tp = [F(p.plan.tps[0]), F(p.plan.tps[1]), F(p.plan.tps[2])];
+  facts.rr = p.plan.rr.toFixed(2);
+  const status = orderType === 'MARKET' ? 'RUNNING' : 'PENDING';
+  return { signal: toSignal(p.plan, ctx, { confidence: 'MEDIUM', risk: 'MEDIUM', topDown: facts.bias }), facts: { ...facts, status } };
+}
+
 function runManual(ctx, d, styleName) {
+  if (styleName === 'Scalping') return runAggressive(ctx, d);
   const cfg = MANUAL_STYLES[styleName] || MANUAL_STYLES['Day Trading'];
   const C = tf => closedOnly(d[tf], TF_MS[tf]);
   const price = ctx.price, pip = ctx.pip;
@@ -654,6 +717,11 @@ function parseJsonLoose(text) {
 }
 
 // Narasi cadangan yang tetap terdengar seperti ngobrol (dipakai jika AI gagal)
+function fbZone(f, id) {
+  if (!f.zone) return id ? `area pullback ${f.zoneTf || f.trigTf}` : `pullback area on ${f.zoneTf || f.trigTf}`;
+  return id ? `zona ${f.zone.label} di ${f.zone.lower}–${f.zone.upper}` : `zone ${f.zone.label} at ${f.zone.lower}–${f.zone.upper}`;
+}
+
 function fallbackStory(f, lang) {
   const id = lang === 'id';
   if (f.mode === 'manual') {
@@ -664,8 +732,8 @@ function fallbackStory(f, lang) {
         : `I'm still looking for a setup on ${f.symbol}. Bias is ${f.bias} from ${f.htfTf}. ${z} ${f.standbyReason || ''} Once ${f.trigTf} gives a confirming close, I'll take it.`;
     }
     return id
-      ? `Oke, setup ${f.signal} sudah valid di ${f.symbol}. Bias ${f.bias} dari ${f.htfTf}, zona ${f.zone.label} di ${f.zone.lower}–${f.zone.upper}. ${f.orderType === 'MARKET' ? `Harga sudah di zona dan trigger ${f.trigger} sudah close, jadi saya masuk di ${f.entry}.` : `Harga belum sampai zona, jadi saya pasang limit di ${f.entry}.`} SL ${f.sl}, target ${f.tp[0]}, ${f.tp[1]}, ${f.tp[2]}, RR sekitar 1:${f.rr}.`
-      : `Setup ${f.signal} is valid on ${f.symbol}. Bias ${f.bias} from ${f.htfTf}, zone ${f.zone.label} at ${f.zone.lower}–${f.zone.upper}. ${f.orderType === 'MARKET' ? `Price is in the zone and ${f.trigger} has closed, so I'm entering at ${f.entry}.` : `Price hasn't reached the zone yet, so I'm placing a limit at ${f.entry}.`} SL ${f.sl}, targets ${f.tp[0]}, ${f.tp[1]}, ${f.tp[2]}, RR about 1:${f.rr}.`;
+      ? `Oke, setup ${f.signal} sudah valid di ${f.symbol}. Bias ${f.bias} dari ${f.htfTf}, ${fbZone(f, true)}. ${f.orderType === 'MARKET' ? `Harga sudah di zona dan trigger ${f.trigger} sudah close, jadi saya masuk di ${f.entry}.` : `Harga belum sampai zona, jadi saya pasang limit di ${f.entry}.`} SL ${f.sl}, target ${f.tp[0]}, ${f.tp[1]}, ${f.tp[2]}, RR sekitar 1:${f.rr}.`
+      : `Setup ${f.signal} is valid on ${f.symbol}. Bias ${f.bias} from ${f.htfTf}, ${fbZone(f, false)}. ${f.orderType === 'MARKET' ? `Price is in the zone and ${f.trigger} has closed, so I'm entering at ${f.entry}.` : `Price hasn't reached the zone yet, so I'm placing a limit at ${f.entry}.`} SL ${f.sl}, targets ${f.tp[0]}, ${f.tp[1]}, ${f.tp[2]}, RR about 1:${f.rr}.`;
   }
   // bot
   if (f.status === 'RUNNING') {
