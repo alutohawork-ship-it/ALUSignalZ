@@ -133,4 +133,28 @@ export default async function handler(req, res) {
     // ── Build LLM conversation ──
     const history = Array.isArray(body.messages) ? body.messages.slice(-8) : [{ role: 'user', content: userMessage }];
     const conversation = [
-      { role: 'system',
+      { role: 'system', content: buildChatSystemPrompt(scan, symbol, lang) },
+      ...history,
+    ];
+
+    const reply = await callQwenChat(conversation);
+
+    const fallbackReply = lang === 'en'
+      ? `Right now ${symbol} is at ${price}. Current state: ${scan.signal.state}. Waiting for: ${scan.diagnostics.waitingFor || 'valid setup per SOP'}. (AI offline — this is a canned response.)`
+      : `Saat ini ${symbol} di ${price}. Status: ${scan.signal.state}. Menunggu: ${scan.diagnostics.waitingFor || 'setup valid sesuai SOP'}. (AI sedang sibuk — ini respons template.)`;
+
+    return res.status(200).json({
+      ok: true,
+      reply: reply || fallbackReply,
+      context: {
+        bias: scan.diagnostics.bias?.label,
+        state: scan.signal.state,
+        signal: scan.signal.action !== 'NONE' ? scan.signal.action : null,
+        price,
+      },
+    });
+  } catch (err) {
+    console.error('chat.js error:', err);
+    return res.status(500).json({ ok: false, reply: `Server error: ${err.message}` });
+  }
+}
