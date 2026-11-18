@@ -1,6 +1,6 @@
 // api/generate.js
-// v130 — Top-Down SMC/ICT + Interactive Analyst Voice (Human-Readable Reasoning)
-// Update: Narasi HTF→LTF per-timeframe, explain-why-no-setup, state-aware messaging.
+// v131 — Top-Down SMC/ICT + Interactive Analyst Voice (Standby-Proof)
+// Update: Return ok:true untuk STANDBY agar Frontend merender teks analis interaktif.
 
 export const config = { maxDuration: 60 };
 
@@ -1814,10 +1814,33 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
     result = await RUNNERS[styleName](ctx, data);
   }
 
+  // ── PERUBAHAN PENTING: Standby Tetap Mengembalikan `ok: true` ──
   if (!result || !result.plan) {
     const fallbackReasonId = result?.reason || msg('id', 'noSetup');
     const fallbackReasonEn = result?.reasonEn || msg('en', 'noSetup');
-    return fail(res, lang === 'en' ? fallbackReasonEn : fallbackReasonId);
+    
+    const standbySignal = {
+      signal: 'NONE',
+      orderType: 'NONE',
+      fill: 'NONE',
+      status: 'STANDBY',
+      entry: null, sl: null, tp1: null, tp2: null, tp3: null,
+      setup: 'STANDBY / SCANNING',
+      confidence: 'NONE', 
+      risk: 'NONE',
+      reason: lang === 'en' ? fallbackReasonEn : fallbackReasonId,
+      reasons: { id: fallbackReasonId, en: fallbackReasonEn },
+      chartContext: '', topDown: null, state: 'STANDBY', score: null
+    };
+
+    return res.status(200).json({ 
+      ok: true, 
+      mode: isAutoBot ? 'bot' : 'candles', 
+      symbol, 
+      style: styleName, 
+      price, 
+      signal: standbySignal 
+    });
   }
 
   if (isAutoBot) await markTrialAsUsed(email);
