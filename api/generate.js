@@ -518,22 +518,24 @@ function runBot(ctx, d, styleName) {
   const zoneTf = c15 && c15.length >= 25 ? c15 : c30;
   const zones = bias.dir ? zonesOf(zoneTf, bias.dir, price, atr15, BOT_CFG.zoneMaxAtr15) : [];
   const zone = zones[0] || null;
-  const ltfDir = (ms5 && (ms5.dir || ms5.trend)) || 0;
+  const ltfDir = (ms5 && ms5.trend) || 0; // arah M5 (HH-HL / LH-LL), CHoCH M5 tidak membatalkan
+
+  const inZone = zone ? (price >= zone.lower && price <= zone.upper) : false;
+  const touched = zone ? c1.slice(-8).some(x => x.h >= zone.lower && x.l <= zone.upper) : false;
+  const zoneHit = !!zone && (inZone || touched);
 
   let dir = 0;
-  if (zone) dir = zone.dir;
-  else if (!requireHtf && ltfDir && (!bias.dir || ltfDir === bias.dir)) dir = ltfDir;
+  if (zoneHit) dir = zone.dir;
+  else if (!requireHtf && ltfDir) dir = ltfDir; // Scalping: pakai struktur M5 + trigger M1, HTF tidak memblokir
 
   const swRaw = sweepOf(c5) || sweepOf(c1);
   const sw = swRaw && dir && swRaw.dir === dir ? swRaw : null;
   const disp = dir ? (dispOf(c1, atr1, dir) || dispOf(c5, atr5, dir)) : null;
   const trigger = dir ? botTrigger(c1, ms5, dir, zone) : null;
-  const touched = zone ? c1.slice(-8).some(x => x.h >= zone.lower && x.l <= zone.upper) : false;
-  const inZone = zone ? (price >= zone.lower && price <= zone.upper) : false;
 
   const T = (ok, txt) => `${ok ? '✅' : '⬜'} ${txt}`;
   const checklist = [
-    T(bias.dir !== 0, `Bias HTF (H1/M30/M15): ${bias.dir === 1 ? 'BULLISH' : bias.dir === -1 ? 'BEARISH' : 'RANGE / NETRAL'}`),
+    T(bias.dir !== 0, `Info HTF (H1/M30/M15, tidak memblokir scalp): ${bias.dir === 1 ? 'BULLISH' : bias.dir === -1 ? 'BEARISH' : 'RANGE / NETRAL'}`),
     T(!!ms5, `Struktur M5: ${trendLabel(ms5)}`),
     T(!!(ms1 && ms1.event), `Struktur M1: ${trendLabel(ms1)}`),
     T(!!zone, zone ? `WNS zone ${zone.label} ${F(zone.lower)}–${F(zone.upper)} (${(zone.dist / atr15).toFixed(1)}x ATR)` : (requireHtf ? 'WNS zone HTF: belum ada, gaya Konservatif menunggu zona' : 'WNS zone HTF: belum ada (scalp pakai struktur LTF)')),
@@ -551,19 +553,20 @@ function runBot(ctx, d, styleName) {
   };
   const topDown = facts.bias;
 
-  const ready = dir && trigger && (zone ? (inZone || touched) : (ms5 && ms5.trend === dir && (sw || disp)));
+  // Sweep/displacement diutamakan, tapi trigger CHoCH M1 / CISD / Breaker sudah cukup (kontinuitas fleksibel)
+  const ready = dir && trigger && (zoneHit || (ms5 && ms5.trend === dir && (sw || disp || /CHoCH M1|CISD|Breaker/.test(trigger))));
   if (!ready) {
     let why;
     if (!dir) why = requireHtf ? 'Belum ada zona WNS HTF searah.' : 'Struktur M5 belum searah / HTF belum sejalan.';
     else if (!trigger) why = `Struktur ${dir === 1 ? 'bullish' : 'bearish'} sudah terbaca, menunggu trigger close-confirmed di M1.`;
-    else if (zone && !(inZone || touched)) why = `Zona WNS ${zone.label} masih ${(zone.dist / atr15).toFixed(1)}x ATR dari harga. Saya tunggu, belum saya kejar.`;
+    else if (zone && !zoneHit && requireHtf) why = `Zona WNS ${zone.label} masih ${(zone.dist / atr15).toFixed(1)}x ATR dari harga. Gaya Konservatif menunggu harga masuk zona.`;
     else why = 'Sweep / displacement searah belum lengkap.';
     return standbyOut(facts, why, checklist, topDown);
   }
 
   // Anti-chase: harga sudah lari terlalu jauh dari level struktur M5
   const ext = dir === 1 ? (ms5 ? price - ms5.h1 : 0) : (ms5 ? ms5.l1 - price : 0);
-  if (!zone && ext > BOT_CFG.chaseAtr5 * atr5) {
+  if (!zoneHit && ext > BOT_CFG.chaseAtr5 * atr5) {
     const why = `Harga sudah lari ${(ext / atr5).toFixed(1)}x ATR dari level struktur. Tunggu pullback, tidak chase.`;
     facts.standbyReason = why;
     return standbyOut(facts, why, checklist, topDown);
@@ -572,17 +575,17 @@ function runBot(ctx, d, styleName) {
   const recent = c1.slice(-4);
   let inv = dir === 1 ? Math.min(...recent.map(x => x.l)) : Math.max(...recent.map(x => x.h));
   if (sw) inv = dir === 1 ? Math.min(inv, sw.extreme) : Math.max(inv, sw.extreme);
-  if (zone) inv = dir === 1 ? Math.min(inv, zone.lower) : Math.max(inv, zone.upper);
+  if (zoneHit) inv = dir === 1 ? Math.min(inv, zone.lower) : Math.max(inv, zone.upper);
   const buf = Math.max(2 * pip, 0.1 * atr1);
   const sl0 = dir === 1 ? inv - buf : inv + buf;
   const minRR = /CISD|Breaker/.test(trigger) ? 1.5 : 2.0;
   const liq = [...liquidityLevels(c5), ...liquidityLevels(c15)];
   const p = planFrom({
     dir, entry: price, sl: sl0, orderType: 'MARKET', minRR, liq,
-    maxRisk: zone ? BOT_CFG.maxSlAtr15 * atr15 : BOT_CFG.maxSlAtr5 * atr5,
+    maxRisk: zoneHit ? BOT_CFG.maxSlAtr15 * atr15 : BOT_CFG.maxSlAtr5 * atr5,
     minRisk: BOT_CFG.minSlAtr1 * atr1, atrRef: atr5 || atr1,
-    setup: `SMC/ICT Bot · ${zone ? 'WNS ' + zone.label : 'LTF Structure'} · ${trigger}`,
-    zone: zone ? { ...zone, lower: zone.lower, upper: zone.upper, label: zone.label } : null,
+    setup: `SMC/ICT Bot · ${zoneHit ? 'WNS ' + zone.label : 'LTF Scalp'} · ${trigger}`,
+    zone: zoneHit ? { ...zone, lower: zone.lower, upper: zone.upper, label: zone.label } : null,
   });
   if (!p.ok) {
     facts.standbyReason = p.reason;
