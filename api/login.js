@@ -1,24 +1,6 @@
-const KEY = 'alu_clients';
-
-// Panggil Upstash REST API langsung, tanpa npm package
-async function kv(command) {
-  const r = await fetch(process.env.KV_REST_API_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.KV_REST_API_TOKEN}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(command),
-  });
-  const data = await r.json();
-  if (!r.ok || data.error) throw new Error(data.error || `KV HTTP ${r.status}`);
-  return data.result;
-}
-
-async function readClients() {
-  const raw = await kv(['GET', KEY]);
-  return raw ? JSON.parse(raw) : [];
-}
+// api/login.js — logika sama dengan login asli, datanya dibaca dari Postgres (tabel clients)
+// Env: DATABASE_URL, ADMIN_CODE (opsional)
+import { getClient } from '../lib/access.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -36,8 +18,7 @@ export default async function handler(req, res) {
     }
 
     const email = input.toLowerCase();
-    const clients = await readClients();
-    const c = clients.find(x => x.email === email);
+    const c = await getClient(email);
 
     if (!c) {
       return res.status(200).json({ ok: false, msg: 'Email belum terdaftar. Silakan hubungi admin untuk pendaftaran.' });
