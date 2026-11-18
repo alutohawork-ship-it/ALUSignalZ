@@ -14,9 +14,9 @@ const VISION_TIMEOUT_MS = 55000;
 
 const QWEN_BASE_URL = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/$/, '');
 const QWEN_KEYS = [process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
-const QWEN_MODELS = [process.env.QWEN_MODEL || 'qwen-3.8-max', process.env.QWEN_MODEL_2].filter(Boolean);
-const QWEN_TIMEOUT_MS = 15000;
-const QWEN_MAX_TOKENS = 700;
+const QWEN_MODELS = [...new Set([process.env.QWEN_MODEL || 'qwen-3.8-max', process.env.QWEN_MODEL_2, AI_VISION_MODEL].filter(Boolean))];
+const QWEN_TIMEOUT_MS = 20000;
+const QWEN_MAX_TOKENS = 1200;
 const VISION_MAX_TOKENS = 2600;
 
 const TL_KEY_NAMES = ['TICKERLAYER_API_KEY', ...Array.from({ length: 19 }, (_, i) => `TICKERLAYER_API_KEY_${i + 1}`)];
@@ -1190,17 +1190,28 @@ async function handleVision(body, lang, res) {
 
 // ── QWEN REASONING (MANUAL) ──
 async function qwenReasonDual(signal, ctx, styleName, lang) {
-  if (!QWEN_KEYS.length) return null;
-  const sys = 'You are an institutional SMC/ICT analyst. Concise, punchy reasoning in JSON: {"id":"...","en":"..."}. Preserve all prices.';
-  const user = JSON.stringify({ symbol: ctx.symbol, style: styleName, signal: signal.signal, order: signal.fill, entry: signal.entry, sl: signal.sl, tp1: signal.tp1, tp2: signal.tp2, tp3: signal.tp3, setup: signal.setup, ruleReason: signal.reason, topDown: signal.topDown || null });
-  const attempts = []; for (const m of QWEN_MODELS) for (const k of QWEN_KEYS.slice(0, 2)) attempts.push({ m, k });
-  for (const { m, k } of attempts) {
-    try {
-      const r = await httpJson(`${QWEN_BASE_URL}/chat/completions`, { method: 'POST', headers: { Authorization: `Bearer ${k}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: m, max_tokens: QWEN_MAX_TOKENS, temperature: 0.2, messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] }) }, QWEN_TIMEOUT_MS);
-      if (!r.ok) continue;
-      const parsed = parseJsonLoose(extractContent(r.data).replace(/<think>[\s\S]*?<\/think>/gi, '').trim());
-      if (parsed && parsed.id && parsed.en) return parsed;
-    } catch (e) { console.warn('qwenReasonDual:', e.message); }
+  if (!QWEN_KEYS.length) { console.warn('qwen: API key belum diatur'); return null; }
+  const sys = 'You are an institutional SMC/ICT analyst. Reply with ONLY valid JSON, no markdown, no code fences: {"id":"...","en":"..."}. Concise (max 5 short sentences per language). Preserve all prices exactly.';
+  const user = JSON.stringify({ symbol: ctx.symbol, style: styleName, signal: signal.signal, status: signal.status, order: signal.fill, entry: signal.entry, sl: signal.sl, tp1: signal.tp1, tp2: signal.tp2, tp3: signal.tp3, setup: signal.setup, ruleReason: signal.reason, topDown: signal.topDown || null });
+  const deadline = Date.now() + 20000; // jaga agar total request tidak melewati maxDuration Vercel
+  for (const m of QWEN_MODELS) {
+    for (const k of QWEN_KEYS.slice(0, 2)) {
+      const left = deadline - Date.now();
+      if (left < 3000) return null;
+      try {
+        const r = await httpJson(`${QWEN_BASE_URL}/chat/completions`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${k}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: m, max_tokens: QWEN_MAX_TOKENS, temperature: 0.2, messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] }),
+        }, Math.min(QWEN_TIMEOUT_MS, left));
+        if (!r.ok) { console.warn(`qwen ${m} HTTP ${r.status}: ${String(r.text || '').slice(0, 160)}`); continue; }
+        const raw = extractContent(r.data).replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+        const parsed = parseJsonLoose(raw);
+        if (parsed && parsed.id && parsed.en) return parsed;
+        if (raw && !raw.startsWith('{') && raw.length > 20) return { id: raw, en: raw };
+        console.warn(`qwen ${m}: respons tidak bisa di-parse`);
+      } catch (e) { console.warn('qwenReasonDual:', m, e.message); }
+    }
   }
   return null;
 }
@@ -1258,6 +1269,10 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
       reason: lang === 'en' ? ren : rid, reasons: { id: rid, en: ren },
       chartContext: '', topDown: null, state: 'STANDBY', score: null,
     };
+    if (!isAutoBot) {
+      const dual = await qwenReasonDual(standbySignal, ctx, styleName, lang);
+      if (dual) { standbySignal.reasons = { id: dual.id, en: dual.en }; standbySignal.reason = dual[lang] || dual.id; standbySignal.aiReasoning = true; }
+    }
     return res.status(200).json({ ok: true, mode: isAutoBot ? 'bot' : 'candles', symbol, style: styleName, price, signal: standbySignal });
   }
 
@@ -1265,7 +1280,8 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
   const final = isAutoBot ? pickSingleForBot(result, price) : result;
   const signal = buildSignal(final, lang);
 
-  if (!isAutoBot) {
+  // AI reasoning untuk manual & bot (saat ada setup)
+  {
     const dual = await qwenReasonDual(signal, ctx, styleName, lang);
     if (dual) {
       signal.reasons = { id: dual.id, en: dual.en };
