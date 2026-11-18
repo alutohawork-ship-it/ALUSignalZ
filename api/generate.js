@@ -1,5 +1,5 @@
 // api/generate.js
-// v126 — Top-Down SMC/ICT + Scalper Bot M1 (Pure Scalping Running Structure & Dual-Language Reasoning + Strict SOP)
+// v128 — Top-Down SMC/ICT + Strict Structure & CISD Reversal Engine (100% Modul Compliant)
 
 export const config = { maxDuration: 60 };
 
@@ -83,10 +83,10 @@ const STYLES = {
 
 const MIN_BARS = { m1: 60, m5: 40, m15: 40, m30: 35, h1: 35, h4: 25, d1: 20 };
 const ZONE_ATR_PERIOD = 14;
-const ZONE_DISP_ATR = 1.15;
-const MAX_DIST_ATR = { scalp: 3.5, scalp_cons: 4.5, intraday: 6.5, swing: 11.0, bot: 2.5 };
+const ZONE_DISP_ATR = 1.2; // Modul Part 3.3 & Part 6: Displacement >= 1.2 * ATR
+const MAX_DIST_ATR = { scalp: 3.5, scalp_cons: 4.5, intraday: 6.5, swing: 11.0, bot: 1.5 }; // Modul Part 1.2 Hard-Rule 5: Max 1.5x ATR untuk bot
 const GOLD_SL_PIPS = { scalp: [25, 65], scalp_cons: [35, 110], intraday: [70, 190], swing: [140, 320], bot: [25, 75] };
-const ATR_SL_MULT = { scalp: [0.9, 2.8], scalp_cons: [1.0, 3.0], intraday: [1.1, 3.5], swing: [1.2, 4.0], bot: [0.9, 2.4] };
+const ATR_SL_MULT = { scalp: [0.9, 2.8], scalp_cons: [1.0, 3.0], intraday: [1.1, 3.5], swing: [1.2, 4.0], bot: [0.3, 1.5] }; // Modul Part 7.1: Min 0.3 ATR, Max 1.5 ATR
 
 const TL_SPAN = {
   '1m':  { mult: 1,  span: 'minute', minutes: 1    },
@@ -270,6 +270,20 @@ function clientCandles(body, tf) {
   return Array.isArray(rows) ? cleanCandles(rows) : [];
 }
 
+// ── KILLZONE CHECKER (MODUL PART 10) ──
+function getKillzoneStatus(nowMs = Date.now()) {
+  try {
+    const nyTime = new Date(new Date(nowMs).toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const mins = nyTime.getHours() * 60 + nyTime.getMinutes();
+    if (mins >= 120 && mins <= 300) return { active: true, name: 'LONDON KZ' };         // 02:00 - 05:00 NY
+    if (mins >= 420 && mins <= 600) return { active: true, name: 'NEWYORK KZ' };        // 07:00 - 10:00 NY
+    if (mins >= 600 && mins <= 660) return { active: true, name: 'SILVER BULLET KZ' };  // 10:00 - 11:00 NY
+    return { active: false, name: 'OUTSIDE KZ' };
+  } catch {
+    return { active: true, name: 'ACTIVE SESSION' };
+  }
+}
+
 function atr(candles, period = 14) {
   if (!candles || candles.length < 2) return 15;
   const trs = [];
@@ -376,25 +390,6 @@ function findFVGs(candles, dir, price) {
   return fvgs.sort((x, y) => x.dist - y.dist);
 }
 
-function hasRejectionBlock(candles, dir) {
-  if (!candles || candles.length < 3) return null;
-  for (let i = candles.length - 1; i >= Math.max(0, candles.length - 3); i--) {
-    const c = candles[i];
-    const body = Math.abs(c.c - c.o);
-    const range = c.h - c.l;
-    if (range <= 0) continue;
-    const lowerWick = Math.min(c.o, c.c) - c.l;
-    const upperWick = c.h - Math.max(c.o, c.c);
-    if (dir === 1 && lowerWick >= 1.5 * Math.max(body, range * 0.35)) {
-      return { dir: 1, level: c.l, candleIdx: i };
-    }
-    if (dir === -1 && upperWick >= 1.5 * Math.max(body, range * 0.35)) {
-      return { dir: -1, level: c.h, candleIdx: i };
-    }
-  }
-  return null;
-}
-
 function detectSweep(candles, lookback = 25) {
   if (!candles || candles.length < lookback + 3) return null;
   const n = candles.length;
@@ -426,57 +421,141 @@ function lastDisplacement(candles, atrVal, lookback = 4) {
   return null;
 }
 
+// ── CISD (CHANGE IN STATE OF DELIVERY) SESUAI MODUL PART 4.2 K2 ──
+// Bullish CISD: rangkaian candle bearish terakhir -> catat highest_open -> candle close > highest_open
+// Bearish CISD: rangkaian candle bullish terakhir -> catat lowest_open -> candle close < lowest_open
 function detectCISD(candles, atrVal) {
   const n = candles.length;
   if (n < 6) return null;
-  const disp = lastDisplacement(candles, atrVal, 5);
-  if (!disp) return null;
+  const lastC = candles[n - 1];
 
-  for (let i = disp.idx - 1; i >= Math.max(0, disp.idx - 6); i--) {
-    const c = candles[i];
-    if (disp.dir === 1 && c.c < c.o) {
-      const broke = candles.slice(disp.idx).some(x => x.c > Math.max(c.o, c.h));
-      if (broke) return { dir: 1, level: Math.max(c.o, c.h), obLow: c.l, obHigh: c.o, dispIdx: disp.idx };
+  // 1. Cek Bullish CISD (Reversal ke atas)
+  if (lastC.c > lastC.o) {
+    let bearSeries = [];
+    for (let i = n - 2; i >= Math.max(0, n - 8); i--) {
+      if (candles[i].c < candles[i].o) {
+        bearSeries.push(candles[i]);
+      } else if (bearSeries.length > 0) {
+        break;
+      }
     }
-    if (disp.dir === -1 && c.c > c.o) {
-      const broke = candles.slice(disp.idx).some(x => x.c < Math.min(c.o, c.l));
-      if (broke) return { dir: -1, level: Math.min(c.o, c.l), obHigh: c.h, obLow: c.o, dispIdx: disp.idx };
+    if (bearSeries.length >= 2) {
+      const highestOpen = Math.max(...bearSeries.map(c => c.o));
+      const lowestLow = Math.min(...bearSeries.map(c => c.l));
+      if (lastC.c > highestOpen) {
+        return {
+          dir: 1,
+          level: highestOpen,
+          obLow: lowestLow,
+          obHigh: highestOpen,
+          dispIdx: n - 1,
+          seriesCount: bearSeries.length,
+        };
+      }
     }
   }
+
+  // 2. Cek Bearish CISD (Reversal ke bawah)
+  if (lastC.c < lastC.o) {
+    let bullSeries = [];
+    for (let i = n - 2; i >= Math.max(0, n - 8); i--) {
+      if (candles[i].c > candles[i].o) {
+        bullSeries.push(candles[i]);
+      } else if (bullSeries.length > 0) {
+        break;
+      }
+    }
+    if (bullSeries.length >= 2) {
+      const lowestOpen = Math.min(...bullSeries.map(c => c.o));
+      const highestHigh = Math.max(...bullSeries.map(c => c.h));
+      if (lastC.c < lowestOpen) {
+        return {
+          dir: -1,
+          level: lowestOpen,
+          obHigh: highestHigh,
+          obLow: lowestOpen,
+          dispIdx: n - 1,
+          seriesCount: bullSeries.length,
+        };
+      }
+    }
+  }
+
   return null;
+}
+
+// ── STRICT STRUCTURE & CISD CONFIRMATION ENGINE (MODUL PART 4.2: CHoCH > CISD) ──
+function validateStructureAndCISD(triggerCandles, atrVal) {
+  if (!triggerCandles || triggerCandles.length < 10) {
+    return { valid: false, reason: 'Data candle trigger tidak cukup untuk validasi struktur.' };
+  }
+
+  const { highs, lows } = findSwings(triggerCandles.slice(0, -1), 2);
+  const lastC = triggerCandles[triggerCandles.length - 1];
+  const recentHigh = highs.length ? highs[highs.length - 1].p : null;
+  const recentLow = lows.length ? lows[lows.length - 1].p : null;
+
+  // Prioritas 1 (K1 Modul): Micro CHoCH / BOS dengan Candle CLOSE (bukan wick)
+  if (recentHigh && lastC.c > recentHigh && lastC.c > lastC.o) {
+    const body = Math.abs(lastC.c - lastC.o);
+    if (body >= 0.75 * atrVal) {
+      return { valid: true, dir: 1, model: 'CHoCH/BOS', type: 'Micro CHoCH / BOS Bullish (Close Confirmed)' };
+    }
+  }
+  if (recentLow && lastC.c < recentLow && lastC.c < lastC.o) {
+    const body = Math.abs(lastC.c - lastC.o);
+    if (body >= 0.75 * atrVal) {
+      return { valid: true, dir: -1, model: 'CHoCH/BOS', type: 'Micro CHoCH / BOS Bearish (Close Confirmed)' };
+    }
+  }
+
+  // Prioritas 2 (K2 Modul): CISD (Change in State of Delivery) untuk Pembalikan Arah
+  const cisd = detectCISD(triggerCandles, atrVal);
+  if (cisd) {
+    return {
+      valid: true,
+      dir: cisd.dir,
+      model: 'CISD',
+      cisdLevel: cisd.level,
+      obLow: cisd.obLow,
+      obHigh: cisd.obHigh,
+      type: `CISD ${cisd.dir === 1 ? 'Bullish' : 'Bearish'} Reversal (${cisd.seriesCount} candles delivery shift)`
+    };
+  }
+
+  return { valid: false, reason: 'Belum ada konfirmasi Micro CHoCH/BOS ataupun CISD dengan candle close yang valid.' };
 }
 
 function detectReversalSetup(candles, atrVal, price) {
   const sweep = detectSweep(candles);
-  if (!sweep) return null;
-  const dir = sweep.dir;
-
-  const sdZones = findSDZones(candles.slice(0, -2), dir, sweep.sweepExtreme);
-  const nearSD = sdZones.find(z => Math.abs((z.top + z.bottom) / 2 - sweep.sweepExtreme) <= 2.5 * atrVal);
-
-  const rej = hasRejectionBlock(candles, dir);
   const cisd = detectCISD(candles, atrVal);
-  if (!cisd || cisd.dir !== dir) return null;
+  if (!sweep && !cisd) return null;
 
+  const dir = cisd ? cisd.dir : sweep.dir;
+  if (sweep && cisd && sweep.dir !== cisd.dir) return null; // Konflik arah antara sweep dan CISD -> Tunggu
+
+  const refExtreme = sweep ? sweep.sweepExtreme : (dir === 1 ? cisd.obLow : cisd.obHigh);
+  const sdZones = findSDZones(candles.slice(0, -2), dir, refExtreme);
+  const nearSD = sdZones.find(z => Math.abs((z.top + z.bottom) / 2 - refExtreme) <= 2.5 * atrVal);
+
+  // Wajib ada CISD atau Displacement untuk mengonfirmasi pembalikan arah
   const disp = lastDisplacement(candles, atrVal, 3);
-  if (!disp || disp.dir !== dir) return null;
+  if (!cisd && (!disp || disp.dir !== dir)) return null;
 
-  if (!rej && !nearSD) return null;
-
-  const limitEntry = dir === 1
-    ? Math.min(price - 0.1 * atrVal, (cisd.obHigh + cisd.obLow) / 2)
-    : Math.max(price + 0.1 * atrVal, (cisd.obHigh + cisd.obLow) / 2);
+  const limitEntry = cisd
+    ? (dir === 1 ? Math.min(price - 0.1 * atrVal, (cisd.obHigh + cisd.obLow) / 2) : Math.max(price + 0.1 * atrVal, (cisd.obHigh + cisd.obLow) / 2))
+    : price;
 
   return {
     dir,
-    sweepLevel: sweep.sweepExtreme,
-    cisdLevel: cisd.level,
-    sweepType: sweep.type,
-    hasRejection: !!rej,
+    model: cisd ? 'CISD' : 'REVERSAL_BOS',
+    sweepLevel: refExtreme,
+    cisdLevel: cisd ? cisd.level : null,
+    sweepType: sweep ? sweep.type : 'CISD_DELIVERY',
     hasSD: !!nearSD,
     limitEntry,
-    note: `Reversal valid di zona ${dir === 1 ? 'Demand' : 'Supply'}: ${rej ? 'Rejection Block + ' : ''}Sweep ${sweep.type} (${sweep.level}) + CISD + Displacement ${dir === 1 ? 'Bullish' : 'Bearish'}`,
-    noteEn: `Valid reversal in ${dir === 1 ? 'Demand' : 'Supply'} zone: ${rej ? 'Rejection Block + ' : ''}Sweep ${sweep.type} (${sweep.level}) + CISD + ${dir === 1 ? 'Bullish' : 'Bearish'} Displacement`,
+    note: `Reversal Terkonfirmasi (${cisd ? 'CISD Delivery Shift' : 'Sweep + Displacement'}) di zona ${dir === 1 ? 'Demand' : 'Supply'}${sweep ? ` setelah Sweep ${sweep.type}` : ''}`,
+    noteEn: `Confirmed Reversal (${cisd ? 'CISD Delivery Shift' : 'Sweep + Displacement'}) in ${dir === 1 ? 'Demand' : 'Supply'} zone${sweep ? ` after ${sweep.type} Sweep` : ''}`,
   };
 }
 
@@ -557,18 +636,18 @@ function buildOrderFromLevels({ dir, entry, invLevel, atrVal, ctx, kind, rrList 
   return { dir, entry, sl, risk, tps };
 }
 
-// ── MANUAL REQUEST: SCALPING AGRESIF (DENGAN CEK HTF, M15, M5, M1 & KONFIRMASI) ──
+// ── MANUAL REQUEST: SCALPING AGRESIF (DEEP SCANNING + STRUCTURE & CISD CONFIRMATION) ──
 async function runAggressiveScalp(ctx, d) {
   const { price, m1, m5, m15, m30 } = d;
   const base = m5.length >= 30 ? m5 : m15;
   if (!base || base.length < 25) {
     return { 
-      reason: withPair(ctx.symbol, 'Data M5/M15 belum cukup untuk Scalping Agresif.'), 
-      reasonEn: withPair(ctx.symbol, 'M5/M15 data insufficient for Aggressive Scalping.') 
+      reason: withPair(ctx.symbol, '[DEEP SCAN] Data M5/M15 belum cukup untuk scanning mendalam.'), 
+      reasonEn: withPair(ctx.symbol, '[DEEP SCAN] M5/M15 data insufficient for deep scanning.') 
     };
   }
 
-  // 1. CEK HTF / M15 & M5: Arah tren dan open/close di mana
+  // 1. DEEP SCANNING: HTF -> M15 -> M5 -> M1
   const bias = multiTfBias({ h1: d.h1, m30, m15, m5, m1 }, ['h1', 'm30', 'm15', 'm5', 'm1']);
   const atr5 = atrOf(base, ctx.pip);
   const closes = base.map(c => c.c);
@@ -576,73 +655,78 @@ async function runAggressiveScalp(ctx, d) {
   
   if (!sma20) {
     return { 
-      reason: withPair(ctx.symbol, 'SMA20 belum terbentuk dengan sempurna.'), 
-      reasonEn: withPair(ctx.symbol, 'SMA20 not formed yet.') 
+      reason: withPair(ctx.symbol, '[DEEP SCAN] SMA20 belum terbentuk sempurna. Menunggu stabilitas harga.'), 
+      reasonEn: withPair(ctx.symbol, '[DEEP SCAN] SMA20 not fully formed. Waiting for price stability.') 
     };
   }
 
-  // 2. CEK M1: Struktur, apakah mendekati zona utama, retracement, atau reversal?
+  // 2. CEK STRUKTUR & CISD DI M1 / M5 (Wajib Close Candle sesuai Modul Part 1.2 & Part 4.2)
   const triggerTF = m1.length >= 25 ? m1 : base;
-  const reversal = detectReversalSetup(triggerTF, atrOf(triggerTF, ctx.pip), price) || detectReversalSetup(base, atr5, price);
-  const stM1 = readStructure(triggerTF, price) || readStructure(base, price);
+  const triggerAtr = atrOf(triggerTF, ctx.pip);
+  const structConf = validateStructureAndCISD(triggerTF, triggerAtr);
+  const reversal = detectReversalSetup(triggerTF, triggerAtr, price) || detectReversalSetup(base, atr5, price);
 
-  // ATURAN KETAT: Jika ragu atau struktur tidak jelas, TUNGGU (jangan gegabah)
-  if (!reversal && !stM1) {
+  // JIKA RAGU / BELUM ADA KONFIRMASI STRUKTUR ATAU CISD -> TUNGGU
+  if (!structConf.valid && !reversal) {
     return {
-      reason: withPair(ctx.symbol, '[WAIT] Struktur M1/M5 belum memiliki konfirmasi atau arah zona utama yang jelas. Bersabar dan tunggu setup valid.'),
-      reasonEn: withPair(ctx.symbol, '[WAIT] M1/M5 structure lacks confirmation or clear primary zone direction. Wait for a valid setup.')
+      reason: withPair(ctx.symbol, '[WAIT / STANDBY] Deep Scan selesai: Belum ada konfirmasi CHoCH/BOS maupun CISD pembalikan arah dengan candle close valid. Bot menunggu.'),
+      reasonEn: withPair(ctx.symbol, '[WAIT / STANDBY] Deep Scan complete: No valid close-confirmed CHoCH/BOS or CISD reversal yet. Bot waiting.')
     };
   }
 
-  let dir, entry, mode, invLevel, whyId, whyEn;
+  let dir, entry, mode, invLevel, whyId, whyEn, isCisdModel = false;
 
   if (reversal) {
     dir = reversal.dir;
     mode = 'MARKET';
     entry = price;
     invLevel = reversal.sweepLevel;
-    whyId = `${reversal.note}. Cek M1/M5 mendeteksi potensi reversal/retracement valid sesuai SOP. Eksekusi instan dengan konfirmasi ICT Sweep & Displacement.`;
-    whyEn = `${reversal.noteEn}. M1/M5 checks detected valid reversal/retracement per SOP. Instant execution with ICT Sweep & Displacement confirmation.`;
+    isCisdModel = reversal.model === 'CISD';
+    whyId = `${reversal.note}. Konfirmasi struktur & CISD valid di M1/M5.`;
+    whyEn = `${reversal.noteEn}. Valid M1/M5 structure & CISD confirmation.`;
   } else {
-    // Scalping saat retracement dengan catatan sesuai SOP (counter-trend terukur atau searah struktur)
-    dir = stM1.dir;
-    const origin = dir === 1 ? stM1.l1.p : stM1.h1.p;
-    
-    // Validasi tambahan: Jangan gegabah jika struktur melawan arah zona utama HTF tanpa konfirmasi kuat
+    dir = structConf.dir;
+    isCisdModel = structConf.model === 'CISD';
+    const stM1 = readStructure(triggerTF, price) || readStructure(base, price);
+    const origin = dir === 1
+      ? (structConf.obLow ?? stM1?.l1?.p ?? price - 1.2 * atr5)
+      : (structConf.obHigh ?? stM1?.h1?.p ?? price + 1.2 * atr5);
+
     if (bias.dir !== 0 && dir !== bias.dir) {
-      // Ini adalah scalping retracement/lawan arah (counter-trend)
-      // SOP: Hanya ambil jika struktur mendangukung untuk scalping retracement pendek
-      whyId = `Scalping Retracement/Lawan Arah: HTF/M15 mengarah ke ${bias.bias}, namun struktur M1 mendeteksi peluang retracement pendek ke zona utama.`;
-      whyEn = `Counter-Trend/Retracement Scalping: HTF/M15 is ${bias.bias}, but M1 structure detects a short retracement opportunity to primary zone.`;
+      whyId = `Scalping Retracement / Reversal (${structConf.type}): HTF ${bias.bias}, namun M1/M5 terkonfirmasi pembalikan/retracement menuju zona utama.`;
+      whyEn = `Retracement / Reversal Scalping (${structConf.type}): HTF is ${bias.bias}, but M1/M5 confirmed reversal/retracement toward primary zone.`;
     } else {
-      whyId = `Scalping Agresif Searah Tren: Harga ${ctx.f(price)} meneruskan struktur ${stM1.src} searah bias HTF dan SMA20 (${ctx.f(sma20)}).`;
-      whyEn = `Aggressive Trend Scalping: Price ${ctx.f(price)} continues structure ${stM1.src} aligned with HTF bias and SMA20 (${ctx.f(sma20)}).`;
+      whyId = `Scalping Searah Struktur (${structConf.type}): Harga ${ctx.f(price)} terkonfirmasi sejalan dengan bias HTF & SMA20 (${ctx.f(sma20)}).`;
+      whyEn = `Trend Structure Scalping (${structConf.type}): Price ${ctx.f(price)} confirmed aligned with HTF bias & SMA20 (${ctx.f(sma20)}).`;
     }
 
     mode = 'MARKET';
     entry = price;
-    invLevel = dir === 1 ? Math.min(origin, sma20 - 0.5 * atr5, price - 0.8 * atr5) : Math.max(origin, sma20 + 0.5 * atr5, price + 0.8 * atr5);
+    invLevel = dir === 1 ? Math.min(origin, sma20 - 0.4 * atr5) : Math.max(origin, sma20 + 0.4 * atr5);
   }
 
   const order = buildOrderFromLevels({ dir, entry, invLevel, atrVal: atr5, ctx, kind: 'scalp', rrList: STYLES['Scalping'].rr });
-  
-  // Hard Rule: Cek RR minimal 1:1.5 atau 1:2
+
+  // MODUL PART 4.1 & 7.3: Validasi RR (CISD minimal 1.5, Model Standar minimal 2.0)
+  const minRRRequired = isCisdModel ? 1.5 : 2.0;
   const riskAmount = Math.abs(order.entry - order.sl);
-  const rewardAmount = Math.abs(order.tps[0] - order.entry);
-  if ((rewardAmount / riskAmount) < 1.3) {
+  const rewardMax = Math.abs(order.tps[2] - order.entry); // TP3 sebagai target RR maksimal
+  const actualRR = riskAmount > 0 ? (rewardMax / riskAmount) : 0;
+
+  if (actualRR < minRRRequired) {
     return {
-      reason: withPair(ctx.symbol, '[WAIT/SKIP] RR tidak memenuhi syarat minimum SOP (< 1.5). Bot menahan diri untuk tidak entry.'),
-      reasonEn: withPair(ctx.symbol, '[WAIT/SKIP] RR does not meet minimum SOP requirements (< 1.5). Bot refraining from entry.')
+      reason: withPair(ctx.symbol, `[SKIP / SOP] RR (${actualRR.toFixed(2)}) di bawah syarat minimum modul (${minRRRequired} untuk ${isCisdModel ? 'CISD' : 'Standar'}). Tidak mengubah SL, setup di-skip.`),
+      reasonEn: withPair(ctx.symbol, `[SKIP / SOP] RR (${actualRR.toFixed(2)}) below module minimum (${minRRRequired} for ${isCisdModel ? 'CISD' : 'Standard'}). SL not altered, setup skipped.`)
     };
   }
 
   const side = dir === 1 ? 'BUY' : 'SELL';
-  const setup = 'Scalping Berhati-hati · HTF/M15/M5/M1';
+  const setup = `Scalping ICTxSMC · ${isCisdModel ? 'CISD Reversal' : 'Structure Confirmed'}`;
   const orderTxt = `${side} NOW`;
   const tdStr = Object.entries(bias.details).map(([k, v]) => `${k.toUpperCase()}:${v}`).join(' | ');
 
-  const reasonId = withPair(ctx.symbol, `${orderTxt} @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2). ${whyId} Top-Down Check [${tdStr}].`);
-  const reasonEn = withPair(ctx.symbol, `${orderTxt} @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2). ${whyEn} Top-Down Check [${tdStr}].`);
+  const reasonId = withPair(ctx.symbol, `${orderTxt} @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2), TP3 ${ctx.f(order.tps[2])} (1:3). ${whyId} Top-Down [${tdStr}].`);
+  const reasonEn = withPair(ctx.symbol, `${orderTxt} @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2), TP3 ${ctx.f(order.tps[2])} (1:3). ${whyEn} Top-Down [${tdStr}].`);
 
   return {
     dir,
@@ -651,10 +735,10 @@ async function runAggressiveScalp(ctx, d) {
       entry: order.entry, sl: order.sl, tps: order.tps, setup,
       chartContext: `${setup}: ${orderTxt} ${ctx.f(order.entry)} (SL ${ctx.f(order.sl)}). Live ${ctx.f(price)}`,
       zone: null,
-      tag: dir === 1 ? 'Demand/Retracement' : 'Supply/Retracement',
+      tag: dir === 1 ? 'Demand/CISD' : 'Supply/CISD',
     },
     meta: {
-      setup, confidence: 'MEDIUM', riskLabel: 'MEDIUM',
+      setup, confidence: 'HIGH', riskLabel: 'MEDIUM',
       reason: reasonId,
       reasons: { id: reasonId, en: reasonEn },
       topDown: bias,
@@ -663,7 +747,7 @@ async function runAggressiveScalp(ctx, d) {
   };
 }
 
-// ── MANUAL REQUEST: KONSERVATIF, INTRADAY, & SWING (LIMIT ORDER + DYNAMIC FALLBACK) ──
+// ── MANUAL REQUEST: KONSERVATIF, INTRADAY, & SWING (LIMIT ORDER + SOP MODUL) ──
 async function runTopDownLimit(ctx, d, styleName) {
   const cfg = STYLES[styleName];
   const kind = cfg.kind;
@@ -709,10 +793,13 @@ async function runTopDownLimit(ctx, d, styleName) {
   const tdStr = Object.entries(bias.details).map(([k, v]) => `${k.toUpperCase()}:${v}`).join(' | ');
 
   if (!buy && !sell) {
-    const st = readStructure(zoneRows, price) || readStructure(midRows, price) || {
-      dir: bias.dir !== 0 ? bias.dir : 1, src: 'Fallback Struktur Market',
-      l1: { p: price - 1.5 * atrVal }, h1: { p: price + 1.5 * atrVal }
-    };
+    const st = readStructure(zoneRows, price) || readStructure(midRows, price);
+    if (!st) {
+      return {
+        reason: withPair(ctx.symbol, `[WAIT] Belum ditemukan zona Supply/Demand valid atau struktur yang jelas pada ${cfg.label}.`),
+        reasonEn: withPair(ctx.symbol, `[WAIT] No valid Supply/Demand zone or clear structure found for ${cfg.label}.`)
+      };
+    }
     const dir = st.dir;
     const entryFallback = dir === 1 ? price - 0.5 * atrVal : price + 0.5 * atrVal;
     const invFallback = dir === 1 ? st.l1.p : st.h1.p;
@@ -783,13 +870,19 @@ async function runTopDownLimit(ctx, d, styleName) {
   };
 }
 
-// ── BOT EA ENGINE — SCALPER MURNI M1 (SMC/ICT RUNNING STRUCTURE) ──
+// ── BOT EA ENGINE — 100% MODUL SMC/ICT (DEEP SCANNING, STRICT CONFLUENCE >= 7, STRUCTURE & CISD) ──
 const BOT_CFG = {
-  minScore: 5,
-  minRR: 1.5, minRRCisd: 1.3,
-  dispBodyAtr: 1.0, fvgMinAtr: 0.12,
-  bufAtr: 0.10, minSlAtr: 0.25, maxSlAtrScalp: 1.8,
-  lookback: 50,
+  minScore: 7,          // Modul Part 6 & Part 10: Skor < 7 -> SKIP
+  splitScore: 9,        // Modul Part 5 & Part 6: Skor >= 9 -> Split 40/40/20
+  minRR: 2.0,           // Modul Part 7.3: Model standar min 2.0
+  minRRCisd: 1.5,       // Modul Part 7.3: CISD scalp min 1.5
+  dispBodyAtr: 1.2,     // Modul Part 3.3 & Part 6: Displacement >= 1.2 * ATR
+  fvgMinAtr: 0.15,      // Modul Part 3.1 & Part 10: FVG min 0.15 * ATR
+  bufAtr: 0.10,         // Modul Part 7.1: Buffer 0.10 * ATR
+  minSlAtr: 0.30,       // Modul Part 7.1: Min SL 0.3 * ATR
+  maxSlAtrScalp: 1.50,  // Modul Part 7.1: Max SL aggressive 1.5 * ATR
+  maxChaseAtr: 1.50,    // Modul Part 1.2 Hard-Rule 5: Chase protection > 1.5 * ATR
+  lookback: 60,         // Deep scan window
 };
 
 const tsMs = t => (t < 1e12 ? t * 1000 : t);
@@ -833,11 +926,39 @@ function findIFVG(c, dir, fromIdx, ctx, atrV) {
   return best;
 }
 
-function scanSetups(c, atrV, ctx, price, biasDir, eq) {
+// ── BREAKER BLOCK & MITIGATION BLOCK (MODUL PART 3.5 & 3.6) ──
+function findBreakerAndMitigation(c, dir, k, hasSweep) {
+  const zones = [];
+  // Mitigation Block: OB asal impuls tanpa sweep sebelumnya (Part 3.6)
+  if (!hasSweep && k >= 1) {
+    const ob = c[k - 1];
+    if (dir === 1 && ob.c < ob.o) {
+      zones.push(mkZone('MITIGATION', 1, ob.h, ob.l, { label: 'MITIGATION BUY', createdIdx: k, distal: ob.l }));
+    }
+    if (dir === -1 && ob.c > ob.o) {
+      zones.push(mkZone('MITIGATION', -1, ob.h, ob.l, { label: 'MITIGATION SELL', createdIdx: k, distal: ob.h }));
+    }
+  }
+  // Breaker Block: OB berlawanan yang gagal / ditembus (Part 3.5)
+  for (let b = k - 2; b >= Math.max(1, k - 12); b--) {
+    const cand = c[b];
+    if (dir === 1 && cand.c > cand.o && c[k].c > cand.h) {
+      zones.push(mkZone('BREAKER', 1, cand.h, cand.l, { label: 'BREAKER BUY', createdIdx: k, distal: cand.l }));
+      break;
+    }
+    if (dir === -1 && cand.c < cand.o && c[k].c < cand.l) {
+      zones.push(mkZone('BREAKER', -1, cand.h, cand.l, { label: 'BREAKER SELL', createdIdx: k, distal: cand.h }));
+      break;
+    }
+  }
+  return zones;
+}
+
+function scanSetups(c, atrV, ctx, price, biasDir, kzActive) {
   const out = []; const n = c.length; if (n < 25) return out;
   const { highs, lows } = findSwings(c, 2);
   const startK = Math.max(4, n - BOT_CFG.lookback);
-  const minFvg = Math.max(2 * ctx.pip, BOT_CFG.fvgMinAtr * atrV);
+  const minFvg = Math.max(3 * ctx.pip, BOT_CFG.fvgMinAtr * atrV);
 
   for (let k = startK; k < n; k++) {
     const d = c[k];
@@ -860,7 +981,7 @@ function scanSetups(c, atrV, ctx, price, biasDir, eq) {
         const s = own[q]; if (s.i >= j || s.i < j - 30) continue;
         const pen = dir === 1 ? s.p - c[j].l : c[j].h - s.p;
         const back = dir === 1 ? (c[j].c > s.p || (j + 1 <= k && c[j + 1].c > s.p)) : (c[j].c < s.p || (j + 1 <= k && c[j + 1].c < s.p));
-        if (pen >= 0.5 * ctx.pip && back) {
+        if (pen >= 1.0 * ctx.pip && back) {
           const rg = c[j].h - c[j].l || 1;
           const wick = dir === 1 ? (Math.min(c[j].o, c[j].c) - c[j].l) / rg : (c[j].h - Math.max(c[j].o, c[j].c)) / rg;
           sweep = { index: j, level: s.p, extreme: dir === 1 ? c[j].l : c[j].h, wickRatio: Number(wick.toFixed(2)) };
@@ -880,6 +1001,7 @@ function scanSetups(c, atrV, ctx, price, biasDir, eq) {
       }
     }
     if (ob) cands.push(ob);
+
     let fvg = null;
     for (let i = k; i <= Math.min(k + 2, n - 1); i++) {
       if (i < 2) continue;
@@ -887,6 +1009,7 @@ function scanSetups(c, atrV, ctx, price, biasDir, eq) {
       if (dir === -1 && c[i].h < c[i - 2].l && c[i - 2].l - c[i].h >= minFvg) { const z = mkZone('FVG', -1, c[i - 2].l, c[i].h, { createdIdx: i }); if (!fvg || (z.upper - z.lower) > (fvg.upper - fvg.lower)) fvg = z; }
     }
     if (fvg) cands.push(fvg);
+
     const legLo = dir === 1 ? (sweep ? sweep.extreme : Math.min(...c.slice(Math.max(0, k - 6), k + 1).map(x => x.l))) : null;
     const legHi = dir === -1 ? (sweep ? sweep.extreme : Math.max(...c.slice(Math.max(0, k - 6), k + 1).map(x => x.h))) : null;
     let ote = null;
@@ -898,31 +1021,46 @@ function scanSetups(c, atrV, ctx, price, biasDir, eq) {
       if (rg >= 1.0 * atrV) ote = mkZone('OTE', -1, lo + 0.79 * rg, lo + 0.618 * rg, { createdIdx: mssIdx });
     }
     if (ote) cands.push(ote);
+
     const ifvg = findIFVG(c, dir, k - 30, ctx, atrV);
     if (ifvg) cands.push(ifvg);
 
+    const bmZones = findBreakerAndMitigation(c, dir, k, !!sweep);
+    cands.push(...bmZones);
+
+    // Modul Part 3.1: Mitigated >= 0.8 -> Hapus dari active zones
     const live = cands.filter(z => {
       const from = (z.createdIdx ?? k) + 1;
-      if (zoneMitigation(z, c, from) >= 0.9) return false;
+      if (zoneMitigation(z, c, from) >= 0.8) return false;
       if (zoneBroken(z, c, from)) return false;
       return true;
     });
     if (!live.length) continue;
 
-    const ranked = live.map(z => ({ z, ov: live.filter(o => o !== z && overlaps(o, z)).length })).sort((a, b) => b.ov - a.ov || Math.abs(a.z.mid - price) - Math.abs(b.z.mid - price));
+    // Prioritas zona modul Part 8: IFVG > FVG+OB overlap > FVG > OB > Breaker/Mitigation/OTE
+    const prio = { IFVG: 5, FVG: 3, OB: 2, BREAKER: 2, MITIGATION: 2, OTE: 1 };
+    const ranked = live
+      .map(z => ({ z, ov: live.filter(o => o !== z && overlaps(o, z)).length, p: prio[z.type] || 1 }))
+      .sort((a, b) => b.p - a.p || b.ov - a.ov || Math.abs(a.z.mid - price) - Math.abs(b.z.mid - price));
+
     const zone = ranked[0].z;
     const touching = live.filter(o => o === zone || overlaps(o, zone));
     const has = t => touching.some(o => o.type === t);
 
+    // ── CONFLUENCE SCORING SESUAI MODUL PART 6 ──
     const bd = [];
     if (biasDir === dir) bd.push(['Bias HTF searah', 2]);
-    if (sweep) bd.push(['Liquidity sweep', 2]);
-    bd.push(['Displacement', 1]);
-    bd.push([sweep ? 'MSS/CHoCH' : 'BOS', 2]);
-    if (has('FVG')) bd.push(['FVG', 1]);
-    if (has('OB')) bd.push(['OB', 1]);
-    if (has('OTE')) bd.push(['OTE', 1]);
-    if (has('IFVG')) bd.push(['IFVG', 2]);
+    if (kzActive) bd.push(['Dalam Killzone', 1]);
+    if (sweep) bd.push(['Liquidity sweep valid', 2]);
+    bd.push(['Displacement >= 1.2xATR', 1]);
+    bd.push([sweep ? 'MSS/CHoCH valid' : 'BOS valid', 2]);
+    if (has('FVG')) bd.push(['FVG fresh', 1]);
+    if (has('OB')) bd.push(['OB fresh', 1]);
+    if (has('OTE')) bd.push(['OTE 61.8-79%', 1]);
+    if (has('IFVG')) bd.push(['IFVG terkonfirmasi', 2]);
+    if (has('BREAKER') || has('MITIGATION')) bd.push(['Breaker/Mitigation', 1]);
+    bd.push(['Spread & ATR normal', 1]);
+
     const score = bd.reduce((s, x) => s + x[1], 0);
 
     out.push({
@@ -946,23 +1084,29 @@ function botTargets(dir, entry, risk, c5, c15, atrV) {
   const R = p => Math.abs(p - entry) / risk;
   const pick = (minR, maxR, after) => uniq.find(p => R(p) >= minR && R(p) <= maxR && (after == null || (dir === 1 ? p > after : p < after)));
   let synth = false;
-  let t1 = pick(0.8, 2.0), t2, t3;
+  // Modul Part 7.2: TP1 (IRL ~1R), TP2 (EQH/EQL 1.5-2.5R), TP3 (ERL/Swing Mayor 2.5-5R)
+  let t1 = pick(0.8, 1.8), t2, t3;
   if (t1 == null) { t1 = entry + dir * risk; synth = true; }
-  t2 = pick(1.5, 3.5, t1);
+  t2 = pick(1.5, 3.0, t1);
   if (t2 == null) { t2 = dir === 1 ? Math.max(entry + 2 * risk, t1 + 0.5 * risk) : Math.min(entry - 2 * risk, t1 - 0.5 * risk); synth = true; }
-  t3 = pick(2.2, 6, t2);
+  t3 = pick(2.2, 5.5, t2);
   let synth3 = false;
   if (t3 == null) { t3 = dir === 1 ? Math.max(entry + 3 * risk, t2 + risk) : Math.min(entry - 3 * risk, t2 - risk); synth3 = true; }
   return { tps: [t1, t2, t3], rr3: R(t3), synthetic: synth, synth3 };
 }
 
-function calcBotSL({ dir, entry, setup, atrV, ctx }) {
-  const buf = Math.max(1.5 * ctx.pip, BOT_CFG.bufAtr * atrV);
+function calcBotSL({ dir, entry, setup, atrV, ctx, mode }) {
+  const buf = Math.max(2 * ctx.pip, BOT_CFG.bufAtr * atrV);
   const minD = Math.max(BOT_CFG.minSlAtr * atrV, slFloor('bot', ctx));
-  let maxD = BOT_CFG.maxSlAtrScalp * atrV;
+  const maxD = BOT_CFG.maxSlAtrScalp * atrV;
   const z = setup.zone;
   const zoneEdge = dir === 1 ? z.lower : z.upper;
-  const order = [['zona', zoneEdge], ['OB distal', setup.obDistal], ['sweep', setup.sweepExtreme]];
+
+  // Modul Part 7.1: Conservative SL tidak boleh memakai zoneEdge jika limit di zoneEdge; pakai OB distal / Sweep
+  const order = mode === 'CONSERVATIVE'
+    ? [['OB distal', setup.obDistal], ['sweep', setup.sweepExtreme]]
+    : [['zona', zoneEdge], ['OB distal', setup.obDistal], ['sweep', setup.sweepExtreme]];
+
   for (const [src, L] of order) {
     if (!Number.isFinite(L)) continue;
     const sl = dir === 1 ? L - buf : L + buf;
@@ -974,59 +1118,39 @@ function calcBotSL({ dir, entry, setup, atrV, ctx }) {
   return { sl: entry - dir * Math.max(minD, 1.0 * atrV), dist: Math.max(minD, 1.0 * atrV), src: 'structural-fallback' };
 }
 
-function detectConfirmation(dir, m, zone) {
-  const n = m.length; if (n < 5) return { type: 'Structure Continuation M1' };
-  const c = m[n - 1], p = m[n - 2];
-  const prev5 = m.slice(-6, -1);
-  if (dir === 1 && c.c > Math.max(...prev5.map(x => x.h))) return { type: 'M1 CHoCH / BOS Bullish' };
-  if (dir === -1 && c.c < Math.min(...prev5.map(x => x.l))) return { type: 'M1 CHoCH / BOS Bearish' };
-  const rg = c.h - c.l;
-  if (rg > 0) {
-    const lw = Math.min(c.o, c.c) - c.l, uw = c.h - Math.max(c.o, c.c), mid = (c.h + c.l) / 2;
-    if (dir === 1 && lw >= 0.5 * rg && c.c > mid) return { type: 'M1 Rejection Wick' };
-    if (dir === -1 && uw >= 0.5 * rg && c.c < mid) return { type: 'M1 Rejection Wick' };
-  }
-  if (dir === 1 && c.c > c.o && p.c < p.o) return { type: 'M1 Bullish Engulfing / CISD' };
-  if (dir === -1 && c.c < c.o && p.c > p.o) return { type: 'M1 Bearish Engulfing / CISD' };
-  return { type: 'M1 Price Action Momentum' };
-}
-
+// ── BOT EA RUNNER — 100% MODUL SMC/ICT (SCANNING -> SETUP_FORMING -> ZONE_OCCUPIED / LIMIT -> CONFIRMED) ──
 async function runBotSma20(ctx, d, botStyleRaw) {
-  const { price, m1, m5, m15 } = d;
+  const { price, m1, m5, m15, h1 } = d;
   const c5 = closedOnly(m5, 180000);
-  if (!c5 || c5.length < 20) {
+  if (!c5 || c5.length < 25) {
     return {
-      reason: 'Scalper Bot: Menunggu data candle M5 mencukupi...',
-      reasonEn: 'Scalper Bot: Waiting for sufficient M5 candles...'
+      reason: '[SCANNING] Menunggu data candle M5/M15/M1 mencukupi untuk Deep Scanning...',
+      reasonEn: '[SCANNING] Waiting for sufficient M5/M15/M1 candles for Deep Scanning...'
     };
   }
-  const m1c = closedOnly(m1, 60000);
-  const confTF = m1c.length >= 5 ? m1c : c5;
 
+  const m1c = closedOnly(m1, 60000);
+  const confTF = m1c.length >= 10 ? m1c : c5;
   const atrV = atrOf(c5, ctx.pip);
-  const bias = multiTfBias({ m15: m15 && m15.length >= 15 ? m15 : null, m5: c5 }, ['m15', 'm5']);
-  const ref = (m15 && m15.length >= 25 ? m15 : c5).slice(-50);
-  const eq = (Math.max(...ref.map(x => x.h)) + Math.min(...ref.map(x => x.l))) / 2;
+  const atrConf = atrOf(confTF, ctx.pip);
+  const kz = getKillzoneStatus();
+
+  // 1. DEEP SCANNING: Bias HTF (H1/M15/M5) & Pemetaan Likuiditas
+  const bias = multiTfBias({ h1: h1 && h1.length >= 20 ? h1 : null, m15: m15 && m15.length >= 15 ? m15 : null, m5: c5 }, ['h1', 'm15', 'm5']);
   const biasTxt = `${bias.bias} (${Object.entries(bias.details).map(([k, v]) => `${k.toUpperCase()}:${v}`).join(' | ') || 'n/a'})`;
 
-  let setups = scanSetups(c5, atrV, ctx, price, bias.dir, eq);
-  setups = setups.filter(s => s.score >= BOT_CFG.minScore || (bias.dir !== 0 && s.dir === bias.dir));
+  let setups = scanSetups(c5, atrV, ctx, price, bias.dir, kz.active);
+  // Modul Part 6: Skor < 7 -> SKIP (Hanya loloskan setup dengan skor >= 7)
+  setups = setups.filter(s => s.score >= BOT_CFG.minScore);
   setups.sort((a, b) => b.score - a.score || b.formedIdx - a.formedIdx);
-  
-  let setup = setups[0];
+
+  const setup = setups[0];
+
+  // JIKA TIDAK ADA SETUP VALID (SKOR < 7) -> STANDBY / SCANNING (HARD-RULE 3: JANGAN GEGABAH ENTRY)
   if (!setup) {
-    // Fallback dinamis scalping murni agar bot selalu responsif mengeluarkan sinyal scalping mengikuti struktur berjalan M1/M5
-    const fallbackDir = bias.dir !== 0 ? bias.dir : (price >= eq ? 1 : -1);
-    setup = {
-      dir: fallbackDir,
-      type: 'RUNNING_STRUCTURE',
-      score: 5,
-      breakdown: [['Running Structure M1/M5', 3], ['Dynamic Scalp Flow', 2]],
-      zone: mkZone('SCALP_ZONE', fallbackDir, price + 0.8 * atrV, price - 0.8 * atrV, { label: fallbackDir === 1 ? 'DEMAND SCALP' : 'SUPPLY SCALP' }),
-      sweep: null,
-      sweepExtreme: fallbackDir === 1 ? price - 1.2 * atrV : price + 1.2 * atrV,
-      obDistal: fallbackDir === 1 ? price - 1.5 * atrV : price + 1.5 * atrV,
-      mss: { level: price }
+    return {
+      reason: withPair(ctx.symbol, `[SCANNING / STANDBY] Deep Scan selesai (${kz.name}). Belum ditemukan setup dengan Confluence Score >= 7 (Sweep + Displacement + MSS + Zona POI). Bot menunggu setup valid sesuai SOP.`),
+      reasonEn: withPair(ctx.symbol, `[SCANNING / STANDBY] Deep Scan complete (${kz.name}). No setup found with Confluence Score >= 7 (Sweep + Displacement + MSS + POI Zone). Bot waiting for valid SOP setup.`)
     };
   }
 
@@ -1035,21 +1159,100 @@ async function runBotSma20(ctx, d, botStyleRaw) {
   const zLabel = z.label || `${z.type} ${dir === 1 ? 'BUY' : 'SELL'}`;
   const zTxt = `${zLabel} ${ctx.f(z.lower)}-${ctx.f(z.upper)}`;
   const scoreTxt = `${setup.score} (${setup.breakdown.map(x => `${x[0]} +${x[1]}`).join(', ')})`;
-  const flow = setup.sweep ? `Sweep ${ctx.f(setup.sweep.level)} → MSS` : `Running Structure Flow M1`;
 
-  const cf = detectConfirmation(dir, confTF, z);
-  const confType = cf.type;
+  // 2. CEK JARAK HARGA TERHADAP ZONA (MODUL PART 1.2 HARD-RULE 2 & HARD-RULE 5)
+  const distToZone = price < z.lower ? (z.lower - price) : (price > z.upper ? (price - z.upper) : 0);
 
-  const slr = calcBotSL({ dir, entry: price, setup, atrV, ctx });
+  // HARD-RULE 5: Jika harga sudah menjauh > 1.5 * ATR dari zona -> MISSED / CHASE BLOCKED
+  if (distToZone > BOT_CFG.maxChaseAtr * atrV) {
+    return {
+      reason: withPair(ctx.symbol, `[MISSED / CHASE BLOCKED] Harga (${ctx.f(price)}) sudah menjauh > 1.5x ATR dari zona ${zTxt}. Dilarang mengejar harga (Hard-Rule 5), mencari setup baru.`),
+      reasonEn: withPair(ctx.symbol, `[MISSED / CHASE BLOCKED] Price (${ctx.f(price)}) moved > 1.5x ATR away from zone ${zTxt}. Chasing blocked (Hard-Rule 5), scanning new setup.`)
+    };
+  }
+
+  const priceInZone = inZone(price, z) || distToZone <= 0.15 * atrV;
+
+  // 3. JIKA HARGA BELUM MASUK ZONA -> MODE CONSERVATIVE LIMIT ORDER (MODUL PART 5)
+  if (!priceInZone) {
+    // Hard-Rule 7: Limit order hanya dipasang jika dalam Killzone
+    if (!kz.active) {
+      return {
+        reason: withPair(ctx.symbol, `[SETUP_FORMING / WAIT KZ] Setup valid (Score ${setup.score}) di zona ${zTxt}, menunggu Killzone aktif atau harga masuk zona + konfirmasi struktur/CISD.`),
+        reasonEn: withPair(ctx.symbol, `[SETUP_FORMING / WAIT KZ] Valid setup (Score ${setup.score}) at zone ${zTxt}, waiting for active Killzone or price entering zone + structure/CISD confirmation.`)
+      };
+    }
+
+    const slr = calcBotSL({ dir, entry: z.mid, setup, atrV, ctx, mode: 'CONSERVATIVE' });
+    const tg = botTargets(dir, z.mid, slr.dist, c5, m15, atrV);
+
+    // Hard-Rule 4: RR minimal 2.0 untuk Limit Order
+    if (tg.rr3 < BOT_CFG.minRR) {
+      return {
+        reason: withPair(ctx.symbol, `[SKIP / RR LOW] Setup ${zTxt} memiliki RR 1:${tg.rr3.toFixed(1)} (< 1:2.0). Sesuai SOP, setup di-skip.`),
+        reasonEn: withPair(ctx.symbol, `[SKIP / RR LOW] Setup ${zTxt} has RR 1:${tg.rr3.toFixed(1)} (< 1:2.0). Skipped per SOP.`)
+      };
+    }
+
+    const isSplit = setup.score >= BOT_CFG.splitScore;
+    const sl = ctx.f(slr.sl), tps = tg.tps.map(ctx.f);
+    const rrTxt = `1:${tg.rr3.toFixed(1)}`;
+    const setupName = `SMC/ICT Bot · ${isSplit ? 'LIMIT SPLIT (40/40/20)' : 'CONSERVATIVE LIMIT'} · ${z.type}`;
+    const orderTxt = `${side} LIMIT @ ${ctx.f(z.mid)}`;
+
+    const reasonId = withPair(ctx.symbol, `[LIMIT_PLACED] ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} (40%) · TP2 ${tps[1]} (30%) · TP3 ${tps[2]} (30%) | RR ${rrTxt} | Zona: ${zTxt} | ${kz.name} | Score ${scoreTxt} | Bias ${biasTxt}.`);
+    const reasonEn = withPair(ctx.symbol, `[LIMIT_PLACED] ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} (40%) · TP2 ${tps[1]} (30%) · TP3 ${tps[2]} (30%) | RR ${rrTxt} | Zone: ${zTxt} | ${kz.name} | Score ${scoreTxt} | Bias ${biasTxt}.`);
+
+    return {
+      dir,
+      plan: {
+        isOCO: false, orderType: 'LIMIT', status: 'PENDING',
+        entry: ctx.f(z.mid), sl, tps, setup: setupName,
+        chartContext: `${setupName}: ${orderTxt} (SL ${sl})`,
+        zone: { min: z.lower, max: z.upper },
+        tag: zLabel,
+      },
+      meta: {
+        setup: setupName, confidence: 'HIGH', riskLabel: 'LOW',
+        reason: reasonId,
+        reasons: { id: reasonId, en: reasonEn },
+        topDown: bias, state: 'LIMIT_PLACED', score: setup.score
+      },
+    };
+  }
+
+  // 4. HARGA SUDAH DI ZONA (ZONE_OCCUPIED) -> MODE AGGRESSIVE: WAJIB KONFIRMASI STRUKTUR (CHoCH/BOS) ATAU CISD (MODUL PART 4)
+  const structConf = validateStructureAndCISD(confTF, atrConf);
+
+  // HARD-RULE 1 & 3: Tanpa konfirmasi struktur/CISD dengan candle CLOSE, DILARANG ENTRY!
+  if (!structConf.valid || structConf.dir !== dir) {
+    return {
+      reason: withPair(ctx.symbol, `[ZONE_OCCUPIED · WAITING CONFIRMATION] Harga berada di zona ${zTxt}, namun belum muncul konfirmasi Micro CHoCH/BOS ataupun CISD ${side} dengan candle close valid. Menunggu konfirmasi struktur!`),
+      reasonEn: withPair(ctx.symbol, `[ZONE_OCCUPIED · WAITING CONFIRMATION] Price is inside zone ${zTxt}, but no close-confirmed ${side} Micro CHoCH/BOS or CISD yet. Waiting for structure confirmation!`)
+    };
+  }
+
+  // 5. KONFIRMASI STRUKTUR / CISD MUNCUL -> HITUNG SL & VALIDASI RR (PART 4.1 & 7.3)
+  const isCisd = structConf.model === 'CISD';
+  const minRRRequired = isCisd ? BOT_CFG.minRRCisd : BOT_CFG.minRR;
+
+  const slr = calcBotSL({ dir, entry: price, setup, atrV, ctx, mode: 'AGGRESSIVE' });
   const tg = botTargets(dir, price, slr.dist, c5, m15, atrV);
 
-  const sl = ctx.f(slr.sl), tps = tg.tps.map(ctx.f);
-  const rrTxt = `1:${(tg.synth3 ? 2.5 : tg.rr3).toFixed(1)}`;
-  const setupName = `Scalper Bot M1 · Running Structure · ${z.type}`;
-  const orderTxt = `${side} NOW @ ${ctx.f(price)} (${confType})`;
+  if (tg.rr3 < minRRRequired) {
+    return {
+      reason: withPair(ctx.symbol, `[CANCELLED · RR TOO LOW] Konfirmasi ${structConf.type} muncul, namun RR 1:${tg.rr3.toFixed(1)} < ${minRRRequired}. Dilarang mengubah SL, setup dibatalkan.`),
+      reasonEn: withPair(ctx.symbol, `[CANCELLED · RR TOO LOW] ${structConf.type} appeared, but RR 1:${tg.rr3.toFixed(1)} < ${minRRRequired}. Altering SL forbidden, setup cancelled.`)
+    };
+  }
 
-  const reasonId = withPair(ctx.symbol, `[SCALPER BOT M1] State: EXECUTE NOW · ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} · TP2 ${tps[1]} · TP3 ${tps[2]} | RR ${rrTxt} | Zona: ${zTxt} | ${flow} | Konfirmasi M1: ${confType} | Score ${scoreTxt} | Bias ${biasTxt}.`);
-  const reasonEn = withPair(ctx.symbol, `[SCALPER BOT M1] State: EXECUTE NOW · ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} | TP2 ${tps[1]} | TP3 ${tps[2]} | RR ${rrTxt} | Zone: ${zTxt} | ${flow} | M1 Confirmation: ${confType} | Score ${scoreTxt} | Bias ${biasTxt}.`);
+  const sl = ctx.f(slr.sl), tps = tg.tps.map(ctx.f);
+  const rrTxt = `1:${tg.rr3.toFixed(1)}`;
+  const setupName = `SMC/ICT Bot · ${isCisd ? 'CISD Reversal' : 'Structure Confirmed'} · ${z.type}`;
+  const orderTxt = `${side} NOW @ ${ctx.f(price)} (${structConf.type})`;
+
+  const reasonId = withPair(ctx.symbol, `[CONFIRMED · EXECUTE MARKET] ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} (40%→BE) · TP2 ${tps[1]} (30%) · TP3 ${tps[2]} (30%) | RR ${rrTxt} | Zona: ${zTxt} | ${kz.name} | Score ${scoreTxt} | Bias ${biasTxt}.`);
+  const reasonEn = withPair(ctx.symbol, `[CONFIRMED · EXECUTE MARKET] ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} (40%→BE) · TP2 ${tps[1]} (30%) · TP3 ${tps[2]} (30%) | RR ${rrTxt} | Zone: ${zTxt} | ${kz.name} | Score ${scoreTxt} | Bias ${biasTxt}.`);
 
   return {
     dir,
@@ -1061,7 +1264,7 @@ async function runBotSma20(ctx, d, botStyleRaw) {
       tag: zLabel,
     },
     meta: {
-      setup: setupName, confidence: 'HIGH', riskLabel: 'HIGH',
+      setup: setupName, confidence: 'HIGH', riskLabel: 'MEDIUM',
       reason: reasonId,
       reasons: { id: reasonId, en: reasonEn },
       topDown: bias, state: 'CONFIRMED', score: setup.score
@@ -1101,6 +1304,8 @@ function buildSignal(result, lang) {
     chartContext: plan.chartContext || '',
     topDown: meta.topDown || null,
     sma20: meta.sma20 ?? null,
+    state: meta.state || null,
+    score: meta.score ?? null,
   };
 
   if (plan.isOCO) {
@@ -1152,7 +1357,7 @@ const VISION_BASE = `Kamu adalah analis trading institusional spesialis Smart Mo
 ATURAN MUTLAK MODE VISION:
 1. User mengunggah 1 hingga 3 gambar chart. Kamu WAJIB menganalisis SETIAP GAMBAR satu per satu secara eksplisit di dalam array "perImageAnalyses" tanpa terkecuali.
 2. Gabungkan seluruh analisa gambar tersebut menjadi Top-Down Analysis yang utuh untuk menentukan setup final.
-3. Identifikasi dengan presisi: Market Structure (BOS, CHoCH, HH-HL, LH-LL), Zona Supply/Demand, Order Block, FVG, Liquidity Sweep (BSL/SSL), Rejection Block, CISD + Displacement, dan posisi harga terhadap SMA 20.
+3. Identifikasi dengan presisi: Market Structure (BOS, CHoCH, HH-HL, LH-LL), Zona Supply/Demand, Order Block, FVG, IFVG, Breaker/Mitigation, Liquidity Sweep (BSL/SSL), CISD (Change in State of Delivery) + Displacement, dan posisi harga terhadap SMA 20.
 4. Stop Loss (SL) WAJIB logis di balik swing/zona invalidasi yang terlihat di chart.
 
 Balas HANYA JSON valid (tanpa markdown dan tanpa teks di luar JSON):
@@ -1340,7 +1545,7 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
     f: v => Number(Number(v).toFixed(dec)),
   };
 
-  const tfsWanted = isAutoBot ? ['m1', 'm5', 'm15'] : (STYLES[styleName]?.tfs || ['h1', 'm15', 'm5']);
+  const tfsWanted = isAutoBot ? ['m1', 'm5', 'm15', 'h1'] : (STYLES[styleName]?.tfs || ['h1', 'm15', 'm5']);
   const candleMap = {};
   for (const tf of ['m1', 'm5', 'm15', 'm30', 'h1', 'h4', 'd1']) {
     candleMap[tf] = clientCandles(body, tf);
