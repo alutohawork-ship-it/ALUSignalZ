@@ -602,6 +602,47 @@ const fmt = p => {
 const fmtPips = p => `${p > 0 ? '+' : p < 0 ? '−' : ''}${Number(Math.abs(p).toFixed(1))} pip`;
 const pipColor = p => (p > 0 ? TXT.green : p < 0 ? TXT.red : TXT.gray);
 const pipsOf = (t, p) => (p - t.entry) * t.dir / (t.pip || MARKETS[t.key].pip);
+// ── Pengelolaan posisi bot (Modul SMC/ICT): TP1 40% / TP2 30% / TP3 30%, SL→BE setelah TP1, trailing setelah TP2 ──
+const BOT_SPLIT = [0.4, 0.3, 0.3];
+const effSL = t => (t.trailSL != null ? t.trailSL : (t.hits && t.hits.tp1 ? t.entry : t.sl));
+const slLabel = t => (t.trailSL != null ? 'TRAIL' : (t.hits && t.hits.tp1 ? 'BE' : 'SL'));
+// PnL (pips) tertimbang: leg yang sudah kena TP dihitung di harga TP, sisanya di harga exit (atau harga live bila masih jalan)
+function weightedPips(t, mark) {
+  const closed = t.status === 'CLOSED';
+  const rest = closed ? (t.exitPrice ?? t.entry) : (mark ?? t.entry);
+  let sum = 0;
+  TP_KEYS.forEach((k, i) => {
+    if (t[k] == null) return;
+    const px = t.hits && t.hits[k] ? t[k] : rest;
+    sum += BOT_SPLIT[i] * pipsOf(t, px);
+  });
+  return sum;
+}
+const pnlPips = (t, mark) => (t.src === 'bot' && TP_KEYS.every(k => t[k] != null) ? weightedPips(t, mark) : null);
+// Trailing stop: swing low/high M1 terakhir (fallback 1×ATR M1), hanya bergerak searah profit, minimal di BE
+function updateTrail(t, p) {
+  const rows = seriesRows(t.key, '1m');
+  if (!rows || rows.length < 8) return;
+  const since = (t.hits.tp2 && t.hits.tp2.at ? t.hits.tp2.at : Date.now()) - 5 * 60000;
+  const rs = rows.filter(c => c.t >= since && c.t + 60000 <= Date.now());
+  const pip = t.pip || MARKETS[t.key].pip;
+  let cand = null;
+  for (let i = rs.length - 3; i >= 2; i--) {
+    const c = rs[i];
+    if (t.dir > 0 && c.l < rs[i - 1].l && c.l < rs[i - 2].l && c.l <= rs[i + 1].l && c.l <= rs[i + 2].l) { cand = c.l - pip; break; }
+    if (t.dir < 0 && c.h > rs[i - 1].h && c.h > rs[i - 2].h && c.h >= rs[i + 1].h && c.h >= rs[i + 2].h) { cand = c.h + pip; break; }
+  }
+  if (cand == null) {
+    const last = rows.slice(-15); let a = 0;
+    for (let i = 1; i < last.length; i++) a += Math.max(last[i].h - last[i].l, Math.abs(last[i].h - last[i - 1].c), Math.abs(last[i].l - last[i - 1].c));
+    a /= Math.max(1, last.length - 1);
+    cand = t.dir > 0 ? p - a : p + a;
+  }
+  const floor = t.trailSL != null ? t.trailSL : t.entry;
+  cand = t.dir > 0 ? Math.max(cand, floor) : Math.min(cand, floor);
+  cand = t.dir > 0 ? Math.min(cand, p - pip) : Math.max(cand, p + pip);
+  if ((t.dir > 0 && cand > floor) || (t.dir < 0 && cand < floor)) t.trailSL = cand;
+}
 const send = (s, o) => { if (s && s.readyState === 1) s.send(JSON.stringify(o)); };
 const hitKeys = t => TP_KEYS.filter(k => t.hits && t.hits[k]);
 const maxHit = t => TP_KEYS.reduce((m, k, i) => (t.hits && t.hits[k] ? i + 1 : m), 0);
@@ -674,6 +715,8 @@ const botTrade = () => {
     || l.filter(x => x.status !== 'CLOSED').pop()
     || l[l.length - 1] || null;
 };
+// Trade bot yang masih hidup saja (PENDING/RUNNING). Jika sudah SL / TP terakhir / batal -> null, visual entry-SL-TP hilang.
+const botLiveTrade = () => { const t = botTrade(); return t && t.status !== 'CLOSED' ? t : null; };
 
 function log(msg, type) { console.log(`[${type || 'info'}] ${msg}`); }
 
@@ -1309,7 +1352,8 @@ function normalize(t) {
   for (const k of TP_KEYS) if (typeof t.hits[k] === 'number') t.hits[k] = { at: t.hits[k], price: t[k] };
   if (t.status === 'CLOSED') {
     t.maxTp = maxHit(t);
-    t.pips = pipsOf(t, recapPrice(t) ?? t.exitPrice ?? t.entry);
+    const wp = pnlPips(t);
+    t.pips = wp != null ? wp : pipsOf(t, recapPrice(t) ?? t.exitPrice ?? t.entry);
   }
   return t;
 }
@@ -1326,7 +1370,7 @@ function recapPrice(t) {
 function resLabel(t) {
   if (t.result === 'SL') return 'SL';
   if (t.result === 'TP') return `TP${t.maxTp} MAX`;
-  if (t.result === 'BE') return t.maxTp ? `TP${t.maxTp} → BE` : 'BE';
+  if (t.result === 'BE') return t.maxTp ? `TP${t.maxTp} → ${t.trailSL != null ? 'TRAIL' : 'BE'}` : 'BE';
   return '';
 }
 function statusOf(t) {
@@ -1349,10 +1393,11 @@ function tradeFlow(t) {
   const lastK = hitKeys(t).slice(-1)[0];
   const lkP = closed ? recapPrice(t) : (lastK ? t[lastK] : null);
   const lkL = closed ? resLabel(t) : (lastK ? lastK.toUpperCase() : '');
-  const line = (p, lab) => `${entry} > ${fmt(p)} ${fmtPips(pipsOf(t, p))} ${lab}`;
+  const wpNow = pnlPips(t, live);
+  const line = (p, lab) => `${entry} > ${fmt(p)} ${fmtPips(wpNow != null && (closed || hitKeys(t).length) ? wpNow : pipsOf(t, p))} ${lab}`;
   if (lkP != null) {
     const sub = !closed && live != null ? `live ${entry} > ${fmt(live)} ${fmtPips(pipsOf(t, live))}` : '';
-    return { main: line(lkP, lkL), sub, pips: pipsOf(t, lkP) };
+    return { main: line(lkP, lkL), sub, pips: wpNow != null ? wpNow : pipsOf(t, lkP) };
   }
   if (live == null) return { main: `${entry} > --`, sub: '', pips: 0 };
   return { main: line(live, 'RUNNING'), sub: '', pips: pipsOf(t, live) };
@@ -1433,7 +1478,8 @@ function evalTrade(t, p, lo = p, hi = p, now = Date.now()) {
     return true;
   }
 
-  const stop = hitKeys(t).length ? t.entry : t.sl;
+  if (t.src === 'bot' && t.hits.tp2 && !t.hits.tp3) updateTrail(t, p);
+  const stop = t.trailSL != null ? t.trailSL : (hitKeys(t).length ? t.entry : t.sl);
   if (lost(stop)) {
     closeTrade(t, hitKeys(t).length ? 'BE' : 'SL', stop);
     return true;
@@ -1470,7 +1516,8 @@ function replayMissed() {
 function closeTrade(t, result, exitPrice) {
   Object.assign(t, { status: 'CLOSED', result, exitPrice, closedAt: Date.now() });
   t.maxTp = maxHit(t);
-  t.pips = pipsOf(t, recapPrice(t) ?? exitPrice);
+  const wp = pnlPips(t);
+  t.pips = wp != null ? wp : pipsOf(t, recapPrice(t) ?? exitPrice);
 }
 function cancelTrade(t, reason) {
   Object.assign(t, { status: 'CLOSED', result: 'CANCEL', closedAt: Date.now(), pips: 0, maxTp: 0, cancelReason: reason });
@@ -2124,7 +2171,7 @@ function drawBotMap(cv, cx, t, k) {
 
   const L = t ? [
     { label: 'ENTRY', main: true, v: t.entry, c: '#93c5fd', bg: 'rgba(147,197,253,.14)', dash: [] },
-    { label: 'SL', v: t.sl, c: '#f87171', bg: 'rgba(248,113,113,.14)', dash: [4, 4], hit: t.result === 'SL' },
+    { label: slLabel(t), v: effSL(t), c: '#f87171', bg: 'rgba(248,113,113,.14)', dash: [4, 4], hit: t.result === 'SL' },
     { label: 'TP1', v: t.tp1, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp1 },
     { label: 'TP2', v: t.tp2, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp2 },
     { label: 'TP3', v: t.tp3, c: '#38bdf8', bg: 'rgba(56,189,248,.14)', dash: [4, 4], hit: !!t.hits.tp3 }
@@ -2256,7 +2303,7 @@ function drawChart() {
 
 function drawBotChart() {
   if (!isBotView()) return;
-  const activeBotSig = botRunning ? botTrade() : null;
+  const activeBotSig = botRunning ? botLiveTrade() : null;
   drawBotMap(bcv, bcx, activeBotSig, 'XAUUSD');
 }
 
@@ -2294,7 +2341,7 @@ function drawLiveMap(cv, cx, t, k) {
   const pre = t && t.ocoId ? (t.signal === 'BUY' ? 'B ' : 'S ') : '';
   const L = t ? [
     { label: pre + 'ENTRY', main: true, v: t.entry, c: '#93c5fd', bg: 'rgba(147,197,253,.14)', dash: [] },
-    { label: pre + 'SL', v: t.sl, c: '#f87171', bg: 'rgba(248,113,113,.14)', dash: [4, 4], hit: t.result === 'SL' },
+    { label: pre + slLabel(t), v: effSL(t), c: '#f87171', bg: 'rgba(248,113,113,.14)', dash: [4, 4], hit: t.result === 'SL' },
     { label: pre + 'TP1', v: t.tp1, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp1 },
     { label: pre + 'TP2', v: t.tp2, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp2 },
     { label: pre + 'TP3', v: t.tp3, c: '#38bdf8', bg: 'rgba(56,189,248,.14)', dash: [4, 4], hit: !!t.hits.tp3 }
@@ -2929,7 +2976,6 @@ async function runBotCycle() {
       const why = errOf(res, 'Belum ada setup valid yang terdeteksi bot.');
       say(why);
       if (/trial/i.test(why)) { stopBot(why); return; }
-      if (botRunning) setTimeout(runBotCycle, 5000);
       return;
     }
 
@@ -2987,7 +3033,7 @@ async function runBotCycle() {
 
 function refreshBotPanel() {
   if (!isBotView()) return;
-  const t = botRunning ? botTrade() : null;
+  const t = botRunning ? botLiveTrade() : null;
   const st = $('botTradeStatus'), pnl = $('botPnl'), live = $('botLive'), lv = $('botLevels');
   if (!st || !pnl || !live || !lv) return;
 
