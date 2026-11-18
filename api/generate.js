@@ -1,17 +1,17 @@
 // api/generate.js
-// v121 — Top-down SMC/ICT + SMA20. Style-aware. Bot dipaksa SMA20.
+// v123 — Top-Down SMC/ICT + SMA20 (Manual, Bot Fleksibel Konservatif/Agresif, & Vision Per-Gambar)
 
 export const config = { maxDuration: 60 };
 
 const KV_KEY = 'alu_clients';
 const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
 
-// ── AI (vision) ──
+// ── AI (VISION) ──
 const OPENAI_BASE_URL = (process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/$/, '');
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const AI_VISION_MODEL = process.env.AI_VISION_MODEL || 'claude-sonnet-5.5';
-const VISION_TIMEOUT_MS = 50000;
-const VISION_MAX_TOKENS = 900;
+const VISION_TIMEOUT_MS = 55000;
+const VISION_MAX_TOKENS = 1800;
 
 // ── TICKERLAYER ──
 const TL_KEY_NAMES = ['TICKERLAYER_API_KEY', ...Array.from({ length: 19 }, (_, i) => `TICKERLAYER_API_KEY_${i + 1}`)];
@@ -44,45 +44,43 @@ const pairClassOf = symbol => {
 };
 
 const PAIR_CLASS_PROFILE = {
-  gold:      { label: 'Emas',      structTf: 'M1', zoneTf: 'M5', zoneDisp: 0.8, nearAtr: 0.5, slMul: 1.0, bufAtr: 0.2,  range: [100, 50000] },
-  silver:    { label: 'Perak',     structTf: 'M5', zoneTf: 'M5', zoneDisp: 0.9, nearAtr: 0.6, slMul: 1.1, bufAtr: 0.25, range: [5, 300] },
-  metal:     { label: 'Logam',     structTf: 'M5', zoneTf: 'M5', zoneDisp: 0.9, nearAtr: 0.6, slMul: 1.1, bufAtr: 0.25, range: [0.5, 50000] },
-  fx:        { label: 'Forex',     structTf: 'M5', zoneTf: 'M5', zoneDisp: 0.8, nearAtr: 0.6, slMul: 1.0, bufAtr: 0.2,  range: [0.00001, 50000] },
-  fx_jpy:    { label: 'Forex JPY', structTf: 'M5', zoneTf: 'M5', zoneDisp: 0.8, nearAtr: 0.6, slMul: 1.0, bufAtr: 0.2,  range: [0.01, 100000] },
-  index:     { label: 'Indeks',    structTf: 'M5', zoneTf: 'M5', zoneDisp: 0.9, nearAtr: 0.6, slMul: 1.1, bufAtr: 0.25, range: [100, 500000] },
-  commodity: { label: 'Komoditas', structTf: 'M5', zoneTf: 'M5', zoneDisp: 0.9, nearAtr: 0.7, slMul: 1.2, bufAtr: 0.25, range: [0.1, 100000] },
-  crypto:    { label: 'Kripto',    structTf: 'M5', zoneTf: 'M5', zoneDisp: 1.0, nearAtr: 0.8, slMul: 1.3, bufAtr: 0.3,  range: [0.00000001, 5000000] },
+  gold:      { label: 'Emas',      slMul: 1.0, bufAtr: 0.22 },
+  silver:    { label: 'Perak',     slMul: 1.1, bufAtr: 0.25 },
+  metal:     { label: 'Logam',     slMul: 1.1, bufAtr: 0.25 },
+  fx:        { label: 'Forex',     slMul: 1.0, bufAtr: 0.20 },
+  fx_jpy:    { label: 'Forex JPY', slMul: 1.0, bufAtr: 0.20 },
+  index:     { label: 'Indeks',    slMul: 1.1, bufAtr: 0.25 },
+  commodity: { label: 'Komoditas', slMul: 1.2, bufAtr: 0.25 },
+  crypto:    { label: 'Kripto',    slMul: 1.3, bufAtr: 0.30 },
 };
 
 const pairProfile = symbol => ({ cls: pairClassOf(symbol), ...PAIR_CLASS_PROFILE[pairClassOf(symbol)] });
 
-const PIP_OVERRIDE = { XAUUSD: 0.1, DXY: 0.01, US30: 1, NAS100: 1, BTCUSD: 1 };
+const PIP_OVERRIDE = { XAUUSD: 0.1, XAUUSDX: 0.1, DXY: 0.01, US30: 1, NAS100: 1, BTCUSD: 1 };
 const pipSizeOf = (symbol, dec) => PIP_OVERRIDE[symbol] ?? Math.pow(10, -(dec - 1));
 
 const MIN_SL_PIPS = { fx: 5, fx_jpy: 5, gold: 25, silver: 8, metal: 8, crypto: 20, index: 10, commodity: 10 };
 const slFloor = (kind, ctx) => {
   const base = MIN_SL_PIPS[ctx.prof.cls] || 5;
-  const mult = { scalp: 1, scalp_cons: 1, day: 1, intraday: 1.5, swing: 2, bot: 1 }[kind] || 1;
+  const mult = { scalp: 1, scalp_cons: 1.1, intraday: 1.5, swing: 2.2, bot: 1 }[kind] || 1;
   return base * mult * ctx.pip;
 };
 
 const STYLES = {
-  'Scalping':      { label: 'Scalping Agresif · SMA20 + M1/M5/M15/M30', kind: 'scalp',       rr: [1, 2, 3], tfs: ['m30', 'm15', 'm5', 'm1'] },
-  'Scalping EMA':  { label: 'Scalping Agresif · SMA20 + M1/M5/M15/M30', kind: 'scalp',       rr: [1, 2, 3], tfs: ['m30', 'm15', 'm5', 'm1'] },
-  'Day Trading':   { label: 'Scalping Konservatif · H1/M15/M5',         kind: 'scalp_cons',  rr: [1, 2, 3], tfs: ['h1', 'm15', 'm5'] },
-  'Intraday':      { label: 'Intraday · H4/H1/M15/M5',                  kind: 'intraday',    rr: [1, 2, 3], tfs: ['h4', 'h1', 'm15', 'm5'] },
-  'Swing':         { label: 'Swing · D1/H4/H1/M15',                     kind: 'swing',       rr: [1, 2, 3], tfs: ['d1', 'h4', 'h1', 'm15'] },
+  'Scalping':     { label: 'Scalping Agresif · M30+M15+M5+M1 + SMA20', kind: 'scalp',      rr: [1, 2, 3], tfs: ['m30', 'm15', 'm5', 'm1'] },
+  'Scalping EMA': { label: 'Scalping Agresif · M30+M15+M5+M1 + SMA20', kind: 'scalp',      rr: [1, 2, 3], tfs: ['m30', 'm15', 'm5', 'm1'] },
+  'Day Trading':  { label: 'Scalping Konservatif · H1+M15+M5',         kind: 'scalp_cons', rr: [1, 2, 3], tfs: ['h1', 'm15', 'm5'] },
+  'Intraday':     { label: 'Intraday · H4+H1+M15+M5',                  kind: 'intraday',   rr: [1, 2, 3], tfs: ['h4', 'h1', 'm15', 'm5'] },
+  'Swing':        { label: 'Swing · Daily+H4+H1+M15',                  kind: 'swing',      rr: [1, 2, 3], tfs: ['d1', 'h4', 'h1', 'm15'] },
 };
 
-const MIN_BARS = { m1: 100, m5: 40, m15: 60, m30: 40, h1: 40, h4: 30, d1: 20 };
+const MIN_BARS = { m1: 60, m5: 40, m15: 40, m30: 35, h1: 35, h4: 25, d1: 20 };
 const ZONE_ATR_PERIOD = 14;
-const ZONE_DISP_ATR = 1.2;
-const ZONE_FRESH_ONLY = true;
-const MAX_DIST_ATR = { scalp: 3.0, scalp_cons: 4.0, day: 4.0, intraday: 6, swing: 10, bot: 2.0 };
-const GOLD_SL_PIPS = { scalp: [25, 60], scalp_cons: [40, 120], day: [50, 120], intraday: [80, 200], swing: [150, 300], bot: [25, 80] };
-const ATR_SL_MULT = { scalp: [0.8, 3], scalp_cons: [1, 3], day: [1, 3], intraday: [1, 3.5], swing: [1, 4], bot: [0.8, 2.5] };
+const ZONE_DISP_ATR = 1.15;
+const MAX_DIST_ATR = { scalp: 3.5, scalp_cons: 4.5, intraday: 6.5, swing: 11.0, bot: 2.5 };
+const GOLD_SL_PIPS = { scalp: [25, 65], scalp_cons: [35, 110], intraday: [70, 190], swing: [140, 320], bot: [25, 75] };
+const ATR_SL_MULT = { scalp: [0.9, 2.8], scalp_cons: [1.0, 3.0], intraday: [1.1, 3.5], swing: [1.2, 4.0], bot: [0.9, 2.4] };
 
-// TickerLayer timeframe map (espansi multi-TF)
 const TL_SPAN = {
   '1m':  { mult: 1,  span: 'minute', minutes: 1    },
   '5m':  { mult: 5,  span: 'minute', minutes: 5    },
@@ -108,7 +106,7 @@ const MSG = {
     trialLimit: 'Batas trial habis: akun trial hanya 1x signal bot.',
     noPrice: 'Harga live belum tersedia. Tunggu stream XBTFX aktif.',
     noCandles: 'Data candle belum tersedia. Tunggu beberapa detik lalu coba lagi.',
-    noSetup: 'Belum ada setup valid.',
+    noSetup: 'Belum ada setup valid sesuai SOP.',
     noKey: 'OPENAI_API_KEY belum diatur di Vercel.',
     badImage: 'Gambar tidak valid. Gunakan JPG atau PNG.',
   },
@@ -120,7 +118,7 @@ const MSG = {
     trialLimit: 'Trial limit reached: trial accounts are limited to 1 bot signal.',
     noPrice: 'Live price not available. Wait for the XBTFX stream.',
     noCandles: 'Candle data not available yet. Wait a few seconds and try again.',
-    noSetup: 'No valid setup yet.',
+    noSetup: 'No valid setup meeting SOP yet.',
     noKey: 'OPENAI_API_KEY is not set in Vercel.',
     badImage: 'Invalid image. Please use JPG or PNG.',
   },
@@ -153,7 +151,6 @@ async function httpJson(url, options = {}, timeout = 8000) {
   } finally { clearTimeout(timer); }
 }
 
-// ── KV ──
 const kvEnabled = () => !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
 
 async function kvCmd(command) {
@@ -197,7 +194,6 @@ async function markTrialAsUsed(email) {
   } catch (e) { console.error('markTrialAsUsed:', e.message); }
 }
 
-// ── TICKERLAYER ──
 const tlCooldown = new Map();
 
 async function tlGet(url) {
@@ -250,7 +246,6 @@ async function fetchTickerLayerRows(symbol, interval, need) {
   return cleanCandles(rows).slice(-Math.max(1, Math.ceil(need)));
 }
 
-// ── CANDLE & INDIKATOR ──
 function cleanCandles(rows) {
   if (!Array.isArray(rows)) return [];
   return rows
@@ -280,7 +275,6 @@ function atr(candles, period = 14) {
 }
 const atrOf = (candles, pip) => (candles && candles.length >= 15 ? atr(candles, ZONE_ATR_PERIOD) : 10 * pip);
 
-// SMA 20
 function smaLast(values, period = 20) {
   if (!values || values.length < period) return null;
   let s = 0;
@@ -288,7 +282,14 @@ function smaLast(values, period = 20) {
   return s / period;
 }
 
-// ── Struktur & Zona ──
+function smaPrev(values, period = 20, offset = 1) {
+  if (!values || values.length < period + offset) return null;
+  let s = 0;
+  const end = values.length - offset;
+  for (let i = end - period; i < end; i++) s += values[i];
+  return s / period;
+}
+
 function findSwings(c, L = 2) {
   const highs = [], lows = [];
   for (let i = L; i < c.length - L; i++) {
@@ -310,10 +311,10 @@ function readStructure(c, price) {
   const h1 = highs[highs.length - 1], h0 = highs[highs.length - 2];
   const l1 = lows[lows.length - 1], l0 = lows[lows.length - 2];
 
-  if (price > h1.p) return { dir: 1, src: 'BOS naik', bos: true, h1, l1 };
-  if (price < l1.p) return { dir: -1, src: 'BOS turun', bos: true, h1, l1 };
-  if (h1.p > h0.p && l1.p > l0.p) return { dir: 1, src: 'HH-HL', bos: false, h1, l1 };
-  if (h1.p < h0.p && l1.p < l0.p) return { dir: -1, src: 'LH-LL', bos: false, h1, l1 };
+  if (price > h1.p) return { dir: 1, src: 'BOS Bullish', bos: true, h1, l1, h0, l0 };
+  if (price < l1.p) return { dir: -1, src: 'BOS Bearish', bos: true, h1, l1, h0, l0 };
+  if (h1.p > h0.p && l1.p > l0.p) return { dir: 1, src: 'HH-HL Uptrend', bos: false, h1, l1, h0, l0 };
+  if (h1.p < h0.p && l1.p < l0.p) return { dir: -1, src: 'LH-LL Downtrend', bos: false, h1, l1, h0, l0 };
   return null;
 }
 
@@ -340,121 +341,188 @@ function findSDZones(candles, dir, price) {
     const sl = dir === 1 ? bc.l : bc.h;
 
     let broken = false;
-    if (ZONE_FRESH_ONLY) {
-      for (let j = k + 1; j < n; j++) {
-        if (dir === 1 && candles[j].l < bottom) { broken = true; break; }
-        if (dir === -1 && candles[j].h > top) { broken = true; break; }
-      }
+    for (let j = k + 1; j < n; j++) {
+      if (dir === 1 && candles[j].l < bottom) { broken = true; break; }
+      if (dir === -1 && candles[j].h > top) { broken = true; break; }
     }
     if (broken) continue;
 
     const dist = dir === 1 ? Math.max(0, price - top) : Math.max(0, bottom - price);
-    zones.push({ top, bottom, sl, dist, fresh: true, dir });
+    zones.push({ top, bottom, sl, dist, fresh: true, dir, kind: dir === 1 ? 'Demand/OB' : 'Supply/OB' });
   }
   return zones.sort((x, y) => x.dist - y.dist);
 }
 
-// ── SMC / ICT Detection ──
-// Sweep likuiditas (BSL/SSL): wick break swing lalu close balik
-function detectSweep(candles, lookback = 20) {
-  if (!candles || candles.length < lookback + 3) return null;
+function findFVGs(candles, dir, price) {
   const n = candles.length;
-  const last = candles[n - 1];
-  const { highs, lows } = findSwings(candles.slice(0, n - 1), 2);
-  const recentH = highs.slice(-3);
-  const recentL = lows.slice(-3);
-
-  for (const h of recentH) {
-    if (last.h > h.p && last.c < h.p) return { type: 'BSL', level: h.p, dir: -1, idx: h.i };
+  if (n < 10) return [];
+  const fvgs = [];
+  for (let i = 1; i < n - 1; i++) {
+    const prev = candles[i - 1], next = candles[i + 1];
+    if (dir === 1 && prev.h < next.l) {
+      const bottom = prev.h, top = next.l;
+      const mitigated = candles.slice(i + 2).some(x => x.l <= bottom);
+      if (!mitigated && top < price) {
+        fvgs.push({ top, bottom, sl: prev.l, dist: price - top, dir: 1, kind: 'Bullish FVG' });
+      }
+    }
+    if (dir === -1 && prev.l > next.h) {
+      const top = prev.l, bottom = next.h;
+      const mitigated = candles.slice(i + 2).some(x => x.h >= top);
+      if (!mitigated && bottom > price) {
+        fvgs.push({ top, bottom, sl: prev.h, dist: bottom - price, dir: -1, kind: 'Bearish FVG' });
+      }
+    }
   }
-  for (const l of recentL) {
-    if (last.l < l.p && last.c > l.p) return { type: 'SSL', level: l.p, dir: 1, idx: l.i };
+  return fvgs.sort((x, y) => x.dist - y.dist);
+}
+
+function hasRejectionBlock(candles, dir) {
+  if (!candles || candles.length < 3) return null;
+  for (let i = candles.length - 1; i >= Math.max(0, candles.length - 3); i--) {
+    const c = candles[i];
+    const body = Math.abs(c.c - c.o);
+    const range = c.h - c.l;
+    if (range <= 0) continue;
+    const lowerWick = Math.min(c.o, c.c) - c.l;
+    const upperWick = c.h - Math.max(c.o, c.c);
+    if (dir === 1 && lowerWick >= 1.5 * Math.max(body, range * 0.35)) {
+      return { dir: 1, level: c.l, candleIdx: i };
+    }
+    if (dir === -1 && upperWick >= 1.5 * Math.max(body, range * 0.35)) {
+      return { dir: -1, level: c.h, candleIdx: i };
+    }
   }
   return null;
 }
 
-// Displacement: candle body besar searah, minimal 1.2× ATR
-function lastDisplacement(candles, atrVal, lookback = 3) {
+function detectSweep(candles, lookback = 25) {
+  if (!candles || candles.length < lookback + 3) return null;
+  const n = candles.length;
+  const { highs, lows } = findSwings(candles.slice(0, n - 1), 2);
+  const recentH = highs.slice(-4);
+  const recentL = lows.slice(-4);
+
+  for (let k = n - 1; k >= Math.max(0, n - 3); k--) {
+    const c = candles[k];
+    for (const h of recentH) {
+      if (c.h > h.p && c.c < h.p) return { type: 'BSL', level: h.p, sweepExtreme: c.h, dir: -1, idx: k };
+    }
+    for (const l of recentL) {
+      if (c.l < l.p && c.c > l.p) return { type: 'SSL', level: l.p, sweepExtreme: c.l, dir: 1, idx: k };
+    }
+  }
+  return null;
+}
+
+function lastDisplacement(candles, atrVal, lookback = 4) {
   if (!candles) return null;
   const n = candles.length;
   for (let i = n - 1; i >= Math.max(0, n - lookback); i--) {
     const c = candles[i];
     const body = Math.abs(c.c - c.o);
     if (body < 1.2 * atrVal) continue;
-    return { dir: c.c > c.o ? 1 : -1, idx: i, body };
+    return { dir: c.c > c.o ? 1 : -1, idx: i, body, open: c.o, close: c.c };
   }
   return null;
 }
 
-// CISD: displacement tembus body candle lawan terakhir
 function detectCISD(candles, atrVal) {
   const n = candles.length;
-  if (n < 5) return null;
+  if (n < 6) return null;
   const disp = lastDisplacement(candles, atrVal, 5);
   if (!disp) return null;
 
-  for (let i = disp.idx - 1; i >= Math.max(0, disp.idx - 5); i--) {
+  for (let i = disp.idx - 1; i >= Math.max(0, disp.idx - 6); i--) {
     const c = candles[i];
     if (disp.dir === 1 && c.c < c.o) {
-      const broke = candles.slice(disp.idx).some(x => x.c > c.h);
-      if (broke) return { dir: 1, level: c.h, dispIdx: disp.idx };
+      const broke = candles.slice(disp.idx).some(x => x.c > Math.max(c.o, c.h));
+      if (broke) return { dir: 1, level: Math.max(c.o, c.h), obLow: c.l, obHigh: c.o, dispIdx: disp.idx };
     }
     if (disp.dir === -1 && c.c > c.o) {
-      const broke = candles.slice(disp.idx).some(x => x.c < c.l);
-      if (broke) return { dir: -1, level: c.l, dispIdx: disp.idx };
+      const broke = candles.slice(disp.idx).some(x => x.c < Math.min(c.o, c.l));
+      if (broke) return { dir: -1, level: Math.min(c.o, c.l), obHigh: c.h, obLow: c.o, dispIdx: disp.idx };
     }
   }
   return null;
 }
 
-// Reversal setup: sweep + CISD + displacement searah
-function detectReversalSetup(candles, atrVal) {
+function detectReversalSetup(candles, atrVal, price) {
   const sweep = detectSweep(candles);
   if (!sweep) return null;
+  const dir = sweep.dir;
+
+  const sdZones = findSDZones(candles.slice(0, -2), dir, sweep.sweepExtreme);
+  const nearSD = sdZones.find(z => Math.abs((z.top + z.bottom) / 2 - sweep.sweepExtreme) <= 2.5 * atrVal);
+
+  const rej = hasRejectionBlock(candles, dir);
   const cisd = detectCISD(candles, atrVal);
-  if (!cisd || cisd.dir !== sweep.dir) return null;
-  const disp = lastDisplacement(candles, atrVal, 2);
-  if (!disp || disp.dir !== sweep.dir) return null;
+  if (!cisd || cisd.dir !== dir) return null;
+
+  const disp = lastDisplacement(candles, atrVal, 3);
+  if (!disp || disp.dir !== dir) return null;
+
+  if (!rej && !nearSD) return null;
+
+  const limitEntry = dir === 1
+    ? Math.min(price - 0.1 * atrVal, (cisd.obHigh + cisd.obLow) / 2)
+    : Math.max(price + 0.1 * atrVal, (cisd.obHigh + cisd.obLow) / 2);
+
   return {
-    dir: sweep.dir,
-    sweepLevel: sweep.level,
+    dir,
+    sweepLevel: sweep.sweepExtreme,
     cisdLevel: cisd.level,
     sweepType: sweep.type,
-    note: `Reversal ${sweep.type} sweep @ ${sweep.level} + CISD + Displacement ${sweep.dir === 1 ? 'bullish' : 'bearish'}`,
+    hasRejection: !!rej,
+    hasSD: !!nearSD,
+    limitEntry,
+    note: `Reversal valid di zona ${dir === 1 ? 'Demand' : 'Supply'}: ${rej ? 'Rejection Block + ' : ''}Sweep ${sweep.type} (${sweep.level}) + CISD + Displacement ${dir === 1 ? 'Bullish' : 'Bearish'}`,
   };
 }
 
-// Top-down multi-TF bias
-function multiTfBias(tfCandles) {
+function confirmPriceAction(candles, dir) {
+  if (!candles || candles.length < 3) return null;
+  const c1 = candles[candles.length - 1];
+  const c0 = candles[candles.length - 2];
+  const body1 = Math.abs(c1.c - c1.o);
+  const body0 = Math.abs(c0.c - c0.o);
+
+  if (dir === 1 && c1.c > c1.o) {
+    if (c0.c < c0.o && c1.c > c0.o && body1 >= body0 * 0.9) return 'Bullish Engulfing';
+    if (c1.c > c0.h) return 'Bullish Momentum Close';
+  }
+  if (dir === -1 && c1.c < c1.o) {
+    if (c0.c > c0.o && c1.c < c0.o && body1 >= body0 * 0.9) return 'Bearish Engulfing';
+    if (c1.c < c0.l) return 'Bearish Momentum Close';
+  }
+  return null;
+}
+
+function multiTfBias(tfCandles, tfOrder) {
   const weights = { d1: 4, h4: 3, h1: 2.5, m30: 2, m15: 1.5, m5: 1, m1: 0.5 };
   let score = 0, total = 0;
   const details = {};
-  for (const [tf, w] of Object.entries(weights)) {
+  const list = tfOrder || Object.keys(weights);
+
+  for (const tf of list) {
+    const w = weights[tf] || 1;
     const c = tfCandles[tf];
     if (!c || c.length < 20) continue;
     const price = c[c.length - 1].c;
     const st = readStructure(c, price);
     if (!st) continue;
-    details[tf] = { dir: st.dir, src: st.src, bos: st.bos };
+    details[tf] = `${st.dir === 1 ? 'BULL' : 'BEAR'} (${st.src})`;
     score += st.dir * w;
     total += w;
   }
   if (!total) return { dir: 0, bias: 'NEUTRAL', score: 0, details };
   const norm = score / total;
   return {
-    dir: norm > 0.2 ? 1 : norm < -0.2 ? -1 : 0,
-    bias: norm > 0.2 ? 'BULLISH' : norm < -0.2 ? 'BEARISH' : 'NEUTRAL',
+    dir: norm > 0.15 ? 1 : norm < -0.15 ? -1 : 0,
+    bias: norm > 0.15 ? 'BULLISH' : norm < -0.15 ? 'BEARISH' : 'NEUTRAL',
     score: Number(norm.toFixed(2)),
     details,
   };
-}
-
-function emaLast(values, period) {
-  if (!values.length) return 0;
-  const k = 2 / (period + 1);
-  let prev = values[0];
-  for (let i = 1; i < values.length; i++) prev = values[i] * k + prev * (1 - k);
-  return prev;
 }
 
 function clampRisk(risk, kind, ctx, atrVal) {
@@ -472,16 +540,15 @@ function clampRisk(risk, kind, ctx, atrVal) {
   return Math.min(Math.max(risk, min), max);
 }
 
-// ── Order Builders ──
 function buildStrictOrder({ dir, zone, atrVal, ctx, kind, rrList, price }) {
   let entry = (zone.top + zone.bottom) / 2;
   let shifted = false;
 
-  if (dir === 1 && entry >= price) { entry = price - 1.0 * atrVal; shifted = true; }
-  if (dir === -1 && entry <= price) { entry = price + 1.0 * atrVal; shifted = true; }
+  if (dir === 1 && entry >= price) { entry = price - 0.8 * atrVal; shifted = true; }
+  if (dir === -1 && entry <= price) { entry = price + 0.8 * atrVal; shifted = true; }
 
   const invLevel = shifted ? entry : (zone.sl ?? (dir === 1 ? zone.bottom : zone.top));
-  const buf = 0.2 * atrVal;
+  const buf = (ctx.prof.bufAtr || 0.2) * atrVal;
   const rawSl = dir === 1 ? invLevel - buf : invLevel + buf;
   const risk = clampRisk(Math.abs(entry - rawSl), kind, ctx, atrVal);
 
@@ -493,38 +560,34 @@ function buildStrictOrder({ dir, zone, atrVal, ctx, kind, rrList, price }) {
 
   return {
     dir, entry, sl: finalSl, risk, tps,
-    label: `${dir === 1 ? 'Buy' : 'Sell'} Limit · ${dir === 1 ? 'Demand' : 'Supply'}`,
+    label: `${dir === 1 ? 'Buy' : 'Sell'} Limit · ${zone.kind || (dir === 1 ? 'Demand' : 'Supply')}`,
     zone: zoneOut,
-    tag: dir === 1 ? 'Demand' : 'Supply',
+    tag: zone.kind || (dir === 1 ? 'Demand' : 'Supply'),
   };
 }
 
-function buildMarketOrder({ dir, entry, invLevel, atrVal, ctx, kind, rrList }) {
-  const rawSl = dir === 1 ? invLevel - 0.2 * atrVal : invLevel + 0.2 * atrVal;
+function buildOrderFromLevels({ dir, entry, invLevel, atrVal, ctx, kind, rrList }) {
+  const buf = (ctx.prof.bufAtr || 0.2) * atrVal;
+  const rawSl = dir === 1 ? invLevel - buf : invLevel + buf;
   const risk = clampRisk(Math.abs(entry - rawSl), kind, ctx, atrVal);
   const sl = entry - dir * risk;
   const tps = rrList.map(m => entry + dir * risk * m);
   return { dir, entry, sl, risk, tps };
 }
 
-// ── Runners ──
-
-// 1) Scalping Agresif: SMA20 + struktur M30/M15/M5/M1
 async function runAggressiveScalp(ctx, d) {
   const { price, m1, m5, m15, m30 } = d;
-  const base = m5.length >= 40 ? m5 : m15;
-  if (!base || base.length < 30) return { reason: 'Data M5/M15 belum cukup untuk scalping agresif.' };
+  const base = m5.length >= 30 ? m5 : m15;
+  if (!base || base.length < 25) return { reason: withPair(ctx.symbol, 'Data M5/M15 belum cukup untuk Scalping Agresif.') };
 
   const atr5 = atrOf(base, ctx.pip);
   const closes = base.map(c => c.c);
   const sma20 = smaLast(closes, 20);
-  if (!sma20) return { reason: 'SMA20 belum tersedia.' };
+  if (!sma20) return { reason: withPair(ctx.symbol, 'SMA20 belum terbentuk.') };
 
-  // Reversal prioritas
-  const reversal = detectReversalSetup(base, atr5);
-
-  // Top-down bias untuk konfirmasi
-  const bias = multiTfBias({ m30, m15, m5, m1 });
+  const bias = multiTfBias({ m30, m15, m5, m1 }, ['m30', 'm15', 'm5', 'm1']);
+  const triggerTF = m1.length >= 25 ? m1 : base;
+  const reversal = detectReversalSetup(triggerTF, atrOf(triggerTF, ctx.pip), price) || detectReversalSetup(base, atr5, price);
 
   let dir, entry, mode, invLevel, why;
   const dist = Math.abs(price - sma20);
@@ -534,48 +597,48 @@ async function runAggressiveScalp(ctx, d) {
     mode = 'MARKET';
     entry = price;
     invLevel = reversal.sweepLevel;
-    why = reversal.note;
+    why = `${reversal.note}. Eksekusi cepat sesuai kaidah ICT.`;
   } else {
-    const st = readStructure(base, price);
-    if (!st) return { reason: withPair(ctx.symbol, 'Scalping Agresif: struktur belum jelas. Tunggu BOS/CHoCH.') };
+    const st = readStructure(base, price) || readStructure(triggerTF, price);
+    if (!st) return { reason: withPair(ctx.symbol, 'Scalping Agresif: struktur M1/M5 belum jelas. Tunggu BOS/CHoCH.') };
 
-    // Wajib selaras dengan bias multi-TF jika ada
     if (bias.dir !== 0 && st.dir !== bias.dir) {
-      return { reason: withPair(ctx.symbol, `Scalping Agresif: struktur ${st.dir === 1 ? 'bull' : 'bear'} M5 tidak selaras bias HTF (${bias.bias}). Tunggu.`) };
-    }
-    const smaAligned = (st.dir === 1 && price > sma20) || (st.dir === -1 && price < sma20);
-    if (!smaAligned && !st.bos) {
-      return { reason: withPair(ctx.symbol, `Scalping Agresif: harga ${price > sma20 ? 'di atas' : 'di bawah'} SMA20 tapi struktur ${st.dir === 1 ? 'bullish' : 'bearish'} — belum selaras. Tunggu.`) };
+      return { reason: withPair(ctx.symbol, `Scalping Agresif: struktur M5 (${st.dir === 1 ? 'Bull' : 'Bear'}) berlawanan dengan bias M30/M15 (${bias.bias}). Tunggu sinkron.`) };
     }
 
     dir = st.dir;
     const origin = dir === 1 ? st.l1.p : st.h1.p;
+    const smaAligned = (dir === 1 && price >= sma20 - 0.25 * atr5) || (dir === -1 && price <= sma20 + 0.25 * atr5);
 
-    if (dist <= 0.5 * atr5) {
-      // Dekat SMA20 → MARKET sekarang
+    if (smaAligned && dist <= 0.65 * atr5) {
       mode = 'MARKET';
       entry = price;
       invLevel = dir === 1 ? Math.min(origin, sma20 - 0.5 * atr5) : Math.max(origin, sma20 + 0.5 * atr5);
-      why = `Harga ${ctx.f(price)} dekat SMA20 (${ctx.f(sma20)}), struktur ${st.src}. MARKET entry.`;
+      why = `Harga ${ctx.f(price)} menempel jalur SMA20 (${ctx.f(sma20)}) & searah struktur ${st.src}. Entry NOW.`;
     } else {
-      // Jauh dari SMA20 → LIMIT di jalur SMA20 + struktur
-      const limEntry = sma20 + dir * 0.2 * atr5;
+      const fvg = findFVGs(base, dir, price)[0];
+      const sd = findSDZones(base, dir, price)[0];
+      const poiMid = fvg ? (fvg.top + fvg.bottom) / 2 : (sd ? (sd.top + sd.bottom) / 2 : sma20);
+      const limEntry = (sma20 + poiMid) / 2;
+
       if ((dir === 1 && limEntry >= price) || (dir === -1 && limEntry <= price)) {
-        return { reason: withPair(ctx.symbol, 'Scalping Agresif: harga belum pullback ke SMA20, tunggu.') };
+        return { reason: withPair(ctx.symbol, `Scalping Agresif: harga terlalu jauh dari SMA20 (${ctx.f(sma20)}) dan belum membentuk jalur limit valid. Tunggu pullback.`) };
       }
+
       mode = 'LIMIT';
       entry = limEntry;
-      invLevel = dir === 1 ? Math.min(origin, sma20 - 0.6 * atr5) : Math.max(origin, sma20 + 0.6 * atr5);
-      why = `Harga ${ctx.f(price)} jauh dari SMA20 (${ctx.f(sma20)}). LIMIT di jalur SMA20 + struktur ${st.src}.`;
+      invLevel = dir === 1
+        ? Math.min(origin, fvg ? fvg.sl : sma20 - 0.6 * atr5)
+        : Math.max(origin, fvg ? fvg.sl : sma20 + 0.6 * atr5);
+      why = `Jarak harga ke SMA20 (${ctx.f(sma20)}) lebar. Pasang LIMIT di jalur SMA20 + ${fvg ? fvg.kind : (sd ? sd.kind : 'Structure ' + st.src)}.`;
     }
   }
 
-  const order = buildMarketOrder({ dir, entry, invLevel, atrVal: atr5, ctx, kind: 'scalp', rrList: STYLES['Scalping'].rr });
+  const order = buildOrderFromLevels({ dir, entry, invLevel, atrVal: atr5, ctx, kind: 'scalp', rrList: STYLES['Scalping'].rr });
   const side = dir === 1 ? 'BUY' : 'SELL';
-  const setup = 'Scalping Agresif · SMA20 + Top-Down';
+  const setup = 'Scalping Agresif · M30/M15/M5/M1 + SMA20';
   const orderTxt = mode === 'MARKET' ? `${side} NOW` : `${side} LIMIT`;
-
-  const topDownSummary = `Bias HTF: ${bias.bias} (score ${bias.score}). SMA20 M5: ${ctx.f(sma20)}.`;
+  const tdStr = Object.entries(bias.details).map(([k, v]) => `${k.toUpperCase()}:${v}`).join(' | ');
 
   return {
     dir,
@@ -583,89 +646,114 @@ async function runAggressiveScalp(ctx, d) {
       isOCO: false, orderType: mode, status: mode === 'MARKET' ? 'RUNNING' : 'PENDING',
       entry: order.entry, sl: order.sl, tps: order.tps, setup,
       chartContext: `${setup}: ${orderTxt} ${ctx.f(order.entry)} (SL ${ctx.f(order.sl)}). Live ${ctx.f(price)}`,
-      zone: null, tag: dir === 1 ? 'Demand' : 'Supply',
+      zone: mode === 'LIMIT' ? { min: order.entry - 0.2 * atr5, max: order.entry + 0.2 * atr5 } : null,
+      tag: dir === 1 ? 'Demand/SMA20' : 'Supply/SMA20',
     },
     meta: {
       setup, confidence: 'HIGH', riskLabel: 'HIGH',
-      reason: withPair(ctx.symbol, `${orderTxt} @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])}, TP2 ${ctx.f(order.tps[1])}, TP3 ${ctx.f(order.tps[2])}. ${why} ${topDownSummary}`),
+      reason: withPair(ctx.symbol, `${orderTxt} @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2), TP3 ${ctx.f(order.tps[2])} (1:3). ${why} Top-Down: [${tdStr}].`),
       topDown: bias,
       sma20,
     },
   };
 }
 
-// 2) Scalping Konservatif / Intraday / Swing: top-down limit zona
 async function runTopDownLimit(ctx, d, styleName) {
   const cfg = STYLES[styleName];
   const kind = cfg.kind;
   const rr = cfg.rr;
   const { price } = d;
 
-  // Kumpulkan TF sesuai style
   const tfMap = {};
   for (const tf of cfg.tfs) if (d[tf] && d[tf].length) tfMap[tf] = d[tf];
 
-  const bias = multiTfBias(tfMap);
-
-  // Entry TF = TF terakhir yang tersedia (terendah)
+  const bias = multiTfBias(tfMap, cfg.tfs);
   const entryTF = cfg.tfs[cfg.tfs.length - 1];
+  const midTF = cfg.tfs[Math.max(0, cfg.tfs.length - 2)];
+
   const zoneRows = d[entryTF] || d.m15 || d.m5;
-  if (!zoneRows || zoneRows.length < 30) return { reason: `Data ${entryTF.toUpperCase()} belum cukup untuk ${cfg.label}.` };
+  const midRows = d[midTF] || zoneRows;
+
+  if (!zoneRows || zoneRows.length < 25) {
+    return { reason: withPair(ctx.symbol, `Data ${entryTF.toUpperCase()} belum cukup untuk ${cfg.label}.`) };
+  }
 
   const atrVal = atrOf(zoneRows, ctx.pip);
-  const maxDist = (MAX_DIST_ATR[kind] || 4) * atrVal;
+  const maxDist = (MAX_DIST_ATR[kind] || 4.5) * atrVal;
 
-  const demand = findSDZones(zoneRows, 1, price)
-    .filter(z => z.top < price && (price - (z.top + z.bottom) / 2) <= maxDist);
-  const supply = findSDZones(zoneRows, -1, price)
-    .filter(z => z.bottom > price && ((z.top + z.bottom) / 2 - price) <= maxDist);
+  const rawDemand = [...findSDZones(midRows, 1, price), ...findSDZones(zoneRows, 1, price)]
+    .filter(z => z.top < price && (price - (z.top + z.bottom) / 2) <= maxDist)
+    .sort((a, b) => a.dist - b.dist);
+
+  const rawSupply = [...findSDZones(midRows, -1, price), ...findSDZones(zoneRows, -1, price)]
+    .filter(z => z.bottom > price && ((z.top + z.bottom) / 2 - price) <= maxDist)
+    .sort((a, b) => a.dist - b.dist);
 
   const base = { atrVal, ctx, kind, rrList: rr, price };
+  let buy = rawDemand.length ? buildStrictOrder({ dir: 1, zone: rawDemand[0], ...base }) : null;
+  let sell = rawSupply.length ? buildStrictOrder({ dir: -1, zone: rawSupply[0], ...base }) : null;
 
-  // Pilih sisi sesuai bias HTF (kalau bias jelas, hanya zona searah)
-  let buy = demand.length ? buildStrictOrder({ dir: 1, zone: demand[0], ...base }) : null;
-  let sell = supply.length ? buildStrictOrder({ dir: -1, zone: supply[0], ...base }) : null;
-
-  if (bias.dir === 1 && buy) sell = null;
-  if (bias.dir === -1 && sell) buy = null;
+  if (bias.dir === 1) sell = null;
+  if (bias.dir === -1) buy = null;
 
   const setup = cfg.label;
+  const tdStr = Object.entries(bias.details).map(([k, v]) => `${k.toUpperCase()}:${v}`).join(' | ');
 
   if (!buy && !sell) {
-    // Fallback: continuation mengikuti arah market dengan pantulan terdekat
-    const st = readStructure(zoneRows, price);
-    if (st) {
-      const sma = smaLast(zoneRows.map(c => c.c), 20) || price;
-      const dir = st.dir;
-      const origin = dir === 1 ? st.l1.p : st.h1.p;
-      const nearLevel = dir === 1 ? Math.max(origin, sma) : Math.min(origin, sma);
-      const entry = nearLevel + dir * 0.1 * atrVal;
-
-      if ((dir === 1 && entry < price) || (dir === -1 && entry > price)) {
-        const cont = buildMarketOrder({ dir, entry, invLevel: origin, atrVal, ctx, kind, rrList: rr });
-        const side = dir === 1 ? 'BUY' : 'SELL';
-        const contSetup = `${setup} · Continuation`;
-        const reason = withPair(ctx.symbol, `${side} LIMIT @ ${ctx.f(cont.entry)} (SL ${ctx.f(cont.sl)}). Tidak ada zona S/D fresh — pakai continuation mengikuti struktur ${st.src} dengan pantulan terdekat di ${ctx.f(nearLevel)}. Bias HTF: ${bias.bias}.`);
-        return {
-          dir,
-          plan: {
-            isOCO: false, orderType: 'LIMIT', status: 'PENDING',
-            entry: cont.entry, sl: cont.sl, tps: cont.tps, setup: contSetup,
-            chartContext: `${contSetup}: ${side} Limit ${ctx.f(cont.entry)} (SL ${ctx.f(cont.sl)}). Live ${ctx.f(price)}`,
-            zone: null, tag: dir === 1 ? 'Demand' : 'Supply',
-          },
-          meta: { setup: contSetup, confidence: 'MEDIUM', riskLabel: 'MEDIUM', reason, topDown: bias },
-        };
-      }
+    const st = readStructure(zoneRows, price) || readStructure(midRows, price);
+    if (!st) {
+      return { reason: withPair(ctx.symbol, `${setup}: belum ada zona S&D fresh dan struktur market belum jelas. Tidak mengarang entry, tunggu konfirmasi.`) };
     }
-    return { reason: withPair(ctx.symbol, `${setup}: tidak ada zona fresh & tidak ada continuation valid. Tunggu setup baru.`) };
+    if (bias.dir !== 0 && st.dir !== bias.dir) {
+      return { reason: withPair(ctx.symbol, `${setup}: struktur ${entryTF.toUpperCase()} berlawanan dengan bias HTF (${bias.bias}). Tunggu arah selaras.`) };
+    }
+
+    const dir = st.dir;
+    const fvgs = findFVGs(zoneRows, dir, price);
+    const midFvgs = findFVGs(midRows, dir, price);
+    const nearestFvg = fvgs[0] || midFvgs[0];
+    const sma20 = smaLast(zoneRows.map(c => c.c), 20);
+    const origin = dir === 1 ? st.l1.p : st.h1.p;
+
+    let bounceLevel = null;
+    let bounceLabel = '';
+
+    if (nearestFvg && nearestFvg.dist <= maxDist) {
+      bounceLevel = (nearestFvg.top + nearestFvg.bottom) / 2;
+      bounceLabel = nearestFvg.kind;
+    } else if (sma20 && ((dir === 1 && sma20 < price && (price - sma20) <= maxDist) || (dir === -1 && sma20 > price && (sma20 - price) <= maxDist))) {
+      bounceLevel = sma20;
+      bounceLabel = `SMA20 ${entryTF.toUpperCase()}`;
+    }
+
+    if (bounceLevel != null) {
+      const inv = nearestFvg ? nearestFvg.sl : origin;
+      const cont = buildOrderFromLevels({ dir, entry: bounceLevel, invLevel: inv, atrVal, ctx, kind, rrList: rr });
+      const side = dir === 1 ? 'BUY' : 'SELL';
+      const contSetup = `${setup} · Continuation`;
+      const reason = withPair(ctx.symbol, `${side} LIMIT @ ${ctx.f(cont.entry)}, SL ${ctx.f(cont.sl)}, TP1 ${ctx.f(cont.tps[0])} (1:1), TP2 ${ctx.f(cont.tps[1])} (1:2), TP3 ${ctx.f(cont.tps[2])} (1:3). Zona S&D utama jauh/terisi — mengambil setup Continuation searah ${st.src} di ${bounceLabel} (${ctx.f(bounceLevel)}). Top-Down: [${tdStr}].`);
+
+      return {
+        dir,
+        plan: {
+          isOCO: false, orderType: 'LIMIT', status: 'PENDING',
+          entry: cont.entry, sl: cont.sl, tps: cont.tps, setup: contSetup,
+          chartContext: `${contSetup}: ${side} Limit ${ctx.f(cont.entry)} (SL ${ctx.f(cont.sl)}). Live ${ctx.f(price)}`,
+          zone: { min: cont.entry - 0.2 * atrVal, max: cont.entry + 0.2 * atrVal },
+          tag: bounceLabel,
+        },
+        meta: { setup: contSetup, confidence: 'MEDIUM', riskLabel: 'MEDIUM', reason, topDown: bias },
+      };
+    }
+
+    return { reason: withPair(ctx.symbol, `${setup}: belum ditemukan zona S&D kuat maupun pantulan FVG/SMA20 terdekat yang valid sesuai SOP SMC/ICT. Tunggu setup baru.`) };
   }
 
   const leg = o => ({ ...o, orderType: 'LIMIT', status: 'PENDING' });
 
   if (buy && sell) {
     const chartContext = `${setup}: Buy Limit ${ctx.f(buy.entry)} & Sell Limit ${ctx.f(sell.entry)}. Bias ${bias.bias}.`;
-    const reason = withPair(ctx.symbol, `${setup}. BUY LIMIT @ ${ctx.f(buy.entry)} (SL ${ctx.f(buy.sl)}) & SELL LIMIT @ ${ctx.f(sell.entry)} (SL ${ctx.f(sell.sl)}). Bias HTF: ${bias.bias}.`);
+    const reason = withPair(ctx.symbol, `${setup} (Netral HTF). BUY LIMIT @ ${ctx.f(buy.entry)} (SL ${ctx.f(buy.sl)}) & SELL LIMIT @ ${ctx.f(sell.entry)} (SL ${ctx.f(sell.sl)}). Top-Down: [${tdStr}].`);
     return {
       plan: { isOCO: true, orders: [leg(buy), leg(sell)], setup, chartContext },
       meta: { setup, confidence: 'HIGH', riskLabel: 'MEDIUM', reason, topDown: bias },
@@ -674,9 +762,9 @@ async function runTopDownLimit(ctx, d, styleName) {
 
   const o = leg(buy || sell);
   const side = o.dir === 1 ? 'BUY' : 'SELL';
-  const oneSetup = `${setup} · 1 Zona Fresh`;
+  const oneSetup = `${setup} · Zona Terkuat`;
   const chartContext = `${oneSetup}: ${side} Limit ${ctx.f(o.entry)} (SL ${ctx.f(o.sl)}). Bias ${bias.bias}.`;
-  const reason = withPair(ctx.symbol, `${oneSetup}. ${side} LIMIT @ ${ctx.f(o.entry)}, SL ${ctx.f(o.sl)}, TP1 ${ctx.f(o.tps[0])}, TP2 ${ctx.f(o.tps[1])}, TP3 ${ctx.f(o.tps[2])}. Bias HTF: ${bias.bias} (score ${bias.score}).`);
+  const reason = withPair(ctx.symbol, `${oneSetup}. ${side} LIMIT @ ${ctx.f(o.entry)}, SL ${ctx.f(o.sl)}, TP1 ${ctx.f(o.tps[0])} (1:1), TP2 ${ctx.f(o.tps[1])} (1:2), TP3 ${ctx.f(o.tps[2])} (1:3). Zona ${o.tag} terkuat hasil top-down [${tdStr}].`);
 
   return {
     dir: o.dir,
@@ -689,93 +777,202 @@ async function runTopDownLimit(ctx, d, styleName) {
   };
 }
 
-// 3) Bot: SMA20 M1 continuation + reversal
-async function runBotSma20(ctx, d) {
+// ── 3) BOT EA ENGINE (FLEKSIBEL: REVERSAL / SMA / ZONE M1) ──
+async function runBotSma20(ctx, d, botStyleRaw) {
   const { price, m1, m5 } = d;
   const candles = (m1 && m1.length >= 30) ? m1 : m5;
-  if (!candles || candles.length < 30) return { reason: 'Data M1 belum cukup untuk bot SMA20.' };
+  if (!candles || candles.length < 30) {
+    return { reason: 'Bot menunggu data candle M1 mencukupi...' };
+  }
 
+  const isConservative = /konserv|conserv|day/i.test(String(botStyleRaw || ''));
   const atrVal = atrOf(candles, ctx.pip);
   const closes = candles.map(c => c.c);
   const sma20 = smaLast(closes, 20);
-  if (!sma20) return { reason: 'Bot SMA20: SMA20 belum tersedia.' };
+  const sma20Prev = smaPrev(closes, 20, 1);
+  if (!sma20 || !sma20Prev) return { reason: 'Bot menghitung SMA20 M1...' };
 
   const last = candles[candles.length - 1];
-  const reversal = detectReversalSetup(candles, atrVal);
   const st = readStructure(candles, price);
-  const rrList = [1, 2]; // Bot: 1:1 & 1:2
+  const reversal = detectReversalSetup(candles, atrVal, price);
+  const rrList = [1, 2]; // SOP Bot: RR 1:1 & 1:2
 
-  let dir, mode, entry, invLevel, why;
-
-  if (reversal) {
-    // Reversal prioritas untuk bot
-    dir = reversal.dir;
-    mode = 'MARKET';
-    entry = price;
-    invLevel = reversal.sweepLevel;
-    why = reversal.note;
-  } else if (st) {
-    dir = st.dir;
-    const smaAligned = (dir === 1 && price > sma20) || (dir === -1 && price < sma20);
-    if (!smaAligned) {
-      return { reason: `Bot SMA20: harga ${price > sma20 ? 'di atas' : 'di bawah'} SMA20 (${ctx.f(sma20)}) tidak searah struktur ${st.dir === 1 ? 'bullish' : 'bearish'}. Tunggu konfirmasi.` };
+  // ════════════════════════════════════════════════════════
+  // BOT KONSERVATIF FLEKSIBEL:
+  // Jika limit order sebelumnya kejauhan atau belum tersentuh, bot secara dinamis
+  // membaca zona baru (Reversal / SMA20 / S&D Zone terdekat) secara real-time.
+  // ════════════════════════════════════════════════════════
+  if (isConservative) {
+    // 1. Cek Reversal fresh (Sweep + CISD + Displacement di S&D)
+    if (reversal) {
+      const dir = reversal.dir;
+      const entry = reversal.limitEntry;
+      const order = buildOrderFromLevels({ dir, entry, invLevel: reversal.sweepLevel, atrVal, ctx, kind: 'bot', rrList });
+      const side = dir === 1 ? 'BUY' : 'SELL';
+      const setup = 'Bot Konservatif · Fleksibel Reversal';
+      return {
+        dir,
+        plan: {
+          isOCO: false, orderType: 'LIMIT', status: 'PENDING',
+          entry: order.entry, sl: order.sl, tps: order.tps, setup,
+          chartContext: `${setup}: ${side} LIMIT ${ctx.f(order.entry)} (SL ${ctx.f(order.sl)})`,
+          zone: { min: order.entry - 0.2 * atrVal, max: order.entry + 0.2 * atrVal },
+          tag: 'Reversal Zone',
+        },
+        meta: {
+          setup, confidence: 'HIGH', riskLabel: 'MEDIUM',
+          reason: withPair(ctx.symbol, `[BOT KONSERVATIF FLEKSIBEL] ${side} LIMIT @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2). Membaca zona baru Reversal: ${reversal.note}.`),
+          sma20,
+        },
+      };
     }
-    const dist = Math.abs(price - sma20);
-    if (dist <= 0.3 * atrVal) {
-      mode = 'MARKET';
-      entry = price;
-      invLevel = dir === 1 ? Math.min(last.l, sma20 - 0.5 * atrVal) : Math.max(last.h, sma20 + 0.5 * atrVal);
-      why = `Harga ${ctx.f(price)} dekat SMA20 (${ctx.f(sma20)}), struktur ${st.src}. MARKET continuation.`;
+
+    // 2. Baca Zona S&D fresh atau SMA20 terdekat yang realistis dengan harga berjalan
+    const sdZones = findSDZones(candles, dir = (st ? st.dir : (price > sma20 ? 1 : -1)), price);
+    const validSD = sdZones.find(z => Math.abs((z.top + z.bottom) / 2 - price) <= 3.5 * atrVal);
+    
+    let targetEntry = sma20;
+    let inv = dir === 1 ? sma20 - 0.8 * atrVal : sma20 + 0.8 * atrVal;
+    let zoneTag = 'SMA20 Dynamic';
+
+    if (validSD) {
+      targetEntry = (validSD.top + validSD.bottom) / 2;
+      inv = validSD.sl;
+      zoneTag = validSD.kind;
     } else {
-      const limEntry = sma20 + dir * 0.2 * atrVal;
-      if ((dir === 1 && limEntry >= price) || (dir === -1 && limEntry <= price)) {
-        return { reason: `Bot SMA20: harga belum pullback ke SMA20 (${ctx.f(sma20)}). Tunggu.` };
+      const fvg = findFVGs(candles, dir, price)[0];
+      if (fvg && fvg.dist <= 3.0 * atrVal) {
+        targetEntry = (fvg.top + fvg.bottom) / 2;
+        inv = fvg.sl;
+        zoneTag = fvg.kind;
       }
-      mode = 'LIMIT';
-      entry = limEntry;
-      invLevel = dir === 1 ? sma20 - 0.6 * atrVal : sma20 + 0.6 * atrVal;
-      why = `Harga ${ctx.f(price)} jauh dari SMA20 (${ctx.f(sma20)}). LIMIT pullback continuation.`;
     }
-  } else {
-    return { reason: 'Bot SMA20: struktur M1 belum jelas. Tunggu BOS.' };
+
+    // Jika target limit terlalu jauh di atas/bawah harga berjalan, bot secara fleksibel menyesuaikan ke pantulan terdekat
+    const distToTarget = Math.abs(price - targetEntry);
+    if (distToTarget > 4.0 * atrVal) {
+      targetEntry = dir === 1 ? price - 0.6 * atrVal : price + 0.6 * atrVal;
+      zoneTag = 'Dynamic Pullback';
+    }
+
+    const order = buildOrderFromLevels({ dir, entry: targetEntry, invLevel: inv, atrVal, ctx, kind: 'bot', rrList });
+    const side = dir === 1 ? 'BUY' : 'SELL';
+    const setup = 'Bot Konservatif · Fleksibel Zone/SMA';
+    return {
+      dir,
+      plan: {
+        isOCO: false, orderType: 'LIMIT', status: 'PENDING',
+        entry: order.entry, sl: order.sl, tps: order.tps, setup,
+        chartContext: `${setup}: ${side} LIMIT ${ctx.f(order.entry)} (SL ${ctx.f(order.sl)})`,
+        zone: { min: order.entry - 0.2 * atrVal, max: order.entry + 0.2 * atrVal },
+        tag: zoneTag,
+      },
+      meta: {
+        setup, confidence: 'HIGH', riskLabel: 'MEDIUM',
+        reason: withPair(ctx.symbol, `[BOT KONSERVATIF FLEKSIBEL] ${side} LIMIT @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2). Membaca zona baru ${zoneTag} & SMA20 (${ctx.f(sma20)}) secara dinamis.`),
+        sma20,
+      },
+    };
   }
 
-  const order = buildMarketOrder({ dir, entry, invLevel, atrVal, ctx, kind: 'bot', rrList });
-  const side = dir === 1 ? 'BUY' : 'SELL';
-  const setup = 'Bot · SMA20 M1 Continuation';
-  const orderTxt = mode === 'MARKET' ? `${side} NOW` : `${side} LIMIT`;
-  const reason = withPair(ctx.symbol, `${orderTxt} @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (RR 1:1), TP2 ${ctx.f(order.tps[1])} (RR 1:2). ${why}`);
+  // ════════════════════════════════════════════════════════
+  // BOT AGRESIF (ENTRY NOW — OPSI 1, OPSI 2, OPSI 3)
+  // ════════════════════════════════════════════════════════
+  if (reversal) {
+    const dir = reversal.dir;
+    const order = buildOrderFromLevels({ dir, entry: price, invLevel: reversal.sweepLevel, atrVal, ctx, kind: 'bot', rrList });
+    const side = dir === 1 ? 'BUY' : 'SELL';
+    const setup = 'Bot Agresif · Opsi 3 Reversal (CISD+Disp)';
+    return {
+      dir,
+      plan: {
+        isOCO: false, orderType: 'MARKET', status: 'RUNNING',
+        entry: order.entry, sl: order.sl, tps: order.tps, setup,
+        chartContext: `${setup}: ${side} NOW ${ctx.f(order.entry)} (SL ${ctx.f(order.sl)})`,
+        zone: null, tag: 'Reversal CISD',
+      },
+      meta: {
+        setup, confidence: 'HIGH', riskLabel: 'HIGH',
+        reason: withPair(ctx.symbol, `[BOT AGRESIF - OPSI 3 REVERSAL] ${side} NOW @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2). ${reversal.note}.`),
+        sma20,
+      },
+    };
+  }
+
+  if (!st) {
+    return { reason: 'Bot Agresif memindai M1: belum ada struktur BOS/HH-HL/LH-LL maupun setup Reversal. Menunggu...' };
+  }
+
+  const dir = st.dir;
+  const distSma = Math.abs(price - sma20);
+  const touchedSma = (dir === 1 && last.l <= sma20 + 0.15 * atrVal && last.c > sma20)
+                  || (dir === -1 && last.h >= sma20 - 0.15 * atrVal && last.c < sma20);
+  const paConfirm = confirmPriceAction(candles, dir);
+
+  if ((touchedSma || distSma <= 0.35 * atrVal) && ((dir === 1 && price > sma20) || (dir === -1 && price < sma20))) {
+    const invLevel = dir === 1 ? Math.min(last.l, sma20 - 0.45 * atrVal) : Math.max(last.h, sma20 + 0.45 * atrVal);
+    const order = buildOrderFromLevels({ dir, entry: price, invLevel, atrVal, ctx, kind: 'bot', rrList });
+    const side = dir === 1 ? 'BUY' : 'SELL';
+    const setup = 'Bot Agresif · Opsi 2 SMA20 Continuation';
+    return {
+      dir,
+      plan: {
+        isOCO: false, orderType: 'MARKET', status: 'RUNNING',
+        entry: order.entry, sl: order.sl, tps: order.tps, setup,
+        chartContext: `${setup}: ${side} NOW ${ctx.f(order.entry)} (SL ${ctx.f(order.sl)})`,
+        zone: null, tag: 'SMA20 Continuation',
+      },
+      meta: {
+        setup, confidence: 'HIGH', riskLabel: 'HIGH',
+        reason: withPair(ctx.symbol, `[BOT AGRESIF - OPSI 2 SMA20] ${side} NOW @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2). Kontinuitas SMA20 (${ctx.f(sma20)}) searah struktur ${st.src}.`),
+        sma20,
+      },
+    };
+  }
+
+  if (paConfirm && ((dir === 1 && price > sma20) || (dir === -1 && price < sma20)) && distSma <= 1.5 * atrVal) {
+    const invLevel = dir === 1 ? Math.min(last.l, st.l1.p) : Math.max(last.h, st.h1.p);
+    const order = buildOrderFromLevels({ dir, entry: price, invLevel, atrVal, ctx, kind: 'bot', rrList });
+    const side = dir === 1 ? 'BUY' : 'SELL';
+    const setup = 'Bot Agresif · Opsi 1 Structure + Price Action';
+    return {
+      dir,
+      plan: {
+        isOCO: false, orderType: 'MARKET', status: 'RUNNING',
+        entry: order.entry, sl: order.sl, tps: order.tps, setup,
+        chartContext: `${setup}: ${side} NOW ${ctx.f(order.entry)} (SL ${ctx.f(order.sl)})`,
+        zone: null, tag: 'Structure + PA',
+      },
+      meta: {
+        setup, confidence: 'HIGH', riskLabel: 'HIGH',
+        reason: withPair(ctx.symbol, `[BOT AGRESIF - OPSI 1 STRUCTURE+PA] ${side} NOW @ ${ctx.f(order.entry)}, SL ${ctx.f(order.sl)}, TP1 ${ctx.f(order.tps[0])} (1:1), TP2 ${ctx.f(order.tps[1])} (1:2). Struktur ${st.src} + konfirmasi ${paConfirm} di jalur SMA20 (${ctx.f(sma20)}).`),
+        sma20,
+      },
+    };
+  }
 
   return {
-    dir,
-    plan: {
-      isOCO: false, orderType: mode, status: mode === 'MARKET' ? 'RUNNING' : 'PENDING',
-      entry: order.entry, sl: order.sl, tps: order.tps, setup,
-      chartContext: `${setup}: ${orderTxt} ${ctx.f(order.entry)} (SL ${ctx.f(order.sl)}, TP1/TP2 RR 1:1 & 1:2). Live ${ctx.f(price)}`,
-      zone: null, tag: dir === 1 ? 'Demand' : 'Supply',
-    },
-    meta: { setup, confidence: 'HIGH', riskLabel: 'HIGH', reason, sma20 },
+    reason: `Bot Agresif memindai M1: struktur ${st.src}, SMA20 di ${ctx.f(sma20)}. Menunggu trigger...`,
   };
 }
 
 const RUNNERS = {
-  'Scalping': runAggressiveScalp,
+  'Scalping':     runAggressiveScalp,
   'Scalping EMA': runAggressiveScalp,
-  'Day Trading': (ctx, d) => runTopDownLimit(ctx, d, 'Day Trading'),
-  'Intraday': (ctx, d) => runTopDownLimit(ctx, d, 'Intraday'),
-  'Swing': (ctx, d) => runTopDownLimit(ctx, d, 'Swing'),
+  'Day Trading':  (ctx, d) => runTopDownLimit(ctx, d, 'Day Trading'),
+  'Intraday':     (ctx, d) => runTopDownLimit(ctx, d, 'Intraday'),
+  'Swing':        (ctx, d) => runTopDownLimit(ctx, d, 'Swing'),
 };
 
 function normStyle(raw) {
   const k = String(raw || '').toLowerCase().replace(/[^a-z]/g, '');
   if (k.includes('swing')) return 'Swing';
-  if (k.includes('intraday') || k.includes('daytrade')) return k.includes('intraday') ? 'Intraday' : 'Day Trading';
-  if (k.includes('konserv') || k.includes('conserv') || k.includes('daytrading')) return 'Day Trading';
+  if (k.includes('intraday')) return 'Intraday';
+  if (k.includes('konserv') || k.includes('conserv') || k.includes('daytrad')) return 'Day Trading';
   if (k.includes('scalp')) return 'Scalping';
   return 'Day Trading';
 }
 
-// ── Signal Formatter ──
 function buildSignal(result, lang) {
   const meta = result.meta || {};
   const plan = result.plan;
@@ -835,55 +1032,40 @@ function pickSingleForBot(result, price) {
   return result;
 }
 
-// ── VISION (AI) ──
-const VISION_BASE = `Kamu adalah analis trading profesional dengan spesialisasi Smart Money Concept (SMC) dan ICT.
-Tugasmu menganalisis screenshot chart yang dikirim user dan mengembalikan setup valid sesuai style yang diminta.
-Prinsip WAJIB:
-- Analisis TOP-DOWN: baca bias dari timeframe tertinggi ke terendah, baru cari entry di timeframe rendah.
-- Kenali struktur: BOS (Break of Structure), CHoCH (Change of Character), HH-HL, LH-LL.
-- Kenali POI: Order Block, FVG, Supply/Demand zone, Liquidity sweep (BSL/SSL), CISD (Change in State of Delivery), Displacement, Rejection Block.
-- SL wajib logis (di balik swing terakhir / level invalidasi zona).
-- RR sehat: minimal 1:1, ideal 1:2 atau 1:3.
-- Jangan mengarang level yang tidak terlihat di chart.
+const VISION_BASE = `Kamu adalah analis trading institusional spesialis Smart Money Concept (SMC), ICT, Supply & Demand, dan Price Action.
+ATURAN MUTLAK MODE VISION:
+1. User mengunggah 1 hingga 3 gambar chart. Kamu WAJIB menganalisis SETIAP GAMBAR satu per satu secara eksplisit di dalam array "perImageAnalyses" tanpa terkecuali.
+2. Gabungkan seluruh analisa gambar tersebut menjadi Top-Down Analysis yang utuh untuk menentukan setup final.
+3. Identifikasi dengan presisi: Market Structure (BOS, CHoCH, HH-HL, LH-LL), Zona Supply/Demand, Order Block, FVG, Liquidity Sweep (BSL/SSL), Rejection Block, CISD + Displacement, dan posisi harga terhadap SMA 20.
+4. Stop Loss (SL) WAJIB logis di balik swing/zona invalidasi yang terlihat di chart.
 
-Balas HANYA JSON valid, tanpa markdown dan tanpa teks lain:
-{"signal":"BUY|SELL|NONE","orderType":"MARKET|LIMIT","entry":0,"sl":0,"tp1":0,"tp2":0,"tp3":0,"setup":"","confidence":"HIGH|MEDIUM|LOW","risk":"LOW|MEDIUM|HIGH","reason":"","topDown":"bias & TF yg dipakai","zone":"zona yg dipakai"}`;
+Balas HANYA JSON valid (tanpa markdown dan tanpa teks di luar JSON):
+{
+  "signal": "BUY|SELL|NONE",
+  "orderType": "MARKET|LIMIT",
+  "entry": 0,
+  "sl": 0,
+  "tp1": 0,
+  "tp2": 0,
+  "tp3": 0,
+  "setup": "",
+  "confidence": "HIGH|MEDIUM|LOW",
+  "risk": "LOW|MEDIUM|HIGH",
+  "perImageAnalyses": [
+    "Gambar 1: ...",
+    "Gambar 2: ..."
+  ],
+  "reason": "Ringkasan Top-Down & alasan entry lengkap",
+  "topDown": "Kesimpulan bias seluruh TF",
+  "zone": "Zona POI utama"
+}`;
 
 function buildVisionSystem(style) {
   const map = {
-    'Scalping': `STYLE: SCALPING AGRESIF.
-Timeframe acuan: M1 (trigger) + M5 + M15 + M30 + SMA20.
-Aturan:
-- Gunakan SMA20 sebagai magnet/pullback.
-- Jika harga dekat SMA20 dan struktur searah → MARKET entry.
-- Jika harga jauh dari SMA20 → LIMIT di jalur SMA20 + zona struktur terdekat.
-- Boleh entry kapan saja (tidak perlu killzone).
-- RR fleksibel (1:1, 1:2, 1:3) sesuai struktur; jangan mengarang profit.
-- Jika ada reversal valid (sweep BSL/SSL + CISD + Displacement) → beri entry reversal.`,
-    'Day Trading': `STYLE: SCALPING KONSERVATIF.
-Timeframe acuan: M5 (entry) + M15 + H1 (bias HTF).
-Aturan:
-- WAJIB cari zona Buy/Sell TERKUAT dari top-down (H1 → M15 → M5).
-- Entry WAJIB LIMIT ORDER di zona pantulan/rejection.
-- Jika tidak ada zona fresh → cari continuation sesuai arah market dengan pantulan terdekat (SMA20 / OB / FVG).
-- RR ideal 1:2 atau 1:3.
-- Reversal hanya bila sweep + CISD + Displacement jelas → entry LIMIT di OB/FVG hasil displacement.`,
-    'Intraday': `STYLE: INTRADAY.
-Timeframe acuan: M15 (entry) + H1 + H4 (bias HTF).
-WAJIB melampirkan M15 + H1 + H4.
-Aturan:
-- Baca bias H4 → konfirmasi H1, entry di POI M15.
-- Entry LIMIT searah bias HTF.
-- RR ideal 1:2 atau 1:3.
-- Reversal hanya di zona premium/discount HTF dengan sweep + CISD.`,
-    'Swing': `STYLE: SWING.
-Timeframe acuan: H1 (entry) + H4 + D1 (bias HTF).
-WAJIB melampirkan H1 + H4 + D1.
-Aturan:
-- Bias dari D1 → H4.
-- Entry LIMIT di zona premium/discount HTF atau OB H1/H4.
-- RR ideal 1:2 atau 1:3 (boleh lebih).
-- Reversal hanya bila sweep HTF (BSL/SSL) + CHoCH jelas di H4/D1.`,
+    'Scalping': `STYLE TERPILIH: SCALPING AGRESIF. Acuan: M30 + M15 + M5 + M1 + SMA 20.`,
+    'Day Trading': `STYLE TERPILIH: SCALPING KONSERVATIF. Acuan: H1 + M15 + M5.`,
+    'Intraday': `STYLE TERPILIH: INTRADAY. Acuan WAJIB: M15 + H1 + H4.`,
+    'Swing': `STYLE TERPILIH: SWING. Acuan WAJIB: H1 + H4 + Daily.`,
   };
   return `${VISION_BASE}\n\n${map[style] || map['Day Trading']}`;
 }
@@ -903,23 +1085,28 @@ function parseJsonLoose(text) {
 }
 
 function checkVisionSignal(j) {
-  if (!j || typeof j !== 'object') return 'Respons AI tidak bisa dibaca. Coba analisa ulang.';
+  if (!j || typeof j !== 'object') return 'Respons AI tidak bisa dibaca.';
   const sig = String(j.signal || 'NONE').toUpperCase();
   if (sig === 'NONE') return String(j.reason || 'Tidak ada setup valid pada gambar.');
   if (sig !== 'BUY' && sig !== 'SELL') return 'Sinyal dari AI tidak dikenali.';
   const e = Number(j.entry), s = Number(j.sl), t1 = Number(j.tp1);
-  if (![e, s, t1].every(Number.isFinite)) return 'Entry, SL, atau TP1 dari AI tidak lengkap.';
+  if (![e, s, t1].every(Number.isFinite)) return 'Entry, SL, atau TP1 tidak lengkap.';
   const okOrder = sig === 'BUY' ? (s < e && e < t1) : (s > e && e > t1);
-  return okOrder ? null : 'Level entry/SL/TP dari AI tidak konsisten dengan arah sinyal.';
+  return okOrder ? null : 'Level entry/SL/TP tidak konsisten dengan arah sinyal.';
 }
 
-function buildVisionSignal(j, style, lang) {
+function buildVisionSignal(j, style, lang, imgCount) {
   const sig = String(j.signal).toUpperCase();
   const isLimit = String(j.orderType || '').toUpperCase() === 'LIMIT';
   const num = v => (Number.isFinite(Number(v)) ? Number(v) : null);
   const level = (v, allowed, dflt) => (allowed.includes(String(v || '').toUpperCase()) ? String(v).toUpperCase() : dflt);
-  const reason = String(j.reason || '').trim()
-    || (lang === 'en' ? 'AI analysis of the uploaded chart.' : 'Analisis AI dari screenshot chart.');
+
+  const perImg = Array.isArray(j.perImageAnalyses) && j.perImageAnalyses.length
+    ? j.perImageAnalyses.map((item, i) => `• ${String(item).trim()}`).join('\n')
+    : '';
+  const summary = String(j.reason || '').trim() || 'Analisis AI dari screenshot chart.';
+  const fullReason = perImg ? `[Analisa ${imgCount} Gambar]\n${perImg}\n\n[Setup]\n${summary}` : summary;
+
   return {
     signal: sig,
     orderType: isLimit ? 'LIMIT' : 'MARKET',
@@ -930,7 +1117,8 @@ function buildVisionSignal(j, style, lang) {
     setup: String(j.setup || `Vision ${style} Setup`),
     confidence: level(j.confidence, ['HIGH', 'MEDIUM', 'LOW'], 'MEDIUM'),
     risk: level(j.risk, ['LOW', 'MEDIUM', 'HIGH'], 'MEDIUM'),
-    reason, reasons: { [lang]: reason },
+    reason: fullReason,
+    reasons: { [lang]: fullReason },
     chartContext: '',
     zone: j.zone ? { label: String(j.zone) } : null, zoneLabel: '', zoneNote: '',
     topDown: j.topDown ? String(j.topDown) : null,
@@ -945,7 +1133,7 @@ async function runVisionAnalysis(images, style, lang) {
 
   const langName = lang === 'en' ? 'English' : 'Indonesian';
   const userContent = [
-    { type: 'text', text: `Style trading: ${style}. Tulis field reason dalam bahasa ${langName}. Analisa murni dari gambar yang diupload.` },
+    { type: 'text', text: `Jumlah gambar diupload: ${imgs.length}. Style: ${style}. Analisa setiap gambar tanpa terkecuali.` },
     ...imgs.map(url => ({ type: 'image_url', image_url: { url } })),
   ];
 
@@ -955,7 +1143,7 @@ async function runVisionAnalysis(images, style, lang) {
     body: JSON.stringify({
       model: AI_VISION_MODEL,
       max_tokens: VISION_MAX_TOKENS,
-      temperature: 0.2,
+      temperature: 0.15,
       messages: [
         { role: 'system', content: buildVisionSystem(style) },
         { role: 'user', content: userContent },
@@ -971,10 +1159,9 @@ async function runVisionAnalysis(images, style, lang) {
   const parsed = parseJsonLoose(extractContent(r.data));
   const bad = checkVisionSignal(parsed);
   if (bad) return { ok: false, reason: bad };
-  return { ok: true, signal: buildVisionSignal(parsed, style, lang) };
+  return { ok: true, signal: buildVisionSignal(parsed, style, lang, imgs.length) };
 }
 
-// ── Handler ──
 async function handleVision(body, lang, res) {
   const images = Array.isArray(body.images) ? body.images.slice(0, 3) : [];
   const style = normStyle(body.style || body.mode);
@@ -985,7 +1172,8 @@ async function handleVision(body, lang, res) {
 
 async function handleCandles(body, lang, res, { email, isAutoBot }) {
   const symbol = String(body.symbol || 'XAUUSD').toUpperCase();
-  const styleName = isAutoBot ? 'Scalping' : normStyle(body.style || body.mode); // bot pakai runner SMA20 di bawah
+  const rawStyle = body.style || body.mode || 'Day Trading';
+  const styleName = normStyle(rawStyle);
   const price = Number(body.price ?? body.livePrice ?? body.currentPrice ?? 0);
   if (!(price > 0)) return fail(res, msg(lang, 'noPrice'));
 
@@ -998,61 +1186,52 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
     f: v => Number(Number(v).toFixed(dec)),
   };
 
-  // Kumpulkan TF dari client
-  const tfsWanted = isAutoBot
-    ? ['m1', 'm5']
-    : (STYLES[styleName]?.tfs || ['m15', 'm5']);
-
+  const tfsWanted = isAutoBot ? ['m1', 'm5'] : (STYLES[styleName]?.tfs || ['h1', 'm15', 'm5']);
   const candleMap = {};
-  for (const tf of tfsWanted) candleMap[tf] = clientCandles(body, tf);
-  // Fallback: pastikan minimal M5 & M15 terisi
-  for (const tf of ['m5', 'm15']) if (!candleMap[tf]?.length) candleMap[tf] = clientCandles(body, tf);
-
-  const anyOk = Object.values(candleMap).some(a => a.length >= MIN_BARS.m5);
-  if (!anyOk) {
-    // Coba fallback TickerLayer untuk TF yang dibutuhkan
-    try {
-      for (const tf of tfsWanted) {
-        const iv = { m1: '1m', m5: '5m', m15: '15m', m30: '30m', h1: '1h', h4: '4h', d1: '1d' }[tf];
-        if (!iv) continue;
-        if (candleMap[tf] && candleMap[tf].length >= (MIN_BARS[tf] || 30)) continue;
-        const need = tf === 'd1' ? 60 : tf === 'h4' ? 80 : tf === 'h1' ? 100 : tf === 'm30' ? 100 : 200;
-        const rows = await fetchTickerLayerRows(symbol, iv, need);
-        if (rows.length) candleMap[tf] = rows;
-      }
-    } catch (e) { console.warn('fallback TL:', e.message); }
+  for (const tf of ['m1', 'm5', 'm15', 'm30', 'h1', 'h4', 'd1']) {
+    candleMap[tf] = clientCandles(body, tf);
   }
 
-  // Fallback silang
+  try {
+    for (const tf of tfsWanted) {
+      const iv = { m1: '1m', m5: '5m', m15: '15m', m30: '30m', h1: '1h', h4: '4h', d1: '1d' }[tf];
+      if (!iv) continue;
+      if (candleMap[tf] && candleMap[tf].length >= (MIN_BARS[tf] || 25)) continue;
+      const need = tf === 'd1' ? 60 : tf === 'h4' ? 80 : tf === 'h1' ? 100 : tf === 'm30' ? 100 : 200;
+      const rows = await fetchTickerLayerRows(symbol, iv, need);
+      if (rows.length) candleMap[tf] = rows;
+    }
+  } catch (e) { console.warn('fallback TL:', e.message); }
+
   const m5f = candleMap.m5?.length ? candleMap.m5 : candleMap.m15;
   const m15f = candleMap.m15?.length ? candleMap.m15 : candleMap.m5;
-  if (!m5f || !m15f) return fail(res, msg(lang, 'noCandles'));
-
-  if (isAutoBot) await markTrialAsUsed(email);
+  if (!m5f?.length && !m15f?.length && !candleMap.m1?.length) return fail(res, msg(lang, 'noCandles'));
 
   const data = {
     price,
     m1: candleMap.m1 || [],
-    m5: m5f,
-    m15: m15f,
-    m30: candleMap.m30 || m15f,
-    h1: candleMap.h1 || m15f,
-    h4: candleMap.h4 || candleMap.h1 || m15f,
-    d1: candleMap.d1 || candleMap.h4 || m15f,
+    m5: m5f || [],
+    m15: m15f || [],
+    m30: candleMap.m30?.length ? candleMap.m30 : (m15f || []),
+    h1: candleMap.h1?.length ? candleMap.h1 : (candleMap.m30 || m15f || []),
+    h4: candleMap.h4?.length ? candleMap.h4 : (candleMap.h1 || m15f || []),
+    d1: candleMap.d1?.length ? candleMap.d1 : (candleMap.h4 || candleMap.h1 || []),
   };
 
   let result;
   if (isAutoBot) {
-    result = await runBotSma20(ctx, data);
+    result = await runBotSma20(ctx, data, rawStyle);
   } else {
     result = await RUNNERS[styleName](ctx, data);
   }
+
   if (!result || !result.plan) return fail(res, result?.reason || msg(lang, 'noSetup'));
 
+  if (isAutoBot) await markTrialAsUsed(email);
   const final = isAutoBot ? pickSingleForBot(result, price) : result;
 
   return res.status(200).json({
-    ok: true, mode: 'candles', symbol, style: styleName, price,
+    ok: true, mode: isAutoBot ? 'bot' : 'candles', symbol, style: styleName, price,
     signal: buildSignal(final, lang),
   });
 }
@@ -1074,7 +1253,7 @@ export default async function handler(req, res) {
     const lang = body.lang === 'en' ? 'en' : 'id';
     const email = String(body.email || body.value || '').trim().toLowerCase();
     const isAutoBot = !!(body.auto || body.bot || body.mode === 'bot' || body.source === 'bot');
-    const isVision = body.symbol === 'VISION' || (Array.isArray(body.images) && body.images.length > 0);
+    const isVision = body.symbol === 'VISION' || body.mode === 'vision' || (Array.isArray(body.images) && body.images.length > 0);
 
     const access = await checkAccess(email, isAutoBot);
     if (!access.ok) return fail(res, msg(lang, access.key));
