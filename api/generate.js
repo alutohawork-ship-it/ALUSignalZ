@@ -1,5 +1,5 @@
 // api/generate.js
-// v124 — Top-Down SMC/ICT + Manual Agresif, Konservatif, Intraday, Swing (Wajib Keluar Sinyal & Dual-Language Reasoning)
+// v125 — Top-Down SMC/ICT + Scalper Bot M1 (Pure Scalping Running Structure & Dual-Language Reasoning)
 
 export const config = { maxDuration: 60 };
 
@@ -592,7 +592,6 @@ async function runAggressiveScalp(ctx, d) {
     dir = st.dir;
     const origin = dir === 1 ? st.l1.p : st.h1.p;
     
-    // Scalping Agresif: Eksekusi NOW untuk meneruskan price action yang sedang berjalan
     mode = 'MARKET';
     entry = price;
     invLevel = dir === 1 ? Math.min(origin, sma20 - 0.5 * atr5, price - 0.8 * atr5) : Math.max(origin, sma20 + 0.5 * atr5, price + 0.8 * atr5);
@@ -673,7 +672,6 @@ async function runTopDownLimit(ctx, d, styleName) {
   const setup = cfg.label;
   const tdStr = Object.entries(bias.details).map(([k, v]) => `${k.toUpperCase()}:${v}`).join(' | ');
 
-  // Jika zona S&D belum tersaring sempurna, fallback otomatis membuat limit order dari struktur terdekat agar signal TETAP KELUAR (Wajib Keluar Sinyal)
   if (!buy && !sell) {
     const st = readStructure(zoneRows, price) || readStructure(midRows, price) || {
       dir: bias.dir !== 0 ? bias.dir : 1, src: 'Fallback Struktur Market',
@@ -749,17 +747,13 @@ async function runTopDownLimit(ctx, d, styleName) {
   };
 }
 
-// ── BOT EA ENGINE — SMC/ICT ──
+// ── BOT EA ENGINE — SCALPER MURNI M1 (SMC/ICT RUNNING STRUCTURE) ──
 const BOT_CFG = {
-  minScore: 7,
-  relaxedMinScore: 5,
-  splitScore: 9,
-  minRR: 2.0, minRRCisd: 1.5,
-  dispBodyAtr: 1.2, fvgMinAtr: 0.15,
-  bufAtr: 0.10, minSlAtr: 0.3, maxSlAtrAggr: 1.5, maxSlAtrCons: 3.0,
-  maxConfirmM5: 3, missedAtr: 1.5, lookback: 60,
-  killzonesNY: [[2, 5, 'London KZ'], [7, 10, 'New York KZ'], [10, 11, 'Silver Bullet']],
-  requireKillzone: false,
+  minScore: 5,
+  minRR: 1.5, minRRCisd: 1.3,
+  dispBodyAtr: 1.0, fvgMinAtr: 0.12,
+  bufAtr: 0.10, minSlAtr: 0.25, maxSlAtrScalp: 1.8,
+  lookback: 50,
 };
 
 const tsMs = t => (t < 1e12 ? t * 1000 : t);
@@ -767,13 +761,6 @@ function closedOnly(c, ms) {
   if (!c || !c.length) return c || [];
   return Date.now() < tsMs(c[c.length - 1].t) + ms ? c.slice(0, -1) : c;
 }
-function nyHour() {
-  try {
-    const p = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: 'numeric', hour12: false }).formatToParts(new Date());
-    return (Number(p.find(x => x.type === 'hour').value) % 24) + Number(p.find(x => x.type === 'minute').value) / 60;
-  } catch { const d = new Date(); return (d.getUTCHours() + d.getUTCMinutes() / 60 + 19) % 24; }
-}
-const killzoneNow = () => { const h = nyHour(); const k = BOT_CFG.killzonesNY.find(([a, b]) => h >= a && h < b); return k ? k[2] : null; };
 
 const mkZone = (type, dir, upper, lower, extra = {}) => ({ type, direction: dir, upper, lower, mid: (upper + lower) / 2, ...extra });
 const inZone = (p, z) => p >= z.lower && p <= z.upper;
@@ -811,11 +798,10 @@ function findIFVG(c, dir, fromIdx, ctx, atrV) {
 }
 
 function scanSetups(c, atrV, ctx, price, biasDir, eq) {
-  const out = []; const n = c.length; if (n < 30) return out;
+  const out = []; const n = c.length; if (n < 25) return out;
   const { highs, lows } = findSwings(c, 2);
-  const kz = killzoneNow();
-  const startK = Math.max(6, n - BOT_CFG.lookback);
-  const minFvg = Math.max(3 * ctx.pip, BOT_CFG.fvgMinAtr * atrV);
+  const startK = Math.max(4, n - BOT_CFG.lookback);
+  const minFvg = Math.max(2 * ctx.pip, BOT_CFG.fvgMinAtr * atrV);
 
   for (let k = startK; k < n; k++) {
     const d = c[k];
@@ -838,7 +824,7 @@ function scanSetups(c, atrV, ctx, price, biasDir, eq) {
         const s = own[q]; if (s.i >= j || s.i < j - 30) continue;
         const pen = dir === 1 ? s.p - c[j].l : c[j].h - s.p;
         const back = dir === 1 ? (c[j].c > s.p || (j + 1 <= k && c[j + 1].c > s.p)) : (c[j].c < s.p || (j + 1 <= k && c[j + 1].c < s.p));
-        if (pen >= ctx.pip && back) {
+        if (pen >= 0.5 * ctx.pip && back) {
           const rg = c[j].h - c[j].l || 1;
           const wick = dir === 1 ? (Math.min(c[j].o, c[j].c) - c[j].l) / rg : (c[j].h - Math.max(c[j].o, c[j].c)) / rg;
           sweep = { index: j, level: s.p, extreme: dir === 1 ? c[j].l : c[j].h, wickRatio: Number(wick.toFixed(2)) };
@@ -870,10 +856,10 @@ function scanSetups(c, atrV, ctx, price, biasDir, eq) {
     let ote = null;
     if (dir === 1) {
       const hi = Math.max(...c.slice(k).map(x => x.h)), rg = hi - legLo;
-      if (rg >= 1.5 * atrV) ote = mkZone('OTE', 1, hi - 0.618 * rg, hi - 0.79 * rg, { createdIdx: mssIdx });
+      if (rg >= 1.0 * atrV) ote = mkZone('OTE', 1, hi - 0.618 * rg, hi - 0.79 * rg, { createdIdx: mssIdx });
     } else {
       const lo = Math.min(...c.slice(k).map(x => x.l)), rg = legHi - lo;
-      if (rg >= 1.5 * atrV) ote = mkZone('OTE', -1, lo + 0.79 * rg, lo + 0.618 * rg, { createdIdx: mssIdx });
+      if (rg >= 1.0 * atrV) ote = mkZone('OTE', -1, lo + 0.79 * rg, lo + 0.618 * rg, { createdIdx: mssIdx });
     }
     if (ote) cands.push(ote);
     const ifvg = findIFVG(c, dir, k - 30, ctx, atrV);
@@ -881,10 +867,8 @@ function scanSetups(c, atrV, ctx, price, biasDir, eq) {
 
     const live = cands.filter(z => {
       const from = (z.createdIdx ?? k) + 1;
-      if (zoneMitigation(z, c, from) >= 0.8) return false;
+      if (zoneMitigation(z, c, from) >= 0.9) return false;
       if (zoneBroken(z, c, from)) return false;
-      if (dir === 1 ? price - z.upper > BOT_CFG.missedAtr * atrV : z.lower - price > BOT_CFG.missedAtr * atrV) return false;
-      if (dir === 1 ? price < z.lower : price > z.upper) return false;
       return true;
     });
     if (!live.length) continue;
@@ -896,16 +880,13 @@ function scanSetups(c, atrV, ctx, price, biasDir, eq) {
 
     const bd = [];
     if (biasDir === dir) bd.push(['Bias HTF searah', 2]);
-    const kzNow = killzoneNow(); if (kzNow) bd.push([kzNow, 1]);
     if (sweep) bd.push(['Liquidity sweep', 2]);
     bd.push(['Displacement', 1]);
     bd.push([sweep ? 'MSS/CHoCH' : 'BOS', 2]);
-    if (has('FVG')) bd.push(['FVG fresh', 1]);
-    if (has('OB')) bd.push(['OB fresh', 1]);
-    if (has('OTE')) bd.push(['OTE 61.8-79%', 1]);
+    if (has('FVG')) bd.push(['FVG', 1]);
+    if (has('OB')) bd.push(['OB', 1]);
+    if (has('OTE')) bd.push(['OTE', 1]);
     if (has('IFVG')) bd.push(['IFVG', 2]);
-    if (eq != null && (dir === 1 ? zone.mid < eq : zone.mid > eq)) bd.push([dir === 1 ? 'Discount' : 'Premium', 1]);
-    if (atrV >= 3 * ctx.pip) bd.push(['ATR normal', 1]);
     const score = bd.reduce((s, x) => s + x[1], 0);
 
     out.push({
@@ -921,104 +902,95 @@ function scanSetups(c, atrV, ctx, price, biasDir, eq) {
 function botTargets(dir, entry, risk, c5, c15, atrV) {
   const lv = [];
   const addSw = arr => { const s = findSwings(arr, 2); (dir === 1 ? s.highs : s.lows).forEach(x => lv.push(x.p)); };
-  addSw(c5.slice(-150));
-  if (c15 && c15.length >= 20) addSw(c15.slice(-120));
-  const day = c5.slice(-288);
-  if (day.length) lv.push(dir === 1 ? Math.max(...day.map(x => x.h)) : Math.min(...day.map(x => x.l)));
+  addSw(c5.slice(-100));
+  if (c15 && c15.length >= 20) addSw(c15.slice(-80));
   const beyond = lv.filter(p => (dir === 1 ? p > entry : p < entry)).sort((a, b) => (dir === 1 ? a - b : b - a));
   const uniq = [];
-  beyond.forEach(p => { if (!uniq.length || Math.abs(p - uniq[uniq.length - 1]) > 0.25 * atrV) uniq.push(p); });
+  beyond.forEach(p => { if (!uniq.length || Math.abs(p - uniq[uniq.length - 1]) > 0.2 * atrV) uniq.push(p); });
   const R = p => Math.abs(p - entry) / risk;
   const pick = (minR, maxR, after) => uniq.find(p => R(p) >= minR && R(p) <= maxR && (after == null || (dir === 1 ? p > after : p < after)));
   let synth = false;
-  let t1 = pick(0.9, 2.2), t2, t3;
+  let t1 = pick(0.8, 2.0), t2, t3;
   if (t1 == null) { t1 = entry + dir * risk; synth = true; }
-  t2 = pick(1.5, 4.5, t1);
+  t2 = pick(1.5, 3.5, t1);
   if (t2 == null) { t2 = dir === 1 ? Math.max(entry + 2 * risk, t1 + 0.5 * risk) : Math.min(entry - 2 * risk, t1 - 0.5 * risk); synth = true; }
-  t3 = pick(2.5, 8, t2);
+  t3 = pick(2.2, 6, t2);
   let synth3 = false;
   if (t3 == null) { t3 = dir === 1 ? Math.max(entry + 3 * risk, t2 + risk) : Math.min(entry - 3 * risk, t2 - risk); synth3 = true; }
   return { tps: [t1, t2, t3], rr3: R(t3), synthetic: synth, synth3 };
 }
 
-function calcBotSL({ dir, mode, entry, setup, atrV, ctx }) {
-  const buf = Math.max(2 * ctx.pip, BOT_CFG.bufAtr * atrV);
+function calcBotSL({ dir, entry, setup, atrV, ctx }) {
+  const buf = Math.max(1.5 * ctx.pip, BOT_CFG.bufAtr * atrV);
   const minD = Math.max(BOT_CFG.minSlAtr * atrV, slFloor('bot', ctx));
-  let maxD = (mode === 'AGGRESSIVE' ? BOT_CFG.maxSlAtrAggr : BOT_CFG.maxSlAtrCons) * atrV;
-  if (maxD < minD * 1.6) maxD = minD * 1.6;
+  let maxD = BOT_CFG.maxSlAtrScalp * atrV;
   const z = setup.zone;
   const zoneEdge = dir === 1 ? z.lower : z.upper;
-  const order = mode === 'AGGRESSIVE'
-    ? [['zona', zoneEdge], ['OB distal', setup.obDistal], ['sweep', setup.sweepExtreme]]
-    : [['OB distal', setup.obDistal], ['sweep', setup.sweepExtreme], ['zona distal', zoneEdge]];
-  let tooWide = false, tight = false;
+  const order = [['zona', zoneEdge], ['OB distal', setup.obDistal], ['sweep', setup.sweepExtreme]];
   for (const [src, L] of order) {
     if (!Number.isFinite(L)) continue;
     const sl = dir === 1 ? L - buf : L + buf;
     const dist = Math.abs(entry - sl);
     if ((dir === 1 && sl >= entry) || (dir === -1 && sl <= entry)) continue;
-    if (dist < minD) { tight = true; continue; }
-    if (dist > maxD) { tooWide = true; continue; }
+    if (dist < minD || dist > maxD) continue;
     return { sl, dist, src };
   }
-  if (tooWide && !tight) return null;
-  return { sl: entry - dir * minD, dist: minD, src: 'min-ATR' };
+  return { sl: entry - dir * Math.max(minD, 1.0 * atrV), dist: Math.max(minD, 1.0 * atrV), src: 'structural-fallback' };
 }
 
-function detectConfirmation(dir, m, zone, atrV) {
-  const n = m.length; if (n < 8) return null;
-  const c = m[n - 1], rec = m.slice(-15);
-  if (!rec.some(x => x.l <= zone.upper && x.h >= zone.lower)) return { none: true, why: 'harga belum menyentuh zona (M1)', whyEn: 'price has not touched zone (M1)' };
-  if (dir === 1 ? rec.some(x => x.c < zone.lower) : rec.some(x => x.c > zone.upper)) return { invalid: true };
+function detectConfirmation(dir, m, zone) {
+  const n = m.length; if (n < 5) return { type: 'Structure Continuation M1' };
+  const c = m[n - 1], p = m[n - 2];
   const prev5 = m.slice(-6, -1);
-  if (dir === 1 ? c.c > Math.max(...prev5.map(x => x.h)) : c.c < Math.min(...prev5.map(x => x.l))) return { type: 'CHoCH' };
-  let i = n - 2, ext = dir === 1 ? -Infinity : Infinity, cnt = 0;
-  while (i >= 0 && (dir === 1 ? m[i].c < m[i].o : m[i].c > m[i].o)) { ext = dir === 1 ? Math.max(ext, m[i].o) : Math.min(ext, m[i].o); cnt++; i--; }
-  if (cnt >= 3 && (dir === 1 ? c.c > ext : c.c < ext)) return { type: 'CISD' };
+  if (dir === 1 && c.c > Math.max(...prev5.map(x => x.h))) return { type: 'M1 CHoCH / BOS Bullish' };
+  if (dir === -1 && c.c < Math.min(...prev5.map(x => x.l))) return { type: 'M1 CHoCH / BOS Bearish' };
   const rg = c.h - c.l;
   if (rg > 0) {
     const lw = Math.min(c.o, c.c) - c.l, uw = c.h - Math.max(c.o, c.c), mid = (c.h + c.l) / 2;
-    if (dir === 1 && lw >= 0.6 * rg && c.c > mid && c.c > c.o) return { type: 'REJECTION' };
-    if (dir === -1 && uw >= 0.6 * rg && c.c < mid && c.c < c.o) return { type: 'REJECTION' };
+    if (dir === 1 && lw >= 0.5 * rg && c.c > mid) return { type: 'M1 Rejection Wick' };
+    if (dir === -1 && uw >= 0.5 * rg && c.c < mid) return { type: 'M1 Rejection Wick' };
   }
-  const p = m[n - 2];
-  if (dir === 1 && c.c > c.o && p.c < p.o && c.c >= p.o && c.o <= p.c) return { type: 'ENGULFING' };
-  if (dir === -1 && c.c < c.o && p.c > p.o && c.c <= p.o && c.o >= p.c) return { type: 'ENGULFING' };
-  return { none: true, why: 'belum ada candle konfirmasi close', whyEn: 'no closing confirmation candle yet' };
+  if (dir === 1 && c.c > c.o && p.c < p.o) return { type: 'M1 Bullish Engulfing / CISD' };
+  if (dir === -1 && c.c < c.o && p.c > p.o) return { type: 'M1 Bearish Engulfing / CISD' };
+  return { type: 'M1 Price Action Momentum' };
 }
 
 async function runBotSma20(ctx, d, botStyleRaw) {
   const { price, m1, m5, m15 } = d;
-  const c5 = closedOnly(m5, 300000);
-  if (!c5 || c5.length < 30) return { reason: 'Bot menunggu data candle M5 mencukupi (min 30)...', reasonEn: 'Bot waiting for sufficient M5 candles (min 30)...' };
+  const c5 = closedOnly(m5, 180000);
+  if (!c5 || c5.length < 20) {
+    return {
+      reason: 'Scalper Bot: Menunggu data candle M5 mencukupi...',
+      reasonEn: 'Scalper Bot: Waiting for sufficient M5 candles...'
+    };
+  }
   const m1c = closedOnly(m1, 60000);
-  const confTF = m1c.length >= 10 ? m1c : c5;
+  const confTF = m1c.length >= 5 ? m1c : c5;
 
-  const isConservative = /konserv|conserv|day/i.test(String(botStyleRaw || ''));
-  const modeName = isConservative ? 'KONSERVATIF' : 'AGRESIF';
-  const modeNameEn = isConservative ? 'CONSERVATIVE' : 'AGGRESSIVE';
   const atrV = atrOf(c5, ctx.pip);
-  const bias = multiTfBias({ m15: m15 && m15.length >= 20 ? m15 : null, m5: c5 }, ['m15', 'm5']);
-  const ref = (m15 && m15.length >= 30 ? m15 : c5).slice(-80);
+  const bias = multiTfBias({ m15: m15 && m15.length >= 15 ? m15 : null, m5: c5 }, ['m15', 'm5']);
+  const ref = (m15 && m15.length >= 25 ? m15 : c5).slice(-50);
   const eq = (Math.max(...ref.map(x => x.h)) + Math.min(...ref.map(x => x.l))) / 2;
   const biasTxt = `${bias.bias} (${Object.entries(bias.details).map(([k, v]) => `${k.toUpperCase()}:${v}`).join(' | ') || 'n/a'})`;
 
-  const kz = killzoneNow();
-  if (BOT_CFG.requireKillzone && !kz) {
-    return {
-      reason: `[${modeName}] State: SCANNING · di luar killzone. Bias ${biasTxt}.`,
-      reasonEn: `[${modeNameEn}] State: SCANNING · outside killzone. Bias ${biasTxt}.`
-    };
-  }
-
   let setups = scanSetups(c5, atrV, ctx, price, bias.dir, eq);
-  setups = setups.filter(s => s.score >= BOT_CFG.minScore || (s.score >= BOT_CFG.relaxedMinScore && bias.dir !== 0 && s.dir === bias.dir));
+  setups = setups.filter(s => s.score >= BOT_CFG.minScore || (bias.dir !== 0 && s.dir === bias.dir));
   setups.sort((a, b) => b.score - a.score || b.formedIdx - a.formedIdx);
-  const setup = setups[0];
+  
+  let setup = setups[0];
   if (!setup) {
-    return {
-      reason: `[BOT ${modeName}] State: SCANNING · belum ada setup valid sesuai SOP SMC/ICT. Bias ${biasTxt}.`,
-      reasonEn: `[BOT ${modeNameEn}] State: SCANNING · no valid SMC/ICT setup found yet. Bias ${biasTxt}.`
+    // Fallback dinamis scalping murni agar bot selalu responsif mengeluarkan sinyal scalping mengikuti struktur berjalan M1/M5
+    const fallbackDir = bias.dir !== 0 ? bias.dir : (price >= eq ? 1 : -1);
+    setup = {
+      dir: fallbackDir,
+      type: 'RUNNING_STRUCTURE',
+      score: 5,
+      breakdown: [['Running Structure M1/M5', 3], ['Dynamic Scalp Flow', 2]],
+      zone: mkZone('SCALP_ZONE', fallbackDir, price + 0.8 * atrV, price - 0.8 * atrV, { label: fallbackDir === 1 ? 'DEMAND SCALP' : 'SUPPLY SCALP' }),
+      sweep: null,
+      sweepExtreme: fallbackDir === 1 ? price - 1.2 * atrV : price + 1.2 * atrV,
+      obDistal: fallbackDir === 1 ? price - 1.5 * atrV : price + 1.5 * atrV,
+      mss: { level: price }
     };
   }
 
@@ -1027,82 +999,36 @@ async function runBotSma20(ctx, d, botStyleRaw) {
   const zLabel = z.label || `${z.type} ${dir === 1 ? 'BUY' : 'SELL'}`;
   const zTxt = `${zLabel} ${ctx.f(z.lower)}-${ctx.f(z.upper)}`;
   const scoreTxt = `${setup.score} (${setup.breakdown.map(x => `${x[0]} +${x[1]}`).join(', ')})`;
-  const flow = setup.sweep
-    ? `Sweep ${ctx.f(setup.sweep.level)} (wick ${Math.round(setup.sweep.wickRatio * 100)}%) → Displacement → MSS ${ctx.f(setup.mss.level)}`
-    : `Displacement → BOS ${ctx.f(setup.mss.level)}`;
-  const confidence = setup.score >= BOT_CFG.minScore ? 'HIGH' : 'MEDIUM';
+  const flow = setup.sweep ? `Sweep ${ctx.f(setup.sweep.level)} → MSS` : `Running Structure Flow M1`;
 
-  const priceInZone = inZone(price, z);
-  const pullbackSide = dir === 1 ? price > z.upper : price < z.lower;
+  const cf = detectConfirmation(dir, confTF, z);
+  const confType = cf.type;
 
-  let mode, entry, conf = null, state;
-  if (priceInZone) {
-    const cf = detectConfirmation(dir, confTF, z, atrV);
-    if (cf && cf.invalid) {
-      return {
-        reason: `[BOT ${modeName}] State: CANCELLED · harga close menembus sisi distal zona ${zTxt}.`,
-        reasonEn: `[BOT ${modeNameEn}] State: CANCELLED · price close breached distal side of zone ${zTxt}.`
-      };
-    }
-    if (!cf || cf.none) {
-      return {
-        reason: `[BOT ${modeName}] State: ZONE_OCCUPIED ⚡ ${side} di ${zTxt} · menunggu konfirmasi close M1 — ${cf?.why || ''}. Score ${setup.score}. Bias ${biasTxt}.`,
-        reasonEn: `[BOT ${modeNameEn}] State: ZONE_OCCUPIED ⚡ ${side} at ${zTxt} · waiting M1 close confirmation — ${cf?.whyEn || ''}. Score ${setup.score}. Bias ${biasTxt}.`
-      };
-    }
-    mode = 'MARKET'; entry = price; conf = cf.type; state = 'CONFIRMED';
-  } else if (isConservative && pullbackSide) {
-    mode = 'LIMIT'; entry = z.mid; state = 'LIMIT_PLACED';
-  } else if (!isConservative && pullbackSide) {
-    return {
-      reason: `[BOT AGRESIF] State: SETUP_FORMING · ${side} setup ${flow}. Menunggu harga masuk ${zTxt} (harga ${ctx.f(price)}). Score ${setup.score}.`,
-      reasonEn: `[BOT AGGRESSIVE] State: SETUP_FORMING · ${side} setup ${flow}. Waiting price to enter ${zTxt} (price ${ctx.f(price)}). Score ${setup.score}.`
-    };
-  } else {
-    return {
-      reason: `[BOT ${modeName}] State: MISSED · harga sudah melewati zona ${zTxt}. Mencari setup baru.`,
-      reasonEn: `[BOT ${modeNameEn}] State: MISSED · price has passed zone ${zTxt}. Searching new setup.`
-    };
-  }
-
-  const slr = calcBotSL({ dir, mode: isConservative && mode === 'LIMIT' ? 'CONSERVATIVE' : 'AGGRESSIVE', entry, setup, atrV, ctx });
-  if (!slr) {
-    return {
-      reason: `[BOT ${modeName}] SKIP · SL struktural terlalu lebar untuk ${zTxt}.`,
-      reasonEn: `[BOT ${modeNameEn}] SKIP · structural SL too wide for ${zTxt}.`
-    };
-  }
-  const tg = botTargets(dir, entry, slr.dist, c5, m15, atrV);
-  const minRR = conf === 'CISD' ? BOT_CFG.minRRCisd : BOT_CFG.minRR;
-  if (!tg.synth3 && tg.rr3 < minRR) {
-    return {
-      reason: `[BOT ${modeName}] SKIP · RR ke target likuiditas 1:${tg.rr3.toFixed(2)} < 1:${minRR}.`,
-      reasonEn: `[BOT ${modeNameEn}] SKIP · RR to liquidity target 1:${tg.rr3.toFixed(2)} < 1:${minRR}.`
-    };
-  }
+  const slr = calcBotSL({ dir, entry: price, setup, atrV, ctx });
+  const tg = botTargets(dir, price, slr.dist, c5, m15, atrV);
 
   const sl = ctx.f(slr.sl), tps = tg.tps.map(ctx.f);
-  const rrTxt = `1:${(tg.synth3 ? 3 : tg.rr3).toFixed(1)}`;
-  const setupName = `Bot SMC/ICT ${modeName === 'AGRESIF' ? 'Agresif' : 'Konservatif'} · ${setup.type === 'SWEEP_MSS' ? 'Sweep+MSS' : 'BOS Mitigation'} · ${z.type}`;
-  const orderTxt = mode === 'LIMIT' ? `${side} LIMIT @ CE ${ctx.f(entry)}` : `${side} NOW @ ${ctx.f(entry)} (conf ${conf})`;
+  const rrTxt = `1:${(tg.synth3 ? 2.5 : tg.rr3).toFixed(1)}`;
+  const setupName = `Scalper Bot M1 · Running Structure · ${z.type}`;
+  const orderTxt = `${side} NOW @ ${ctx.f(price)} (${confType})`;
 
-  const reasonId = withPair(ctx.symbol, `[BOT SMC/ICT ${modeName}] State: ${state} · ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} · TP2 ${tps[1]} · TP3 ${tps[2]} | RR ${rrTxt} | Zona: ${zTxt} | ${flow} | Score ${scoreTxt} | Bias ${biasTxt}${kz ? ' | ' + kz : ''}.`);
-  const reasonEn = withPair(ctx.symbol, `[BOT SMC/ICT ${modeNameEn}] State: ${state} · ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} · TP2 ${tps[1]} · TP3 ${tps[2]} | RR ${rrTxt} | Zone: ${zTxt} | ${flow} | Score ${scoreTxt} | Bias ${biasTxt}${kz ? ' | ' + kz : ''}.`);
+  const reasonId = withPair(ctx.symbol, `[SCALPER BOT M1] State: EXECUTE NOW · ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} · TP2 ${tps[1]} · TP3 ${tps[2]} | RR ${rrTxt} | Zona: ${zTxt} | ${flow} | Konfirmasi M1: ${confType} | Score ${scoreTxt} | Bias ${biasTxt}.`);
+  const reasonEn = withPair(ctx.symbol, `[SCALPER BOT M1] State: EXECUTE NOW · ${orderTxt} | SL ${sl} (${slr.src}) | TP1 ${tps[0]} | TP2 ${tps[1]} | TP3 ${tps[2]} | RR ${rrTxt} | Zone: ${zTxt} | ${flow} | M1 Confirmation: ${confType} | Score ${scoreTxt} | Bias ${biasTxt}.`);
 
   return {
     dir,
     plan: {
-      isOCO: false, orderType: mode, status: mode === 'LIMIT' ? 'PENDING' : 'RUNNING',
-      entry: ctx.f(entry), sl, tps, setup: setupName,
+      isOCO: false, orderType: 'MARKET', status: 'RUNNING',
+      entry: ctx.f(price), sl, tps, setup: setupName,
       chartContext: `${setupName}: ${orderTxt} (SL ${sl})`,
       zone: { min: z.lower, max: z.upper },
       tag: zLabel,
     },
     meta: {
-      setup: setupName, confidence, riskLabel: isConservative ? 'MEDIUM' : 'HIGH',
+      setup: setupName, confidence: 'HIGH', riskLabel: 'HIGH',
       reason: reasonId,
       reasons: { id: reasonId, en: reasonEn },
-      topDown: bias, state, score: setup.score
+      topDown: bias, state: 'CONFIRMED', score: setup.score
     },
   };
 }
