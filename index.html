@@ -110,7 +110,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
       <div>
         <label class="text-[9px] font-bold text-gray-400 block mb-1">PAKET / STATUS</label>
         <select id="newClientStatus" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2.5 rounded-lg focus:outline-none">
-          <option value="trial">Trial 3 Hari</option>
+          <option value="trial">Trial 3 Hari (Max 2 Sinyal Bot)</option>
           <option value="monthly">Langganan Bulanan (Monthly)</option>
           <option value="lifetime">Akses Selamanya (Lifetime)</option>
         </select>
@@ -145,7 +145,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
       <div id="userStatusBadge" class="hidden text-[9px] font-bold font-mono px-2 py-0.5 rounded border bg-darkbg text-gray-300 border-panelborder flex items-center gap-1.5 shadow-sm">
         <span id="statusType">TRIAL</span>
         <span id="statusTimer" class="text-yellow-400">--d --h left</span>
-        <span id="statusUsage" class="text-emerald-400 border-l border-panelborder pl-1.5">0/5 req</span>
+        <span id="statusUsage" class="text-emerald-400 border-l border-panelborder pl-1.5">0/2 req</span>
       </div>
       <button onclick="logout()" data-i18n="btnLogout" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40"></button>
       <button onclick="toggleLang()" id="langBtn" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-panelborder text-gray-300 border border-panelborder hover:border-accentblue">ID 🌐</button>
@@ -711,8 +711,10 @@ function startStatusTimer(data) {
     elType.textContent = 'TRIAL';
     elType.className = 'text-yellow-400';
     elUsage.classList.remove('hidden');
-    elUsage.textContent = `${data.requests_today || 0}/5 req`;
-    elUsage.className = (data.requests_today || 0) >= 5 ? 'text-red-400 border-l border-panelborder pl-1.5 font-bold' : 'text-emerald-400 border-l border-panelborder pl-1.5';
+    // Batasan trial max 2 sinyal bot
+    const botUsageCount = botTrades().length;
+    elUsage.textContent = `${botUsageCount}/2 req`;
+    elUsage.className = botUsageCount >= 2 ? 'text-red-400 border-l border-panelborder pl-1.5 font-bold' : 'text-emerald-400 border-l border-panelborder pl-1.5';
   } else if (data.status === 'monthly') {
     elType.textContent = 'MONTHLY';
     elType.className = 'text-emerald-400';
@@ -2090,7 +2092,6 @@ function drawBotMap(cv, cx, t, k) {
   const { vis, slot, xOfT } = layoutX(rows, plotL, plotR, tfMs);
   const smcData = getSmc(k, iv);
 
-  // Hitung SMA 20 untuk visual garis di kanvas bot
   const closes = rows.map(c => c.c);
   const smaPoints = [];
   for (let i = 19; i < rows.length; i++) {
@@ -2125,7 +2126,6 @@ function drawBotMap(cv, cx, t, k) {
   const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * plotH;
   const clampX = x => Math.max(plotL, Math.min(plotR, x));
 
-  // Render SMC FVG & OB pada kanvas bot khusus
   if (smcData.status === 'ok') {
     smcData.fvgs.forEach(z => {
       const x0 = clampX(xOfT(z.t));
@@ -2147,7 +2147,6 @@ function drawBotMap(cv, cx, t, k) {
     });
   }
 
-  // Render Garis SMA 20
   if (smaPoints.length > 1) {
     cx.save();
     cx.strokeStyle = '#facc15';
@@ -2164,7 +2163,6 @@ function drawBotMap(cv, cx, t, k) {
     cx.restore();
   }
 
-  // Render Candles
   const bodyW = Math.max(1.5, slot * 0.62);
   cx.lineWidth = 1;
   for (const c of vis) {
@@ -2181,7 +2179,6 @@ function drawBotMap(cv, cx, t, k) {
     cx.fillRect(x - bodyW / 2, Math.min(yO, yC), bodyW, Math.max(1, Math.abs(yC - yO)));
   }
 
-  // Render Level Trade Bot
   if (t) {
     L.forEach(l => {
       const y = yOf(l.v);
@@ -2230,13 +2227,11 @@ function drawBotMap(cv, cx, t, k) {
   }
 }
 
-// Chart manual
 function drawChart() {
   if (market === 'VISION' || isBotView()) return;
   drawLiveMap(cv, cx, activeTrade(), market);
 }
 
-// Chart bot khusus dengan visual SMC & SMA20
 function drawBotChart() {
   if (!isBotView()) return;
   const activeBotSig = botRunning ? botTrade() : null;
@@ -2799,11 +2794,13 @@ function stopBot(text) {
   let cancelledAny = false;
   for (const t of trades) {
     if (t.src === 'bot' && t.status !== 'CLOSED') {
-      cancelTrade(t, 'Bot dinonaktifkan (Setup batal)');
+      cancelTrade(t, 'Bot dihentikan oleh pengguna');
       cancelledAny = true;
     }
   }
+  
   botActiveId = null;
+  
   if (cancelledAny) {
     saveTrades();
     renderHistory();
@@ -2817,11 +2814,31 @@ function stopBot(text) {
 
 async function toggleBot() {
   getAudioContext();
-  if (botRunning) return stopBot('Bot dihentikan.');
+  
+  if (botRunning) {
+    stopBot('Bot dihentikan.');
+    return;
+  }
+
+  // RESET TOTAL STATE BOT SEBELUMNYA AGAR MULAI FRESH ANALISA BARU
+  for (const t of trades) {
+    if (t.src === 'bot' && t.status !== 'CLOSED') {
+      cancelTrade(t, 'Reset untuk memulai analisa baru');
+    }
+  }
+  botActiveId = null;
+  saveTrades();
+  renderHistory();
+
   botRunning = true;
   renderBotUI();
-  if ($('botMsg')) $('botMsg').textContent = 'Bot diaktifkan. Memantau pasar XAUUSD secara otomatis...';
-  runBotCycle();
+  
+  const style = $('botStyle') ? $('botStyle').value : 'Scalping';
+  if ($('botMsg')) $('botMsg').textContent = `Bot diaktifkan dengan style [${style}]. Memulai pemindaian analisa baru...`;
+  
+  await runBotCycle();
+  
+  if (botTimer) clearInterval(botTimer);
   botTimer = setInterval(runBotCycle, 15000);
 }
 
@@ -2908,6 +2925,13 @@ async function runBotCycle() {
     renderAll();
     playTradeAlert();
     say(`Sinyal bot baru: ${trade.signal} ${trade.mode === 'LIMIT' ? 'LIMIT' : 'NOW'} @ ${fmt(trade.entry)}.`);
+
+    // BATASAN TRIAL: Maksimal 2 sinyal bot, setelah itu stop otomatis
+    const currentBotCount = botTrades().length;
+    if (currentBotCount >= 2) {
+      stopBot('Batas trial tercapai: akun trial maksimal 2 sinyal bot.');
+      return;
+    }
 
     if ($('botMode') && $('botMode').value === 'once') {
       stopBot('Mode sekali: bot berhenti setelah 1 sinyal. Lanjut manual.');
