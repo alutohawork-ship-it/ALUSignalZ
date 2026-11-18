@@ -657,6 +657,7 @@ const marketOpen = k => MARKETS[k].h24 || ![0, 6].includes(new Date().getUTCDay(
 const T = k => I18N[lang][k];
 const optOf = s => T((STYLE_CFG[s] || STYLE_CFG.Scalping).opt);
 const symOf = k => workingSym[k] || MARKETS[k].aliases[aliasIdx[k] || 0];
+const srcLabel = (k, iv) => `${k} · ${iv} · WIB · ${srcOf(k, iv)}`;
 
 const activeTrade = () => {
   const t = market === 'VISION' ? visionTrade : (trades.find(x => x.id === activeId && x.key === market && x.src !== 'bot') || null);
@@ -2030,7 +2031,7 @@ function detectSMC(rows) {
     if (b.c < b.o && c.c > b.h) obs.push({ dir: 1, bottom: b.c, top: b.o, t: b.t });
     if (b.c > b.o && c.c < b.l) obs.push({ dir: -1, bottom: b.o, top: b.c, t: b.t });
     
-    // CISD Detection: Change in State of Delivery (sudden impulse breakout of prior range)
+    // CISD Detection: Change in State of Delivery
     if (Math.abs(b.c - b.o) > (b.h - b.l) * 0.7 && Math.abs(b.c - b.o) > (rows[i-2] ? Math.abs(rows[i-2].c - rows[i-2].o) * 1.5 : 0)) {
       cisd.push({ dir: b.c >= b.o ? 1 : -1, price: (b.o + b.c) / 2, t: b.t });
     }
