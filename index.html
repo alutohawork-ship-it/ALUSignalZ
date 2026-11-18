@@ -41,8 +41,8 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
 .validation-progress-fill{height:100%;width:0%;background:linear-gradient(90deg,#f59e0b,#fbbf24);transition:width .3s ease}
 .smc-tf-btn { transition: all 0.2s; }
 .smc-tf-btn.active { background-color: #2962ff; color: white; border-color: #2962ff; }
-#smcCanvas, #botCanvas { touch-action: none; cursor: grab; }
-#smcCanvas:active, #botCanvas:active { cursor: grabbing; }
+#smcCanvas, #botCanvas, #chatBotCanvas { touch-action: none; cursor: grab; }
+#smcCanvas:active, #botCanvas:active, #chatBotCanvas:active { cursor: grabbing; }
 </style>
 </head>
 <body class="bg-darkbg text-gray-200 font-sans min-h-screen flex flex-col justify-between p-2 sm:p-4">
@@ -171,14 +171,15 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
         <select id="marketSelect" onchange="syncMarket()" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
           <option value="XAUUSD">XAUUSD / Gold</option>
           <option value="BTCUSD">BTCUSD / Bitcoin</option>
-          <option value="AUTOBOT">Auto Bot (XAUUSD Scalping)</option>
+          <option value="AUTOBOT">Scanner Bot (Auto XAUUSD)</option>
+          <option value="CHATBOT">Interactive Chat Bot (AI Asisten)</option>
           <option value="VISION">Vision Chart (Upload)</option>
         </select>
 
-        <!-- PANEL AUTO BOT -->
+        <!-- PANEL SCANNER BOT (TERPISAH) -->
         <div id="botPanel" class="hidden bg-darkbg border border-panelborder rounded-xl p-2.5 space-y-2">
           <div class="flex justify-between items-center">
-            <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-robot text-accentblue"></i> AUTO BOT · XAUUSD</span>
+            <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-robot text-accentblue"></i> SCANNER BOT · XAUUSD</span>
             <span id="botBadge" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border">OFF</span>
           </div>
           <div class="grid grid-cols-2 gap-1.5">
@@ -192,20 +193,18 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
             </select>
           </div>
           <label class="flex items-center gap-1.5 text-[9px] text-gray-400 cursor-pointer"><input type="checkbox" id="botSess" class="rounded bg-cardbg border-panelborder"> Hanya sesi London/NY (07–21 UTC)</label>
-          <button id="botBtn" onclick="toggleBot()" class="w-full font-bold py-2 rounded-lg text-xs transition bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20">START BOT (EA)</button>
+          <button id="botBtn" onclick="toggleBot()" class="w-full font-bold py-2 rounded-lg text-xs transition bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20">START SCANNER BOT</button>
           
-          <!-- Interaktif Bot Reasoning / Structure Log -->
           <div class="bg-cardbg border border-panelborder rounded-lg p-2 space-y-1">
-            <p class="text-[8px] font-bold text-accentblue uppercase tracking-wider"><i class="fa-solid fa-comments"></i> Live Structure & Bot Analysis</p>
-            <p id="botMsg" class="text-[9px] font-mono text-gray-300 min-h-[24px] break-words leading-relaxed">Bot siap memindai struktur pasar...</p>
+            <p class="text-[8px] font-bold text-accentblue uppercase tracking-wider"><i class="fa-solid fa-chart-bar"></i> Live Scanner Log</p>
+            <p id="botMsg" class="text-[9px] font-mono text-gray-300 min-h-[24px] break-words leading-relaxed">Scanner bot siap memindai struktur pasar...</p>
           </div>
           
-          <p id="botStats" class="text-[8px] font-mono text-gray-500">Total Bot Trade: 0 | Win: 0 | Loss: 0</p>
+          <p id="botStats" class="text-[8px] font-mono text-gray-500">Total Scanner Trade: 0 | Win: 0 | Loss: 0</p>
 
-          <!-- BOT LIVE MAP DENGAN VISUAL KHUSUS SMC / SMA20 -->
           <div class="border-t border-panelborder pt-2 space-y-1.5">
             <div class="flex justify-between items-center">
-              <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-chart-line text-accentblue"></i> BOT SMC & SMA20 LIVE MAP</span>
+              <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-chart-line text-accentblue"></i> SCANNER SMC & SMA20 LIVE MAP</span>
               <span id="botTradeStatus" class="hidden text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40 whitespace-nowrap">RUNNING</span>
             </div>
             <p id="botPnl" class="text-[10px] font-mono font-bold text-gray-400"></p>
@@ -222,13 +221,31 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
               <span class="text-orange-400 font-bold"> Sweep Line</span>
               <span class="text-yellow-300">SMA 20 Line</span>
               <span class="text-sky-300">BOS / MSS / CHoCH</span>
-              <span class="text-fuchsia-300">┈ CISD</span>
-              <span class="text-emerald-300">SMT Buy</span>
-              <span class="text-red-300">SMT Sell</span>
-              <span class="text-indigo-300">Trendline</span>
             </div>
-            <p class="text-[8px] font-bold text-gray-500 pt-1">RIWAYAT BOT</p>
+            <p class="text-[8px] font-bold text-gray-500 pt-1">RIWAYAT SCANNER</p>
             <div id="botHistory" class="space-y-1 max-h-[160px] overflow-y-auto pr-1"></div>
+          </div>
+        </div>
+
+        <!-- PANEL INTERACTIVE CHAT BOT (TERPISAH SEPENUHNYA) -->
+        <div id="chatBotPanel" class="hidden bg-darkbg border border-panelborder rounded-xl p-2.5 space-y-2">
+          <div class="flex justify-between items-center">
+            <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-comments text-accentblue"></i> INTERACTIVE CHAT BOT (AI)</span>
+            <span class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-emerald-500/20 text-emerald-400 border-emerald-500/40">READY</span>
+          </div>
+          <div class="bg-cardbg border border-panelborder rounded-xl p-3 space-y-2">
+            <div id="chatLog" class="h-[220px] overflow-y-auto space-y-2 pr-1 text-[10px] font-mono">
+              <div class="bg-darkbg p-2 rounded-lg border border-panelborder text-gray-300">
+                <span class="text-yellow-400 font-bold">AI Chat Bot:</span> Halo! Saya adalah modul Chat & AI Interaktif khusus. Tanyakan apa saja mengenai analisa market, level trading, atau edukasi SMC/ICT!
+              </div>
+            </div>
+            <div class="flex gap-1.5">
+              <input type="text" id="chatInput" placeholder="Ketik pertanyaan / perintah chat..." onkeydown="if(event.key==='Enter') sendChatMessage()" class="flex-1 bg-darkbg border border-panelborder rounded-lg px-2.5 py-2 text-xs text-white focus:outline-none focus:border-accentblue">
+              <button onclick="sendChatMessage()" class="bg-accentblue hover:bg-blue-600 text-white font-bold px-3 py-2 rounded-lg text-xs transition"><i class="fa-solid fa-paper-plane"></i></button>
+            </div>
+          </div>
+          <div class="relative w-full h-[160px]">
+            <canvas id="chatBotCanvas" class="absolute inset-0 w-full h-full"></canvas>
           </div>
         </div>
 
@@ -389,15 +406,6 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
             <span class="text-orange-400 font-bold"> Sweep Line</span>
             <span class="text-yellow-300">SW sweep</span>
             <span class="text-sky-300">BOS / MSS / CHoCH</span>
-            <span class="text-fuchsia-300">┈ CISD</span>
-            <span class="text-emerald-300">SMT Buy</span>
-            <span class="text-red-300">SMT Sell</span>
-            <span class="text-indigo-300">Trendline</span>
-            <span class="text-teal-300">Asia</span>
-            <span class="text-red-400">London KZ</span>
-            <span class="text-blue-400">London</span>
-            <span class="text-red-400">NY KZ</span>
-            <span class="text-sky-400">New York</span>
           </div>
         </div>
       </div>
@@ -677,11 +685,9 @@ const toMs = v => {
   return Number.isFinite(d) ? d : NaN;
 };
 
-// --- Format Concise/Clean Reasoning ---
 function cleanReason(text) {
   if (!text) return 'Setup valid terdeteksi berdasarkan konfluensi struktur SMC/ICT.';
   let clean = String(text).trim();
-  // Potong atau ringkas jika terlalu panjang (> 300 karakter)
   if (clean.length > 320) {
     clean = clean.substring(0, 315) + '...';
   }
@@ -728,9 +734,12 @@ const scv = $('smcCanvas');
 const sx = scv ? scv.getContext('2d') : null;
 const bcv = $('botCanvas');
 const bcx = bcv ? bcv.getContext('2d') : null;
+const chatBotCv = $('chatBotCanvas');
+const chatBotCx = chatBotCv ? chatBotCv.getContext('2d') : null;
 
 let botActiveId = null, botBusy = false;
 const isBotView = () => !!$('marketSelect') && $('marketSelect').value === 'AUTOBOT';
+const isChatBotView = () => !!$('marketSelect') && $('marketSelect').value === 'CHATBOT';
 const botTrades = () => trades.filter(x => x.src === 'bot');
 const botTrade = () => {
   const l = botTrades();
@@ -972,31 +981,35 @@ function pickTradeFor(k, preferId) {
 function syncMarket(tradeId) {
   const sel = $('marketSelect').value;
   const isBot = sel === 'AUTOBOT';
-  market = isBot ? 'XAUUSD' : sel;
-  setTxt('selectedPairBadge', isBot ? 'XAUUSD · BOT' : market);
+  const isChatBot = sel === 'CHATBOT';
+  market = (isBot || isChatBot) ? 'XAUUSD' : sel;
+  setTxt('selectedPairBadge', isBot ? 'XAUUSD · SCANNER BOT' : isChatBot ? 'XAUUSD · CHAT BOT' : market);
 
   const isVision = market === 'VISION';
   $('visionPanel').classList.toggle('hidden', !isVision);
   $('streamPanel').classList.toggle('hidden', isVision);
   $('biasPanel').classList.toggle('hidden', isVision);
-  $('chartPanel').classList.toggle('hidden', isVision || isBot);
+  $('chartPanel').classList.toggle('hidden', isVision || isBot || isChatBot);
   $('smcPanel').classList.toggle('hidden', isVision);
   $('sessionPanel').classList.toggle('hidden', isVision);
 
   const manualSignalCard = $('standbyView')?.parentElement;
-  if (manualSignalCard) manualSignalCard.classList.toggle('hidden', isBot);
+  if (manualSignalCard) manualSignalCard.classList.toggle('hidden', isBot || isChatBot);
 
   const botPanel = $('botPanel');
   if (botPanel) botPanel.classList.toggle('hidden', !isBot);
 
+  const chatBotPanel = $('chatBotPanel');
+  if (chatBotPanel) chatBotPanel.classList.toggle('hidden', !isChatBot);
+
   const styleContainer = $('styleContainer');
-  if (styleContainer) styleContainer.classList.toggle('hidden', isBot);
+  if (styleContainer) styleContainer.classList.toggle('hidden', isBot || isChatBot);
 
   const signalBtn = $('signalBtn');
-  if (signalBtn) signalBtn.classList.toggle('hidden', isBot);
+  if (signalBtn) signalBtn.classList.toggle('hidden', isBot || isChatBot);
 
   setTxt('btnText', isVision ? T('btnGenVision') : T('btnGen'));
-  activeId = (isVision || isBot) ? null : pickTradeFor(market, tradeId);
+  activeId = (isVision || isBot || isChatBot) ? null : pickTradeFor(market, tradeId);
   refreshCard();
   renderHistory();
 
@@ -1644,7 +1657,7 @@ function renderHistory() {
 
 const BADGE = 'text-[8px] font-mono font-bold px-2 py-0.5 rounded border ';
 function refreshCard() {
-  if (isBotView()) {
+  if (isBotView() || isChatBotView()) {
     $('standbyView').classList.add('hidden');
     $('activeCard').classList.add('hidden');
     $('tradeStatus').classList.add('hidden');
@@ -2040,33 +2053,17 @@ function liquidity(rows, sw) {
 }
 
 function detectSMC(rows) {
-  const fvgs = [], obs = [], cisd = [], smt = [], trendlines = [];
+  const fvgs = [], obs = [];
   for (let i = 1; i < rows.length - 1; i++) {
     const a = rows[i - 1], b = rows[i], c = rows[i + 1];
     if (a.h < c.l && !invalidZone(rows, i + 2, 1, a.h, c.l)) fvgs.push({ dir: 1, bottom: a.h, top: c.l, t: b.t });
     if (a.l > c.h && !invalidZone(rows, i + 2, -1, c.h, a.l)) fvgs.push({ dir: -1, bottom: c.h, top: a.l, t: b.t });
     if (b.c < b.o && c.c > b.h) obs.push({ dir: 1, bottom: b.c, top: b.o, t: b.t });
     if (b.c > b.o && c.c < b.l) obs.push({ dir: -1, bottom: b.o, top: b.c, t: b.t });
-    
-    if (Math.abs(b.c - b.o) > (b.h - b.l) * 0.7 && Math.abs(b.c - b.o) > (rows[i-2] ? Math.abs(rows[i-2].c - rows[i-2].o) * 1.5 : 0)) {
-      cisd.push({ dir: b.c >= b.o ? 1 : -1, price: (b.o + b.c) / 2, t: b.t });
-    }
   }
-
   const sw = swings(rows);
-  if (sw.sh.length >= 2) {
-    const h1 = sw.sh[sw.sh.length - 2], h2 = sw.sh[sw.sh.length - 1];
-    trendlines.push({ x1: h1.t, y1: h1.p, x2: h2.t, y2: h2.p, type: 'RESISTANCE' });
-    if (h2.p < h1.p) smt.push({ dir: -1, p: h2.p, t: h2.t, label: 'SMT Sell' });
-  }
-  if (sw.sl.length >= 2) {
-    const l1 = sw.sl[sw.sl.length - 2], l2 = sw.sl[sw.sl.length - 1];
-    trendlines.push({ x1: l1.t, y1: l1.p, x2: l2.t, y2: l2.p, type: 'SUPPORT' });
-    if (l2.p > l1.p) smt.push({ dir: 1, p: l2.p, t: l2.t, label: 'SMT Buy' });
-  }
-
   const st = structure(rows, sw);
-  return { fvgs: fvgs.slice(-4), obs: obs.slice(-4), liq: liquidity(rows, sw), ev: st.ev, cisd: cisd.slice(-3), smt: smt.slice(-2), trendlines: trendlines.slice(-2) };
+  return { fvgs: fvgs.slice(-4), obs: obs.slice(-4), liq: liquidity(rows, sw), ev: st.ev };
 }
 
 function getSmc(k, iv) {
@@ -2076,7 +2073,7 @@ function getSmc(k, iv) {
   const rows = displayRows(k, iv);
   const res = rows.length >= 20
     ? { ...detectSMC(rows), status: 'ok' }
-    : { status: 'loading', fvgs: [], obs: [], liq: { pools: [], sweeps: [] }, ev: [], cisd: [], smt: [], trendlines: [] };
+    : { status: 'loading', fvgs: [], obs: [], liq: { pools: [], sweeps: [] }, ev: [] };
   res.n = rows.length;
   res.err = (!s.rows.length && !s.ext.length) ? (s.err || s.extErr || '') : '';
   s.smc = res;
@@ -2164,7 +2161,7 @@ function layoutX(rows, plotL, plotR, tfMs) {
 }
 const clampX = (x, plotL, plotR) => Math.max(plotL, Math.min(plotR, x));
 
-// ---- Kanvas Khusus Bot ----
+// ---- Kanvas Khusus Scanner Bot ----
 function drawBotMap(cv, cx, t, k) {
   if (!cx) return;
   const d = fitCv(cv, cx);
@@ -2183,7 +2180,7 @@ function drawBotMap(cv, cx, t, k) {
   cx.textAlign = 'left';
   cx.textBaseline = 'top';
   cx.fillStyle = 'rgba(148,163,184,.9)';
-  cx.fillText(`BOT SMC, SWEEP, CISD & SMT · ${srcLabel(k, iv)}`, plotL + 2, 3);
+  cx.fillText(`SCANNER BOT SMC, SWEEP & SMT · ${srcLabel(k, iv)}`, plotL + 2, 3);
 
   if (!rows.length && live == null) {
     cx.font = 'bold 11px ui-monospace, monospace';
@@ -2279,45 +2276,6 @@ function drawBotMap(cv, cx, t, k) {
         cx.textAlign = 'left';
         cx.textBaseline = 'bottom';
         cx.fillText('⚡ SWEEP', x1 + 4, y - 2);
-        cx.restore();
-      });
-    }
-    if (smcData.cisd) {
-      smcData.cisd.forEach(cd => {
-        const y = yOf(cd.price), x0 = clampX(xOfT(cd.t), plotL, plotR);
-        cx.save();
-        cx.strokeStyle = '#e879f9';
-        cx.lineWidth = 1.5;
-        cx.setLineDash([2, 4]);
-        cx.beginPath(); cx.moveTo(x0, y); cx.lineTo(plotR, y); cx.stroke();
-        cx.setLineDash([]);
-        cx.font = 'bold 8px ui-monospace, monospace';
-        cx.fillStyle = '#e879f9';
-        cx.textAlign = 'right';
-        cx.textBaseline = 'middle';
-        cx.fillText('CISD', plotR - 6, y);
-        cx.restore();
-      });
-    }
-    if (smcData.smt) {
-      smcData.smt.forEach(sm => {
-        const y = yOf(sm.p), x = clampX(xOfT(sm.t), plotL, plotR);
-        cx.save();
-        cx.font = 'bold 8px ui-monospace, monospace';
-        cx.fillStyle = sm.dir > 0 ? '#34d399' : '#f87171';
-        cx.textAlign = 'center';
-        cx.textBaseline = sm.dir > 0 ? 'top' : 'bottom';
-        cx.fillText(sm.label, x, y + (sm.dir > 0 ? 4 : -4));
-        cx.restore();
-      });
-    }
-    if (smcData.trendlines) {
-      smcData.trendlines.forEach(tl => {
-        const x1 = xOfT(tl.x1), y1 = yOf(tl.y1), x2 = xOfT(tl.x2), y2 = yOf(tl.y2);
-        cx.save();
-        cx.strokeStyle = '#818cf8';
-        cx.lineWidth = 1.5;
-        cx.beginPath(); cx.moveTo(x1, y1); cx.lineTo(x2, y2); cx.stroke();
         cx.restore();
       });
     }
@@ -2418,8 +2376,83 @@ function drawBotMap(cv, cx, t, k) {
   }
 }
 
+// ---- Kanvas Khusus Chat Bot AI Interaktif ----
+function drawChatBotMap(cv, cx, k) {
+  if (!cx) return;
+  const d = fitCv(cv, cx);
+  if (!d) return;
+  const CW = d.w, CH = d.h;
+
+  const iv = '5m';
+  const rows = displayRows(k, iv);
+  const live = prices[k] ? prices[k].price : null;
+  const plotL = 6, plotT = 16, plotB = CH - 10, plotR = CW - 10;
+  const plotH = plotB - plotT;
+
+  cx.font = '8px ui-monospace, monospace';
+  cx.textAlign = 'left';
+  cx.textBaseline = 'top';
+  cx.fillStyle = 'rgba(148,163,184,.9)';
+  cx.fillText(`AI CHAT BOT LIVE PULSE · ${k} (${iv})`, plotL + 2, 2);
+
+  if (!rows.length) return;
+  const { vis, slot, xOfT } = layoutX(rows, plotL, plotR, 300000);
+
+  let lo = Infinity, hi = -Infinity;
+  vis.forEach(c => {
+    if (c.h < lo) lo = c.h;
+    if (c.h > hi) hi = c.h;
+    if (c.l < lo) lo = c.l;
+    if (c.l > hi) hi = c.l;
+  });
+  if (live != null) { if (live < lo) lo = live; if (live > hi) hi = live; }
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
+  if (!(hi - lo > 0)) { lo -= 1; hi += 1; }
+  const yOf = p => plotT + (1 - (p - lo) / (hi - lo)) * plotH;
+
+  const bodyW = Math.max(1.5, slot * 0.6);
+  cx.lineWidth = 1;
+  for (const c of vis) {
+    const x = xOfT(c.t);
+    if (x < plotL || x > plotR) continue;
+    const up = c.c >= c.o;
+    const col = up ? '#34d399' : '#f87171';
+    const yH = yOf(c.h), yL = yOf(c.l), yO = yOf(c.o), yC = yOf(c.c);
+    cx.strokeStyle = col;
+    cx.beginPath(); cx.moveTo(x, yH); cx.lineTo(x, yL); cx.stroke();
+    cx.fillStyle = col;
+    cx.fillRect(x - bodyW / 2, Math.min(yO, yC), bodyW, Math.max(1, Math.abs(yC - yO)));
+  }
+}
+
+function sendChatMessage() {
+  const input = $('chatInput');
+  const logBox = $('chatLog');
+  if(!input || !logBox) return;
+  const text = input.value.trim();
+  if(!text) return;
+
+  // Append user bubble
+  logBox.innerHTML += `<div class="text-right"><span class="inline-block bg-accentblue/20 text-blue-300 border border-blue-500/30 p-2 rounded-lg text-left max-w-[85%]"><span class="font-bold text-white">Anda:</span> ${esc(text)}</span></div>`;
+  input.value = '';
+  logBox.scrollTop = logBox.scrollHeight;
+
+  // Simulate AI response for Chat Bot
+  setTimeout(() => {
+    let reply = "Analisis chat interaktif: Berdasarkan struktur SMC saat ini pada XAUUSD, market sedang menguji area konfluensi support. Pastikan manajemen risiko tetap terjaga.";
+    const lower = text.toLowerCase();
+    if(lower.includes('buy') || lower.includes('sell')) {
+      reply = "Untuk setup entry, gunakan menu Analisa Signal utama atau aktifkan Scanner Bot di atas untuk eksekusi otomatis.";
+    } else if(lower.includes('halo') || lower.includes('hi')) {
+      reply = "Halo trader! Ada yang bisa saya bantu jelaskan terkait setup atau kondisi market hari ini?";
+    }
+    logBox.innerHTML += `<div class="text-left"><span class="inline-block bg-darkbg text-gray-200 border border-panelborder p-2 rounded-lg max-w-[85%]"><span class="text-yellow-400 font-bold">AI Chat Bot:</span> ${esc(reply)}</span></div>`;
+    logBox.scrollTop = logBox.scrollHeight;
+  }, 600);
+}
+
 function drawChart() {
-  if (market === 'VISION' || isBotView()) return;
+  if (market === 'VISION' || isBotView() || isChatBotView()) return;
   drawLiveMap(cv, cx, activeTrade(), market);
 }
 
@@ -2427,6 +2460,11 @@ function drawBotChart() {
   if (!isBotView()) return;
   const activeBotSig = botRunning ? botLiveTrade() : null;
   drawBotMap(bcv, bcx, activeBotSig, 'XAUUSD');
+}
+
+function drawChatBotChart() {
+  if (!isChatBotView()) return;
+  drawChatBotMap(chatBotCv, chatBotCx, 'XAUUSD');
 }
 
 // ---- Live Map Chart Standar ----
@@ -2541,45 +2579,6 @@ function drawLiveMap(cv, cx, t, k) {
         cx.textAlign = 'left';
         cx.textBaseline = 'bottom';
         cx.fillText('⚡ SWEEP', x1 + 4, y - 2);
-        cx.restore();
-      });
-    }
-    if (smcData.cisd) {
-      smcData.cisd.forEach(cd => {
-        const y = yOf(cd.price), x0 = clampX(xOfT(cd.t), plotL, plotR);
-        cx.save();
-        cx.strokeStyle = '#e879f9';
-        cx.lineWidth = 1.5;
-        cx.setLineDash([2, 4]);
-        cx.beginPath(); cx.moveTo(x0, y); cx.lineTo(plotR, y); cx.stroke();
-        cx.setLineDash([]);
-        cx.font = 'bold 8px ui-monospace, monospace';
-        cx.fillStyle = '#e879f9';
-        cx.textAlign = 'right';
-        cx.textBaseline = 'middle';
-        cx.fillText('CISD', plotR - 6, y);
-        cx.restore();
-      });
-    }
-    if (smcData.smt) {
-      smcData.smt.forEach(sm => {
-        const y = yOf(sm.p), x = clampX(xOfT(sm.t), plotL, plotR);
-        cx.save();
-        cx.font = 'bold 8px ui-monospace, monospace';
-        cx.fillStyle = sm.dir > 0 ? '#34d399' : '#f87171';
-        cx.textAlign = 'center';
-        cx.textBaseline = sm.dir > 0 ? 'top' : 'bottom';
-        cx.fillText(sm.label, x, y + (sm.dir > 0 ? 4 : -4));
-        cx.restore();
-      });
-    }
-    if (smcData.trendlines) {
-      smcData.trendlines.forEach(tl => {
-        const x1 = xOfT(tl.x1), y1 = yOf(tl.y1), x2 = xOfT(tl.x2), y2 = yOf(tl.y2);
-        cx.save();
-        cx.strokeStyle = '#818cf8';
-        cx.lineWidth = 1.5;
-        cx.beginPath(); cx.moveTo(x1, y1); cx.lineTo(x2, y2); cx.stroke();
         cx.restore();
       });
     }
@@ -2715,9 +2714,6 @@ function drawSMC() {
   const obs = s.obs.filter(z => inBand(z.bottom, z.top));
   const pools = s.liq.pools.filter(p => near(p.p));
   const sweeps = s.liq.sweeps.filter(p => near(p.p));
-  const cisd = s.cisd || [];
-  const smt = s.smt || [];
-  const trendlines = s.trendlines || [];
   const ev = s.ev.filter(e => near(e.p) && e.toT >= t0);
   const sess = sessionBoxes(rows, Date.now()).filter(se => se.b > t0);
 
@@ -2802,42 +2798,6 @@ function drawSMC() {
     sx.textAlign = 'left';
     sx.textBaseline = 'bottom';
     sx.fillText('⚡ SWEEP', x1 + 4, y - 2);
-    sx.restore();
-  });
-
-  cisd.forEach(cd => {
-    const y = yOf(cd.price), x0 = clampX(xOfT(cd.t), plotL, plotR);
-    sx.save();
-    sx.strokeStyle = '#e879f9';
-    sx.lineWidth = 1.5;
-    sx.setLineDash([2, 4]);
-    sx.beginPath(); sx.moveTo(x0, y); sx.lineTo(plotR, y); sx.stroke();
-    sx.setLineDash([]);
-    sx.font = 'bold 8px ui-monospace, monospace';
-    sx.fillStyle = '#e879f9';
-    sx.textAlign = 'right';
-    sx.textBaseline = 'middle';
-    sx.fillText('CISD', plotR - 6, y);
-    sx.restore();
-  });
-
-  smt.forEach(sm => {
-    const y = yOf(sm.p), x = clampX(xOfT(sm.t), plotL, plotR);
-    sx.save();
-    sx.font = 'bold 8px ui-monospace, monospace';
-    sx.fillStyle = sm.dir > 0 ? '#34d399' : '#f87171';
-    sx.textAlign = 'center';
-    sx.textBaseline = sm.dir > 0 ? 'top' : 'bottom';
-    sx.fillText(sm.label, x, y + (sm.dir > 0 ? 4 : -4));
-    sx.restore();
-  });
-
-  trendlines.forEach(tl => {
-    const x1 = xOfT(tl.x1), y1 = yOf(tl.y1), x2 = xOfT(tl.x2), y2 = yOf(tl.y2);
-    sx.save();
-    sx.strokeStyle = '#818cf8';
-    sx.lineWidth = 1.5;
-    sx.beginPath(); sx.moveTo(x1, y1); sx.lineTo(x2, y2); sx.stroke();
     sx.restore();
   });
 
@@ -3157,18 +3117,18 @@ function renderBotUI() {
   const btn = $('botBtn'), badge = $('botBadge'), stats = $('botStats');
   if (!btn || !badge) return;
   if (botRunning) {
-    btn.textContent = 'STOP BOT (EA)';
+    btn.textContent = 'STOP SCANNER BOT';
     btn.className = 'w-full bg-red-600 hover:bg-red-500 text-white font-bold py-2 rounded-lg text-xs transition shadow-lg shadow-red-600/20';
     badge.textContent = 'RUNNING';
     badge.className = 'text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-emerald-500/20 text-emerald-400 border-emerald-500/40';
   } else {
-    btn.textContent = 'START BOT (EA)';
+    btn.textContent = 'START SCANNER BOT';
     btn.className = 'w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 rounded-lg text-xs transition shadow-lg shadow-emerald-600/20';
     badge.textContent = 'OFF';
     badge.className = 'text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-red-500/20 text-red-400 border-red-500/40';
   }
   const c = botCounts();
-  if (stats) stats.textContent = `Total Bot Trade: ${c.total} | Win: ${c.wins} | Loss: ${c.losses}`;
+  if (stats) stats.textContent = `Total Scanner Trade: ${c.total} | Win: ${c.wins} | Loss: ${c.losses}`;
 }
 
 function stopBot(text) {
@@ -3178,7 +3138,7 @@ function stopBot(text) {
   let cancelledAny = false;
   for (const t of trades) {
     if (t.src === 'bot' && t.status !== 'CLOSED') {
-      cancelTrade(t, 'Bot dihentikan oleh pengguna');
+      cancelTrade(t, 'Scanner bot dihentikan oleh pengguna');
       cancelledAny = true;
     }
   }
@@ -3200,13 +3160,13 @@ async function toggleBot() {
   getAudioContext();
   
   if (botRunning) {
-    stopBot('Bot dihentikan.');
+    stopBot('Scanner bot dihentikan.');
     return;
   }
 
   for (const t of trades) {
     if (t.src === 'bot' && t.status !== 'CLOSED') {
-      cancelTrade(t, 'Reset untuk memulai analisa baru');
+      cancelTrade(t, 'Reset untuk memulai scan baru');
     }
   }
   botActiveId = null;
@@ -3217,7 +3177,7 @@ async function toggleBot() {
   renderBotUI();
   
   const style = $('botStyle') ? $('botStyle').value : 'Scalping';
-  if ($('botMsg')) $('botMsg').textContent = `Bot aktif [${style}]. Memindai struktur & FVG terbaru...`;
+  if ($('botMsg')) $('botMsg').textContent = `Scanner Bot aktif [${style}]. Memindai struktur & FVG terbaru...`;
   
   await runBotCycle();
   
@@ -3225,7 +3185,6 @@ async function toggleBot() {
   botTimer = setInterval(runBotCycle, 15000);
 }
 
-// --- Bot Interaktif Menjelaskan Kondisi Struktur Pasar (SMC / ICT) ---
 function updateBotInteractiveReason() {
   if (!botRunning) return;
   const smc = getSmc('XAUUSD', '5m');
@@ -3250,7 +3209,7 @@ async function runBotCycle() {
 
   if ($('botSess') && $('botSess').checked) {
     const h = new Date().getUTCHours();
-    if (h < 7 || h >= 21) return sayBot('Di luar sesi London/NY (07-21 UTC). Bot menunggu...');
+    if (h < 7 || h >= 21) return sayBot('Di luar sesi London/NY (07-21 UTC). Scanner bot menunggu...');
   }
   if (botTrades().some(x => x.status !== 'CLOSED')) {
     updateBotInteractiveReason();
@@ -3319,7 +3278,7 @@ async function runBotCycle() {
       zone: sig.zone || null,
       zoneLabel: sig.zoneLabel || '',
       zoneNote: sig.zoneNote || sig.setupLabel || '',
-      setup: sig.setup || sig.zoneLabel || 'Auto Bot',
+      setup: sig.setup || sig.zoneLabel || 'Scanner Bot',
       confidence: sig.confidence || 'MEDIUM',
       risk: sig.risk || 'HIGH',
       pip: 0.1,
@@ -3335,10 +3294,10 @@ async function runBotCycle() {
     sayBot(`Eksekusi ${trade.signal} @ ${fmt(trade.entry)} (${trade.setup || 'SMC Setup'})`);
 
     if ($('botMode') && $('botMode').value === 'once') {
-      stopBot('Mode sekali: bot berhenti setelah 1 sinyal.');
+      stopBot('Mode sekali: scanner bot berhenti setelah 1 sinyal.');
     }
   } catch (e) {
-    sayBot('Bot error: ' + e.message);
+    sayBot('Scanner bot error: ' + e.message);
   } finally {
     botBusy = false;
   }
@@ -3357,7 +3316,7 @@ function refreshBotPanel() {
     if (botRunning) {
       updateBotInteractiveReason();
     } else {
-      setTxt('botMsg', 'Bot nonaktif.');
+      setTxt('botMsg', 'Scanner bot nonaktif.');
     }
   } else {
     const s = statusOf(t), f = tradeFlow(t);
@@ -3385,7 +3344,7 @@ function refreshBotPanel() {
       return `<div data-tap="${esc(x.id)}" class="bg-darkbg border ${t && x.id === t.id ? 'border-accentblue' : 'border-panelborder'} px-2 py-1 rounded cursor-pointer select-none">
         <div class="flex justify-between text-[9px] font-bold"><span class="text-white">${x.no}. ${esc(x.signal)} · ${esc(optOf(x.style))}</span><span class="font-mono ${TXT[s.color]}">${esc(s.text)}</span></div>
         <div class="font-mono text-[9px] ${pipColor(f.pips)}">${esc(f.main)}</div></div>`;
-    }).join('') : '<p class="text-center text-[9px] text-gray-500 py-2">Belum ada riwayat bot.</p>';
+    }).join('') : '<p class="text-center text-[9px] text-gray-500 py-2">Belum ada riwayat scanner bot.</p>';
   }
   renderBotUI();
 }
@@ -3398,6 +3357,7 @@ setInterval(() => {
   drawChart();
   drawSMC();
   drawBotChart();
+  drawChatBotChart();
   refreshBotPanel();
   if (market !== 'VISION') refreshCard();
 }, 1000);
