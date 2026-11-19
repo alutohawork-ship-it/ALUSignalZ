@@ -625,6 +625,9 @@ const fmtPips = p => `${p > 0 ? '+' : p < 0 ? '−' : ''}${Number(Math.abs(p).to
 const pipColor = p => (p > 0 ? TXT.green : p < 0 ? TXT.red : TXT.gray);
 const pipsOf = (t, p) => (p - t.entry) * t.dir / (t.pip || MARKETS[t.key].pip);
 const BOT_SPLIT = [0.4, 0.3, 0.3];
+// false: rekap bot dihitung seperti manual (posisi dianggap selesai di TP terakhir yang kena).
+// true : rekap memakai porsi 40/30/30 (sisa porsi dihitung di harga keluar, misal BE = 0 pip).
+const BOT_RECAP_SPLIT = false;
 const effSL = t => (t.trailSL != null ? t.trailSL : (t.hits && t.hits.tp1 ? t.entry : t.sl));
 const slLabel = t => (t.trailSL != null ? 'TRAIL' : (t.hits && t.hits.tp1 ? 'BE' : 'SL'));
 function weightedPips(t, mark) {
@@ -638,7 +641,7 @@ function weightedPips(t, mark) {
   });
   return sum;
 }
-const pnlPips = (t, mark) => (t.src === 'bot' && TP_KEYS.every(k => t[k] != null) ? weightedPips(t, mark) : null);
+const pnlPips = (t, mark) => (BOT_RECAP_SPLIT && t.src === 'bot' && TP_KEYS.every(k => t[k] != null) ? weightedPips(t, mark) : null);
 function updateTrail(t, p) {
   const rows = seriesRows(t.key, '1m');
   if (!rows || rows.length < 8) return;
@@ -1401,6 +1404,7 @@ function recapPrice(t) {
   return t.status === 'CLOSED' ? t.exitPrice : null;
 }
 function resLabel(t) {
+  if (t.stopByUser && t.result === 'BE') return t.maxTp ? `TP${t.maxTp} · STOP BOT` : 'STOP BOT';
   if (t.result === 'SL') return 'SL';
   if (t.result === 'TP') return `TP${t.maxTp} MAX`;
   if (t.result === 'BE') return t.maxTp ? `TP${t.maxTp} → ${t.trailSL != null ? 'TRAIL' : 'BE'}` : 'BE';
@@ -3078,7 +3082,15 @@ function stopBot(text) {
   let cancelledAny = false;
   for (const t of trades) {
     if (t.src === 'bot' && t.status !== 'CLOSED') {
-      cancelTrade(t, 'Scanner bot dihentikan oleh pengguna');
+      if (t.status === 'PENDING') {
+        // belum terisi: aman dibatalkan
+        cancelTrade(t, 'Scanner bot dihentikan oleh pengguna');
+      } else {
+        // sudah terisi: tutup di harga live, TP yang sudah kena tetap masuk rekap
+        const live = prices[t.key] ? prices[t.key].price : null;
+        closeTrade(t, 'BE', live || recapPrice(t) || t.entry);
+        t.stopByUser = true;
+      }
       cancelledAny = true;
     }
   }
