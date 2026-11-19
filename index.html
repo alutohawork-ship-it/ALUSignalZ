@@ -182,16 +182,13 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
             <span id="botBadge" class="text-[8px] font-mono font-bold px-2 py-0.5 rounded border">OFF</span>
           </div>
           <div class="grid grid-cols-2 gap-1.5">
-            <select id="botStyle" class="bg-cardbg border border-panelborder text-[10px] font-bold text-white p-1.5 rounded-lg focus:outline-none">
-              <option value="Scalping">Scalping (M5 + M1)</option>
-            </select>
+            <div class="bg-cardbg border border-panelborder text-[10px] font-bold text-white p-1.5 rounded-lg">Scalping · SMA20 M1</div>
             <select id="botMode" class="bg-cardbg border border-panelborder text-[10px] font-bold text-white p-1.5 rounded-lg focus:outline-none">
               <option value="loop">Auto-loop</option>
               <option value="once">Sekali (lanjut manual)</option>
             </select>
           </div>
           <label class="flex items-center gap-1.5 text-[9px] text-gray-400 cursor-pointer"><input type="checkbox" id="botSess" class="rounded bg-cardbg border-panelborder"> Hanya sesi London/NY (07–21 UTC)</label>
-          <label class="flex items-center gap-1.5 text-[9px] text-gray-400 cursor-pointer"><input type="checkbox" id="botSma" class="rounded bg-cardbg border-panelborder"> Pakai SMA 20 M5 (trend micro)</label>
           <button id="botBtn" onclick="toggleBot()" class="w-full font-bold py-2 rounded-lg text-xs transition bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20">START SCANNER BOT</button>
 
           <p id="botCloseTimer" class="text-[10px] font-mono font-bold text-amber-300"></p>
@@ -236,12 +233,11 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
             </div>
             <div class="flex flex-wrap gap-x-2.5 gap-y-0.5 text-[7px] font-mono text-gray-400 px-1 pb-0.5">
               <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(59,130,246,.6)"></i> FVG</span>
-              <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(16,185,129,.6)"></i> Demand/OB</span>
-              <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(239,68,68,.6)"></i> Supply/OB</span>
-              <span class="text-amber-400">┄ BSL/SSL</span>
-              <span class="text-orange-400 font-bold"> Sweep Line</span>
-              <span class="text-yellow-300">SMA 20 Line</span>
-              <span class="text-sky-300">BOS / MSS / CHoCH</span>
+              <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(16,185,129,.6)"></i> Demand OB</span>
+              <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(239,68,68,.6)"></i> Supply OB</span>
+              <span class="text-amber-400">┄ BSL/SSL (Liquidity)</span>
+              <span class="text-yellow-300">SMA 20</span>
+              <span class="text-sky-300">BOS / CHoCH</span>
             </div>
             <p class="text-[8px] font-bold text-gray-500 pt-1">RIWAYAT SCANNER</p>
             <div id="botHistory" class="space-y-1 max-h-[160px] overflow-y-auto pr-1"></div>
@@ -255,15 +251,13 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
           </div>
           <select id="tradingStyleSelect" class="w-full bg-darkbg border border-panelborder text-xs font-bold text-white p-2 rounded-lg focus:outline-none">
             <option value="Scalping" data-i18n="optScalp"></option>
-            <option value="Day Trading" data-i18n="optDay"></option>
             <option value="Intraday" data-i18n="optIntra"></option>
             <option value="Swing" data-i18n="optSwing"></option>
           </select>
           <div id="styleInfoBox" class="hidden mt-2 bg-darkbg border border-panelborder rounded-lg p-2 text-[9px] text-gray-300 space-y-2 leading-relaxed">
-            <div><span class="font-bold text-accentblue">1. Scalping Agresif (High Risk)</span><br><span data-i18n="infoScalp"></span></div>
-            <div><span class="font-bold text-accentblue">2. Scalping Konservatif</span><br><span data-i18n="infoDay"></span></div>
-            <div><span class="font-bold text-accentblue">3. Intraday / Day Trade</span><br><span data-i18n="infoIntra"></span></div>
-            <div><span class="font-bold text-accentblue">4. Swing</span><br><span data-i18n="infoSwing"></span></div>
+            <div><span class="font-bold text-accentblue">1. Scalping</span><br><span data-i18n="infoScalp"></span></div>
+            <div><span class="font-bold text-accentblue">2. Intraday</span><br><span data-i18n="infoIntra"></span></div>
+            <div><span class="font-bold text-accentblue">3. Swing</span><br><span data-i18n="infoSwing"></span></div>
           </div>
         </div>
       </div>
@@ -399,12 +393,14 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
           <div class="flex flex-wrap gap-x-2.5 gap-y-0.5 text-[7px] font-mono text-gray-400 px-1 pb-0.5">
             <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(59,130,246,.6)"></i> FVG ▲</span>
             <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(168,85,247,.6)"></i> FVG ▼</span>
-            <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(16,185,129,.6)"></i> Demand</span>
-            <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(239,68,68,.6)"></i> Supply</span>
-            <span class="text-amber-400">┄ BSL/SSL</span>
-            <span class="text-orange-400 font-bold"> Sweep Line</span>
-            <span class="text-yellow-300">SW sweep</span>
-            <span class="text-sky-300">BOS / MSS / CHoCH</span>
+            <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(16,185,129,.6)"></i> Demand OB</span>
+            <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(239,68,68,.6)"></i> Supply OB</span>
+            <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:#facc15"></i> SMA 20</span>
+            <span class="text-amber-400">┄ BSL/SSL (Liquidity)</span>
+            <span class="text-sky-300">BOS / CHoCH</span>
+            <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(45,212,191,.6)"></i> Asia</span>
+            <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(59,130,246,.6)"></i> London</span>
+            <span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:rgba(56,189,248,.6)"></i> New York</span>
           </div>
         </div>
       </div>
@@ -460,10 +456,26 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
             <p id="calWRSub" class="text-[7px] text-gray-500 font-mono">0W / 0L</p>
           </div>
         </div>
+        <div id="calByStyle" class="grid grid-cols-4 gap-1 text-center"></div>
         <div class="flex justify-between items-center gap-2">
           <p id="calAllTime" class="text-[7px] text-gray-500 font-mono leading-snug">Semua waktu: 0 pip</p>
           <button onclick="calReset()" data-i18n="calResetBtn" class="text-[8px] font-bold px-2 py-1 rounded bg-red-500/20 text-red-400 border border-red-500/40 whitespace-nowrap"></button>
         </div>
+      </div>
+
+      <div id="recapCard" class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
+        <div class="flex justify-between items-center gap-2">
+          <span class="text-[9px] font-bold text-gray-400 flex items-center gap-1"><i class="fa-solid fa-chart-column text-accentblue"></i> <span data-i18n="rcTitle"></span></span>
+          <select id="recapRange" onchange="renderRecap()" class="bg-darkbg border border-panelborder text-[9px] font-bold text-white px-1.5 py-0.5 rounded focus:outline-none">
+            <option value="today" data-i18n="rcToday"></option>
+            <option value="month" data-i18n="rcMonth"></option>
+            <option value="all" data-i18n="rcAll"></option>
+          </select>
+        </div>
+        <div id="recapCards" class="grid grid-cols-2 gap-1.5"></div>
+        <p id="recapTotal" class="text-[7px] font-mono text-gray-400 break-words"></p>
+        <div class="relative w-full h-[150px]"><canvas id="recapChart" class="absolute inset-0 w-full h-full"></canvas></div>
+        <div id="recapLegend" class="flex flex-wrap gap-x-2.5 gap-y-0.5 text-[7px] font-mono text-gray-400"></div>
       </div>
 
       <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2">
@@ -532,14 +544,13 @@ const TFS = [1, 5, 15, 30, 60, 240, 1440];
 const HL_TF = [[1, 'M1'], [5, 'M5'], [15, 'M15'], [60, 'H1'], [240, 'H4'], [1440, 'D1']];
 const TF_MIN = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 };
 const TP_KEYS = ['tp1', 'tp2', 'tp3'];
-const EXPIRY_MS = { 'Scalping': 90 * 60000, 'Day Trading': 3 * 3600000, 'Intraday': 8 * 3600000, 'Swing': 48 * 3600000 };
+const EXPIRY_MS = { 'Scalping': 90 * 60000, 'Intraday': 8 * 3600000, 'Swing': 48 * 3600000 };
 const STYLE_CFG = {
   'Scalping': { htf: '15m', mtf: '5m', ltf: '1m', ema: [5, 9], opt: 'optScalp' },
-  'Day Trading': { htf: '1h', mtf: '30m', ltf: '5m', ema: [14, 20], opt: 'optDay' },
   'Intraday': { htf: '4h', mtf: '1h', ltf: '15m', ema: [20, 50, 100], opt: 'optIntra' },
   'Swing': { htf: '1d', mtf: '4h', ltf: '1h', ema: [20, 200], opt: 'optSwing' }
 };
-const SMC_TF_MAP = { 'Scalping': '1m', 'Day Trading': '5m', 'Intraday': '5m', 'Swing': '15m' };
+const SMC_TF_MAP = { 'Scalping': '1m', 'Intraday': '5m', 'Swing': '15m' };
 const BIAS_TF = [{ label: 'M5', iv: '5m' }, { label: 'M15', iv: '15m' }, { label: 'M30', iv: '30m' }, { label: 'H1', iv: '1h' }, { label: 'H4', iv: '4h' }, { label: 'Daily', iv: '1d' }];
 const CANDLE_TTL = { '1m': 30000, '5m': 60000, '15m': 120000, '30m': 180000, '1h': 300000, '4h': 600000, '1d': 900000 };
 const PRIO_IV = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
@@ -604,6 +615,18 @@ const I18N = {
     batal: 'CANCELLED', dibatal: 'cancelled', weekend: 'Market is closed (Weekend).', signalWait: 'No valid setup yet.'
   }
 };
+
+// ── Override teks gaya & rekap ──
+Object.assign(I18N.id, {
+  optScalp: 'Scalping',
+  infoScalp: 'Scalping: NOW jika harga di dalam zona M5 atau momentum M5 kuat searah. LIMIT di tepi zona atau pullback jika belum tersentuh.',
+  rcTitle: 'REKAP PER STYLE', rcToday: 'Hari ini', rcMonth: 'Bulan ini', rcAll: 'Semua',
+});
+Object.assign(I18N.en, {
+  optScalp: 'Scalping',
+  infoScalp: 'Scalping: NOW when price is inside an M5 zone or a strong M5 momentum runs in the same direction. LIMIT at the zone edge or on a pullback if not yet touched.',
+  rcTitle: 'RECAP BY STYLE', rcToday: 'Today', rcMonth: 'This month', rcAll: 'All',
+});
 
 const $ = id => document.getElementById(id);
 const setTxt = (id, v) => { const e = $(id); if (e) e.textContent = v; };
@@ -1775,6 +1798,18 @@ function renderBias() {
 const WEEKDAYS = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
 const calLoad = () => { try { return JSON.parse(localStorage.getItem(CAL_KEY)) || {}; } catch (e) { return {}; } };
 const calSave = o => { try { localStorage.setItem(CAL_KEY, JSON.stringify(o)); } catch (e) {} };
+// ── Gaya untuk kalender & rekap: Scalping / Intraday / Swing / BOT ──
+const RC_STYLES = ['Scalping', 'Intraday', 'Swing', 'BOT'];
+const RC_COL = { Scalping: '#fbbf24', Intraday: '#38bdf8', Swing: '#a78bfa', BOT: '#34d399' };
+const RC_LBL = { Scalping: 'SCALPING', Intraday: 'INTRADAY', Swing: 'SWING', BOT: 'BOT' };
+const RC_ABBR = { Scalping: 'SC', Intraday: 'IN', Swing: 'SW', BOT: 'BT' };
+// Trade bot (src 'bot') masuk BOT. Gaya lama 'Day Trading' dipetakan ke Scalping.
+const styleKeyOf = t => {
+  if (t.src === 'bot' || String(t.id || '').startsWith('bot_')) return 'BOT';
+  return t.style === 'Intraday' || t.style === 'Swing' ? t.style : 'Scalping';
+};
+const rcKey = e => (RC_STYLES.includes(e.style) ? e.style : 'Scalping');
+
 function calEntry(t) {
   if (t.key === 'VISION') return null;
   let res = 'OPEN', pips = 0;
@@ -1782,7 +1817,10 @@ function calEntry(t) {
     if (t.result === 'CANCEL') res = 'CANCEL';
     else { pips = Math.round((Number(t.pips) || 0) * 10) / 10; res = pips > 0 ? 'W' : pips < 0 ? 'L' : 'BE'; }
   }
-  return { id: t.id, date: ymd(new Date(t.createdAt || Date.now())), key: t.key, res, pips };
+  return {
+    id: t.id, date: ymd(new Date(t.createdAt || Date.now())), key: t.key,
+    style: styleKeyOf(t), res, pips, at: t.closedAt || t.createdAt || 0,
+  };
 }
 function calSync() {
   const since = Number(localStorage.getItem(CAL_SINCE_KEY)) || 0;
@@ -1791,7 +1829,9 @@ function calSync() {
   for (const t of trades) {
     if ((t.createdAt || 0) < since || t.key === 'VISION') continue;
     const e = calEntry(t), o = cal[t.id];
-    if (!o || o.res !== e.res || o.pips !== e.pips || o.date !== e.date || o.key !== e.key) { cal[t.id] = e; ch = true; }
+    if (!o || o.res !== e.res || o.pips !== e.pips || o.date !== e.date || o.key !== e.key || o.style !== e.style || o.at !== e.at) {
+      cal[t.id] = e; ch = true;
+    }
   }
   if (ch) calSave(cal);
   renderCalendar();
@@ -1804,6 +1844,134 @@ function calStats(list) {
   }
   return { win, lose, wc, lc, net: win + lose, wr: wc + lc ? wc / (wc + lc) * 100 : 0 };
 }
+// Trade, win, lose, pip+, pip−, PnL (net pip), dan win rate per style
+function styleStats(list) {
+  const out = {};
+  for (const k of RC_STYLES) out[k] = { n: 0, w: 0, l: 0, be: 0, open: 0, pos: 0, neg: 0, net: 0, wr: 0 };
+  for (const e of list) {
+    const s = out[rcKey(e)];
+    if (e.res === 'OPEN') { s.open++; continue; }
+    if (e.res === 'CANCEL') continue;
+    s.n++;
+    if (e.res === 'W') { s.w++; s.pos += e.pips; }
+    else if (e.res === 'L') { s.l++; s.neg += e.pips; }
+    else s.be++;
+    s.net += e.pips;
+  }
+  for (const k of RC_STYLES) {
+    const s = out[k];
+    s.pos = Math.round(s.pos * 10) / 10;
+    s.neg = Math.round(s.neg * 10) / 10;
+    s.net = Math.round(s.net * 10) / 10;
+    s.wr = s.w + s.l ? s.w / (s.w + s.l) * 100 : 0;
+  }
+  return out;
+}
+function rcEntries(range) {
+  const all = Object.values(calLoad()).filter(e => e && e.res);
+  if (range === 'all') return all;
+  if (range === 'month') {
+    const ym = calView.y + '-' + String(calView.m + 1).padStart(2, '0');
+    return all.filter(e => e.date && e.date.startsWith(ym));
+  }
+  const today = ymd(new Date());
+  return all.filter(e => e.date === today);
+}
+function renderRecap() {
+  const cardsEl = $('recapCards');
+  if (!cardsEl) return;
+  const range = $('recapRange') ? $('recapRange').value : 'today';
+  const list = rcEntries(range);
+  const st = styleStats(list);
+  cardsEl.innerHTML = RC_STYLES.map(k => {
+    const s = st[k];
+    const c = s.net > 0 ? TXT.green : s.net < 0 ? TXT.red : TXT.gray;
+    return `<div class="bg-darkbg/70 border border-panelborder rounded-lg p-1.5 space-y-0.5">
+      <div class="flex justify-between items-center gap-1"><span class="text-[8px] font-extrabold" style="color:${RC_COL[k]}">${RC_LBL[k]}</span><span class="text-[7px] font-mono text-gray-500">${s.open ? s.open + ' berjalan' : ''}</span></div>
+      <p class="text-[11px] font-extrabold font-mono ${c}">${fmtPips(s.net)}</p>
+      <p class="text-[7px] font-mono text-gray-400">TRADE ${s.n} · WIN ${s.w} · LOSE ${s.l} · WR ${s.wr.toFixed(0)}%</p>
+      <p class="text-[7px] font-mono"><span class="text-emerald-400">PIP+ ${fmtPips(s.pos)}</span> <span class="text-red-400">PIP− ${fmtPips(s.neg)}</span></p>
+    </div>`;
+  }).join('');
+  const tot = RC_STYLES.reduce((a, k) => {
+    const s = st[k];
+    a.n += s.n; a.w += s.w; a.l += s.l; a.pos += s.pos; a.neg += s.neg; a.net += s.net; a.open += s.open;
+    return a;
+  }, { n: 0, w: 0, l: 0, pos: 0, neg: 0, net: 0, open: 0 });
+  const wr = tot.w + tot.l ? tot.w / (tot.w + tot.l) * 100 : 0;
+  setTxt('recapTotal', `TOTAL · ${tot.n} trade · ${tot.w}W / ${tot.l}L · WR ${wr.toFixed(1)}% · ${fmtPips(tot.pos)} · ${fmtPips(tot.neg)} · PnL ${fmtPips(tot.net)}${tot.open ? ' · ' + tot.open + ' berjalan' : ''}`);
+  drawRecapChart(list);
+}
+// Kurva PnL kumulatif per style (pip), x = urutan trade tertutup pada style tersebut
+function drawRecapChart(list) {
+  const el = $('recapChart');
+  const c = el ? el.getContext('2d') : null;
+  if (!c) return;
+  const d = fitCv(el, c);
+  if (!d) return;
+  const W = d.w, H = d.h, padL = 34, padR = 8, padT = 8, padB = 14;
+  const series = {};
+  for (const k of RC_STYLES) {
+    const arr = list
+      .filter(e => rcKey(e) === k && (e.res === 'W' || e.res === 'L' || e.res === 'BE'))
+      .sort((a, b) => (a.at || 0) - (b.at || 0));
+    let cum = 0;
+    series[k] = [0, ...arr.map(e => (cum += e.pips))];
+  }
+  const maxN = Math.max(1, ...RC_STYLES.map(k => series[k].length - 1));
+  let lo = 0, hi = 0;
+  for (const k of RC_STYLES) for (const v of series[k]) { if (v < lo) lo = v; if (v > hi) hi = v; }
+  if (!(hi - lo > 0)) hi = lo + 1;
+  const xOf = i => padL + (W - padL - padR) * (i / maxN);
+  const yOf = v => padT + (H - padT - padB) * (1 - (v - lo) / (hi - lo));
+
+  c.lineWidth = 1;
+  c.strokeStyle = 'rgba(148,163,184,.12)';
+  c.font = '8px ui-monospace, monospace';
+  c.fillStyle = 'rgba(148,163,184,.9)';
+  c.textAlign = 'right';
+  c.textBaseline = 'middle';
+  for (let i = 0; i <= 3; i++) {
+    const y = padT + (H - padT - padB) * i / 3;
+    c.beginPath(); c.moveTo(padL, y); c.lineTo(W - padR, y); c.stroke();
+    c.fillText((hi - (hi - lo) * i / 3).toFixed(0), padL - 4, y);
+  }
+  if (lo < 0 && hi > 0) {
+    const y0 = yOf(0);
+    c.save();
+    c.strokeStyle = 'rgba(226,232,240,.35)';
+    c.setLineDash([3, 3]);
+    c.beginPath(); c.moveTo(padL, y0); c.lineTo(W - padR, y0); c.stroke();
+    c.restore();
+  }
+  let any = false;
+  for (const k of RC_STYLES) {
+    const pts = series[k];
+    if (pts.length < 2) continue;
+    any = true;
+    c.strokeStyle = RC_COL[k];
+    c.lineWidth = 1.6;
+    c.beginPath();
+    pts.forEach((v, i) => { const x = xOf(i), y = yOf(v); if (i) c.lineTo(x, y); else c.moveTo(x, y); });
+    c.stroke();
+    c.beginPath();
+    c.arc(xOf(pts.length - 1), yOf(pts[pts.length - 1]), 2.5, 0, Math.PI * 2);
+    c.fillStyle = RC_COL[k];
+    c.fill();
+  }
+  if (!any) {
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillStyle = 'rgba(148,163,184,.9)';
+    c.fillText(lang === 'id' ? 'Belum ada trade tertutup di rentang ini' : 'No closed trades in this range', W / 2, H / 2);
+  }
+  const lg = $('recapLegend');
+  if (lg) lg.innerHTML = RC_STYLES.map(k => {
+    const last = series[k][series[k].length - 1];
+    return `<span><i class="inline-block w-2 h-2 rounded-sm align-middle" style="background:${RC_COL[k]}"></i> ${RC_LBL[k]} ${fmtPips(last)}</span>`;
+  }).join('');
+}
+
 function renderCalendar() {
   if (!$('calGrid')) return;
   const all = Object.values(calLoad());
@@ -1811,11 +1979,15 @@ function renderCalendar() {
   const mEntries = all.filter(e => e.date && e.date.startsWith(ym));
   const byDay = {};
   for (const e of mEntries) {
-    const d = byDay[e.date] = byDay[e.date] || { pips: 0, w: 0, l: 0, open: 0 };
+    const d = byDay[e.date] = byDay[e.date] || { pips: 0, w: 0, l: 0, open: 0, st: {} };
     if (e.res === 'W') { d.w++; d.pips += e.pips; }
     else if (e.res === 'L') { d.l++; d.pips += e.pips; }
     else if (e.res === 'BE') d.pips += e.pips;
     else if (e.res === 'OPEN') d.open++;
+    if (e.res === 'W' || e.res === 'L' || e.res === 'BE') {
+      const k = rcKey(e);
+      d.st[k] = Math.round(((d.st[k] || 0) + e.pips) * 10) / 10;
+    }
   }
   setTxt('calTitle', new Date(calView.y, calView.m, 1).toLocaleDateString(lang === 'id' ? 'id-ID' : 'en-US', { month: 'long', year: 'numeric' }));
   $('calWeekdays').innerHTML = WEEKDAYS.map(d => `<div class="text-[7px] text-gray-500 font-bold">${d}</div>`).join('');
@@ -1827,7 +1999,7 @@ function renderCalendar() {
   for (let d = 1; d <= days; d++) {
     const key = ym + '-' + String(d).padStart(2, '0');
     const v = byDay[key];
-    let cls = 'border-panelborder bg-darkbg', body = '';
+    let cls = 'border-panelborder bg-darkbg', body = '', chips = '';
     if (v && (v.w || v.l)) {
       const p = Math.round(v.pips * 10) / 10;
       cls = p > 0 ? 'border-emerald-500/40 bg-emerald-500/10' : p < 0 ? 'border-red-500/40 bg-red-500/10' : 'border-panelborder bg-darkbg';
@@ -1835,8 +2007,13 @@ function renderCalendar() {
     } else if (v && v.open) {
       body = `<p class="font-mono text-[7px] text-blue-400">${v.open} run</p>`;
     }
+    if (v && v.st) {
+      const parts = RC_STYLES.filter(k => v.st[k] !== undefined)
+        .map(k => `<span class="font-mono text-[6px] font-bold" style="color:${RC_COL[k]}">${RC_ABBR[k]}${v.st[k] > 0 ? '+' : ''}${v.st[k]}</span>`);
+      if (parts.length) chips = `<div class="flex flex-wrap justify-center gap-x-0.5 leading-tight">${parts.join(' ')}</div>`;
+    }
     const ring = key === todayKey ? ' ring-1 ring-accentblue' : '';
-    html += `<div class="rounded border ${cls}${ring} min-h-[44px] p-0.5 text-center"><p class="text-[8px] text-gray-400 font-bold">${d}</p>${body}</div>`;
+    html += `<div class="rounded border ${cls}${ring} min-h-[44px] p-0.5 text-center"><p class="text-[8px] text-gray-400 font-bold">${d}</p>${body}${chips}</div>`;
   }
   $('calGrid').innerHTML = html;
 
@@ -1855,6 +2032,17 @@ function renderCalendar() {
   setTxt('calWR', m1.wr.toFixed(1) + '%');
   setTxt('calWRSub', m1.wc + 'W / ' + m1.lc + 'L');
   setTxt('calAllTime', `Semua waktu: ${fmtPips(a1.net)} · ${a1.wc} W · ${a1.lc} L · ${openA} berjalan`);
+
+  const ms = styleStats(mEntries);
+  const bs = $('calByStyle');
+  if (bs) bs.innerHTML = RC_STYLES.map(k => {
+    const s = ms[k];
+    return `<div class="bg-darkbg/70 border border-panelborder rounded-lg p-1">
+      <p class="text-[7px] font-extrabold" style="color:${RC_COL[k]}">${RC_LBL[k]}</p>
+      <p class="text-[9px] font-extrabold font-mono ${pipColor(s.net)}">${fmtPips(s.net)}</p>
+      <p class="text-[6px] font-mono text-gray-500">${s.w}W ${s.l}L · ${s.n} trade</p></div>`;
+  }).join('');
+  renderRecap();
 }
 function calShift(n) {
   let m = calView.m + n, y = calView.y;
@@ -2267,21 +2455,6 @@ function drawBotMap(cv, cx, t, k) {
         cx.restore();
       });
     }
-    if (smcData.liq && smcData.liq.sweeps) {
-      smcData.liq.sweeps.forEach(swp => {
-        const y = yOf(swp.p), x1 = clampX(xOfT(swp.hitT), plotL, plotR);
-        cx.save();
-        cx.strokeStyle = '#f97316';
-        cx.lineWidth = 2;
-        cx.beginPath(); cx.moveTo(clampX(xOfT(swp.t), plotL, plotR), y); cx.lineTo(plotR, y); cx.stroke();
-        cx.font = 'bold 9px ui-monospace, monospace';
-        cx.fillStyle = '#f97316';
-        cx.textAlign = 'left';
-        cx.textBaseline = 'bottom';
-        cx.fillText('⚡ SWEEP', x1 + 4, y - 2);
-        cx.restore();
-      });
-    }
     if (smcData.ev) {
       smcData.ev.forEach(e => {
         const x0 = clampX(xOfT(e.fromT), plotL, plotR), x1 = clampX(xOfT(e.toT), plotL, plotR), y = yOf(e.p);
@@ -2491,21 +2664,6 @@ function drawLiveMap(cv, cx, t, k) {
         cx.restore();
       });
     }
-    if (smcData.liq && smcData.liq.sweeps) {
-      smcData.liq.sweeps.forEach(swp => {
-        const y = yOf(swp.p), x1 = clampX(xOfT(swp.hitT), plotL, plotR);
-        cx.save();
-        cx.strokeStyle = '#f97316';
-        cx.lineWidth = 2;
-        cx.beginPath(); cx.moveTo(clampX(xOfT(swp.t), plotL, plotR), y); cx.lineTo(plotR, y); cx.stroke();
-        cx.font = 'bold 9px ui-monospace, monospace';
-        cx.fillStyle = '#f97316';
-        cx.textAlign = 'left';
-        cx.textBaseline = 'bottom';
-        cx.fillText('⚡ SWEEP', x1 + 4, y - 2);
-        cx.restore();
-      });
-    }
     if (smcData.ev) {
       smcData.ev.forEach(e => {
         const x0 = clampX(xOfT(e.fromT), plotL, plotR), x1 = clampX(xOfT(e.toT), plotL, plotR), y = yOf(e.p);
@@ -2524,6 +2682,23 @@ function drawLiveMap(cv, cx, t, k) {
     }
   }
 
+  if (rows.length > 20) {
+    const smaArr = smaSeries(rows, 20);
+    const off = rows.length - vis.length;
+    cx.save();
+    cx.strokeStyle = '#facc15';
+    cx.lineWidth = 1.5;
+    cx.beginPath();
+    let on = false;
+    for (let j = 0; j < vis.length; j++) {
+      const v = smaArr[off + j];
+      if (v == null) { on = false; continue; }
+      const x = xOfT(vis[j].t), y = yOf(v);
+      if (!on) { cx.moveTo(x, y); on = true; } else cx.lineTo(x, y);
+    }
+    cx.stroke();
+    cx.restore();
+  }
   const bodyW = Math.max(1.5, slot * 0.62);
   cx.lineWidth = 1;
   for (const c of vis) {
@@ -2584,6 +2759,18 @@ function drawLiveMap(cv, cx, t, k) {
   }
 }
 
+// SMA periode n untuk setiap candle (null sebelum cukup data)
+function smaSeries(rows, n = 20) {
+  const out = new Array(rows.length).fill(null);
+  let sum = 0;
+  for (let i = 0; i < rows.length; i++) {
+    sum += rows[i].c;
+    if (i >= n) sum -= rows[i - n].c;
+    if (i >= n - 1) out[i] = sum / n;
+  }
+  return out;
+}
+
 function drawSMC() {
   if (!sx) return;
   const d = fitCv(scv, sx);
@@ -2637,7 +2824,6 @@ function drawSMC() {
   const fvgs = s.fvgs.filter(z => inBand(z.bottom, z.top));
   const obs = s.obs.filter(z => inBand(z.bottom, z.top));
   const pools = s.liq.pools.filter(p => near(p.p));
-  const sweeps = s.liq.sweeps.filter(p => near(p.p));
   const ev = s.ev.filter(e => near(e.p) && e.toT >= t0);
   const sess = sessionBoxes(rows, Date.now()).filter(se => se.b > t0);
 
@@ -2693,7 +2879,7 @@ function drawSMC() {
     sx.restore();
   };
   fvgs.forEach(z => zone(z, z.dir > 0 ? 'FVG ▲' : 'FVG ▼', z.dir > 0 ? '59,130,246' : '168,85,247'));
-  obs.forEach(z => zone(z, z.dir > 0 ? 'Demand' : 'Supply', z.dir > 0 ? '16,185,129' : '239,68,68'));
+  obs.forEach(z => zone(z, z.dir > 0 ? 'Demand OB' : 'Supply OB', z.dir > 0 ? '16,185,129' : '239,68,68'));
 
   pools.forEach(p => {
     const y = yOf(p.p);
@@ -2708,20 +2894,6 @@ function drawSMC() {
     sx.textAlign = 'right';
     sx.textBaseline = p.high ? 'bottom' : 'top';
     sx.fillText(p.label, plotR - 4, y + (p.high ? -2 : 2));
-    sx.restore();
-  });
-
-  sweeps.forEach(swp => {
-    const y = yOf(swp.p), x1 = clampX(xOfT(swp.hitT), plotL, plotR);
-    sx.save();
-    sx.strokeStyle = '#f97316';
-    sx.lineWidth = 2;
-    sx.beginPath(); sx.moveTo(clampX(xOfT(swp.t), plotL, plotR), y); sx.lineTo(plotR, y); sx.stroke();
-    sx.font = 'bold 9px ui-monospace, monospace';
-    sx.fillStyle = '#f97316';
-    sx.textAlign = 'left';
-    sx.textBaseline = 'bottom';
-    sx.fillText('⚡ SWEEP', x1 + 4, y - 2);
     sx.restore();
   });
 
@@ -2740,6 +2912,30 @@ function drawSMC() {
     sx.restore();
   });
 
+  {
+    const smaArr = smaSeries(rows, 20);
+    sx.save();
+    sx.strokeStyle = '#facc15';
+    sx.lineWidth = 1.5;
+    sx.beginPath();
+    let on = false, endPt = null;
+    for (let j = 0; j < vis.length; j++) {
+      const v = smaArr[startIdx + j];
+      if (v == null) { on = false; continue; }
+      const x = xOfT(vis[j].t), y = yOf(v);
+      if (!on) { sx.moveTo(x, y); on = true; } else sx.lineTo(x, y);
+      endPt = { x, y };
+    }
+    sx.stroke();
+    if (endPt) {
+      sx.font = 'bold 8px ui-monospace, monospace';
+      sx.fillStyle = '#facc15';
+      sx.textAlign = 'right';
+      sx.textBaseline = 'bottom';
+      sx.fillText('SMA 20', plotR - 4, endPt.y - 3);
+    }
+    sx.restore();
+  }
   const bodyW = Math.max(1.5, slot * 0.62);
   sx.lineWidth = 1;
   sx.globalAlpha = .9;
@@ -3112,7 +3308,7 @@ function saveBotState() {
   try {
     localStorage.setItem(BOT_STATE_KEY, JSON.stringify({
       running: botRunning,
-      style: $('botStyle') ? $('botStyle').value : 'Scalping',
+      style: 'Scalping',
       mode: $('botMode') ? $('botMode').value : 'loop',
       sess: $('botSess') ? $('botSess').checked : false,
       sma: $('botSma') ? $('botSma').checked : false,
@@ -3172,8 +3368,8 @@ async function toggleBot(resume = false) {
   saveBotState();
   renderBotUI();
   
-  const style = $('botStyle') ? $('botStyle').value : 'Scalping';
-  if ($('botMsg')) $('botMsg').textContent = `Scanner Bot aktif [${style}]. Memindai struktur & FVG terbaru...`;
+  const style = 'Scalping';
+  if ($('botMsg')) $('botMsg').textContent = `Scanner Bot aktif [${style}]. Memindai SMA20 dan struktur M1...`;
   
   await runBotCycle();
   
@@ -3221,8 +3417,8 @@ async function runBotCycle() {
 
   botBusy = true;
   try {
-    sayBot('Memindai sweep likuiditas, FVG, dan struktur M5...');
-    const style = $('botStyle') ? $('botStyle').value : 'Scalping';
+    sayBot('Memindai SMA20 dan struktur M1...');
+    const style = 'Scalping';
     const rowsOf = iv => seriesRows('XAUUSD', iv).slice(-300).map(c => ({ t: c.t, o: c.o, h: c.h, l: c.l, c: c.c }));
 
     const res = await post('/api/generate', {
@@ -3231,9 +3427,8 @@ async function runBotCycle() {
       style: style,
       price: livePx,
       currentPrice: livePx,
-      candles: { m1: rowsOf('1m'), m5: rowsOf('5m'), m15: rowsOf('15m'), m30: rowsOf('30m'), h1: rowsOf('1h') },
+      candles: { m1: rowsOf('1m') },
       lang: lang,
-      useSma: !!($('botSma') && $('botSma').checked),
       auto: true,
       source: 'bot'
     });
@@ -3374,7 +3569,7 @@ window.addEventListener('load', async () => {
   trades = loadTrades();
   applyLang();
   await checkSession();
-  renderCalendar();
+  calSync();
   if (localStorage.getItem(K.type) === 'terminal') showApp();
 });
 </script>
