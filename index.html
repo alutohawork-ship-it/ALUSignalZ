@@ -555,6 +555,7 @@ const BIAS_TF = [{ label: 'M5', iv: '5m' }, { label: 'M15', iv: '15m' }, { label
 const CANDLE_TTL = { '1m': 30000, '5m': 60000, '15m': 120000, '30m': 180000, '1h': 300000, '4h': 600000, '1d': 900000 };
 const PRIO_IV = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
 const CANDLE_LIMIT = 300;
+const CANDLE_LIMIT_1M = 1000; // ~16 jam candle M1 untuk replay saat browser lama tertutup
 const SWING_L = 2;
 const BIN_SYM = { BTCUSD: 'BTCUSDT' };
 const BIN_HOSTS = ['https://api.binance.com', 'https://data-api.binance.vision'];
@@ -1303,7 +1304,7 @@ function fetchSeries(k, iv, force) {
     const syms = CSYM[k] ? [CSYM[k]] : [...new Set([workingSym[k], ...MARKETS[k].aliases.slice(0, 2)].filter(Boolean))];
     let got = null, why = '';
     for (const sym of syms) {
-      const r = await post('/api/candles', { value: email, email: email, symbol: sym, interval: iv, limit: CANDLE_LIMIT });
+      const r = await post('/api/candles', { value: email, email: email, symbol: sym, interval: iv, limit: iv === '1m' ? CANDLE_LIMIT_1M : CANDLE_LIMIT });
       const rows = parseCandles(r);
       if (rows.length >= 10) { got = rows; CSYM[k] = sym; break; }
       why = r.network ? 'koneksi gagal' : `HTTP ${r.status || 0}, ${rows.length} candle`;
@@ -1413,6 +1414,7 @@ function loadTrades() {
 }
 function normalize(t) {
   t.hits = t.hits || {};
+  if (t.status !== 'CLOSED') delete t.scanAt; // scan ulang dari awal saat dibuka; hits idempoten
   if (t.dir !== 1 && t.dir !== -1) t.dir = t.signal === 'BUY' ? 1 : -1;
   if (!t.card && t.reason) t.card = { reason: cleanReason(t.reason), reasons: {}, reasonLang: lang };
   for (const k of TP_KEYS) if (typeof t.hits[k] === 'number') t.hits[k] = { at: t.hits[k], price: t[k] };
@@ -1482,7 +1484,6 @@ function checkTrades(k, p) {
   let ch = false;
   for (const t of trades) {
     if (t.key !== k || t.status === 'CLOSED') continue;
-    t.scanAt = now;
     if (evalTrade(t, p, lo, hi, now)) ch = true;
   }
   if (ch) { saveTrades(); renderHistory(); }
@@ -1560,25 +1561,41 @@ function replayMissed() {
   const nowT = Date.now();
   for (const t of trades) {
     if (t.key === 'VISION' || t.status === 'CLOSED') continue;
+    const s1 = ser(t.key, '1m');
+    // Tunggu sampai candle 1m dari SERVER sudah termuat (bukan hanya candle lokal sejak halaman dibuka)
+    if (!s1.at || s1.rows.length < 10) continue;
     const rows = seriesRows(t.key, '1m');
-    if (!rows.length) continue;
     const firstFull = Math.ceil((t.createdAt || 0) / 60000) * 60000;
     const scanned = t.scanAt || 0;
     for (const c of rows) {
       if (t.status === 'CLOSED') break;
       if (c.t < firstFull) continue;
-      if (c.t + 60000 <= scanned) continue;
-      if (c.t + 60000 > nowT) continue;
+      const end = c.t + 60000;
+      if (end <= scanned) continue;
+      if (end > nowT) continue;            // candle berjalan ditangani tick live
+      if (s1.at < end) continue;           // data server diambil sebelum candle ini tutup -> tunggu refresh
       const path = c.c >= c.o ? [c.o, c.l, c.h, c.c] : [c.o, c.h, c.l, c.c];
       for (const pt of path) {
         if (t.status === 'CLOSED') break;
-        if (evalTrade(t, pt, pt, pt, c.t + 60000)) ch = true;
+        if (evalTrade(t, pt, pt, pt, end)) ch = true;
       }
-      t.scanAt = c.t + 60000;
+      t.scanAt = end;
     }
   }
   if (ch) { saveTrades(); renderAll(); }
 }
+
+// Dipanggil saat tab/browser kembali aktif: refresh candle 1m & scan ulang celah waktu
+function resumeCatchUp() {
+  if (!localStorage.getItem(K.email)) return;
+  if (!ws || ws.readyState !== 1) { if (!authFailed) connect(); }
+  const keys = [...new Set(trades.filter(t => t.status !== 'CLOSED' && t.key !== 'VISION').map(t => t.key))];
+  Promise.all(keys.map(k => fetchSeries(k, '1m', true))).then(() => { replayMissed(); renderAll(); });
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') resumeCatchUp(); });
+window.addEventListener('pageshow', resumeCatchUp);
+window.addEventListener('online', resumeCatchUp);
+window.addEventListener('focus', resumeCatchUp);
 
 function closeTrade(t, result, exitPrice) {
   Object.assign(t, { status: 'CLOSED', result, exitPrice, closedAt: Date.now() });
