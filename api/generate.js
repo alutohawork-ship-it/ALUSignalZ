@@ -4,7 +4,7 @@
 // AI REASONING                   : konsultan analis yang ngobrol santai, fallback narasi manusiawi jika AI gagal.
 
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
-import { generateManualPlan } from '../lib/manual_scalp.js';
+import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 
 export const config = { maxDuration: 60 };
 
@@ -523,12 +523,19 @@ async function runDocManual(ctx, d, styleName) {
     mode: 'manual', symbol: ctx.symbol, style: styleName, kz: ctx.kz.name, price: ctx.f(ctx.price),
     htfTf: tf.htf, zoneTf: tf.zone, trigTf: tf.trig,
   };
+  const watchInput = {
+    m5: closedOnly(d.m5, TF_MS.m5), m15: closedOnly(d.m15, TF_MS.m15), m30: closedOnly(d.m30, TF_MS.m30),
+    h1: closedOnly(d.h1, TF_MS.h1), h4: closedOnly(d.h4, TF_MS.h4), d1: closedOnly(d.d1, TF_MS.d1),
+    price: ctx.price, pip: ctx.pip, styleName,
+  };
+  facts.watch = buildWatchlist(watchInput);
+  facts.syarat = SYARAT_MASUK[styleName] || null;
   const out = generateManualPlan({
     m5: closedOnly(d.m5, TF_MS.m5), m15: closedOnly(d.m15, TF_MS.m15), m30: closedOnly(d.m30, TF_MS.m30),
     h1: closedOnly(d.h1, TF_MS.h1), h4: closedOnly(d.h4, TF_MS.h4), d1: closedOnly(d.d1, TF_MS.d1),
     tickSize: 10 ** -ctx.dec,
   }, styleName);
-  const regimeTxt = out.regime ? out.regime.replace('_', ' ') : 'netral';
+  const regimeTxt = (out.regime ? out.regime.replace('_', ' ') : 'netral') + (out.regimeSrc ? ` · ${out.regimeSrc}` : '');
   facts.bias = regimeTxt;
   if (!out.ok) {
     facts.standbyReason = out.reason;
@@ -552,6 +559,7 @@ async function runDocManual(ctx, d, styleName) {
     tipe_order: 'LIMIT',
     arah_htf: facts.bias,
     regime_htf: out.regime || 'neutral',
+    regime_sumber: out.regimeSrc || null,
     alasan_aturan: o.reason,
     zona: z ? { jenis: `${z.timeframe} ${z.type}`, bawah: ctx.f(z.bottom), atas: ctx.f(z.top), fresh: !!z.fresh } : null,
     entry: ctx.f(o.entryPrice),
@@ -792,7 +800,7 @@ function runBot(ctx, d, styleName) {
 }
 
 // ── AI REASONING (konsultan ngobrol) ──
-const SYS_MANUAL = `Kamu adalah konsultan analis trading SMC/ICT senior yang sedang ngobrol langsung dengan trader. Gaya bicara santai, hangat, dan dinamis seperti rekan yang sedang menceritakan proses cari setup: kenapa bias ini kamu ambil, zona mana yang kamu incar, apa yang kamu tunggu, dan apa yang akan kamu lakukan kalau kondisinya terjadi. Pakai "saya" atau "kita". JANGAN pakai daftar, label kaku, atau tanda bintang. Tulis 4 sampai 6 kalimat. Sebut angka harga persis dari data dan jangan mengarang angka baru. Kalau ada setup, jelaskan entry, SL, dan TP dengan natural. Kalau belum ada, jelaskan kenapa menunggu dan apa pemicunya. Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}. "id" berbahasa Indonesia, "en" English, isi percakapannya sama.`;
+const SYS_MANUAL = `Kamu adalah konsultan analis trading SMC/ICT senior yang sedang ngobrol langsung dengan trader. Gaya bicara santai, hangat, dan dinamis seperti rekan yang sedang menceritakan proses cari setup: kenapa bias ini kamu ambil, zona mana yang kamu incar, apa yang kamu tunggu, dan apa yang akan kamu lakukan kalau kondisinya terjadi. Pakai "saya" atau "kita". JANGAN pakai daftar, label kaku, atau tanda bintang. Tulis 4 sampai 6 kalimat. Sebut angka harga persis dari data dan jangan mengarang angka baru. Kalau ada setup, jelaskan entry, SL, dan TP dengan natural. Kalau belum ada setup, jelaskan kenapa menunggu, sebutkan zona yang sedang dipantau dari field watch (dengan batas harga persisnya), dan syarat masuk dari field syarat. Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}. "id" berbahasa Indonesia, "en" English, isi percakapannya sama.`;
 const SYS_BOT = `Kamu adalah konsultan analis yang menemani bot scalper XAUUSD sambil ngobrol dengan trader. Ceritakan dengan santai dan dinamis apa yang sedang kamu cari: struktur M5 dan M1, zona WNS HTF kalau ada, sweep, displacement, dan trigger yang masih ditunggu. Kalau zona HTF masih jauh tapi struktur LTF sudah searah, jelaskan kenapa kamu tetap siap scalp dari M1. Pakai "saya" atau "kita". JANGAN pakai daftar, label kaku, atau tanda bintang. Tulis 3 sampai 5 kalimat dengan angka harga persis dari data. Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}. "id" berbahasa Indonesia, "en" English, isi percakapannya sama.`;
 
 async function qwenJson(sys, userObj, maxTokens = QWEN_MAX_TOKENS) {
@@ -838,14 +846,20 @@ function fbZone(f, id) {
   return id ? `zona ${f.zone.label} di ${f.zone.lower}–${f.zone.upper}` : `zone ${f.zone.label} at ${f.zone.lower}–${f.zone.upper}`;
 }
 
+function fbWatch(f, id) {
+  const list = (f.watch || []).map(w => `${w.tf} ${w.tipe} ${w.bawah}–${w.atas} [${w.status}, ${w.di_dalam ? 'harga di dalam' : w.jarak_pip + ' pip'}]`).join('; ');
+  if (!list) return id ? 'Belum ada zona fresh di dekat harga.' : 'No fresh zone close to price yet.';
+  return id ? `Zona yang saya pantau: ${list}.` : `Zones I'm watching: ${list}.`;
+}
+
 function fallbackStory(f, lang) {
   const id = lang === 'id';
   if (f.mode === 'manual') {
     if (f.status === 'STANDBY') {
       const z = f.zone ? (id ? `Zona ${f.zone.label} di ${f.zone.lower}–${f.zone.upper} (${f.zone.tf}), sekitar ${f.zone.distAtr}x ATR dari harga.` : `${f.zone.label} zone at ${f.zone.lower}–${f.zone.upper} (${f.zone.tf}), about ${f.zone.distAtr}x ATR away.`) : '';
       return id
-        ? `Saya masih cari setup di ${f.symbol}. Bias ${f.bias} dari ${f.htfTf}. ${z} ${f.standbyReason || ''} Begitu ${f.trigTf} kasih close konfirmasi, saya langsung ambil.`
-        : `I'm still looking for a setup on ${f.symbol}. Bias is ${f.bias} from ${f.htfTf}. ${z} ${f.standbyReason || ''} Once ${f.trigTf} gives a confirming close, I'll take it.`;
+        ? `Saya masih cari setup di ${f.symbol}. Bias ${f.bias} dari ${f.htfTf}. ${z} ${f.standbyReason || ''} ${fbWatch(f, true)} Syarat masuk: ${f.syarat || '-'}.`
+        : `I'm still looking for a setup on ${f.symbol}. Bias is ${f.bias} from ${f.htfTf}. ${z} ${f.standbyReason || ''} ${fbWatch(f, false)} Entry condition: ${f.syarat || '-'}.`;
     }
     return id
       ? `Oke, setup ${f.signal} sudah valid di ${f.symbol}. Bias ${f.bias} dari ${f.htfTf}, ${fbZone(f, true)}. ${f.orderType === 'MARKET' ? `Harga sudah di zona dan trigger ${f.trigger} sudah close, jadi saya masuk di ${f.entry}.` : `Harga belum sampai zona, jadi saya pasang limit di ${f.entry}.`} SL ${f.sl}, target ${f.tp[0]}, ${f.tp[1]}, ${f.tp[2]}, RR sekitar 1:${f.rr}.`
