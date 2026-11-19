@@ -909,4 +909,41 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
   const cacheKey = isAutoBot
     ? `${symbol}|${styleName}|${f.status}|${f.signal || ''}|${f.trigger || ''}|${f.bias || ''}|${f.tier || ''}`
     : `M|${symbol}|${styleName}|${f.status}|${f.signal || ''}|${f.entry || ''}|${String(f.standbyReason || '').slice(0, 60)}`;
-  const story = await getStory(f, cacheKey, isAutoBot ? BOT_CFG.storyTtlMs : MAN
+  const story = await getStory(f, cacheKey, isAutoBot ? BOT_CFG.storyTtlMs : MANUAL_STORY_TTL_MS);
+  const signal = {
+    ...out.signal,
+    reason: lang === 'en' ? story.en : story.id,
+    reasons: { id: story.id, en: story.en },
+    reasonSource: story.ai ? 'AI' : 'RULES',
+    aiReasoning: !!story.ai,
+    ...(ctx.debug ? { aiError: story.aiError || null } : {}),
+  };
+  return res.status(200).json({ ok: true, mode: isAutoBot ? 'bot' : 'candles', symbol, style: styleName, price, signal });
+}
+
+export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-user-email');
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (req.method !== 'POST') return fail(res, 'Method not allowed', 405);
+
+  try {
+    let body = req.body || {};
+    if (typeof body === 'string') try { body = JSON.parse(body); } catch { return fail(res, 'Body tidak valid (JSON).'); }
+
+    const lang = body.lang === 'en' ? 'en' : 'id';
+    const email = String(body.email || body.value || '').trim().toLowerCase();
+    const isAutoBot = !!(body.auto || body.bot || body.mode === 'bot' || body.source === 'bot');
+    const isVision = body.symbol === 'VISION' || body.mode === 'vision' || (Array.isArray(body.images) && body.images.length > 0);
+
+    const access = await checkAccess(email, isAutoBot);
+    if (!access.ok) return fail(res, msg(lang, access.key));
+
+    if (isVision) return await handleVision(body, lang, res);
+    return await handleCandles(body, lang, res, { email, isAutoBot });
+  } catch (err) {
+    console.error('Fatal API Error:', err);
+    if (!res.headersSent) return fail(res, `Server error: ${err.message || 'unknown'}`, 500);
+  }
+}
