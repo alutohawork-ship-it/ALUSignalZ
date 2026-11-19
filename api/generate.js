@@ -1,4 +1,4 @@
-// api/generate.js — v148 (SMC manual + bot strict, OCO, counter-trend, TP band, AI DeepSeek/GPT)
+// api/generate.js — v149 (SMC manual + bot 3-tier, OCO, bounce, TP band, AI DeepSeek/GPT storytelling)
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import { runBotSma } from '../lib/bot_sma.js';
@@ -14,7 +14,6 @@ const VISION_TIMEOUT_MS = 50000;
 const VISION_DEADLINE_MS = 54000;
 const VISION_MAX_TOKENS = 1800;
 
-// ── AI REASONING (teks saja) ──
 const QWEN_BASE_URL = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/$/, '');
 const QWEN_KEYS = [process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
 const QWEN_MODELS = [...new Set([process.env.QWEN_MODEL || 'deepseek-v4-flash', process.env.QWEN_MODEL_2 || 'gpt-6-luna', AI_VISION_MODEL].filter(Boolean))];
@@ -58,9 +57,9 @@ const MANUAL_TF_NEEDED = {
 };
 const BOT_TF_NEEDED = ['m1', 'm5', 'h1'];
 const MAX_DIST_PIP = { 'Scalping': 150, 'Intraday': 500, 'Swing': 2000 };
-const MAX_DIST_OVERRIDE = { BTCUSD: 800 }; // BTC: 1 pip = 1 USD
+const MAX_DIST_OVERRIDE = { BTCUSD: 800 };
 
-const BOT_CFG = { storyTtlMs: 45000 };
+const BOT_CFG = { storyTtlMs: 15000 };  // AI selalu update tiap 15 detik
 const MANUAL_STORY_TTL_MS = 180000;
 const GATE_TTL_MS = 10 * 60 * 1000;
 
@@ -211,7 +210,6 @@ const DOC_STYLE_TF = {
 
 const gateCache = new Map();
 
-// Mengubah satu leg OCO menjadi bentuk yang dibaca frontend
 function legView(l, ctx) {
   const f = v => Number(safeNum(v, 0).toFixed(ctx.dec));
   return {
@@ -257,6 +255,7 @@ async function runDocManual(ctx, d, styleName) {
   const dir = o.side === 'buy' ? 1 : -1;
   const sideTxt = dir === 1 ? 'BUY' : 'SELL';
   const isCounter = o.role === 'counter';
+  const isBounce = o.role === 'bounce';
   const z = out.zone;
   const plan = {
     dir, entry: o.entryPrice, sl: o.sl, orderType: o.orderType || 'LIMIT',
@@ -270,7 +269,9 @@ async function runDocManual(ctx, d, styleName) {
   const maxDist = MAX_DIST_OVERRIDE[ctx.symbol] ?? MAX_DIST_PIP[styleName] ?? 150;
   let gate;
 
-  if (out.regime === 'choppy') {
+  if (isBounce) {
+    gate = { keputusan: 'AMBIL', alasan: 'Bounce scalp di zona S&D fresh', ai: false };
+  } else if (out.regime === 'choppy') {
     gate = { keputusan: 'TUNGGU', alasan: 'Market Structure HTF choppy/belum searah.', ai: false };
   } else if (!isCounter && arahHtf !== 'NETRAL' && arahHtf !== sideTxt) {
     gate = { keputusan: 'TUNGGU', alasan: `Arah setup ${sideTxt} berlawanan dengan bias HTF ${arahHtf}.`, ai: false };
@@ -282,21 +283,13 @@ async function runDocManual(ctx, d, styleName) {
     if (hit && Date.now() - hit.t < GATE_TTL_MS) gate = hit.v;
     else {
       gate = await aiGateManual({
-        gaya: styleName,
-        simbol: ctx.symbol,
-        arah_setup: sideTxt,
-        role: o.role || 'main',
-        oco: !!out.oco,
-        tipe_order: plan.orderType,
-        arah_htf: arahHtf,
-        regime_htf: out.regime || 'neutral',
-        regime_sumber: out.regimeSrc || null,
+        gaya: styleName, simbol: ctx.symbol, arah_setup: sideTxt,
+        role: o.role || 'main', oco: !!out.oco, tipe_order: plan.orderType,
+        arah_htf: arahHtf, regime_htf: out.regime || 'neutral', regime_sumber: out.regimeSrc || null,
         alasan_aturan: o.reason,
         zona: z ? { jenis: `${z.timeframe} ${z.type}`, bawah: ctx.f(z.bottom), atas: ctx.f(z.top), fresh: !!z.fresh } : null,
-        entry: ctx.f(o.entryPrice),
-        harga_sekarang: ctx.f(ctx.price),
-        jarak_entry_pip: jarakPip,
-        batas_jarak_pip: maxDist,
+        entry: ctx.f(o.entryPrice), harga_sekarang: ctx.f(ctx.price),
+        jarak_entry_pip: jarakPip, batas_jarak_pip: maxDist,
       });
       if (gate.ai) {
         gateCache.set(gKey, { t: Date.now(), v: gate });
@@ -347,18 +340,14 @@ function runManual(ctx, d, styleName) {
 
 function legFields(l) {
   return {
-    signal: l.signal,
-    orderType: l.orderType,
+    signal: l.signal, orderType: l.orderType,
     fill: l.orderType === 'MARKET' ? 'NOW' : 'LIMIT',
     entry: l.entry, sl: l.sl, tp1: l.tp1, tp2: l.tp2, tp3: l.tp3,
     tpMode: l.tpMode, riskPips: l.riskPips,
-    invalidLevel: l.invalidLevel,
-    role: l.role,
+    invalidLevel: l.invalidLevel, role: l.role,
   };
 }
 
-// Mengecek leg OCO: leg yang sudah melewati SL atau invalidasi dibuang,
-// leg yang terisi membatalkan leg lain.
 function resolveOcoFill(prev, price) {
   const legs = prev.oco.legs;
   const aliveIdx = legs.map((_, i) => i).filter(i => {
@@ -377,20 +366,13 @@ function resolveOcoFill(prev, price) {
   if (filledIdx !== undefined) {
     const l = legs[filledIdx];
     return {
-      ...prev,
-      ...legFields(l),
-      status: 'RUNNING',
-      state: 'FILLED',
+      ...prev, ...legFields(l),
+      status: 'RUNNING', state: 'FILLED',
       chartContext: `${l.signal} FILLED ${l.entry}`,
-      oco: {
-        ...prev.oco,
-        filled: filledIdx,
-        cancelled: legs.map((_, i) => i).filter(i => i !== filledIdx),
-      },
+      oco: { ...prev.oco, filled: filledIdx, cancelled: legs.map((_, i) => i).filter(i => i !== filledIdx) },
     };
   }
 
-  // Belum terisi: jika leg utama mati, tampilkan leg yang masih hidup
   const primary = aliveIdx.includes(0) ? legs[0] : legs[aliveIdx[0]];
   return { ...prev, ...legFields(primary), oco: { ...prev.oco, alive: aliveIdx } };
 }
@@ -412,7 +394,7 @@ function validPrevSignal(prev, symbol, styleName, price) {
   return prev;
 }
 
-// ── BOT ENGINE (SMC strict, dua arah, tanpa SMA) ──
+// ── BOT ENGINE ──
 function runBot(ctx, d) {
   const bars = {
     m1: closedOnly(d.m1, TF_MS.m1),
@@ -421,11 +403,21 @@ function runBot(ctx, d) {
   };
   const r = runBotSma(bars, { price: ctx.price, dec: ctx.dec, pip: ctx.pip, symbol: ctx.symbol });
   const F = v => ctx.f(safeNum(v, ctx.price));
+
+  // Watchlist untuk cerita AI
+  const watch = buildWatchlist({
+    m5: bars.m5, m15: d.m15, h1: bars.h1, h4: d.h4, d1: d.d1,
+    price: ctx.price, pip: ctx.pip, styleName: 'Scalping',
+  });
+
   const facts = {
     mode: 'bot', symbol: ctx.symbol, style: 'Scalping', kz: ctx.kz.name, dec: ctx.dec,
     price: F(ctx.price), bias: r.bias || 'NETRAL', dirTxt: r.dirTxt || '-',
     trigger: r.trigger || null, checklist: Array.isArray(r.checklist) ? r.checklist : [],
     sma: r.trendTxt || '-', m1: r.structTxt || '-', zone: null,
+    watch: watch,
+    tier: r.tier || 'STRICT',
+    status: r.ok ? 'SIGNAL' : 'STANDBY',
   };
   if (!r || !r.ok) return standbyOut(facts, r?.reason || 'Menunggu setup valid.', facts.checklist, facts.bias);
 
@@ -436,7 +428,8 @@ function runBot(ctx, d) {
     orderType: r.orderType || 'MARKET', setup: r.setup || 'Bot Signal', zone: null,
   };
   const out = toSignal(plan, ctx, {
-    confidence: r.confidence || 'HIGH', risk: r.tier === 'LOOSE' ? 'HIGH' : 'MEDIUM',
+    confidence: r.confidence || 'HIGH',
+    risk: r.tier === 'LOOSE' || r.tier === 'MOMENTUM' ? 'HIGH' : 'MEDIUM',
     checklist: facts.checklist, scanSummary: facts.checklist.join('\n'), topDown: facts.bias,
   });
   out.tier = r.tier || 'STRICT';
@@ -458,24 +451,28 @@ ATURAN MUTLAK ANTI-HALUSINASI:
 1. DILARANG KERAS mengarang atau mengubah angka harga yang TIDAK ADA di dalam JSON input. Salin angka persis dari JSON.
 2. DILARANG mengubah tipe order (jika orderType = "MARKET" sebut eksekusi sekarang; jika orderType = "LIMIT" sebut pending LIMIT).
 3. Jika role = "counter": jelaskan bahwa ini counter-trend yang valid karena struktur M5 dan zona pantulan sendiri, dan targetnya mengarah ke zona utama.
-4. Jika field oco ada: jelaskan dua limit (legs) beserta angkanya, dan bahwa jika salah satu terisi, yang lain dibatalkan.
-5. Jika tpMode ada: sebutkan bahwa TP mengikuti band risk (riskPips) beserta rasio TP-nya.
-6. Jika status = "RUNNING" atau "PENDING": sebutkan arah, bias H1 (bias), zona POI, serta angka persis entry, SL, dan TP. Jika confirmed = false, sebutkan bahwa konfirmasi M1 belum ada.
-7. Jika status = "STANDBY": sebutkan alasan dari standbyReason, checklist yang OK dan yang BELUM, zona dari watch (jika ada), dan syarat dari syarat.
-8. Pakai "saya" atau "kita". JANGAN pakai daftar/bullet atau tanda bintang (*). WAJIB tulis 3 sampai 5 kalimat lengkap. DILARANG hanya menulis nama simbol.
+4. Jika role = "bounce": jelaskan bahwa ini bounce scalp di zona Supply/Demand fresh, tanpa konfirmasi CHoCH M5, dan tunggu harga menyentuh zona.
+5. Jika field oco ada: jelaskan dua limit (legs) beserta angkanya, dan bahwa jika salah satu terisi, yang lain dibatalkan.
+6. Jika tpMode ada: sebutkan bahwa TP mengikuti band risk (riskPips) beserta rasio TP-nya.
+7. Jika status = "RUNNING" atau "PENDING": sebutkan arah, bias H1 (bias), zona POI, serta angka persis entry, SL, dan TP. Jika confirmed = false, sebutkan bahwa konfirmasi M1 belum ada.
+8. Jika status = "STANDBY": sebutkan alasan dari standbyReason, checklist yang OK dan yang BELUM, zona dari watch (jika ada), dan syarat dari syarat.
+9. Pakai "saya" atau "kita". JANGAN pakai daftar/bullet atau tanda bintang (*). WAJIB tulis 4 sampai 6 kalimat lengkap.
 Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}.`;
 
-const SYS_BOT = `Kamu adalah konsultan analis yang melaporkan status Bot Scalper XAUUSD secara faktual dan santai.
-Strategi bot: SMC ketat. Bias H1, BOS/CHoCH M5, anchor leg, OTE 0.618–0.786, POI minimal 2 dari 3 (OB, FVG, S&D), sentuhan POI, lalu CHoCH M1 dan candle konfirmasi. Bot hanya memberi sinyal MARKET jika semua validasi lolos. Bot bisa memakai arah berlawanan (counter-trend) jika struktur M5 dan zona pantulan valid. Tidak ada indikator SMA.
+const SYS_BOT = `Kamu adalah mentor trading senior spesialis SMC (Market Structure, Order Block, FVG, Supply & Demand) yang sedang menjelaskan analisa bot scalper ke muridnya dengan gaya bercerita (story telling) yang santai, dinamis, dan mengalir.
 ATURAN MUTLAK:
-1. DILARANG KERAS mengarang atau mengubah angka harga yang tidak ada di JSON input.
-2. Jelaskan validasi yang sudah OK dan yang masih BELUM berdasarkan checklist, serta alasan dari standbyReason jika belum ada sinyal.
-3. Pakai "saya" atau "kita". JANGAN pakai daftar/bullet atau tanda bintang (*). WAJIB tulis 3 sampai 5 kalimat lengkap. DILARANG hanya menulis nama simbol.
+1. DILARANG KERAS mengarang atau mengubah angka harga yang tidak ada di JSON input. Salin angka persis dari JSON.
+2. JANGAN gunakan bullet points, daftar angka, atau tanda bintang (*). Tulis dalam bentuk paragraf utuh yang mengalir (minimal 5-7 kalimat).
+3. Buka cerita dengan kondisi HTF (H1/H4) berdasarkan field "bias" dan "sma". Sebutkan time framenya, apakah sedang tren naik, turun, atau ranging. Apakah terjadi BOS, MSS, atau CHoCH?
+4. Lanjut ke M5/M1 berdasarkan field "checklist" dan "m1": Jelaskan rencana scalping-nya. Apakah bot menunggu harga retracement ke area POI utama, ke area Fibonacci OTE, atau ke Supply/Demand utama? Jika ada field "watch", sebutkan zona Supply/Demand yang sedang dipantau beserta harga batas bawah dan atasnya.
+5. Berikan skenario dinamis: Jika harga reversal, apa rencananya? Jika lanjut tren (continuation), targetnya ke mana? Sebutkan syarat konfirmasi struktur yang jelas (misal: tunggu candle close di atas/bawah level X).
+6. Jika bot sedang STANDBY (belum entry): Jelaskan dengan santai apa yang sedang ditunggu berdasarkan field "checklist" dan "watch". Misal: "Bot kita sedang sabar menunggu, karena POI di OTE baru terkumpul 1 dari 2 syarat, dan kita memantau zona Supply di harga X..."
+7. Jika bot sedang RUNNING/PENDING: Jelaskan arah, tier (STRICT/LOOSE/MOMENTUM), trigger, entry, SL, dan TP persis dari JSON.
+8. Gunakan kata "saya" atau "kita". 
 Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}.`;
 
 const NUM_RE = /\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?/g;
 
-// Parse angka format Inggris (2005.50) maupun Indonesia (2.005,50)
 function parseNum(tok) {
   let s = String(tok);
   if (s.includes('.') && s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
@@ -493,7 +490,6 @@ function collectNums(v, out = []) {
   return out;
 }
 
-// Cek angka harga di teks AI: harus ada di data, dengan toleransi pembulatan
 function verifyNoHallucinatedPrices(text, facts) {
   try {
     if (!text || typeof text !== 'string') return false;
@@ -509,9 +505,7 @@ function verifyNoHallucinatedPrices(text, facts) {
       if (!allowed.some(a => Math.abs(a - n) <= tol)) return false;
     }
     return true;
-  } catch {
-    return true;
-  }
+  } catch { return true; }
 }
 
 function extractContent(data) {
@@ -530,8 +524,6 @@ function parseJsonLoose(text) {
   try { return JSON.parse(s.slice(a, b + 1)); } catch { return null; }
 }
 
-// Mengembalikan { json, error } supaya penyebab kegagalan AI bisa dibaca di log atau debug.
-// Tidak memakai response_format karena beberapa model di gateway menolaknya (HTTP 400).
 async function qwenJson(sys, userObj, maxTokens = QWEN_MAX_TOKENS) {
   if (!QWEN_KEYS.length) return { json: null, error: 'API key AI belum diatur (QWEN_API_KEY / OPENAI_API_KEY)' };
   const user = JSON.stringify(userObj);
@@ -546,9 +538,7 @@ async function qwenJson(sys, userObj, maxTokens = QWEN_MAX_TOKENS) {
           method: 'POST',
           headers: { Authorization: `Bearer ${k}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: m,
-            max_tokens: maxTokens,
-            temperature: 0.1,
+            model: m, max_tokens: maxTokens, temperature: 0.1,
             messages: [
               { role: 'system', content: sys + '\nBalas hanya objek JSON tanpa penjelasan dan tanpa markdown.' },
               { role: 'user', content: user },
@@ -598,23 +588,23 @@ function fallbackStory(f, lang) {
     const bandTxt = f.tpMode && f.tpMode !== 'RR' && f.tpMode !== 'SWING_INTRADAY'
       ? ` (TP band ${f.tpMode === 'LOW_RISK' ? '1:1.5/1:2.5/1:4' : '1:1/1:2/1:3'}, risk ${f.riskPips} pip)`
       : '';
+    const roleTxt = f.role === 'bounce' ? 'Bounce scalp' : f.role === 'counter' ? 'Counter-trend' : 'Main';
     return id
-      ? `Setup ${f.signal} valid di ${f.symbol} dengan bias ${f.bias} pada ${fbZone(f, true)} (${f.trigger}). ${now ? `Eksekusi MARKET sekarang di ${f.entry}` : `Pasang pending LIMIT di ${f.entry}`}, SL di ${f.sl}, dan target TP di ${f.tp[0]}, ${f.tp[1]}, serta ${f.tp[2]}${bandTxt}.`
-      : `Valid ${f.signal} setup on ${f.symbol} aligned with ${f.bias} bias at ${fbZone(f, false)} (${f.trigger}). ${now ? `Execute MARKET now at ${f.entry}` : `Place pending LIMIT at ${f.entry}`}, SL at ${f.sl}, and targets at ${f.tp[0]}, ${f.tp[1]}, and ${f.tp[2]}${bandTxt}.`;
+      ? `${roleTxt} ${f.signal} valid di ${f.symbol} dengan bias ${f.bias} pada ${fbZone(f, true)} (${f.trigger}). ${now ? `Eksekusi MARKET sekarang di ${f.entry}` : `Pasang pending LIMIT di ${f.entry}`}, SL di ${f.sl}, dan target TP di ${f.tp[0]}, ${f.tp[1]}, serta ${f.tp[2]}${bandTxt}.`
+      : `${roleTxt} ${f.signal} valid on ${f.symbol} aligned with ${f.bias} bias at ${fbZone(f, false)} (${f.trigger}). ${now ? `Execute MARKET now at ${f.entry}` : `Place pending LIMIT at ${f.entry}`}, SL at ${f.sl}, and targets at ${f.tp[0]}, ${f.tp[1]}, and ${f.tp[2]}${bandTxt}.`;
   }
   if (f.signal === 'BUY' || f.signal === 'SELL') {
     const now = f.orderType === 'MARKET';
     return id
-      ? `Sinyal ${f.dirTxt} bot aktif melalui ${f.trigger}. ${now ? `Eksekusi MARKET di ${f.entry}` : `Pasang LIMIT di ${f.entry}`}, SL di ${f.sl}, dan TP di ${f.tp[0]}, ${f.tp[1]}, ${f.tp[2]}.`
-      : `Bot ${f.dirTxt} signal triggered via ${f.trigger}. ${now ? `Execute MARKET at ${f.entry}` : `Place LIMIT at ${f.entry}`}, SL at ${f.sl}, and TP at ${f.tp[0]}, ${f.tp[1]}, ${f.tp[2]}.`;
+      ? `Sinyal ${f.dirTxt} bot aktif melalui ${f.trigger}. ${now ? `Eksekusi MARKET di ${f.entry}` : `Pasang LIMIT di ${f.entry}`}, SL di ${f.sl}, dan TP di ${f.tp[0]}, ${f.tp[1]}, ${f.tp[2]}. ${fbWatch(f, true)}`
+      : `Bot ${f.dirTxt} signal triggered via ${f.trigger}. ${now ? `Execute MARKET at ${f.entry}` : `Place LIMIT at ${f.entry}`}, SL at ${f.sl}, and TP at ${f.tp[0]}, ${f.tp[1]}, ${f.tp[2]}. ${fbWatch(f, false)}`;
   }
   const checkTxt = (f.checklist || []).slice(0, 3).join(' ');
   return id
-    ? `Bot sedang memantau ${f.symbol} M1. Status: ${f.m1 || '-'}. ${f.standbyReason || ''} ${checkTxt}`
-    : `Bot is scanning ${f.symbol} M1. Status: ${f.m1 || '-'}. ${f.standbyReason || ''} ${checkTxt}`;
+    ? `Bot sedang memantau ${f.symbol} M1. Bias HTF ${f.bias}. Status: ${f.m1 || '-'}. ${f.standbyReason || ''} ${checkTxt} ${fbWatch(f, true)}`
+    : `Bot is scanning ${f.symbol} M1. HTF bias ${f.bias}. Status: ${f.m1 || '-'}. ${f.standbyReason || ''} ${checkTxt} ${fbWatch(f, false)}`;
 }
 
-// Jawaban AI dianggap layak hanya jika berupa kalimat, bukan nama simbol saja
 function isUsableStory(s, facts) {
   if (typeof s !== 'string') return false;
   const t = s.trim();
@@ -641,9 +631,7 @@ async function getStory(facts, cacheKey, ttl = BOT_CFG.storyTtlMs) {
     } else {
       story = { id: String(json.id), en: String(json.en), ai: true };
     }
-  } catch (e) {
-    aiError = e.message;
-  }
+  } catch (e) { aiError = e.message; }
   if (!story) {
     console.warn('getStory fallback:', aiError);
     story = { id: fallbackStory(facts, 'id'), en: fallbackStory(facts, 'en'), ai: false, aiError };
@@ -655,14 +643,15 @@ async function getStory(facts, cacheKey, ttl = BOT_CFG.storyTtlMs) {
   return story;
 }
 
-const SYS_GATE_MANUAL = `Kamu adalah filter veto ketat untuk kandidat setup MANUAL SMC.
+const SYS_GATE_MANUAL = `Kamu adalah filter veto untuk kandidat setup MANUAL SMC.
 Kamu DILARANG membuat setup baru dan DILARANG mengubah angka entry, SL, TP, atau tipe order.
 Jawab "TUNGGU" HANYA jika terbukti ada salah satu kontradiksi berikut:
-1. arah_setup berlawanan dengan arah_htf, KECUALI role = "counter". Counter-trend sudah divalidasi struktur M5 dan zona pantulan sendiri, jadi jangan tolak karena arah.
+1. arah_setup berlawanan dengan arah_htf, KECUALI role = "counter" atau role = "bounce". Counter-trend dan bounce sudah divalidasi struktur/zona sendiri, jadi jangan tolak karena arah.
 2. regime_htf = "choppy".
 3. jarak_entry_pip > batas_jarak_pip.
 4. alasan_aturan kosong.
 Jika tidak ada satupun dari 4 pelanggaran di atas, WAJIB jawab "AMBIL".
+Jangan terlalu kaku pada syarat POI jika struktur M5 atau zona bounce sudah valid. Prioritaskan arah dan momentum.
 FORMAT OUTPUT (hanya JSON, tanpa markdown):
 {"keputusan":"AMBIL" atau "TUNGGU","alasan":"..."}`;
 
@@ -907,10 +896,7 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
   if (!isAutoBot && out.signal.status === 'STANDBY') {
     const prev = validPrevSignal(body.prevSignal, symbol, styleName, price);
     if (prev) {
-      return res.status(200).json({
-        ok: true, mode: 'candles', symbol, style: styleName, price,
-        signal: { ...prev, sticky: true },
-      });
+      return res.status(200).json({ ok: true, mode: 'candles', symbol, style: styleName, price, signal: { ...prev, sticky: true } });
     }
   }
 
@@ -921,43 +907,6 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
 
   const f = out.facts || { mode: isAutoBot ? 'bot' : 'manual', symbol, style: styleName, status: out.signal.status, dec };
   const cacheKey = isAutoBot
-    ? `${symbol}|${styleName}|${f.status}|${f.signal || ''}|${f.trigger || ''}|${f.bias || ''}`
+    ? `${symbol}|${styleName}|${f.status}|${f.signal || ''}|${f.trigger || ''}|${f.bias || ''}|${f.tier || ''}`
     : `M|${symbol}|${styleName}|${f.status}|${f.signal || ''}|${f.entry || ''}|${String(f.standbyReason || '').slice(0, 60)}`;
-  const story = await getStory(f, cacheKey, isAutoBot ? BOT_CFG.storyTtlMs : MANUAL_STORY_TTL_MS);
-  const signal = {
-    ...out.signal,
-    reason: lang === 'en' ? story.en : story.id,
-    reasons: { id: story.id, en: story.en },
-    reasonSource: story.ai ? 'AI' : 'RULES',
-    aiReasoning: !!story.ai,
-    ...(ctx.debug ? { aiError: story.aiError || null } : {}),
-  };
-  return res.status(200).json({ ok: true, mode: isAutoBot ? 'bot' : 'candles', symbol, style: styleName, price, signal });
-}
-
-export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-user-email');
-  if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST') return fail(res, 'Method not allowed', 405);
-
-  try {
-    let body = req.body || {};
-    if (typeof body === 'string') try { body = JSON.parse(body); } catch { return fail(res, 'Body tidak valid (JSON).'); }
-
-    const lang = body.lang === 'en' ? 'en' : 'id';
-    const email = String(body.email || body.value || '').trim().toLowerCase();
-    const isAutoBot = !!(body.auto || body.bot || body.mode === 'bot' || body.source === 'bot');
-    const isVision = body.symbol === 'VISION' || body.mode === 'vision' || (Array.isArray(body.images) && body.images.length > 0);
-
-    const access = await checkAccess(email, isAutoBot);
-    if (!access.ok) return fail(res, msg(lang, access.key));
-
-    if (isVision) return await handleVision(body, lang, res);
-    return await handleCandles(body, lang, res, { email, isAutoBot });
-  } catch (err) {
-    console.error('Fatal API Error:', err);
-    if (!res.headersSent) return fail(res, `Server error: ${err.message || 'unknown'}`, 500);
-  }
-}
+  const story = await getStory(f, cacheKey, isAutoBot ? BOT_CFG.storyTtlMs : MANk
