@@ -1,4 +1,4 @@
-// api/generate.js — v146 (SMC Scalping manual + bot SMC strict, AI reasoning fix)
+// api/generate.js — v147 (SMC manual + bot strict, OCO, counter-trend, TP band manual)
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import { runBotSma } from '../lib/bot_sma.js';
@@ -57,6 +57,7 @@ const MANUAL_TF_NEEDED = {
 };
 const BOT_TF_NEEDED = ['m1', 'm5', 'h1'];
 const MAX_DIST_PIP = { 'Scalping': 150, 'Intraday': 500, 'Swing': 2000 };
+const MAX_DIST_OVERRIDE = { BTCUSD: 800 }; // BTC: 1 pip = 1 USD
 
 const BOT_CFG = { storyTtlMs: 45000 };
 const MANUAL_STORY_TTL_MS = 180000;
@@ -172,6 +173,8 @@ function toSignal(plan, ctx, extra) {
     zoneNote: '',
     chartContext: `${plan.setup || 'Signal'}: ${isMarket ? 'NOW' : 'LIMIT'} ${f(plan.entry)}`,
     rr: Number(safeNum(plan.rr, 1).toFixed(2)),
+    tpMode: plan.tpMode || null,
+    riskPips: plan.riskPips != null ? Number(Number(plan.riskPips).toFixed(1)) : null,
     checklist: extra.checklist || [],
     scanSummary: extra.scanSummary || '',
     topDown: extra.topDown || null,
@@ -207,6 +210,22 @@ const DOC_STYLE_TF = {
 
 const gateCache = new Map();
 
+// Mengubah satu leg OCO menjadi bentuk yang dibaca frontend
+function legView(l, ctx) {
+  const f = v => Number(safeNum(v, 0).toFixed(ctx.dec));
+  return {
+    signal: l.side === 'buy' ? 'BUY' : 'SELL',
+    role: l.role || 'main',
+    orderType: l.orderType,
+    entry: f(l.entryPrice), sl: f(l.sl),
+    tp1: f(l.tp1), tp2: f(l.tp2), tp3: f(l.tp3),
+    tpMode: l.tpMode || null,
+    riskPips: l.riskPips != null ? Number(Number(l.riskPips).toFixed(1)) : null,
+    invalidLevel: f(l.invalidLevel),
+    reason: l.reason,
+  };
+}
+
 async function runDocManual(ctx, d, styleName) {
   const tf = DOC_STYLE_TF[styleName] || DOC_STYLE_TF['Scalping'];
   const facts = {
@@ -222,7 +241,7 @@ async function runDocManual(ctx, d, styleName) {
   facts.syarat = SYARAT_MASUK[styleName] || null;
 
   const out = generateManualPlan({
-    ...closed, tickSize: 10 ** -ctx.dec, price: ctx.price, pip: ctx.pip, rr: ctx.rr,
+    ...closed, tickSize: 10 ** -ctx.dec, price: ctx.price, pip: ctx.pip, rr: ctx.rr, symbol: ctx.symbol,
   }, styleName);
   const regimeTxt = (out.regime ? out.regime.replace('_', ' ') : 'netral') + (out.regimeSrc ? ` · ${out.regimeSrc}` : '');
   facts.bias = regimeTxt;
@@ -236,27 +255,28 @@ async function runDocManual(ctx, d, styleName) {
   const o = out.order;
   const dir = o.side === 'buy' ? 1 : -1;
   const sideTxt = dir === 1 ? 'BUY' : 'SELL';
+  const isCounter = o.role === 'counter';
   const z = out.zone;
   const plan = {
     dir, entry: o.entryPrice, sl: o.sl, orderType: o.orderType || 'LIMIT',
-    tps: [o.tp1, o.tp2, o.tp3], rr: o.rr, invalidLevel: o.invalidLevel,
+    tps: [o.tp1, o.tp2, o.tp3], rr: o.rr, tpMode: o.tpMode, riskPips: o.riskPips, invalidLevel: o.invalidLevel,
     setup: `Manual · ${DOC_STYLE_LABEL[styleName] || styleName} · ${o.reason}`,
     zone: z ? { lower: z.bottom, upper: z.top, label: `${z.timeframe} ${z.type}`, mid: (z.top + z.bottom) / 2 } : null,
   };
 
   const arahHtf = out.regime === 'trending_up' ? 'BUY' : out.regime === 'trending_down' ? 'SELL' : 'NETRAL';
   const jarakPip = Math.round(Math.abs(ctx.price - o.entryPrice) / ctx.pip);
-  const maxDist = MAX_DIST_PIP[styleName] || 150;
+  const maxDist = MAX_DIST_OVERRIDE[ctx.symbol] ?? MAX_DIST_PIP[styleName] ?? 150;
   let gate;
 
   if (out.regime === 'choppy') {
     gate = { keputusan: 'TUNGGU', alasan: 'Market Structure HTF choppy/belum searah.', ai: false };
-  } else if (arahHtf !== 'NETRAL' && arahHtf !== sideTxt) {
+  } else if (!isCounter && arahHtf !== 'NETRAL' && arahHtf !== sideTxt) {
     gate = { keputusan: 'TUNGGU', alasan: `Arah setup ${sideTxt} berlawanan dengan bias HTF ${arahHtf}.`, ai: false };
   } else if (jarakPip > maxDist) {
     gate = { keputusan: 'TUNGGU', alasan: `Entry ${jarakPip} pip dari harga, melebihi batas ${maxDist} pip.`, ai: false };
   } else {
-    const gKey = `${ctx.symbol}|${styleName}|${sideTxt}|${plan.orderType}|${ctx.f(o.entryPrice)}|${o.rr}`;
+    const gKey = `${ctx.symbol}|${styleName}|${sideTxt}|${o.role}|${plan.orderType}|${ctx.f(o.entryPrice)}|${o.tpMode}|${out.oco ? 'oco' : ''}`;
     const hit = gateCache.get(gKey);
     if (hit && Date.now() - hit.t < GATE_TTL_MS) gate = hit.v;
     else {
@@ -264,6 +284,8 @@ async function runDocManual(ctx, d, styleName) {
         gaya: styleName,
         simbol: ctx.symbol,
         arah_setup: sideTxt,
+        role: o.role || 'main',
+        oco: !!out.oco,
         tipe_order: plan.orderType,
         arah_htf: arahHtf,
         regime_htf: out.regime || 'neutral',
@@ -297,14 +319,23 @@ async function runDocManual(ctx, d, styleName) {
   sig.expiresAt = o.expiryTime;
   sig.symbol = ctx.symbol;
   sig.style = styleName;
+  sig.role = o.role || 'main';
+  if (out.oco) {
+    sig.oco = { rule: out.oco.rule, legs: out.oco.legs.map(l => legView(l, ctx)) };
+  }
+
   facts.signal = sideTxt;
+  facts.role = o.role || 'main';
   facts.orderType = plan.orderType;
   facts.entry = sig.entry;
   facts.sl = sig.sl;
   facts.tp = [sig.tp1, sig.tp2, sig.tp3];
   facts.rr = Number(o.rr).toFixed(2);
+  facts.tpMode = o.tpMode;
+  facts.riskPips = sig.riskPips;
   facts.trigger = o.reason;
   facts.confirmed = !!o.confirmed;
+  if (sig.oco) facts.oco = sig.oco;
   if (plan.zone) facts.zone = { label: plan.zone.label, lower: sig.zone.min, upper: sig.zone.max };
   return { signal: sig, facts: { ...facts, status: sig.status } };
 }
@@ -313,12 +344,65 @@ function runManual(ctx, d, styleName) {
   return runDocManual(ctx, d, styleName);
 }
 
+function legFields(l) {
+  return {
+    signal: l.signal,
+    orderType: l.orderType,
+    fill: l.orderType === 'MARKET' ? 'NOW' : 'LIMIT',
+    entry: l.entry, sl: l.sl, tp1: l.tp1, tp2: l.tp2, tp3: l.tp3,
+    tpMode: l.tpMode, riskPips: l.riskPips,
+    invalidLevel: l.invalidLevel,
+    role: l.role,
+  };
+}
+
+// Mengecek leg OCO: leg yang sudah melewati SL atau invalidasi dibuang,
+// leg yang terisi membatalkan leg lain.
+function resolveOcoFill(prev, price) {
+  const legs = prev.oco.legs;
+  const aliveIdx = legs.map((_, i) => i).filter(i => {
+    const l = legs[i];
+    return l.signal === 'BUY'
+      ? price > Math.max(l.sl, l.invalidLevel ?? -Infinity)
+      : price < Math.min(l.sl, l.invalidLevel ?? Infinity);
+  });
+  if (!aliveIdx.length) return null;
+
+  const filledIdx = aliveIdx.find(i => {
+    const l = legs[i];
+    return l.signal === 'BUY' ? price <= l.entry : price >= l.entry;
+  });
+
+  if (filledIdx !== undefined) {
+    const l = legs[filledIdx];
+    return {
+      ...prev,
+      ...legFields(l),
+      status: 'RUNNING',
+      state: 'FILLED',
+      chartContext: `${l.signal} FILLED ${l.entry}`,
+      oco: {
+        ...prev.oco,
+        filled: filledIdx,
+        cancelled: legs.map((_, i) => i).filter(i => i !== filledIdx),
+      },
+    };
+  }
+
+  // Belum terisi: jika leg utama mati, tampilkan leg yang masih hidup
+  const primary = aliveIdx.includes(0) ? legs[0] : legs[aliveIdx[0]];
+  return { ...prev, ...legFields(primary), oco: { ...prev.oco, alive: aliveIdx } };
+}
+
 function validPrevSignal(prev, symbol, styleName, price) {
   if (!prev || typeof prev !== 'object') return null;
   if (prev.status !== 'PENDING' || (prev.signal !== 'BUY' && prev.signal !== 'SELL')) return null;
   if (prev.symbol !== symbol || prev.style !== styleName) return null;
   const exp = Number(prev.expiresAt);
   if (!Number.isFinite(exp) || Date.now() > exp) return null;
+
+  if (Array.isArray(prev.oco?.legs) && prev.oco.legs.length) return resolveOcoFill(prev, price);
+
   const sl = Number(prev.sl), tp1 = Number(prev.tp1), entry = Number(prev.entry);
   const inv = prev.invalidLevel != null ? Number(prev.invalidLevel) : null;
   if (![sl, tp1, entry].every(Number.isFinite)) return null;
@@ -327,14 +411,14 @@ function validPrevSignal(prev, symbol, styleName, price) {
   return prev;
 }
 
-// ── BOT ENGINE (SMC strict, tanpa SMA) ──
+// ── BOT ENGINE (SMC strict, dua arah, tanpa SMA) ──
 function runBot(ctx, d) {
   const bars = {
     m1: closedOnly(d.m1, TF_MS.m1),
     m5: closedOnly(d.m5, TF_MS.m5),
     h1: closedOnly(d.h1, TF_MS.h1),
   };
-  const r = runBotSma(bars, { price: ctx.price, dec: ctx.dec, pip: ctx.pip });
+  const r = runBotSma(bars, { price: ctx.price, dec: ctx.dec, pip: ctx.pip, symbol: ctx.symbol });
   const F = v => ctx.f(safeNum(v, ctx.price));
   const facts = {
     mode: 'bot', symbol: ctx.symbol, style: 'Scalping', kz: ctx.kz.name,
@@ -347,7 +431,7 @@ function runBot(ctx, d) {
   const tpsArr = Array.isArray(r.tps) && r.tps.length >= 3 ? r.tps : [r.entry, r.entry, r.entry];
   const plan = {
     dir: r.dir, entry: safeNum(r.entry, ctx.price), sl: safeNum(r.sl, ctx.price),
-    tps: tpsArr, rr: safeNum(r.rr, 1.5),
+    tps: tpsArr, rr: safeNum(r.rr, 1.5), tpMode: r.tpMode || 'RR',
     orderType: r.orderType || 'MARKET', setup: r.setup || 'Bot Signal', zone: null,
   };
   const out = toSignal(plan, ctx, {
@@ -355,6 +439,7 @@ function runBot(ctx, d) {
     checklist: facts.checklist, scanSummary: facts.checklist.join('\n'), topDown: facts.bias,
   });
   facts.signal = r.dirTxt;
+  facts.role = r.role || 'main';
   facts.orderType = plan.orderType;
   facts.status = out.status;
   facts.entry = F(plan.entry);
@@ -369,17 +454,20 @@ const SYS_MANUAL = `Kamu adalah konsultan analis trading spesialis SMC (Market S
 ATURAN MUTLAK ANTI-HALUSINASI:
 1. DILARANG KERAS mengarang atau mengubah angka harga yang TIDAK ADA di dalam JSON input. Salin angka persis dari JSON.
 2. DILARANG mengubah tipe order (jika orderType = "MARKET" sebut eksekusi sekarang; jika orderType = "LIMIT" sebut pending LIMIT).
-3. Jika status = "RUNNING" atau "PENDING": sebutkan arah (signal), bias H1 (bias), zona POI (zone & trigger), serta angka persis entry, SL, dan TP. Sebutkan juga invalidLevel jika ada. Jika confirmed = false, sebutkan bahwa konfirmasi M1 belum ada.
-4. Jika status = "STANDBY": sebutkan alasan menunggu dari standbyReason, checklist yang sudah OK dan yang BELUM, zona yang dipantau dari watch (jika ada), dan syarat dari syarat.
-5. Pakai "saya" atau "kita". JANGAN pakai daftar/bullet atau tanda bintang (*). Tulis 3 sampai 5 kalimat.
+3. Jika role = "counter": jelaskan bahwa ini counter-trend yang valid karena struktur M5 dan zona pantulan sendiri, dan targetnya mengarah ke zona utama.
+4. Jika field oco ada: jelaskan dua limit (legs) beserta angkanya, dan bahwa jika salah satu terisi, yang lain dibatalkan.
+5. Jika tpMode ada: sebutkan bahwa TP mengikuti band risk (riskPips) beserta rasio TP-nya.
+6. Jika status = "RUNNING" atau "PENDING": sebutkan arah, bias H1 (bias), zona POI, serta angka persis entry, SL, dan TP. Jika confirmed = false, sebutkan bahwa konfirmasi M1 belum ada.
+7. Jika status = "STANDBY": sebutkan alasan dari standbyReason, checklist yang OK dan yang BELUM, zona dari watch (jika ada), dan syarat dari syarat.
+8. Pakai "saya" atau "kita". JANGAN pakai daftar/bullet atau tanda bintang (*). WAJIB tulis 3 sampai 5 kalimat lengkap. DILARANG hanya menulis nama simbol.
 Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}.`;
 
 const SYS_BOT = `Kamu adalah konsultan analis yang melaporkan status Bot Scalper XAUUSD secara faktual dan santai.
-Strategi bot: SMC ketat. Bias H1, BOS/CHoCH M5, anchor leg, OTE 0.618–0.786, POI minimal 2 dari 3 (OB, FVG, S&D), sentuhan POI, lalu CHoCH M1 dan candle konfirmasi. Bot hanya memberi sinyal MARKET jika semua validasi lolos. Tidak ada indikator SMA.
+Strategi bot: SMC ketat. Bias H1, BOS/CHoCH M5, anchor leg, OTE 0.618–0.786, POI minimal 2 dari 3 (OB, FVG, S&D), sentuhan POI, lalu CHoCH M1 dan candle konfirmasi. Bot hanya memberi sinyal MARKET jika semua validasi lolos. Bot bisa memakai arah berlawanan (counter-trend) jika struktur M5 dan zona pantulan valid. Tidak ada indikator SMA.
 ATURAN MUTLAK:
 1. DILARANG KERAS mengarang atau mengubah angka harga yang tidak ada di JSON input.
 2. Jelaskan validasi yang sudah OK dan yang masih BELUM berdasarkan checklist, serta alasan dari standbyReason jika belum ada sinyal.
-3. Pakai "saya" atau "kita". JANGAN pakai daftar/bullet atau tanda bintang (*). Tulis 3 sampai 5 kalimat.
+3. Pakai "saya" atau "kita". JANGAN pakai daftar/bullet atau tanda bintang (*). WAJIB tulis 3 sampai 5 kalimat lengkap. DILARANG hanya menulis nama simbol.
 Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}.`;
 
 const NUM_RE = /\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?/g;
@@ -491,14 +579,18 @@ function fallbackStory(f, lang) {
   const id = lang === 'id';
   if (f.mode === 'manual') {
     if (f.status === 'STANDBY') {
+      const checkTxt = (f.checklist || []).slice(0, 4).join(' ');
       return id
-        ? `Saya masih menunggu setup valid di ${f.symbol}. Bias saat ini ${f.bias}. ${f.standbyReason || ''} ${fbWatch(f, true)}`
-        : `I am still waiting for a valid setup on ${f.symbol}. Current bias is ${f.bias}. ${f.standbyReason || ''} ${fbWatch(f, false)}`;
+        ? `Saya masih menunggu setup valid di ${f.symbol}. Bias saat ini ${f.bias}. ${f.standbyReason || ''} ${checkTxt} ${fbWatch(f, true)}`
+        : `I am still waiting for a valid setup on ${f.symbol}. Current bias is ${f.bias}. ${f.standbyReason || ''} ${checkTxt} ${fbWatch(f, false)}`;
     }
     const now = f.orderType === 'MARKET';
+    const tpTxt = f.tpMode && f.tpMode !== 'RR' && f.tpMode !== 'SWING_INTRADAY'
+      ? (id ? ` (TP band ${f.tpMode === 'LOW_RISK' ? '1:1.5/1:2.5/1:4' : '1:1/1:2/1:3'}, risk ${f.riskPips} pip)` : ` (TP band ${f.tpMode === 'LOW_RISK' ? '1:1.5/1:2.5/1:4' : '1:1/1:2/1:3'}, risk ${f.riskPips} pip)`)
+      : '';
     return id
-      ? `Setup ${f.signal} valid di ${f.symbol} dengan bias ${f.bias} pada ${fbZone(f, true)} (${f.trigger}). ${now ? `Eksekusi MARKET sekarang di ${f.entry}` : `Pasang pending LIMIT di ${f.entry}`}, SL di ${f.sl}, dan target TP di ${f.tp[0]}, ${f.tp[1]}, serta ${f.tp[2]}.`
-      : `Valid ${f.signal} setup on ${f.symbol} aligned with ${f.bias} bias at ${fbZone(f, false)} (${f.trigger}). ${now ? `Execute MARKET now at ${f.entry}` : `Place pending LIMIT at ${f.entry}`}, SL at ${f.sl}, and targets at ${f.tp[0]}, ${f.tp[1]}, and ${f.tp[2]}.`;
+      ? `Setup ${f.signal} valid di ${f.symbol} dengan bias ${f.bias} pada ${fbZone(f, true)} (${f.trigger}). ${now ? `Eksekusi MARKET sekarang di ${f.entry}` : `Pasang pending LIMIT di ${f.entry}`}, SL di ${f.sl}, dan target TP di ${f.tp[0]}, ${f.tp[1]}, serta ${f.tp[2]}${tpTxt}.`
+      : `Valid ${f.signal} setup on ${f.symbol} aligned with ${f.bias} bias at ${fbZone(f, false)} (${f.trigger}). ${now ? `Execute MARKET now at ${f.entry}` : `Place pending LIMIT at ${f.entry}`}, SL at ${f.sl}, and targets at ${f.tp[0]}, ${f.tp[1]}, and ${f.tp[2]}${tpTxt}.`;
   }
   if (f.signal === 'BUY' || f.signal === 'SELL') {
     const now = f.orderType === 'MARKET';
@@ -512,6 +604,16 @@ function fallbackStory(f, lang) {
     : `Bot is scanning ${f.symbol} M1. Status: ${f.m1 || '-'}. ${f.standbyReason || ''} ${checkTxt}`;
 }
 
+// Jawaban AI dianggap layak hanya jika berupa kalimat, bukan nama simbol saja
+function isUsableStory(s, facts) {
+  if (typeof s !== 'string') return false;
+  const t = s.trim();
+  if (t.length < 40) return false;
+  if (t.split(/\s+/).length < 6) return false;
+  if (facts?.symbol && t.toUpperCase() === String(facts.symbol).toUpperCase()) return false;
+  return true;
+}
+
 const storyCache = new Map();
 async function getStory(facts, cacheKey, ttl = BOT_CFG.storyTtlMs) {
   if (cacheKey) {
@@ -522,7 +624,9 @@ async function getStory(facts, cacheKey, ttl = BOT_CFG.storyTtlMs) {
   try {
     const { json, error } = await qwenJson(facts.mode === 'bot' ? SYS_BOT : SYS_MANUAL, facts);
     if (!json) aiError = error || 'AI tidak memberi jawaban';
-    else if (!verifyNoHallucinatedPrices(json.id, facts) || !verifyNoHallucinatedPrices(json.en, facts)) {
+    else if (!isUsableStory(json.id, facts) || !isUsableStory(json.en, facts)) {
+      aiError = 'jawaban AI terlalu pendek atau hanya nama simbol';
+    } else if (!verifyNoHallucinatedPrices(json.id, facts) || !verifyNoHallucinatedPrices(json.en, facts)) {
       aiError = 'angka di jawaban AI tidak cocok dengan data';
     } else {
       story = { id: String(json.id), en: String(json.en), ai: true };
@@ -535,17 +639,16 @@ async function getStory(facts, cacheKey, ttl = BOT_CFG.storyTtlMs) {
     story = { id: fallbackStory(facts, 'id'), en: fallbackStory(facts, 'en'), ai: false, aiError };
   }
   if (cacheKey) {
-    // Jawaban AI disimpan sesuai ttl. Fallback disimpan singkat supaya AI dicoba lagi.
     storyCache.set(cacheKey, { t: Date.now(), ttl: story.ai ? ttl : Math.min(ttl, 20000), v: story });
     if (storyCache.size > 300) storyCache.delete(storyCache.keys().next().value);
   }
   return story;
 }
 
-const SYS_GATE_MANUAL = `Kamu adalah filter veto ketat untuk kandidat setup MANUAL SMC / Supply & Demand.
+const SYS_GATE_MANUAL = `Kamu adalah filter veto ketat untuk kandidat setup MANUAL SMC.
 Kamu DILARANG membuat setup baru dan DILARANG mengubah angka entry, SL, TP, atau tipe order.
-Jawab "TUNGGU" HANYA jika terbukti ada salah satu kontradiksi berikut di data input:
-1. arah_setup berlawanan dengan arah_htf (misal BUY melawan SELL). Jika arah_htf = "NETRAL", jangan tolak karena arah.
+Jawab "TUNGGU" HANYA jika terbukti ada salah satu kontradiksi berikut:
+1. arah_setup berlawanan dengan arah_htf, KECUALI role = "counter". Counter-trend sudah divalidasi struktur M5 dan zona pantulan sendiri, jadi jangan tolak karena arah.
 2. regime_htf = "choppy".
 3. jarak_entry_pip > batas_jarak_pip.
 4. alasan_aturan kosong.
