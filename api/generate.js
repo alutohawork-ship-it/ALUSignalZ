@@ -63,7 +63,7 @@ const MANUAL_STYLES = {
 const MAX_SL_ATR = { scalp: 1.5, scalp_cons: 2.0, intraday: 2.5, swing: 3.5 };
 
 // ── Parameter BOT (LTF scalper) ──
-const BOT_CFG = { chaseAtr5: 2.0, zoneMaxAtr15: 1.5, maxSlAtr5: 1.5, maxSlAtr15: 2.0, minSlAtr1: 0.3, storyTtlMs: 45000 };
+const BOT_CFG = { chaseAtr5: 2.0, zoneMaxAtr15: 1.5, maxSlAtr5: 1.2, minSlAtr1: 0.3, maxSlPips: 60, storyTtlMs: 45000 };
 
 const isoDate = d => d.toISOString().slice(0, 10);
 function fail(res, reason, status = 200) { return res.status(status).json({ ok:false, reason, message:reason, msg:reason, error:reason }); }
@@ -696,9 +696,21 @@ function runBot(ctx, d, styleName) {
   const touched = zone ? c1.slice(-8).some(x => x.h >= zone.lower && x.l <= zone.upper) : false;
   const zoneHit = !!zone && (inZone || touched);
 
-  let dir = 0;
-  if (zoneHit) dir = zone.dir;
-  else if (!requireHtf && ltfDir && (!ctx.useSma || smaMicroDir(c5) === ltfDir)) dir = ltfDir; // Scalping: struktur M5 + trigger M1 (+ SMA20 M5 bila aktif)
+  // ── TOP-DOWN SOP ──
+  // 1) H1/M30/M15 menentukan bias. Netral = tidak ada entry.
+  // 2) ZONE  : harga di zona utama M15 searah bias.
+  // 3) TREND : M5 searah bias, lalu entry dari POI M5/M1 searah bias.
+  // 4) COUNTER_POI: melawan bias HANYA jika harga di POI M15 berlawanan, ada sweep, dan M5 sudah CHoCH (reversal).
+  const htfDir = bias.dir;
+  const poiCounter = htfDir ? (zonesOf(zoneTf, -htfDir, price, atr15, 0.8)[0] || null) : null;
+  const swAny = sweepOf(c5) || sweepOf(c1);
+  const ltfSameBias = !!htfDir && ltfDir === htfDir && (!ctx.useSma || smaMicroDir(c5) === htfDir);
+  const choch5Counter = !!htfDir && !!ms5 && ms5.event === 'CHoCH' && ms5.dir === -htfDir;
+
+  let dir = 0, mode = null;
+  if (htfDir && zoneHit && zone.dir === htfDir) { dir = htfDir; mode = 'ZONE'; }
+  else if (htfDir && ltfSameBias) { dir = htfDir; mode = 'TREND'; }
+  else if (htfDir && poiCounter && swAny && swAny.dir === -htfDir && choch5Counter) { dir = -htfDir; mode = 'COUNTER_POI'; }
 
   const swRaw = sweepOf(c5) || sweepOf(c1);
   const sw = swRaw && dir && swRaw.dir === dir ? swRaw : null;
@@ -717,7 +729,8 @@ function runBot(ctx, d, styleName) {
 
   const T = (ok, txt) => `${ok ? '✅' : '⬜'} ${txt}`;
   const checklist = [
-    T(bias.dir !== 0, `Info HTF (H1/M30/M15, tidak memblokir scalp): ${bias.dir === 1 ? 'BULLISH' : bias.dir === -1 ? 'BEARISH' : 'RANGE / NETRAL'}`),
+    T(bias.dir !== 0, `Top-down H1/M30/M15: ${bias.dir === 1 ? 'BULLISH' : bias.dir === -1 ? 'BEARISH' : 'RANGE / NETRAL'}`),
+    T(!!mode, mode ? `Mode: ${mode}${mode === 'COUNTER_POI' ? ' (reversal di POI M15 + sweep + CHoCH M5)' : ''}` : 'Mode: belum ada (top-down belum lengkap)'),
     T(!!ms5, `Struktur M5: ${trendLabel(ms5)}`),
     T(!!(ms1 && ms1.event), `Struktur M1: ${trendLabel(ms1)}`),
     T(!!zone, zone ? `WNS zone ${zone.label} ${F(zone.lower)}–${F(zone.upper)} (${(zone.dist / atr15).toFixed(1)}x ATR)` : (requireHtf ? 'WNS zone HTF: belum ada, gaya Konservatif menunggu zona' : 'WNS zone HTF: belum ada (scalp pakai struktur LTF)')),
@@ -738,10 +751,19 @@ function runBot(ctx, d, styleName) {
   const topDown = facts.bias;
 
   // Sweep/displacement diutamakan, tapi trigger CHoCH M1 / CISD / Breaker sudah cukup (kontinuitas fleksibel)
-  const ready = dir && trigger && confirmed && smaOk && (zoneHit || (ms5 && ms5.trend === dir && (sw || disp || /CHoCH M1|CISD|Breaker/.test(trigger))));
+  // Area mikro: zona M5/M1 searah yang berdekatan dengan harga (wajib untuk LTF)
+  const microZone = mode === 'TREND' ? ([...zonesOf(c5, dir, price, atr5, 1.0), ...zonesOf(c1, dir, price, atr1, 1.0)][0] || null) : null;
+  const slZ = mode === 'ZONE' ? zone : mode === 'COUNTER_POI' ? poiCounter : microZone;
+  const ready = dir && trigger && confirmed && smaOk && (
+    mode === 'ZONE' ||
+    (mode === 'TREND' && microZone && (sw || disp || /CHoCH M1|CISD|Breaker/.test(trigger))) ||
+    (mode === 'COUNTER_POI' && poiCounter && sw && trigger)
+  );
   if (!ready) {
     let why;
-    if (!dir) why = requireHtf ? 'Belum ada zona WNS HTF searah.' : 'Struktur M5 belum searah / HTF belum sejalan.';
+    if (!htfDir) why = 'Top-down H1/M30/M15 netral (range). SOP tidak mengizinkan entry sampai bias jelas.';
+    else if (!dir) why = `Top-down ${htfDir === 1 ? 'BULLISH' : 'BEARISH'}, tapi M5 belum searah dan belum ada POI M15 berlawanan + sweep + CHoCH M5.`;
+    else if (mode === 'TREND' && !microZone) why = `Searah bias ${htfDir === 1 ? 'BULLISH' : 'BEARISH'}, tapi belum ada POI M5/M1 di dekat harga.`;
     else if (!trigger) why = `Struktur ${dir === 1 ? 'bullish' : 'bearish'} sudah terbaca, menunggu trigger close-confirmed di M1.`;
     else if (zone && !zoneHit && requireHtf) why = `Zona WNS ${zone.label} masih ${(zone.dist / atr15).toFixed(1)}x ATR dari harga. Gaya Konservatif menunggu harga masuk zona.`;
     else if (zoneHit && !closeOutside) why = `Harga sudah masuk zona ${zone.label}, tapi belum ada M1 close di luar zona. Saya tunggu konfirmasi, tidak masuk di dalam zona.`;
@@ -762,7 +784,7 @@ function runBot(ctx, d, styleName) {
   const recent = c1.slice(-4);
   let inv = dir === 1 ? Math.min(...recent.map(x => x.l)) : Math.max(...recent.map(x => x.h));
   if (sw) inv = dir === 1 ? Math.min(inv, sw.extreme) : Math.max(inv, sw.extreme);
-  if (zoneHit) inv = dir === 1 ? Math.min(inv, zone.lower) : Math.max(inv, zone.upper);
+  if (slZ) inv = dir === 1 ? Math.min(inv, slZ.lower) : Math.max(inv, slZ.upper);
   const buf = Math.max(2 * pip, 0.1 * atr1);
   const sl0 = dir === 1 ? inv - buf : inv + buf;
   const minRR = /CISD|Breaker/.test(trigger) ? 1.5 : 2.0;
@@ -780,7 +802,7 @@ function runBot(ctx, d, styleName) {
 
   const p = planFrom({
     dir, entry, sl: sl0, orderType, minRR, liq, botTps: true,
-    maxRisk: zoneHit ? BOT_CFG.maxSlAtr15 * atr15 : BOT_CFG.maxSlAtr5 * atr5,
+    maxRisk: Math.min(BOT_CFG.maxSlAtr5 * atr5, BOT_CFG.maxSlPips * pip), // SL maks: 1.2 ATR M5 dan 60 pip
     minRisk: BOT_CFG.minSlAtr1 * atr1, atrRef: atr5 || atr1,
     setup: `SMC/ICT Bot · ${zoneHit ? 'WNS ' + zone.label : 'LTF Scalp'} · ${trigger} · ${entryNote}`,
     zone: zoneHit ? { ...zone, lower: zone.lower, upper: zone.upper, label: zone.label } : null,
