@@ -691,8 +691,8 @@ const toMs = v => {
 function cleanReason(text) {
   if (!text) return 'Setup valid terdeteksi berdasarkan konfluensi struktur SMC/ICT.';
   let clean = String(text).trim();
-  if (clean.length > 320) {
-    clean = clean.substring(0, 315) + '...';
+  if (clean.length > 2000) {
+    clean = clean.substring(0, 1995) + '...';
   }
   return clean;
 }
@@ -2862,7 +2862,7 @@ function showManualStandby(sig) {
   if (ac && !activeId) ac.classList.add('hidden');
   if (sv) {
     sv.classList.remove('hidden');
-    sv.innerHTML = `<div class="text-left bg-darkbg border border-panelborder rounded-lg p-2.5">
+    sv.innerHTML = `<div class="text-left bg-darkbg border border-panelborder rounded-lg p-2.5 max-h-[60vh] overflow-y-auto">
       <p class="text-[9px] font-bold text-emerald-400 mb-1">🤖 AI REASONING · STANDBY</p>
       <p class="text-[10px] font-mono text-gray-300 whitespace-pre-line leading-relaxed">${esc(text)}</p></div>`;
   }
