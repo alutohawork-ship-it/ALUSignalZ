@@ -1,4 +1,4 @@
-// api/generate.js — v147 (SMC manual + bot strict, OCO, counter-trend, TP band manual)
+// api/generate.js — v148 (SMC manual + bot strict, OCO, counter-trend, TP band, AI DeepSeek/GPT)
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import { runBotSma } from '../lib/bot_sma.js';
@@ -14,13 +14,14 @@ const VISION_TIMEOUT_MS = 50000;
 const VISION_DEADLINE_MS = 54000;
 const VISION_MAX_TOKENS = 1800;
 
+// ── AI REASONING (teks saja) ──
 const QWEN_BASE_URL = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/$/, '');
 const QWEN_KEYS = [process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
-const QWEN_MODELS = [...new Set([process.env.QWEN_MODEL || 'qwen-3.8-max', process.env.QWEN_MODEL_2, AI_VISION_MODEL].filter(Boolean))];
-const QWEN_TIMEOUT_MS = 20000;
-const QWEN_DEADLINE_MS = 22000;
-const QWEN_MAX_TOKENS = 900;
-const QWEN_MANUAL_MODEL = process.env.QWEN_MANUAL_MODEL || 'qwen-3.8-max';
+const QWEN_MODELS = [...new Set([process.env.QWEN_MODEL || 'deepseek-v4-flash', process.env.QWEN_MODEL_2 || 'gpt-6-luna', AI_VISION_MODEL].filter(Boolean))];
+const QWEN_TIMEOUT_MS = 25000;
+const QWEN_DEADLINE_MS = 30000;
+const QWEN_MAX_TOKENS = 2000;
+const QWEN_MANUAL_MODEL = process.env.QWEN_MANUAL_MODEL || 'deepseek-v4-flash';
 
 const TL_KEY_NAMES = ['TICKERLAYER_API_KEY', ...Array.from({ length: 19 }, (_, i) => `TICKERLAYER_API_KEY_${i + 1}`)];
 const API_KEYS = TL_KEY_NAMES.map(n => process.env[n] || '');
@@ -180,7 +181,7 @@ function toSignal(plan, ctx, extra) {
     topDown: extra.topDown || null,
     state: isMarket ? 'CONFIRMED' : 'LIMIT_PLACED',
     score: null,
-    reason: '', reasons: { id: '', en: '' }, aiReasoning: false,
+    reason: '', reasons: { id: '', en: '' }, aiReasoning: false, reasonSource: null,
   };
 }
 function standbyOut(facts, standbyReason, checklist, topDown) {
@@ -192,7 +193,7 @@ function standbyOut(facts, standbyReason, checklist, topDown) {
       zone: null, zoneLabel: '', zoneNote: '', chartContext: '',
       checklist: checklist || [], scanSummary: (checklist || []).join('\n'),
       topDown: topDown || null, state: 'STANDBY', score: null,
-      reason: '', reasons: { id: '', en: '' }, aiReasoning: false,
+      reason: '', reasons: { id: '', en: '' }, aiReasoning: false, reasonSource: null,
     },
     facts: { ...facts, status: 'STANDBY', standbyReason },
   };
@@ -230,7 +231,7 @@ async function runDocManual(ctx, d, styleName) {
   const tf = DOC_STYLE_TF[styleName] || DOC_STYLE_TF['Scalping'];
   const facts = {
     mode: 'manual', symbol: ctx.symbol, style: styleName, kz: ctx.kz.name, price: ctx.f(ctx.price),
-    htfTf: tf.htf, zoneTf: tf.zone, trigTf: tf.trig,
+    htfTf: tf.htf, zoneTf: tf.zone, trigTf: tf.trig, dec: ctx.dec,
   };
   const closed = {
     m1: closedOnly(d.m1, TF_MS.m1),
@@ -421,7 +422,7 @@ function runBot(ctx, d) {
   const r = runBotSma(bars, { price: ctx.price, dec: ctx.dec, pip: ctx.pip, symbol: ctx.symbol });
   const F = v => ctx.f(safeNum(v, ctx.price));
   const facts = {
-    mode: 'bot', symbol: ctx.symbol, style: 'Scalping', kz: ctx.kz.name,
+    mode: 'bot', symbol: ctx.symbol, style: 'Scalping', kz: ctx.kz.name, dec: ctx.dec,
     price: F(ctx.price), bias: r.bias || 'NETRAL', dirTxt: r.dirTxt || '-',
     trigger: r.trigger || null, checklist: Array.isArray(r.checklist) ? r.checklist : [],
     sma: r.trendTxt || '-', m1: r.structTxt || '-', zone: null,
@@ -490,18 +491,20 @@ function collectNums(v, out = []) {
   return out;
 }
 
-// Cek angka harga di teks AI: harus ada di data (dibandingkan secara numerik)
+// Cek angka harga di teks AI: harus ada di data, dengan toleransi pembulatan
 function verifyNoHallucinatedPrices(text, facts) {
   try {
     if (!text || typeof text !== 'string') return false;
     const price = Number(facts?.price);
     if (!(price > 0)) return true;
     const allowed = collectNums(facts);
+    const dec = Number.isFinite(facts?.dec) ? facts.dec : 2;
+    const tol = Math.pow(10, -dec) * 0.6;
     for (const t of text.match(NUM_RE) || []) {
       const n = parseNum(t);
       if (!Number.isFinite(n)) continue;
       if (Math.abs(n - price) / price >= 0.05) continue;
-      if (!allowed.some(a => Math.abs(a - n) <= 1e-6 * Math.max(1, Math.abs(n)))) return false;
+      if (!allowed.some(a => Math.abs(a - n) <= tol)) return false;
     }
     return true;
   } catch {
@@ -525,7 +528,8 @@ function parseJsonLoose(text) {
   try { return JSON.parse(s.slice(a, b + 1)); } catch { return null; }
 }
 
-// Mengembalikan { json, error } supaya penyebab kegagalan AI bisa dibaca di log atau debug
+// Mengembalikan { json, error } supaya penyebab kegagalan AI bisa dibaca di log atau debug.
+// Tidak memakai response_format karena beberapa model di gateway menolaknya (HTTP 400).
 async function qwenJson(sys, userObj, maxTokens = QWEN_MAX_TOKENS) {
   if (!QWEN_KEYS.length) return { json: null, error: 'API key AI belum diatur (QWEN_API_KEY / OPENAI_API_KEY)' };
   const user = JSON.stringify(userObj);
@@ -534,7 +538,7 @@ async function qwenJson(sys, userObj, maxTokens = QWEN_MAX_TOKENS) {
   for (const m of QWEN_MODELS) {
     for (const k of QWEN_KEYS.slice(0, 2)) {
       const left = deadline - Date.now();
-      if (left < 3000) return { json: null, error: 'timeout AI' };
+      if (left < 5000) return { json: null, error: `timeout AI (sisa ${left} ms)` };
       try {
         const r = await httpJson(`${QWEN_BASE_URL}/chat/completions`, {
           method: 'POST',
@@ -543,17 +547,21 @@ async function qwenJson(sys, userObj, maxTokens = QWEN_MAX_TOKENS) {
             model: m,
             max_tokens: maxTokens,
             temperature: 0.1,
-            messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
+            messages: [
+              { role: 'system', content: sys + '\nBalas hanya objek JSON tanpa penjelasan dan tanpa markdown.' },
+              { role: 'user', content: user },
+            ],
           }),
         }, Math.min(QWEN_TIMEOUT_MS, left));
         if (!r.ok) {
-          lastErr = `${m} HTTP ${r.status}: ${(r.data?.error?.message || r.text || '').slice(0, 120)}`;
+          lastErr = `${m} HTTP ${r.status}: ${(r.data?.error?.message || r.text || '').slice(0, 160)}`;
           console.warn('qwenJson:', lastErr);
           continue;
         }
-        const parsed = parseJsonLoose(stripThink(extractContent(r.data)));
+        const raw = stripThink(extractContent(r.data));
+        const parsed = parseJsonLoose(raw);
         if (parsed && parsed.id && parsed.en) return { json: parsed, error: '' };
-        lastErr = `${m}: respons bukan JSON {id,en}`;
+        lastErr = `${m}: respons bukan JSON {id,en}. Potongan: ${raw.slice(0, 120)}`;
         console.warn('qwenJson:', lastErr);
       } catch (e) {
         lastErr = `${m}: ${e.message}`;
@@ -585,12 +593,12 @@ function fallbackStory(f, lang) {
         : `I am still waiting for a valid setup on ${f.symbol}. Current bias is ${f.bias}. ${f.standbyReason || ''} ${checkTxt} ${fbWatch(f, false)}`;
     }
     const now = f.orderType === 'MARKET';
-    const tpTxt = f.tpMode && f.tpMode !== 'RR' && f.tpMode !== 'SWING_INTRADAY'
-      ? (id ? ` (TP band ${f.tpMode === 'LOW_RISK' ? '1:1.5/1:2.5/1:4' : '1:1/1:2/1:3'}, risk ${f.riskPips} pip)` : ` (TP band ${f.tpMode === 'LOW_RISK' ? '1:1.5/1:2.5/1:4' : '1:1/1:2/1:3'}, risk ${f.riskPips} pip)`)
+    const bandTxt = f.tpMode && f.tpMode !== 'RR' && f.tpMode !== 'SWING_INTRADAY'
+      ? ` (TP band ${f.tpMode === 'LOW_RISK' ? '1:1.5/1:2.5/1:4' : '1:1/1:2/1:3'}, risk ${f.riskPips} pip)`
       : '';
     return id
-      ? `Setup ${f.signal} valid di ${f.symbol} dengan bias ${f.bias} pada ${fbZone(f, true)} (${f.trigger}). ${now ? `Eksekusi MARKET sekarang di ${f.entry}` : `Pasang pending LIMIT di ${f.entry}`}, SL di ${f.sl}, dan target TP di ${f.tp[0]}, ${f.tp[1]}, serta ${f.tp[2]}${tpTxt}.`
-      : `Valid ${f.signal} setup on ${f.symbol} aligned with ${f.bias} bias at ${fbZone(f, false)} (${f.trigger}). ${now ? `Execute MARKET now at ${f.entry}` : `Place pending LIMIT at ${f.entry}`}, SL at ${f.sl}, and targets at ${f.tp[0]}, ${f.tp[1]}, and ${f.tp[2]}${tpTxt}.`;
+      ? `Setup ${f.signal} valid di ${f.symbol} dengan bias ${f.bias} pada ${fbZone(f, true)} (${f.trigger}). ${now ? `Eksekusi MARKET sekarang di ${f.entry}` : `Pasang pending LIMIT di ${f.entry}`}, SL di ${f.sl}, dan target TP di ${f.tp[0]}, ${f.tp[1]}, serta ${f.tp[2]}${bandTxt}.`
+      : `Valid ${f.signal} setup on ${f.symbol} aligned with ${f.bias} bias at ${fbZone(f, false)} (${f.trigger}). ${now ? `Execute MARKET now at ${f.entry}` : `Place pending LIMIT at ${f.entry}`}, SL at ${f.sl}, and targets at ${f.tp[0]}, ${f.tp[1]}, and ${f.tp[2]}${bandTxt}.`;
   }
   if (f.signal === 'BUY' || f.signal === 'SELL') {
     const now = f.orderType === 'MARKET';
@@ -639,7 +647,7 @@ async function getStory(facts, cacheKey, ttl = BOT_CFG.storyTtlMs) {
     story = { id: fallbackStory(facts, 'id'), en: fallbackStory(facts, 'en'), ai: false, aiError };
   }
   if (cacheKey) {
-    storyCache.set(cacheKey, { t: Date.now(), ttl: story.ai ? ttl : Math.min(ttl, 20000), v: story });
+    storyCache.set(cacheKey, { t: Date.now(), ttl: story.ai ? ttl : Math.min(ttl, 60000), v: story });
     if (storyCache.size > 300) storyCache.delete(storyCache.keys().next().value);
   }
   return story;
@@ -668,7 +676,7 @@ async function aiGateManual(input) {
         method: 'POST',
         headers: { Authorization: `Bearer ${k}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: QWEN_MANUAL_MODEL, max_tokens: 250, temperature: 0,
+          model: QWEN_MANUAL_MODEL, max_tokens: 800, temperature: 0,
           messages: [{ role: 'system', content: SYS_GATE_MANUAL }, { role: 'user', content: JSON.stringify(input) }],
         }),
       }, Math.min(QWEN_TIMEOUT_MS, left));
@@ -789,7 +797,7 @@ function buildVisionSignal(j, style, lang, imgCount) {
     zoneLabel: `${zoneName} ${zLo.toFixed(dec)}–${zHi.toFixed(dec)}`, zoneNote: '',
     topDown: j.topDown ? fix(String(j.topDown)) : null,
     createdAt: now, time: now, ts: now, expiresAt: now + (VISION_EXPIRY_MS[style] || VISION_EXPIRY_MS['Scalping']),
-    source: 'VISION_AI', aiReasoning: true,
+    source: 'VISION_AI', aiReasoning: true, reasonSource: 'AI',
   };
 }
 async function runVisionAnalysis(images, style, lang) {
@@ -883,11 +891,11 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
     out = isAutoBot ? runBot(ctx, data) : await runManual(ctx, data, styleName);
   } catch (e) {
     console.error('engine error:', e);
-    out = standbyOut({ mode: isAutoBot ? 'bot' : 'manual', symbol, style: styleName, status: 'STANDBY' }, `Analisa sementara gagal (${e.message}). Akan dicoba lagi.`, [], null);
+    out = standbyOut({ mode: isAutoBot ? 'bot' : 'manual', symbol, style: styleName, status: 'STANDBY', dec }, `Analisa sementara gagal (${e.message}). Akan dicoba lagi.`, [], null);
   }
 
   if (!out || !out.signal) {
-    out = standbyOut({ mode: isAutoBot ? 'bot' : 'manual', symbol, style: styleName, status: 'STANDBY' }, 'Menunggu data/setup valid.', [], null);
+    out = standbyOut({ mode: isAutoBot ? 'bot' : 'manual', symbol, style: styleName, status: 'STANDBY', dec }, 'Menunggu data/setup valid.', [], null);
   }
 
   if (isAutoBot && out.signal.status !== 'STANDBY') {
@@ -909,7 +917,7 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
     out.signal.nextCloseAt = last ? tsMs(last.t) + TF_MS.m1 : null;
   }
 
-  const f = out.facts || { mode: isAutoBot ? 'bot' : 'manual', symbol, style: styleName, status: out.signal.status };
+  const f = out.facts || { mode: isAutoBot ? 'bot' : 'manual', symbol, style: styleName, status: out.signal.status, dec };
   const cacheKey = isAutoBot
     ? `${symbol}|${styleName}|${f.status}|${f.signal || ''}|${f.trigger || ''}|${f.bias || ''}`
     : `M|${symbol}|${styleName}|${f.status}|${f.signal || ''}|${f.entry || ''}|${String(f.standbyReason || '').slice(0, 60)}`;
@@ -918,6 +926,7 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
     ...out.signal,
     reason: lang === 'en' ? story.en : story.id,
     reasons: { id: story.id, en: story.en },
+    reasonSource: story.ai ? 'AI' : 'RULES',
     aiReasoning: !!story.ai,
     ...(ctx.debug ? { aiError: story.aiError || null } : {}),
   };
