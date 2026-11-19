@@ -1,7 +1,6 @@
-// api/generate.js — v144 (Fix HTTP 500 & Anti-Halusinasi Aman)
+// api/generate.js — v145 (Fix HTTP 500: lazy-load bot_sma, anti-crash)
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
-import { runBotSma } from '../lib/bot_sma.js';
 
 export const config = { maxDuration: 60 };
 
@@ -318,9 +317,10 @@ function validPrevSignal(prev, symbol, styleName, price) {
 }
 
 // ── BOT ENGINE ──
-function runBot(ctx, d) {
+async function runBot(ctx, d) {
+  const { runBotSma } = await import('../lib/bot_sma.js');
   const c1 = closedOnly(d.m1, TF_MS.m1);
-  const r = runBotSma(c1, { price: ctx.price, dec: ctx.dec });
+  const r = runBotSma(c1, { price: ctx.price, dec: ctx.dec }) || { ok: false, reason: 'Bot tidak menghasilkan data.' };
   const F = v => ctx.f(safeNum(v, ctx.price));
   const facts = {
     mode: 'bot', symbol: ctx.symbol, style: 'Scalping', kz: ctx.kz.name,
@@ -722,7 +722,7 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
 
   let out;
   try {
-    out = isAutoBot ? runBot(ctx, data) : await runManual(ctx, data, styleName);
+    out = isAutoBot ? await runBot(ctx, data) : await runManual(ctx, data, styleName);
   } catch (e) {
     console.error('engine error:', e);
     out = standbyOut({ mode: isAutoBot ? 'bot' : 'manual', symbol, style: styleName, status: 'STANDBY' }, `Analisa sementara gagal (${e.message}). Akan dicoba lagi.`, [], null);
