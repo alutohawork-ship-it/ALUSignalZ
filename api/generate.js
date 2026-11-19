@@ -20,8 +20,9 @@ const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
 const OPENAI_BASE_URL = (process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/$/, '');
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const AI_VISION_MODEL = process.env.AI_VISION_MODEL || 'gpt-6-luna';
-const VISION_TIMEOUT_MS = 55000;
-const VISION_MAX_TOKENS = 2600;
+const VISION_TIMEOUT_MS = 50000;
+const VISION_DEADLINE_MS = 54000;   // total budget vision (< maxDuration 60s), termasuk retry
+const VISION_MAX_TOKENS = 1800;
 
 const QWEN_BASE_URL = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/$/, '');
 const QWEN_KEYS = [process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
@@ -840,17 +841,32 @@ async function aiGateManual(input) {
 }
 
 // ── VISION (upload gambar) ──
-const VISION_BASE = `Kamu adalah analis trading institusional spesialis Smart Money Concept (SMC), ICT, Supply & Demand, dan Price Action.
-ATURAN MUTLAK MODE VISION:
-1. User mengunggah 1 hingga 3 gambar chart. Kamu WAJIB menganalisis SETIAP GAMBAR satu per satu secara eksplisit di dalam array "perImageAnalyses" tanpa terkecuali.
-2. Gabungkan seluruh analisa gambar menjadi Top-Down Analysis.
-3. Identifikasi: Market Structure (BOS, CHoCH, HH-HL, LH-LL), Supply/Demand, Order Block, FVG, IFVG, Breaker/Mitigation, Liquidity Sweep (BSL/SSL), CISD + Displacement, posisi harga vs SMA 20.
-4. SL WAJIB logis di balik swing/zona invalidasi di chart.
+const VISION_BASE = `Kamu adalah analis trading spesialis SUPPLY & DEMAND (zona pantulan / bounce zone) dan Price Action.
+STRATEGI UTAMA: HARGA MEMANTUL DARI ZONA.
+- Zona DEMAND (area di mana harga naik tajam meninggalkan base/konsolidasi, atau low swing yang menahan harga) = tempat BUY, harga diharapkan memantul naik.
+- Zona SUPPLY (area di mana harga turun tajam meninggalkan base, atau high swing yang menahan harga) = tempat SELL, harga diharapkan memantul turun.
+- Zona makin kuat jika: meninggalkan zona dengan candle besar (impulsif), belum pernah/jarang disentuh (fresh), ada sweep likuiditas sebelum pantulan, atau ada penolakan (wick panjang / engulfing) di zona.
+- Zona flip: support yang sudah ditembus jadi supply, resistance yang sudah ditembus jadi demand.
 
-Balas HANYA JSON valid:
-{"signal":"BUY|SELL|NONE","orderType":"MARKET|LIMIT","entry":0,"sl":0,"tp1":0,"tp2":0,"tp3":0,"setup":"","confidence":"HIGH|MEDIUM|LOW","risk":"LOW|MEDIUM|HIGH","perImageAnalyses":["Gambar 1: ..."],"reason":"...","topDown":"...","zone":"..."}`;
+ATURAN MUTLAK:
+1. User mengunggah 1 hingga 3 gambar chart. Analisis SETIAP GAMBAR di array "perImageAnalyses" (maks 2 kalimat pendek per gambar: arah tren + zona supply/demand terdekat).
+2. Top-down: tren dari TF tertinggi menentukan arah utama, zona dari TF menengah, entry dari TF terendah.
+3. Pilih SATU zona terbaik: yang paling dekat dengan harga sekarang dan searah tren (demand di uptrend, supply di downtrend). Jika harga di tengah range, ambil zona terdekat di sisi mana pun (pantulan range: BUY di demand bawah, SELL di supply atas).
+4. WAJIB MENGHASILKAN SIGNAL BUY atau SELL. Jawab "NONE" HANYA jika gambar bukan chart atau sama sekali tidak terbaca. Tidak ada jawaban "tunggu", "belum ada setup", atau "area tidak berkualitas". Jika kondisi kurang ideal, tetap beri signal dengan confidence LOW.
+5. Entry: LIMIT di tepi dekat (proximal) atau tengah zona, saat harga belum menyentuh zona. MARKET hanya jika harga sekarang sudah berada di dalam zona dan ada penolakan (wick / engulfing).
+6. SL di balik tepi jauh (distal) zona + buffer kecil. BUY: sl < entry. SELL: sl > entry. TP dihitung otomatis RR 1:1, 1:2, 1:3, isi tp1 = entry ± jarak SL.
+7. Semua angka dibaca dari skala harga di chart. Jangan mengarang level di luar skala yang terlihat.
+8. JAWAB RINGKAS: reason maksimal 3 kalimat (arah, zona pantulan, alasan entry).
+
+Balas HANYA JSON valid tanpa kode blok:
+{"signal":"BUY|SELL","orderType":"MARKET|LIMIT","entry":0,"sl":0,"tp1":0,"tp2":0,"tp3":0,"setup":"","confidence":"HIGH|MEDIUM|LOW","risk":"LOW|MEDIUM|HIGH","perImageAnalyses":["Gambar 1: ..."],"reason":"...","topDown":"...","zone":"Demand 0000-0000"}`;
 function buildVisionSystem(style) {
-  const map = { 'Scalping': 'STYLE: SCALPING AGRESIF. TF: M30+M15+M5+M1+SMA20.', 'Day Trading': 'STYLE: SCALPING KONSERVATIF. TF: H1+M15+M5.', 'Intraday': 'STYLE: INTRADAY. TF: M15+H1+H4.', 'Swing': 'STYLE: SWING. TF: H1+H4+Daily.' };
+  const map = {
+    'Scalping': 'STYLE: SCALPING AGRESIF (SIGNAL WAJIB). TF: M30+M15+M5+M1. Cari zona supply/demand M5/M15 terdekat dengan harga. Entry agresif: MARKET jika harga sudah di zona, atau LIMIT di tepi zona. SL ketat di balik zona. Kamu WAJIB memberi BUY atau SELL, jangan pernah NONE untuk chart yang terbaca.',
+    'Day Trading': 'STYLE: SCALPING Konservatif (SIGNAL WAJIB). TF: H1+M15+M5. Arah dari H1/M15, zona pantulan M5/M15 searah tren, entry LIMIT di tepi atau tengah zona, SL di balik zona. Tetap wajib memberi signal.',
+    'Intraday': 'STYLE: INTRADAY (SIGNAL WAJIB). TF: M15+H1+H4. Arah dari H4/H1, zona pantulan H1/M15, entry LIMIT di zona, SL di balik zona.',
+    'Swing': 'STYLE: SWING (SIGNAL WAJIB). TF: H1+H4+Daily. Arah dari Daily/H4, zona pantulan H4/Daily, entry LIMIT di zona, SL di balik zona.',
+  };
   return `${VISION_BASE}\n\n${map[style] || map['Day Trading']}`;
 }
 function checkVisionSignal(j) {
@@ -858,10 +874,10 @@ function checkVisionSignal(j) {
   const sig = String(j.signal || 'NONE').toUpperCase();
   if (sig === 'NONE') return String(j.reason || 'Tidak ada setup valid pada gambar.');
   if (sig !== 'BUY' && sig !== 'SELL') return 'Sinyal AI tidak dikenali.';
-  const e = Number(j.entry), s = Number(j.sl), t1 = Number(j.tp1);
-  if (![e, s, t1].every(Number.isFinite)) return 'Entry/SL/TP1 tidak lengkap.';
-  const ok = sig === 'BUY' ? (s < e && e < t1) : (s > e && e > t1);
-  return ok ? null : 'Level tidak konsisten dengan arah sinyal.';
+  const e = Number(j.entry), s = Number(j.sl);
+  if (![e, s].every(Number.isFinite) || e <= 0 || s <= 0) return 'Entry/SL tidak lengkap.';
+  const ok = sig === 'BUY' ? s < e : s > e;   // TP dihitung otomatis dari jarak entry-SL
+  return ok ? null : 'Level SL tidak konsisten dengan arah sinyal.';
 }
 function buildVisionSignal(j, style, lang, imgCount) {
   const sig = String(j.signal).toUpperCase();
@@ -883,14 +899,32 @@ async function runVisionAnalysis(images, style, lang) {
     { type: 'text', text: `Jumlah gambar: ${imgs.length}. Style: ${style}. Analisa tiap gambar.` },
     ...imgs.flatMap((url, i) => [{ type: 'text', text: `Gambar ${i + 1}/${imgs.length}:` }, { type: 'image_url', image_url: { url } }]),
   ];
-  const callAI = v => {
-    const body = { model: AI_VISION_MODEL, messages: [{ role: 'system', content: buildVisionSystem(style) }, { role: 'user', content: userContent }] };
+  const deadline = Date.now() + VISION_DEADLINE_MS;
+  const FORCE_TXT = { type: 'text', text: 'PENTING: jawaban NONE tidak diterima. Pilih zona supply/demand terdekat dari harga, lalu berikan BUY atau SELL lengkap dengan entry dan SL dari skala chart. Gunakan confidence LOW jika ragu.' };
+  const callAI = (v, force = false) => {
+    const left = deadline - Date.now();
+    if (left < 8000) throw new Error('Timeout: layanan eksternal lama merespons');
+    const body = { model: AI_VISION_MODEL, messages: [{ role: 'system', content: buildVisionSystem(style) }, { role: 'user', content: force ? [...userContent, FORCE_TXT] : userContent }] };
     if (v === 'new') body.max_completion_tokens = VISION_MAX_TOKENS; else { body.max_tokens = VISION_MAX_TOKENS; body.temperature = 0.15; }
-    return httpJson(`${OPENAI_BASE_URL}/chat/completions`, { method: 'POST', headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, VISION_TIMEOUT_MS);
+    return httpJson(`${OPENAI_BASE_URL}/chat/completions`, { method: 'POST', headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, Math.min(VISION_TIMEOUT_MS, left));
   };
-  let r = await callAI('new'); if (!r.ok && r.status === 400) r = await callAI('legacy');
+  let r;
+  try {
+    r = await callAI('new'); if (!r.ok && r.status === 400) r = await callAI('legacy');
+  } catch (e) {
+    if (/Timeout/i.test(e.message)) return { ok: false, reason: 'AI terlalu lama membaca gambar. Coba lagi, atau kurangi jumlah gambar / ukuran gambar.' };
+    return { ok: false, reason: `AI gagal: ${e.message}` };
+  }
   if (!r.ok) { const detail = r.data?.error?.message || (typeof r.data?.error === 'string' ? r.data.error : '') || r.text.slice(0, 160); return { ok: false, reason: `AI gagal (HTTP ${r.status}): ${detail}` }; }
-  const parsed = parseJsonLoose(extractContent(r.data));
+  let parsed = parseJsonLoose(extractContent(r.data));
+  // AI menjawab NONE / tidak valid: paksa sekali lagi bila waktu masih cukup (signal wajib)
+  const isNone = p => !p || String(p.signal || 'NONE').toUpperCase() === 'NONE' || checkVisionSignal(p);
+  if (isNone(parsed) && deadline - Date.now() > 22000) {
+    try {
+      const r2 = await callAI('new', true);
+      if (r2.ok) { const p2 = parseJsonLoose(extractContent(r2.data)); if (!isNone(p2)) parsed = p2; }
+    } catch (e) { console.warn('vision retry:', e.message); }
+  }
   const bad = checkVisionSignal(parsed); if (bad) return { ok: false, reason: bad };
   return { ok: true, signal: buildVisionSignal(parsed, style, lang, imgs.length) };
 }
