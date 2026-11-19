@@ -436,9 +436,11 @@ function runBot(ctx, d) {
     orderType: r.orderType || 'MARKET', setup: r.setup || 'Bot Signal', zone: null,
   };
   const out = toSignal(plan, ctx, {
-    confidence: 'HIGH', risk: 'MEDIUM',
+    confidence: r.confidence || 'HIGH', risk: r.tier === 'LOOSE' ? 'HIGH' : 'MEDIUM',
     checklist: facts.checklist, scanSummary: facts.checklist.join('\n'), topDown: facts.bias,
   });
+  out.tier = r.tier || 'STRICT';
+  facts.tier = out.tier;
   facts.signal = r.dirTxt;
   facts.role = r.role || 'main';
   facts.orderType = plan.orderType;
