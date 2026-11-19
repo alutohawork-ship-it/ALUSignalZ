@@ -909,4 +909,4 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
   const cacheKey = isAutoBot
     ? `${symbol}|${styleName}|${f.status}|${f.signal || ''}|${f.trigger || ''}|${f.bias || ''}|${f.tier || ''}`
     : `M|${symbol}|${styleName}|${f.status}|${f.signal || ''}|${f.entry || ''}|${String(f.standbyReason || '').slice(0, 60)}`;
-  const story = await getStory(f, cacheKey, isAutoBot ? BOT_CFG.storyTtlMs : MANk
+  const story = await getStory(f, cacheKey, isAutoBot ? BOT_CFG.storyTtlMs : MAN
