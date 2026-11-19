@@ -20,9 +20,8 @@ const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
 const OPENAI_BASE_URL = (process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/$/, '');
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const AI_VISION_MODEL = process.env.AI_VISION_MODEL || 'gpt-6-luna';
-const VISION_TIMEOUT_MS = 50000;
-const VISION_DEADLINE_MS = 54000;   // total budget vision (< maxDuration 60s), termasuk retry
-const VISION_MAX_TOKENS = 1800;
+const VISION_TIMEOUT_MS = 55000;
+const VISION_MAX_TOKENS = 2600;
 
 const QWEN_BASE_URL = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/$/, '');
 const QWEN_KEYS = [process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
@@ -847,7 +846,6 @@ ATURAN MUTLAK MODE VISION:
 2. Gabungkan seluruh analisa gambar menjadi Top-Down Analysis.
 3. Identifikasi: Market Structure (BOS, CHoCH, HH-HL, LH-LL), Supply/Demand, Order Block, FVG, IFVG, Breaker/Mitigation, Liquidity Sweep (BSL/SSL), CISD + Displacement, posisi harga vs SMA 20.
 4. SL WAJIB logis di balik swing/zona invalidasi di chart.
-5. JAWAB RINGKAS: tiap item perImageAnalyses maksimal 2 kalimat pendek, reason maksimal 3 kalimat. Jangan menulis panjang.
 
 Balas HANYA JSON valid:
 {"signal":"BUY|SELL|NONE","orderType":"MARKET|LIMIT","entry":0,"sl":0,"tp1":0,"tp2":0,"tp3":0,"setup":"","confidence":"HIGH|MEDIUM|LOW","risk":"LOW|MEDIUM|HIGH","perImageAnalyses":["Gambar 1: ..."],"reason":"...","topDown":"...","zone":"..."}`;
@@ -885,21 +883,12 @@ async function runVisionAnalysis(images, style, lang) {
     { type: 'text', text: `Jumlah gambar: ${imgs.length}. Style: ${style}. Analisa tiap gambar.` },
     ...imgs.flatMap((url, i) => [{ type: 'text', text: `Gambar ${i + 1}/${imgs.length}:` }, { type: 'image_url', image_url: { url } }]),
   ];
-  const deadline = Date.now() + VISION_DEADLINE_MS;
   const callAI = v => {
-    const left = deadline - Date.now();
-    if (left < 8000) throw new Error('Timeout: layanan eksternal lama merespons');
     const body = { model: AI_VISION_MODEL, messages: [{ role: 'system', content: buildVisionSystem(style) }, { role: 'user', content: userContent }] };
     if (v === 'new') body.max_completion_tokens = VISION_MAX_TOKENS; else { body.max_tokens = VISION_MAX_TOKENS; body.temperature = 0.15; }
-    return httpJson(`${OPENAI_BASE_URL}/chat/completions`, { method: 'POST', headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, Math.min(VISION_TIMEOUT_MS, left));
+    return httpJson(`${OPENAI_BASE_URL}/chat/completions`, { method: 'POST', headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, VISION_TIMEOUT_MS);
   };
-  let r;
-  try {
-    r = await callAI('new'); if (!r.ok && r.status === 400) r = await callAI('legacy');
-  } catch (e) {
-    if (/Timeout/i.test(e.message)) return { ok: false, reason: 'AI terlalu lama membaca gambar. Coba lagi, atau kurangi jumlah gambar / ukuran gambar.' };
-    return { ok: false, reason: `AI gagal: ${e.message}` };
-  }
+  let r = await callAI('new'); if (!r.ok && r.status === 400) r = await callAI('legacy');
   if (!r.ok) { const detail = r.data?.error?.message || (typeof r.data?.error === 'string' ? r.data.error : '') || r.text.slice(0, 160); return { ok: false, reason: `AI gagal (HTTP ${r.status}): ${detail}` }; }
   const parsed = parseJsonLoose(extractContent(r.data));
   const bad = checkVisionSignal(parsed); if (bad) return { ok: false, reason: bad };
