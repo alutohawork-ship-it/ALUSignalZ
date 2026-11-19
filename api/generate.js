@@ -855,11 +855,13 @@ ATURAN MUTLAK:
 4. WAJIB MENGHASILKAN SIGNAL BUY atau SELL. Jawab "NONE" HANYA jika gambar bukan chart atau sama sekali tidak terbaca. Tidak ada jawaban "tunggu", "belum ada setup", atau "area tidak berkualitas". Jika kondisi kurang ideal, tetap beri signal dengan confidence LOW.
 5. Entry: LIMIT di tepi dekat (proximal) atau tengah zona, saat harga belum menyentuh zona. MARKET hanya jika harga sekarang sudah berada di dalam zona dan ada penolakan (wick / engulfing).
 6. SL di balik tepi jauh (distal) zona + buffer kecil. BUY: sl < entry. SELL: sl > entry. TP dihitung otomatis RR 1:1, 1:2, 1:3, isi tp1 = entry ± jarak SL.
-7. Semua angka dibaca dari skala harga di chart. Jangan mengarang level di luar skala yang terlihat.
-8. JAWAB RINGKAS: reason maksimal 3 kalimat (arah, zona pantulan, alasan entry).
+7. PAIR: baca nama instrumen dari judul/ticker chart (contoh XAUUSD, EURUSD, USDJPY, BTCUSD, US30, NAS100, SPX500, GER40, WTI, BRENT). Isi field "pair" dengan kode huruf besar tanpa garis miring. Jika beberapa gambar beda pair, pakai pair pada gambar pertama.
+8. ANGKA: semua level (entry, sl, tp, zoneLow, zoneHigh) WAJIB dibaca dari skala harga sumbu kanan chart pair tersebut dan berada dekat harga sekarang. DILARANG memakai level dari pair lain atau mengarang di luar skala. Tulis dengan jumlah desimal pair: emas/XAUUSD 2, perak 3, forex biasa 5, pair JPY 3, indeks 2, crypto 2 (XRP/ADA/DOT 4, DOGE 5), minyak 2.
+9. zoneLow dan zoneHigh = batas bawah dan atas zona supply/demand yang kamu pilih (angka, urut kecil ke besar).
+10. JAWAB RINGKAS: reason maksimal 3 kalimat dan WAJIB diawali nama pair, contoh "XAUUSD: ...". Sebut arah, zona pantulan, alasan entry, dengan angka persis seperti di field.
 
 Balas HANYA JSON valid tanpa kode blok:
-{"signal":"BUY|SELL","orderType":"MARKET|LIMIT","entry":0,"sl":0,"tp1":0,"tp2":0,"tp3":0,"setup":"","confidence":"HIGH|MEDIUM|LOW","risk":"LOW|MEDIUM|HIGH","perImageAnalyses":["Gambar 1: ..."],"reason":"...","topDown":"...","zone":"Demand 0000-0000"}`;
+{"signal":"BUY|SELL","orderType":"MARKET|LIMIT","entry":0,"sl":0,"tp1":0,"tp2":0,"tp3":0,"setup":"","confidence":"HIGH|MEDIUM|LOW","risk":"LOW|MEDIUM|HIGH","perImageAnalyses":["Gambar 1: ..."],"reason":"XAUUSD: ...","topDown":"...","zone":"Demand","pair":"XAUUSD","zoneLow":0,"zoneHigh":0}`;
 function buildVisionSystem(style) {
   const map = {
     'Scalping': 'STYLE: SCALPING AGRESIF (SIGNAL WAJIB). TF: M30+M15+M5+M1. Cari zona supply/demand M5/M15 terdekat dengan harga. Entry agresif: MARKET jika harga sudah di zona, atau LIMIT di tepi zona. SL ketat di balik zona. Kamu WAJIB memberi BUY atau SELL, jangan pernah NONE untuk chart yang terbaca.',
@@ -869,6 +871,41 @@ function buildVisionSystem(style) {
   };
   return `${VISION_BASE}\n\n${map[style] || map['Day Trading']}`;
 }
+const PAIR_ALIAS = {
+  GOLD: 'XAUUSD', XAUUSDX: 'XAUUSD', SILVER: 'XAGUSD', XAGUSDX: 'XAGUSD',
+  BTCUSDT: 'BTCUSD', ETHUSDT: 'ETHUSD', SOLUSDT: 'SOLUSD', XRPUSDT: 'XRPUSD', BNBUSDT: 'BNBUSD', ADAUSDT: 'ADAUSD', DOGEUSDT: 'DOGEUSD',
+  US500: 'SPX500', SPX: 'SPX500', SP500: 'SPX500', US100: 'NAS100', NDX: 'NAS100', NASDAQ: 'NAS100', NASDAQ100: 'NAS100',
+  DJI: 'US30', DOW: 'US30', DOWJONES: 'US30', DE40: 'GER40', DAX: 'GER40', GER30: 'GER40', DE30: 'GER40',
+  JP225: 'JPN225', NIKKEI: 'JPN225', NI225: 'JPN225', FTSE: 'UK100', FTSE100: 'UK100', CAC40: 'FRA40',
+  USOIL: 'WTI', CRUDEOIL: 'WTI', UKOIL: 'BRENT', BRENTOIL: 'BRENT', DOLLARINDEX: 'DXY', USDX: 'DXY',
+};
+function normPair(raw) {
+  let k = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!k) return null;
+  if (PAIR_ALIAS[k]) k = PAIR_ALIAS[k];
+  return k;
+}
+// desimal & pip sesuai pair; tebakan dari besaran harga hanya jika pair tidak dikenal
+function pairSpec(pair, price) {
+  const sym = normPair(pair);
+  let dec = sym ? DECIMALS[sym] : undefined;
+  if (dec === undefined) {
+    if (sym && /^[A-Z]{6}$/.test(sym)) dec = sym.includes('JPY') ? 3 : 5;
+    else dec = price < 10 ? 5 : price < 500 ? 3 : 2;
+  }
+  const pip = pipSizeOf(sym || '', dec);
+  return { sym: sym || 'VISION', dec, pip };
+}
+// Rapikan angka harga di teks (alasan, analisa, zona) ke desimal pair
+function fmtPriceText(text, entry, dec) {
+  return String(text || '').replace(/\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+/g, tok => {
+    const v = Number(tok.replace(/,/g, ''));
+    if (!Number.isFinite(v) || !(entry > 0)) return tok;
+    return Math.abs(v - entry) / entry < 0.05 ? v.toFixed(dec) : tok;
+  });
+}
+const VISION_EXPIRY_MS = { 'Scalping': 30 * 60e3, 'Day Trading': 2 * 3600e3, 'Intraday': 8 * 3600e3, 'Swing': 4 * 86400e3 };
+
 function checkVisionSignal(j) {
   if (!j || typeof j !== 'object') return 'Respons AI tidak bisa dibaca.';
   const sig = String(j.signal || 'NONE').toUpperCase();
@@ -876,20 +913,52 @@ function checkVisionSignal(j) {
   if (sig !== 'BUY' && sig !== 'SELL') return 'Sinyal AI tidak dikenali.';
   const e = Number(j.entry), s = Number(j.sl);
   if (![e, s].every(Number.isFinite) || e <= 0 || s <= 0) return 'Entry/SL tidak lengkap.';
-  const ok = sig === 'BUY' ? s < e : s > e;   // TP dihitung otomatis dari jarak entry-SL
-  return ok ? null : 'Level SL tidak konsisten dengan arah sinyal.';
+  if (!(sig === 'BUY' ? s < e : s > e)) return 'Level SL tidak konsisten dengan arah sinyal.';
+  if (Math.abs(e - s) / e > 0.05) return 'Level SL tidak sesuai skala harga chart.';   // mis. SL pair lain / salah baca skala
+  return null;
 }
 function buildVisionSignal(j, style, lang, imgCount) {
   const sig = String(j.signal).toUpperCase();
   const isLimit = String(j.orderType || '').toUpperCase() === 'LIMIT';
   const lvl = (v, allowed, dflt) => (allowed.includes(String(v || '').toUpperCase()) ? String(v).toUpperCase() : dflt);
-  const perImg = Array.isArray(j.perImageAnalyses) && j.perImageAnalyses.length ? j.perImageAnalyses.map(item => `• ${String(item).trim()}`).join('\n') : '';
-  const summary = String(j.reason || '').trim() || 'Analisis AI dari chart.';
-  const fullReason = perImg ? `[Analisa ${imgCount} Gambar]\n${perImg}\n\n[Setup]\n${summary}` : summary;
-  const vEntry = Number(j.entry), vSl = Number(j.sl), vDir = sig === 'BUY' ? 1 : -1;
-  const vRisk = Math.abs(vEntry - vSl);
-  const [vTp1, vTp2, vTp3] = [1, 2, 3].map(k => vEntry + vDir * vRisk * k); // RR tetap 1:1, 1:2, 1:3
-  return { signal: sig, orderType: isLimit ? 'LIMIT' : 'MARKET', fill: isLimit ? 'LIMIT' : 'NOW', status: isLimit ? 'PENDING' : 'RUNNING', entry: vEntry, sl: vSl, tp1: vTp1, tp2: vTp2, tp3: vTp3, setup: String(j.setup || `Vision ${style}`), confidence: lvl(j.confidence, ['HIGH', 'MEDIUM', 'LOW'], 'MEDIUM'), risk: lvl(j.risk, ['LOW', 'MEDIUM', 'HIGH'], 'MEDIUM'), reason: fullReason, reasons: { id: fullReason, en: fullReason }, chartContext: '', zone: j.zone ? { label: String(j.zone) } : null, zoneLabel: '', zoneNote: '', topDown: j.topDown ? String(j.topDown) : null, source: 'VISION_AI', aiReasoning: true };
+  const rawEntry = Number(j.entry), rawSl = Number(j.sl);
+  const { sym, dec, pip } = pairSpec(j.pair, rawEntry);
+  const f = v => Number(Number(v).toFixed(dec));
+  const dir = sig === 'BUY' ? 1 : -1;
+  const entry = f(rawEntry);
+  let risk = Math.abs(rawEntry - rawSl);
+  if (!(risk > 0)) risk = pip * 10;
+  const sl = f(entry - dir * risk);
+  const [tp1, tp2, tp3] = [1, 2, 3].map(k => f(entry + dir * risk * k)); // RR tetap 1:1, 1:2, 1:3
+  // zona pantulan: dari AI bila masuk akal, kalau tidak dari entry ke arah SL
+  let zLo = Number(j.zoneLow), zHi = Number(j.zoneHigh);
+  const zOk = Number.isFinite(zLo) && Number.isFinite(zHi) && zLo > 0 && zHi > zLo && Math.abs(zLo - entry) / entry < 0.05 && Math.abs(zHi - entry) / entry < 0.05;
+  if (!zOk) { zLo = Math.min(entry, entry - dir * risk * 0.5); zHi = Math.max(entry, entry - dir * risk * 0.5); }
+  zLo = f(zLo); zHi = f(zHi);
+  const zoneName = String(j.zone || (dir === 1 ? 'Demand' : 'Supply')).replace(/[0-9.,\s\-–]+$/g, '').trim() || (dir === 1 ? 'Demand' : 'Supply');
+  const fix = t => fmtPriceText(t, entry, dec);
+  const perImg = Array.isArray(j.perImageAnalyses) && j.perImageAnalyses.length ? j.perImageAnalyses.map(item => `• ${fix(String(item).trim())}`).join('\n') : '';
+  let summary = fix(String(j.reason || '').trim()) || 'Analisis AI dari chart.';
+  if (!summary.toUpperCase().includes(sym)) summary = `${sym}: ${summary}`;
+  const fullReason = perImg ? `[${sym} · Analisa ${imgCount} Gambar]\n${perImg}\n\n[Setup]\n${summary}` : summary;
+  const now = Date.now();
+  const pips = v => Number((Math.abs(v - entry) / pip).toFixed(1));
+  return {
+    signal: sig, orderType: isLimit ? 'LIMIT' : 'MARKET', fill: isLimit ? 'LIMIT' : 'NOW', status: isLimit ? 'PENDING' : 'RUNNING',
+    state: isLimit ? 'LIMIT_PLACED' : 'CONFIRMED',
+    symbol: sym, pair: sym, dec, pip, style,
+    entry, sl, tp1, tp2, tp3, rr: 3,
+    slPips: pips(sl), tp1Pips: pips(tp1), tp2Pips: pips(tp2), tp3Pips: pips(tp3),
+    setup: fix(String(j.setup || `Vision ${style}`)),
+    confidence: lvl(j.confidence, ['HIGH', 'MEDIUM', 'LOW'], 'MEDIUM'), risk: lvl(j.risk, ['LOW', 'MEDIUM', 'HIGH'], 'MEDIUM'),
+    reason: fullReason, reasons: { id: fullReason, en: fullReason },
+    chartContext: `${sym} ${sig} ${isLimit ? 'LIMIT' : 'MARKET'} ${entry.toFixed(dec)}`,
+    zone: { min: zLo, max: zHi, label: `${zoneName} ${zLo.toFixed(dec)}–${zHi.toFixed(dec)}` },
+    zoneLabel: `${zoneName} ${zLo.toFixed(dec)}–${zHi.toFixed(dec)}`, zoneNote: '',
+    topDown: j.topDown ? fix(String(j.topDown)) : null,
+    createdAt: now, time: now, ts: now, expiresAt: now + (VISION_EXPIRY_MS[style] || VISION_EXPIRY_MS['Day Trading']),
+    source: 'VISION_AI', aiReasoning: true,
+  };
 }
 async function runVisionAnalysis(images, style, lang) {
   if (!OPENAI_API_KEY) return { ok: false, reason: msg(lang, 'noKey') };
@@ -934,7 +1003,8 @@ async function handleVision(body, lang, res) {
   const style = normStyle(body.style || body.mode);
   const out = await runVisionAnalysis(images, style, lang);
   if (!out.ok) return fail(res, out.reason);
-  return res.status(200).json({ ok: true, mode: 'vision', symbol: 'VISION', style, signal: out.signal });
+  const sg = out.signal;
+  return res.status(200).json({ ok: true, mode: 'vision', symbol: sg.symbol, pair: sg.pair, dec: sg.dec, pip: sg.pip, visionSymbol: 'VISION', price: sg.entry, style, signal: sg });
 }
 
 // ── UTAMA ──
