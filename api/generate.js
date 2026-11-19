@@ -1,4 +1,4 @@
-// api/generate.js — v145 (SMC Scalping + AI reasoning fix)
+// api/generate.js — v146 (SMC Scalping manual + bot SMC strict, AI reasoning fix)
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import { runBotSma } from '../lib/bot_sma.js';
@@ -55,6 +55,7 @@ const MANUAL_TF_NEEDED = {
   'Intraday': ['m15', 'h1', 'h4'],
   'Swing':    ['h4', 'd1'],
 };
+const BOT_TF_NEEDED = ['m1', 'm5', 'h1'];
 const MAX_DIST_PIP = { 'Scalping': 150, 'Intraday': 500, 'Swing': 2000 };
 
 const BOT_CFG = { storyTtlMs: 45000 };
@@ -170,7 +171,7 @@ function toSignal(plan, ctx, extra) {
     zoneLabel: plan.zone ? plan.zone.label : '',
     zoneNote: '',
     chartContext: `${plan.setup || 'Signal'}: ${isMarket ? 'NOW' : 'LIMIT'} ${f(plan.entry)}`,
-    rr: Number(safeNum(plan.rr, 3).toFixed(2)),
+    rr: Number(safeNum(plan.rr, 1).toFixed(2)),
     checklist: extra.checklist || [],
     scanSummary: extra.scanSummary || '',
     topDown: extra.topDown || null,
@@ -199,9 +200,9 @@ const DOC_STYLE_LABEL = {
   'Scalping': 'Scalping SMC (H1→M5→M1)', 'Intraday': 'Intraday', 'Swing': 'Swing S&D/OB',
 };
 const DOC_STYLE_TF = {
-  'Scalping': { htf: 'H1 MS', zone: 'OB/FVG/S&D M5 di OTE', trig: 'M1 (CHoCH + konfirmasi)' },
-  'Intraday': { htf: 'H4',    zone: 'VWAP M15',              trig: 'M15' },
-  'Swing':    { htf: 'D1',    zone: 'S&D/OB H4+D1',          trig: 'H4' },
+  'Scalping': { htf: 'H1 MS', zone: 'OB/FVG/S&D M5 dekat OTE', trig: 'M1 (CHoCH + konfirmasi)' },
+  'Intraday': { htf: 'H4',    zone: 'VWAP M15',                trig: 'M15' },
+  'Swing':    { htf: 'D1',    zone: 'S&D/OB H4+D1',            trig: 'H4' },
 };
 
 const gateCache = new Map();
@@ -290,7 +291,7 @@ async function runDocManual(ctx, d, styleName) {
 
   plan.setup = `${plan.setup}${gate.ai ? ' · AI AMBIL' : ''}`;
   const sig = toSignal(plan, ctx, {
-    confidence: z?.fresh ? 'HIGH' : 'MEDIUM', risk: 'MEDIUM',
+    confidence: o.confirmed && z?.fresh ? 'HIGH' : 'MEDIUM', risk: 'MEDIUM',
     checklist: checks, topDown: regimeTxt,
   });
   sig.expiresAt = o.expiryTime;
@@ -303,6 +304,7 @@ async function runDocManual(ctx, d, styleName) {
   facts.tp = [sig.tp1, sig.tp2, sig.tp3];
   facts.rr = Number(o.rr).toFixed(2);
   facts.trigger = o.reason;
+  facts.confirmed = !!o.confirmed;
   if (plan.zone) facts.zone = { label: plan.zone.label, lower: sig.zone.min, upper: sig.zone.max };
   return { signal: sig, facts: { ...facts, status: sig.status } };
 }
@@ -325,10 +327,14 @@ function validPrevSignal(prev, symbol, styleName, price) {
   return prev;
 }
 
-// ── BOT ENGINE ──
+// ── BOT ENGINE (SMC strict, tanpa SMA) ──
 function runBot(ctx, d) {
-  const c1 = closedOnly(d.m1, TF_MS.m1);
-  const r = runBotSma(c1, { price: ctx.price, dec: ctx.dec });
+  const bars = {
+    m1: closedOnly(d.m1, TF_MS.m1),
+    m5: closedOnly(d.m5, TF_MS.m5),
+    h1: closedOnly(d.h1, TF_MS.h1),
+  };
+  const r = runBotSma(bars, { price: ctx.price, dec: ctx.dec, pip: ctx.pip });
   const F = v => ctx.f(safeNum(v, ctx.price));
   const facts = {
     mode: 'bot', symbol: ctx.symbol, style: 'Scalping', kz: ctx.kz.name,
@@ -341,7 +347,7 @@ function runBot(ctx, d) {
   const tpsArr = Array.isArray(r.tps) && r.tps.length >= 3 ? r.tps : [r.entry, r.entry, r.entry];
   const plan = {
     dir: r.dir, entry: safeNum(r.entry, ctx.price), sl: safeNum(r.sl, ctx.price),
-    tps: tpsArr, rr: safeNum(r.rr, 3),
+    tps: tpsArr, rr: safeNum(r.rr, 1.5),
     orderType: r.orderType || 'MARKET', setup: r.setup || 'Bot Signal', zone: null,
   };
   const out = toSignal(plan, ctx, {
@@ -361,18 +367,18 @@ function runBot(ctx, d) {
 // ── AI REASONING ──
 const SYS_MANUAL = `Kamu adalah konsultan analis trading spesialis SMC (Market Structure, Fibonacci OTE, Order Block, FVG, Supply & Demand) yang menjelaskan hasil scan sistem secara faktual dan santai.
 ATURAN MUTLAK ANTI-HALUSINASI:
-1. DILARANG mengarang angka harga yang TIDAK ADA di dalam JSON input. Salin angka persis dari JSON.
+1. DILARANG KERAS mengarang atau mengubah angka harga yang TIDAK ADA di dalam JSON input. Salin angka persis dari JSON.
 2. DILARANG mengubah tipe order (jika orderType = "MARKET" sebut eksekusi sekarang; jika orderType = "LIMIT" sebut pending LIMIT).
-3. Jika status = "RUNNING" atau "PENDING": sebutkan arah (signal), bias H1 (bias), zona POI (zone & trigger), serta angka persis entry, SL, dan TP. Sebutkan juga invalidLevel jika ada.
+3. Jika status = "RUNNING" atau "PENDING": sebutkan arah (signal), bias H1 (bias), zona POI (zone & trigger), serta angka persis entry, SL, dan TP. Sebutkan juga invalidLevel jika ada. Jika confirmed = false, sebutkan bahwa konfirmasi M1 belum ada.
 4. Jika status = "STANDBY": sebutkan alasan menunggu dari standbyReason, checklist yang sudah OK dan yang BELUM, zona yang dipantau dari watch (jika ada), dan syarat dari syarat.
 5. Pakai "saya" atau "kita". JANGAN pakai daftar/bullet atau tanda bintang (*). Tulis 3 sampai 5 kalimat.
 Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}.`;
 
-const SYS_BOT = `Kamu adalah konsultan analis yang melaporkan status Bot Scalper XAUUSD M1 secara faktual dan santai.
-Strategi bot: Mode utama SMA20 + struktur M1 (pullback ke SMA20 dan BOS/CHoCH searah). Jika SMA20 datar, bot memakai mode tambahan Supply & Demand M1 + CHoCH M1.
+const SYS_BOT = `Kamu adalah konsultan analis yang melaporkan status Bot Scalper XAUUSD secara faktual dan santai.
+Strategi bot: SMC ketat. Bias H1, BOS/CHoCH M5, anchor leg, OTE 0.618–0.786, POI minimal 2 dari 3 (OB, FVG, S&D), sentuhan POI, lalu CHoCH M1 dan candle konfirmasi. Bot hanya memberi sinyal MARKET jika semua validasi lolos. Tidak ada indikator SMA.
 ATURAN MUTLAK:
 1. DILARANG KERAS mengarang atau mengubah angka harga yang tidak ada di JSON input.
-2. Jelaskan berdasarkan sma, m1, trigger, checklist, dan standbyReason apakah bot memakai mode utama atau mode tambahan.
+2. Jelaskan validasi yang sudah OK dan yang masih BELUM berdasarkan checklist, serta alasan dari standbyReason jika belum ada sinyal.
 3. Pakai "saya" atau "kita". JANGAN pakai daftar/bullet atau tanda bintang (*). Tulis 3 sampai 5 kalimat.
 Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}.`;
 
@@ -431,7 +437,7 @@ function parseJsonLoose(text) {
   try { return JSON.parse(s.slice(a, b + 1)); } catch { return null; }
 }
 
-// Mengembalikan { json, error } supaya penyebab kegagalan AI bisa dibaca di log/debug
+// Mengembalikan { json, error } supaya penyebab kegagalan AI bisa dibaca di log atau debug
 async function qwenJson(sys, userObj, maxTokens = QWEN_MAX_TOKENS) {
   if (!QWEN_KEYS.length) return { json: null, error: 'API key AI belum diatur (QWEN_API_KEY / OPENAI_API_KEY)' };
   const user = JSON.stringify(userObj);
@@ -497,12 +503,13 @@ function fallbackStory(f, lang) {
   if (f.signal === 'BUY' || f.signal === 'SELL') {
     const now = f.orderType === 'MARKET';
     return id
-      ? `Sinyal ${f.dirTxt} bot aktif melalui ${f.trigger} dengan struktur ${f.m1}. ${now ? `Eksekusi MARKET di ${f.entry}` : `Pasang LIMIT di ${f.entry}`}, SL di ${f.sl}, dan TP di ${f.tp[0]}, ${f.tp[1]}, ${f.tp[2]}.`
-      : `Bot ${f.dirTxt} signal triggered via ${f.trigger} with ${f.m1} structure. ${now ? `Execute MARKET at ${f.entry}` : `Place LIMIT at ${f.entry}`}, SL at ${f.sl}, and TP at ${f.tp[0]}, ${f.tp[1]}, ${f.tp[2]}.`;
+      ? `Sinyal ${f.dirTxt} bot aktif melalui ${f.trigger}. ${now ? `Eksekusi MARKET di ${f.entry}` : `Pasang LIMIT di ${f.entry}`}, SL di ${f.sl}, dan TP di ${f.tp[0]}, ${f.tp[1]}, ${f.tp[2]}.`
+      : `Bot ${f.dirTxt} signal triggered via ${f.trigger}. ${now ? `Execute MARKET at ${f.entry}` : `Place LIMIT at ${f.entry}`}, SL at ${f.sl}, and TP at ${f.tp[0]}, ${f.tp[1]}, ${f.tp[2]}.`;
   }
+  const checkTxt = (f.checklist || []).slice(0, 3).join(' ');
   return id
-    ? `Bot sedang memantau ${f.symbol} M1. Kondisi tren: ${f.sma || '-'}. Struktur: ${f.m1 || '-'}. ${f.standbyReason || ''}`
-    : `Bot is scanning ${f.symbol} M1. Trend status: ${f.sma || '-'}. Structure: ${f.m1 || '-'}. ${f.standbyReason || ''}`;
+    ? `Bot sedang memantau ${f.symbol} M1. Status: ${f.m1 || '-'}. ${f.standbyReason || ''} ${checkTxt}`
+    : `Bot is scanning ${f.symbol} M1. Status: ${f.m1 || '-'}. ${f.standbyReason || ''} ${checkTxt}`;
 }
 
 const storyCache = new Map();
@@ -528,7 +535,7 @@ async function getStory(facts, cacheKey, ttl = BOT_CFG.storyTtlMs) {
     story = { id: fallbackStory(facts, 'id'), en: fallbackStory(facts, 'en'), ai: false, aiError };
   }
   if (cacheKey) {
-    // Jawaban AI disimpan sesuai ttl; fallback disimpan singkat supaya AI dicoba lagi
+    // Jawaban AI disimpan sesuai ttl. Fallback disimpan singkat supaya AI dicoba lagi.
     storyCache.set(cacheKey, { t: Date.now(), ttl: story.ai ? ttl : Math.min(ttl, 20000), v: story });
     if (storyCache.size > 300) storyCache.delete(storyCache.keys().next().value);
   }
@@ -745,7 +752,7 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
   const price = Number(body.price ?? body.livePrice ?? body.currentPrice ?? 0);
   if (!(price > 0)) return fail(res, msg(lang, 'noPrice'));
 
-  const rrChoice = [1, 1.5, 2].includes(Number(body.rr)) ? Number(body.rr) : 1.5;
+  const rrChoice = [0.5, 1, 1.5, 2].includes(Number(body.rr)) ? Number(body.rr) : 1;
   const dec = DECIMALS[symbol] ?? 2;
   const ctx = {
     symbol, lang, dec, price, pip: pipSizeOf(symbol, dec), gold: isGold(symbol),
@@ -755,7 +762,7 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
 
   const candleMap = {};
   for (const tf of ['m1', 'm5', 'm15', 'm30', 'h1', 'h4', 'd1']) candleMap[tf] = clientCandles(body, tf);
-  const need = isAutoBot ? ['m1'] : manualTfs(styleName);
+  const need = isAutoBot ? BOT_TF_NEEDED : manualTfs(styleName);
   try {
     for (const tf of need) {
       if (candleMap[tf] && candleMap[tf].length >= (MIN_BARS[tf] || 25)) continue;
