@@ -22,6 +22,8 @@ const QWEN_MODELS = [...new Set([process.env.QWEN_MODEL || 'qwen-3.8-max', proce
 const QWEN_TIMEOUT_MS = 20000;
 const QWEN_DEADLINE_MS = 22000;   // total budget agar tidak melewati maxDuration Vercel
 const QWEN_MAX_TOKENS = 1000;
+const QWEN_MANUAL_MODEL = process.env.QWEN_MANUAL_MODEL || 'qwen-3.8-max'; // manual: keputusan AI
+// Vision memakai AI_VISION_MODEL (default gpt-6-luna). Bot tidak memakai AI untuk keputusan.
 
 const TL_KEY_NAMES = ['TICKERLAYER_API_KEY', ...Array.from({ length: 19 }, (_, i) => `TICKERLAYER_API_KEY_${i + 1}`)];
 const API_KEYS = TL_KEY_NAMES.map(n => process.env[n] || '');
@@ -515,7 +517,7 @@ const DOC_STYLE_TF = {
   'Swing':       { htf: 'D1',  zone: 'H4/D1',      trig: 'H4' },
 };
 
-function runDocManual(ctx, d, styleName) {
+async function runDocManual(ctx, d, styleName) {
   const tf = DOC_STYLE_TF[styleName] || DOC_STYLE_TF['Scalping'];
   const facts = {
     mode: 'manual', symbol: ctx.symbol, style: styleName, kz: ctx.kz.name, price: ctx.f(ctx.price),
@@ -541,6 +543,31 @@ function runDocManual(ctx, d, styleName) {
     setup: `Manual · ${DOC_STYLE_LABEL[styleName] || styleName} · ${o.reason}`,
     zone: z ? { lower: z.bottom, upper: z.top, label: `${z.timeframe} ${z.type}`, mid: (z.top + z.bottom) / 2 } : null,
   };
+  // Gate AI (Qwen): aturan sudah membuat kandidat, AI hanya memutuskan AMBIL / TUNGGU
+  const c5last = closedOnly(d.m5, TF_MS.m5).slice(-1)[0];
+  const gate = await aiGateManual({
+    gaya: styleName,
+    simbol: ctx.symbol,
+    arah_setup: dir === 1 ? 'BUY' : 'SELL',
+    tipe_order: 'LIMIT',
+    arah_htf: facts.bias,
+    regime_htf: out.regime || 'neutral',
+    alasan_aturan: o.reason,
+    zona: z ? { jenis: `${z.timeframe} ${z.type}`, bawah: ctx.f(z.bottom), atas: ctx.f(z.top), fresh: !!z.fresh } : null,
+    entry: ctx.f(o.entryPrice),
+    harga_sekarang: ctx.f(ctx.price),
+    jarak_entry_pip: Math.round(Math.abs(ctx.price - o.entryPrice) / ctx.pip),
+    arah_candle_terakhir: c5last ? (c5last.c > c5last.o ? 'BULLISH' : c5last.c < c5last.o ? 'BEARISH' : 'DOJI') : null,
+    kill_zone_aktif: !!ctx.kz.active,
+    kill_zone: ctx.kz.name,
+  });
+  if (gate.keputusan !== 'AMBIL') {
+    const why = `AI (Qwen) TUNGGU: ${gate.alasan}`;
+    facts.standbyReason = why;
+    facts.gateDecision = 'TUNGGU';
+    return standbyOut(facts, why, [], regimeTxt);
+  }
+  plan.setup = `${plan.setup} · AI AMBIL`;
   const sig = toSignal(plan, ctx, { confidence: 'MEDIUM', risk: 'MEDIUM', topDown: regimeTxt });
   sig.expiresAt = o.expiryTime;
   facts.signal = dir === 1 ? 'BUY' : 'SELL';
@@ -552,7 +579,7 @@ function runDocManual(ctx, d, styleName) {
   return { signal: sig, facts: { ...facts, status: 'PENDING' } };
 }
 
-function runManual(ctx, d, styleName) {
+async function runManual(ctx, d, styleName) {
   if (['Scalping', 'Day Trading', 'Intraday', 'Swing'].includes(styleName)) return runDocManual(ctx, d, styleName);
   const cfg = MANUAL_STYLES[styleName] || MANUAL_STYLES['Day Trading'];
   const C = tf => closedOnly(d[tf], TF_MS[tf]);
@@ -850,6 +877,55 @@ async function getStory(facts, cacheKey) {
   return story;
 }
 
+// ── GATE AI MANUAL (Qwen 3.8 max): hanya memutuskan AMBIL / TUNGGU ──
+const SYS_GATE_MANUAL = `Kamu adalah filter keputusan untuk setup MANUAL XAUUSD. Kamu TIDAK membuat setup baru dan TIDAK mengubah entry, SL, atau TP.
+Tugasmu hanya memutuskan: AMBIL atau TUNGGU untuk kandidat setup yang diberikan.
+
+ATURAN WAJIB:
+1. Gunakan HANYA data dari input. Jangan menambah angka, zona, atau indikator yang tidak ada di input.
+2. Field null atau tidak jelas berarti TUNGGU.
+3. AMBIL hanya jika SEMUA kondisi ini terpenuhi:
+   - arah_setup sejalan dengan arah_htf
+   - regime_htf bukan "choppy"
+   - alasan_aturan tidak kosong
+   - jika zona tidak null: zona.fresh = true DAN jarak_entry_pip <= 150
+   - arah_candle_terakhir (candle M5 terakhir) sejalan dengan arah_setup, atau tidak berlawanan kuat
+   - kill zone aktif, ATAU alasan_aturan sudah memuat konfirmasi (zona atau trigger)
+4. Jika ada satu syarat yang tidak terpenuhi, keputusannya TUNGGU.
+5. Jika ragu, pilih TUNGGU.
+6. Alasan maksimal 200 karakter, Bahasa Indonesia, dan sebut field yang menjadi dasar keputusan.
+
+FORMAT OUTPUT (hanya JSON, tanpa teks lain, tanpa markdown):
+{"keputusan":"AMBIL" atau "TUNGGU","alasan":"..."}`;
+
+async function aiGateManual(input) {
+  const fallback = { keputusan: 'TUNGGU', alasan: 'AI tidak memberi jawaban valid', ai: false };
+  if (!QWEN_KEYS.length) return fallback;
+  const deadline = Date.now() + QWEN_DEADLINE_MS;
+  for (const k of QWEN_KEYS.slice(0, 2)) {
+    const left = deadline - Date.now();
+    if (left < 3000) return fallback;
+    try {
+      const r = await httpJson(`${QWEN_BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${k}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: QWEN_MANUAL_MODEL, max_tokens: 300, temperature: 0,
+          messages: [{ role: 'system', content: SYS_GATE_MANUAL }, { role: 'user', content: JSON.stringify(input) }],
+        }),
+      }, Math.min(QWEN_TIMEOUT_MS, left));
+      if (!r.ok) { console.warn(`aiGateManual HTTP ${r.status}`); continue; }
+      const raw = extractContent(r.data).replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+      const parsed = parseJsonLoose(raw);
+      if (parsed && ['AMBIL', 'TUNGGU'].includes(parsed.keputusan)) {
+        return { keputusan: parsed.keputusan, alasan: String(parsed.alasan || '').slice(0, 200), ai: true };
+      }
+      console.warn('aiGateManual: JSON tidak valid');
+    } catch (e) { console.warn('aiGateManual:', e.message); }
+  }
+  return fallback;
+}
+
 // ── VISION (upload gambar) ──
 const VISION_BASE = `Kamu adalah analis trading institusional spesialis Smart Money Concept (SMC), ICT, Supply & Demand, dan Price Action.
 ATURAN MUTLAK MODE VISION:
@@ -959,7 +1035,7 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
 
   let out;
   try {
-    out = isAutoBot ? runBot(ctx, data, styleName) : runManual(ctx, data, styleName);
+    out = isAutoBot ? runBot(ctx, data, styleName) : await runManual(ctx, data, styleName);
   } catch (e) {
     console.error('engine error:', e);
     out = standbyOut({ mode: isAutoBot ? 'bot' : 'manual', symbol, status: 'STANDBY' }, `Analisa sementara gagal (${e.message}). Akan dicoba lagi.`, [], null);
