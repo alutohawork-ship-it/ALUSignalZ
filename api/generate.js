@@ -1,4 +1,4 @@
-// api/generate.js — v162 (simpleZonePlan M5 refine M1 + scalpStructPlan M1/M5 + smc_flex + pullbackPlan + scalpWatch + no old fallback on Scalping + standby cache fix + bars.live guard + prevSignal age/dist guard + bot M15/M5/M1 + XAUUSD dist override + standby checklist to AI)
+// api/generate.js — v163 (ONLY three candle: bot_3candle; engine SMC/EA tidak dipanggil) (simpleZonePlan M5 refine M1 + scalpStructPlan M1/M5 + smc_flex + pullbackPlan + scalpWatch + no old fallback on Scalping + standby cache fix + bars.live guard + prevSignal age/dist guard + bot M15/M5/M1 + XAUUSD dist override + standby checklist to AI)
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import {
@@ -8,7 +8,7 @@ import {
   simpleZonePlan,
   scalpWatch,
 } from '../lib/smc_flex.js';
-import { runBotSma as runBotFlex } from '../lib/bot_ea.js';
+import { runBotSma as runBotFlex } from '../lib/bot_3candle.js';
 
 export const config = { maxDuration: 60 };
 
@@ -481,7 +481,6 @@ function runBot(ctx, d) {
   const r = runBotFlex(bars, { price: ctx.price, dec: ctx.dec, pip: ctx.pip, symbol: ctx.symbol, prevCandleT: ctx.prevCandleT ?? null });
   const F = v => ctx.f(safeNum(v, ctx.price));
 
-  const watch = scalpWatch({ m1: bars.m1, m5: bars.m5 }, { price: ctx.price, pip: ctx.pip, dec: ctx.dec, symbol: ctx.symbol });
 
   const facts = {
     mode: 'bot', symbol: ctx.symbol, style: 'Scalping', kz: ctx.kz.name, dec: ctx.dec,
@@ -1052,7 +1051,7 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
   let out;
   try {
     ctx.prevCandleT = Number.isFinite(Number(body.prevSignal?.candleT)) ? Number(body.prevSignal.candleT) : null;
-    out = isAutoBot ? runBot(ctx, data) : await runManual(ctx, data, styleName);
+    out = runBot(ctx, data); // satu-satunya engine: pola three candle
   } catch (e) {
     console.error('engine error:', e);
     out = standbyOut({ mode: isAutoBot ? 'bot' : 'manual', symbol, style: styleName, status: 'STANDBY', dec }, `Analisa sementara gagal (${e.message}). Akan dicoba lagi.`, [], null);
