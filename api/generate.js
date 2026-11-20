@@ -1,4 +1,4 @@
-// api/generate.js — v165 (BOT = three candle, gaya 'scalperbot' terpisah dari MANUAL 'Scalping') (simpleZonePlan M5 refine M1 + scalpStructPlan M1/M5 + smc_flex + pullbackPlan + scalpWatch + no old fallback on Scalping + standby cache fix + bars.live guard + prevSignal age/dist guard + bot M15/M5/M1 + XAUUSD dist override + standby checklist to AI)
+// api/generate.js — v166 (batas jarak Scalping XAUUSD 50 pip; BOT = three candle, gaya 'scalperbot' terpisah dari MANUAL 'Scalping') (simpleZonePlan M5 refine M1 + scalpStructPlan M1/M5 + smc_flex + pullbackPlan + scalpWatch + no old fallback on Scalping + standby cache fix + bars.live guard + prevSignal age/dist guard + bot M15/M5/M1 + XAUUSD dist override + standby checklist to AI)
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import {
@@ -78,6 +78,12 @@ const MANUAL_TF_NEEDED = {
 const BOT_TF_NEEDED = ['m1', 'm5', 'm15'];
 const MAX_DIST_PIP = { 'Scalping': 150, 'Intraday': 500, 'Swing': 2000 };
 const MAX_DIST_OVERRIDE = { BTCUSD: 800, XAUUSD: 1000 };
+// Scalping XAUUSD: entry (LIMIT/zona) maksimal 50 pip dari harga. Sinyal yang lebih jauh dianggap tertinggal.
+const MAX_DIST_SCALP_GOLD_PIP = 50;
+function maxDistFor(symbol, styleName) {
+  if (styleName === 'Scalping' && symbol === 'XAUUSD') return MAX_DIST_SCALP_GOLD_PIP;
+  return MAX_DIST_OVERRIDE[symbol] ?? MAX_DIST_PIP[styleName] ?? 150;
+}
 
 const BOT_CFG = {
   storyTtlMs: 15000, storyTtlBotMs: 5 * 60e3, signalTtlMs: 15 * 60e3,
@@ -341,7 +347,7 @@ async function runDocManual(ctx, d, styleName) {
   const arahHtf = out.regime === 'trending_up' ? 'BUY' : out.regime === 'trending_down' ? 'SELL' : 'NETRAL';
   const refPx = closed.m1.length ? closed.m1[closed.m1.length - 1].c : ctx.price;
   const jarakPip = Math.round(Math.abs(refPx - o.entryPrice) / ctx.pip);
-  const maxDist = MAX_DIST_OVERRIDE[ctx.symbol] ?? MAX_DIST_PIP[styleName] ?? 150;
+  const maxDist = maxDistFor(ctx.symbol, styleName);
   let gate;
 
   if (styleName === 'Scalping') {
@@ -458,7 +464,7 @@ function validPrevSignal(prev, symbol, styleName, price, pip) {
   if (prev.symbol !== symbol || prev.style !== styleName) return null;
   const exp = Number(prev.expiresAt);
   if (!Number.isFinite(exp) || Date.now() > exp) return null;
-  const maxDist = MAX_DIST_OVERRIDE[symbol] ?? MAX_DIST_PIP[styleName] ?? 150;
+  const maxDist = maxDistFor(symbol, styleName);
   if (prev.status === 'PENDING' && Math.abs(Number(prev.entry) - price) > maxDist * pip) return null;
 
   if (Array.isArray(prev.oco?.legs) && prev.oco.legs.length) return resolveOcoFill(prev, price);
