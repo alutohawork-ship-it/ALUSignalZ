@@ -26,9 +26,19 @@ const QWEN_KEYS = [process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process
 const QWEN_MODELS = [...new Set([process.env.QWEN_MODEL || 'deepseek-v4-flash', process.env.QWEN_MODEL_2 || 'gpt-6-luna', AI_VISION_MODEL].filter(Boolean))];
 const QWEN_TIMEOUT_MS = 25000;
 const QWEN_DEADLINE_MS = 30000;
-const QWEN_MANUAL_DEADLINE_MS = 12000;
+const QWEN_MANUAL_DEADLINE_MS = Number(process.env.QWEN_MANUAL_DEADLINE_MS) > 0 ? Number(process.env.QWEN_MANUAL_DEADLINE_MS) : 12000;
 const QWEN_MAX_TOKENS = 3000;
 const QWEN_MANUAL_MODEL = process.env.QWEN_MANUAL_MODEL || 'deepseek-v4-flash';
+// Pemisahan AI manual vs bot (opsional, via environment variable):
+//   QWEN_MANUAL_API_KEY  : key khusus manual (dicoba lebih dulu, key lama jadi cadangan)
+//   QWEN_MANUAL_MODEL    : model khusus manual (teks cerita + gate). QWEN_MANUAL_MODELS: daftar dipisah koma.
+//   QWEN_BOT_MODELS      : daftar model khusus bot, dipisah koma
+const envList = v => String(v || '').split(',').map(s => s.trim()).filter(Boolean);
+const QWEN_MANUAL_KEYS = [...new Set([process.env.QWEN_MANUAL_API_KEY, ...QWEN_KEYS].filter(Boolean))];
+const QWEN_MANUAL_MODELS = envList(process.env.QWEN_MANUAL_MODELS).length
+  ? envList(process.env.QWEN_MANUAL_MODELS)
+  : (process.env.QWEN_MANUAL_MODEL ? [process.env.QWEN_MANUAL_MODEL] : QWEN_MODELS);
+const QWEN_BOT_MODELS = envList(process.env.QWEN_BOT_MODELS).length ? envList(process.env.QWEN_BOT_MODELS) : QWEN_MODELS;
 
 const TL_KEY_NAMES = ['TICKERLAYER_API_KEY', ...Array.from({ length: 19 }, (_, i) => `TICKERLAYER_API_KEY_${i + 1}`)];
 const API_KEYS = TL_KEY_NAMES.map(n => process.env[n] || '');
@@ -596,13 +606,13 @@ function parseJsonLoose(text) {
   try { return JSON.parse(s.slice(a, b + 1)); } catch { return null; }
 }
 
-async function qwenJson(sys, userObj, maxTokens = QWEN_MAX_TOKENS, deadlineMs = QWEN_DEADLINE_MS) {
-  if (!QWEN_KEYS.length) return { json: null, error: 'API key AI belum diatur (QWEN_API_KEY / OPENAI_API_KEY)' };
+async function qwenJson(sys, userObj, maxTokens = QWEN_MAX_TOKENS, deadlineMs = QWEN_DEADLINE_MS, models = QWEN_MODELS, keys = QWEN_KEYS) {
+  if (!keys.length) return { json: null, error: 'API key AI belum diatur (QWEN_API_KEY / OPENAI_API_KEY)' };
   const user = JSON.stringify(userObj);
   const deadline = Date.now() + deadlineMs;
   let lastErr = 'semua model gagal';
-  for (const m of QWEN_MODELS) {
-    for (const k of QWEN_KEYS.slice(0, 2)) {
+  for (const m of models) {
+    for (const k of keys.slice(0, 2)) {
       const left = deadline - Date.now();
       if (left < 2500) return { json: null, error: `timeout AI (sisa ${left} ms)` };
       try {
@@ -706,7 +716,12 @@ async function getStory(facts, cacheKey, ttl = BOT_CFG.storyTtlMs) {
   let story = null, aiError = '';
   try {
     const deadlineMs = facts.mode === 'manual' ? QWEN_MANUAL_DEADLINE_MS : QWEN_DEADLINE_MS;
-    const { json, error } = await qwenJson(facts.mode === 'bot' ? SYS_BOT_EA : SYS_MANUAL, facts, QWEN_MAX_TOKENS, deadlineMs);
+    const isBotStory = facts.mode === 'bot';
+    const { json, error } = await qwenJson(
+      isBotStory ? SYS_BOT_EA : SYS_MANUAL, facts, QWEN_MAX_TOKENS, deadlineMs,
+      isBotStory ? QWEN_BOT_MODELS : QWEN_MANUAL_MODELS,
+      isBotStory ? QWEN_KEYS : QWEN_MANUAL_KEYS,
+    );
     if (!json) aiError = error || 'AI tidak memberi jawaban';
     else if (!isUsableStory(json.id, facts) || !isUsableStory(json.en, facts)) {
       aiError = 'jawaban AI terlalu pendek atau hanya nama simbol';
@@ -752,9 +767,9 @@ FORMAT OUTPUT (hanya JSON, tanpa markdown):
 
 async function aiGateManual(input) {
   const fallback = { keputusan: 'AMBIL', alasan: 'Sesuai validasi aturan SMC', ai: false };
-  if (!QWEN_KEYS.length) return fallback;
+  if (!QWEN_MANUAL_KEYS.length) return fallback;
   const deadline = Date.now() + QWEN_MANUAL_DEADLINE_MS;
-  for (const k of QWEN_KEYS.slice(0, 2)) {
+  for (const k of QWEN_MANUAL_KEYS.slice(0, 2)) {
     const left = deadline - Date.now();
     if (left < 1500) return fallback;
     try {
