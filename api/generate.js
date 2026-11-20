@@ -1,7 +1,7 @@
-// api/generate.js — v150 (SMC manual + smc_flex + bot 3-tier, OCO, bounce, TP band, AI DeepSeek/GPT storytelling)
+// api/generate.js — v151 (SMC manual + smc_flex + pullbackPlan + bot 3-tier, OCO, bounce, TP band, AI DeepSeek/GPT storytelling)
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
-import { flexScalpPlan, runBotSma as runBotFlex } from '../lib/smc_flex.js';
+import { flexScalpPlan, pullbackPlan, runBotSma as runBotFlex } from '../lib/smc_flex.js';
 
 export const config = { maxDuration: 60 };
 
@@ -258,15 +258,21 @@ async function runDocManual(ctx, d, styleName) {
   facts.syarat = SYARAT_MASUK[styleName] || null;
 
   const barsClosed = { m1: closed.m1, m5: closed.m5, m15: closed.m15, h1: closed.h1 };
-  let out = styleName === 'Scalping'
-    ? flexScalpPlan(barsClosed, { price: ctx.price, dec: ctx.dec, pip: ctx.pip, now: Date.now(), symbol: ctx.symbol })
-    : { ok: false, checks: [] };
+  let out = { ok: false, checks: [] };
+  if (styleName === 'Scalping') {
+    const pctx = { price: ctx.price, dec: ctx.dec, pip: ctx.pip, now: Date.now(), symbol: ctx.symbol };
+    out = flexScalpPlan(barsClosed, pctx);
+    if (!out.ok) {
+      const pb = pullbackPlan(barsClosed, pctx);
+      out = pb.ok ? pb : { ...out, checks: [...(out.checks || []), ...(pb.checks || [])] };
+    }
+  }
   if (!out.ok) {
-    const flexChecks = out.checks || [];
+    const prevChecks = out.checks || [];
     out = generateManualPlan({
       ...closed, tickSize: 10 ** -ctx.dec, price: ctx.price, pip: ctx.pip, rr: ctx.rr, symbol: ctx.symbol,
     }, styleName);
-    out.checks = [...flexChecks, ...(out.checks || [])];
+    out.checks = [...prevChecks, ...(out.checks || [])];
   }
 
   const regimeTxt = (out.regime ? out.regime.replace('_', ' ') : 'netral') + (out.regimeSrc ? ` · ${out.regimeSrc}` : '');
@@ -491,7 +497,7 @@ Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}.`;
 
 const SYS_BOT = `Kamu adalah mentor trading senior spesialis SMC (Market Structure, Order Block, FVG, Supply & Demand) yang sedang menjelaskan analisa bot scalper ke muridnya dengan gaya bercerita (story telling) yang santai, dinamis, dan mengalir.
 ATURAN MUTLAK:
-1. DILARANG KERAS mengarang atau mengubah angka harga yang tidak ada di JSON input. Salin angka persis dari JSON.
+1. DILARANG KERAS mengarang atau mengubah angka harga yang TIDAK ADA di dalam JSON input. Salin angka persis dari JSON.
 2. JANGAN gunakan bullet points, daftar angka, atau tanda bintang (*). Tulis dalam bentuk paragraf utuh yang mengalir (minimal 5-7 kalimat).
 3. Buka cerita dengan kondisi HTF (H1/H4) berdasarkan field "bias" dan "htf". Sebutkan time framenya, apakah sedang tren naik, turun, atau ranging. Apakah terjadi BOS, MSS, atau CHoCH?
 4. Lanjut ke M5/M1 berdasarkan field "checklist" dan "m1": Jelaskan rencana scalping-nya. Apakah bot menunggu harga retracement ke area POI utama, ke area Fibonacci OTE, atau ke Supply/Demand utama? Jika ada field "watch", sebutkan zona Supply/Demand yang sedang dipantau beserta harga batas bawah dan atasnya.
