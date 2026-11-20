@@ -540,6 +540,7 @@ const LIVE_KEY = 'aluLive_v1';
 const K = { type: 'alu_session_type', email: 'alu_user_email', admin: 'alu_admin_code' };
 const JSON_H = { 'Content-Type': 'application/json' };
 const HISTORY_MS = 600000, STALE_MS = 30000, CHART_GUT = 80, CH_PAD = 4;
+const LIVE_FOCUS_N = 60;
 const TFS = [1, 5, 15, 30, 60, 240, 1440];
 const HL_TF = [[1, 'M1'], [5, 'M5'], [15, 'M15'], [60, 'H1'], [240, 'H4'], [1440, 'D1']];
 const TF_MIN = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240, '1d': 1440 };
@@ -2403,7 +2404,9 @@ function drawBotMap(cv, cx, t, k) {
     return;
   }
 
-  const { vis, slot, xOfT } = layoutX(rows, plotL, plotR, tfMs);
+  const focus = !!t && t.status !== 'CLOSED' && t.status !== 'PENDING';
+  const viewRows = focus ? rows.slice(-LIVE_FOCUS_N) : rows;
+  const { vis, slot, xOfT } = layoutX(viewRows, plotL, plotR, tfMs);
   const smcData = getSmc(k, iv);
 
   const closes = rows.map(c => c.c);
@@ -2414,7 +2417,8 @@ function drawBotMap(cv, cx, t, k) {
     smaPoints.push({ t: rows[i].t, v: sum / 20 });
   }
 
-  const L = t ? [
+  const showLv = !!t && t.status !== 'CLOSED';
+  const L = showLv ? [
     { label: 'ENTRY', main: true, v: t.entry, c: '#93c5fd', bg: 'rgba(147,197,253,.14)', dash: [] },
     { label: slLabel(t), v: effSL(t), c: '#f87171', bg: 'rgba(248,113,113,.14)', dash: [4, 4], hit: t.result === 'SL' },
     { label: 'TP1', v: t.tp1, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp1 },
@@ -2430,7 +2434,7 @@ function drawBotMap(cv, cx, t, k) {
     if (c.l > hi) hi = c.l;
   });
   if (live != null) { if (live < lo) lo = live; if (live > hi) hi = live; }
-  if (t) L.forEach(l => { if (l.v < lo) lo = l.v; if (l.v > hi) hi = l.v; });
+  if (showLv) L.forEach(l => { if (l.v < lo) lo = l.v; if (l.v > hi) hi = l.v; });
 
   if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
   if (!(hi - lo > 0)) { const dd = Math.abs(hi) * 0.001 || 1; lo -= dd; hi += dd; }
@@ -2524,7 +2528,7 @@ function drawBotMap(cv, cx, t, k) {
     cx.fillRect(x - bodyW / 2, Math.min(yO, yC), bodyW, Math.max(1, Math.abs(yC - yO)));
   }
 
-  if (t) {
+  if (showLv) {
     L.forEach(l => {
       const y = yOf(l.v);
       cx.save();
@@ -2613,11 +2617,14 @@ function drawLiveMap(cv, cx, t, k) {
     return;
   }
 
-  const { vis, slot, xOfT } = layoutX(rows, plotL, plotR, tfMs);
+  const focus = !!t && t.status !== 'CLOSED' && t.status !== 'PENDING';
+  const viewRows = focus ? rows.slice(-LIVE_FOCUS_N) : rows;
+  const { vis, slot, xOfT } = layoutX(viewRows, plotL, plotR, tfMs);
   const smcData = getSmc(k, iv);
 
   const pre = t && t.ocoId ? (t.signal === 'BUY' ? 'B ' : 'S ') : '';
-  const L = t ? [
+  const showLv = !!t && t.status !== 'CLOSED';
+  const L = showLv ? [
     { label: pre + 'ENTRY', main: true, v: t.entry, c: '#93c5fd', bg: 'rgba(147,197,253,.14)', dash: [] },
     { label: pre + slLabel(t), v: effSL(t), c: '#f87171', bg: 'rgba(248,113,113,.14)', dash: [4, 4], hit: t.result === 'SL' },
     { label: pre + 'TP1', v: t.tp1, c: '#34d399', bg: 'rgba(52,211,153,.14)', dash: [4, 4], hit: !!t.hits.tp1 },
@@ -2631,7 +2638,7 @@ function drawLiveMap(cv, cx, t, k) {
     if (c.l < lo) lo = c.l; if (c.l > hi) hi = c.l;
   });
   if (live != null) { if (live < lo) lo = live; if (live > hi) hi = live; }
-  if (t) L.forEach(l => { if (l.v < lo) lo = l.v; if (l.v > hi) hi = l.v; });
+  if (showLv) L.forEach(l => { if (l.v < lo) lo = l.v; if (l.v > hi) hi = l.v; });
 
   if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
   if (!(hi - lo > 0)) { const dd = Math.abs(hi) * 0.001 || 1; lo -= dd; hi += dd; }
@@ -2732,7 +2739,7 @@ function drawLiveMap(cv, cx, t, k) {
     cx.fillRect(x - bodyW / 2, Math.min(yO, yC), bodyW, Math.max(1, Math.abs(yC - yO)));
   }
 
-  if (t) {
+  if (showLv) {
     L.forEach(l => {
       const y = yOf(l.v);
       cx.save();
