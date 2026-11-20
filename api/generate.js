@@ -370,7 +370,7 @@ async function runDocManual(ctx, d, styleName) {
     confidence: o.confirmed && z?.fresh ? 'HIGH' : 'MEDIUM', risk: 'MEDIUM',
     checklist: checks, topDown: regimeTxt,
   });
-  sig.expiresAt = o.expiryTime;
+  sig.expiresAt = Number.isFinite(Number(o.expiryTime)) ? Number(o.expiryTime) : Date.now() + (VISION_EXPIRY_MS[styleName] || 30 * 60e3);
   sig.symbol = ctx.symbol;
   sig.style = styleName;
   sig.role = o.role || 'main';
@@ -443,9 +443,8 @@ function validPrevSignal(prev, symbol, styleName, price, pip) {
   if (prev.symbol !== symbol || prev.style !== styleName) return null;
   const exp = Number(prev.expiresAt);
   if (!Number.isFinite(exp) || Date.now() > exp) return null;
-  const created = Number(prev.createdAt || 0);
-  if (!created || Date.now() - created > 20 * 60e3) return null;
-  if (prev.status === 'PENDING' && Math.abs(Number(prev.entry) - price) > 60 * pip) return null;
+  const maxDist = MAX_DIST_OVERRIDE[symbol] ?? MAX_DIST_PIP[styleName] ?? 150;
+  if (prev.status === 'PENDING' && Math.abs(Number(prev.entry) - price) > maxDist * pip) return null;
 
   if (Array.isArray(prev.oco?.legs) && prev.oco.legs.length) return resolveOcoFill(prev, price);
 
@@ -1007,7 +1006,12 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
   }
 
   const prev = validPrevSignal(body.prevSignal, symbol, styleName, price, ctx.pip);
-  if (prev && (out.signal.status === 'STANDBY' || out.signal.signal !== prev.signal)) {
+  // Bot: sticky hanya saat hasil baru STANDBY/berlawanan arah.
+  // Manual: sinyal lama dikunci selama masih valid (belum kena SL/TP1/invalid/expired), kecuali client kirim forceNew.
+  const keepPrev = prev && (isAutoBot
+    ? (out.signal.status === 'STANDBY' || out.signal.signal !== prev.signal)
+    : !body.forceNew);
+  if (keepPrev) {
     const last = data.m1 && data.m1.length ? data.m1[data.m1.length - 1] : null;
     const nextCloseAt = isAutoBot && last ? tsMs(last.t) + TF_MS.m1 : undefined;
     return res.status(200).json({ ok: true, mode: isAutoBot ? 'bot' : 'candles', symbol, style: styleName, price, signal: { ...prev, sticky: true, nextCloseAt } });
