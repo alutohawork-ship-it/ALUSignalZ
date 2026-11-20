@@ -1,4 +1,4 @@
-// api/generate.js — v163 (ONLY three candle: bot_3candle; engine SMC/EA tidak dipanggil) (simpleZonePlan M5 refine M1 + scalpStructPlan M1/M5 + smc_flex + pullbackPlan + scalpWatch + no old fallback on Scalping + standby cache fix + bars.live guard + prevSignal age/dist guard + bot M15/M5/M1 + XAUUSD dist override + standby checklist to AI)
+// api/generate.js — v165 (BOT = three candle, gaya 'scalperbot' terpisah dari MANUAL 'Scalping') (simpleZonePlan M5 refine M1 + scalpStructPlan M1/M5 + smc_flex + pullbackPlan + scalpWatch + no old fallback on Scalping + standby cache fix + bars.live guard + prevSignal age/dist guard + bot M15/M5/M1 + XAUUSD dist override + standby checklist to AI)
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import {
@@ -472,6 +472,7 @@ function validPrevSignal(prev, symbol, styleName, price, pip) {
 }
 
 // ── BOT ENGINE ──
+const BOT_STYLE = 'scalperbot';   // gaya terpisah dari manual 'Scalping' agar sinyal tidak saling bentrok
 function runBot(ctx, d) {
   const m1 = closedOnly(d.m1, TF_MS.m1);
   const m5 = closedOnly(d.m5, TF_MS.m5);
@@ -507,7 +508,7 @@ function runBot(ctx, d) {
   out.tier = r.tier || 'STRICT';
   out.candleT = r.candleT ?? null;
   out.symbol = ctx.symbol;
-  out.style = 'Scalping';
+  out.style = BOT_STYLE;
   out.expiresAt = Date.now() + BOT_CFG.signalTtlMs;
   facts.tier = out.tier;
   facts.signal = r.dirTxt;
@@ -986,7 +987,7 @@ function manualTfs(styleName) {
 
 async function handleCandles(body, lang, res, { email, isAutoBot }) {
   const symbol = String(body.symbol || 'XAUUSD').toUpperCase();
-  const styleName = isAutoBot ? 'Scalping' : normStyle(body.style || body.mode || 'Scalping');
+  const styleName = isAutoBot ? BOT_STYLE : normStyle(body.style || body.mode || 'Scalping');
   const price = Number(body.price ?? body.livePrice ?? body.currentPrice ?? 0);
   if (!(price > 0)) return fail(res, msg(lang, 'noPrice'));
 
@@ -1050,8 +1051,8 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
 
   let out;
   try {
-    ctx.prevCandleT = Number.isFinite(Number(body.prevSignal?.candleT)) ? Number(body.prevSignal.candleT) : null;
-    out = runBot(ctx, data); // satu-satunya engine: pola three candle
+    ctx.prevCandleT = (isAutoBot && body.prevSignal?.style === BOT_STYLE && Number.isFinite(Number(body.prevSignal?.candleT))) ? Number(body.prevSignal.candleT) : null;
+    out = isAutoBot ? runBot(ctx, data) : await runManual(ctx, data, styleName);
   } catch (e) {
     console.error('engine error:', e);
     out = standbyOut({ mode: isAutoBot ? 'bot' : 'manual', symbol, style: styleName, status: 'STANDBY', dec }, `Analisa sementara gagal (${e.message}). Akan dicoba lagi.`, [], null);
