@@ -1,4 +1,4 @@
-// api/generate.js — v161 (simpleZonePlan M5 + scalpStructPlan M1/M5 + smc_flex + pullbackPlan + scalpWatch + no old fallback on Scalping + standby cache fix + bars.live guard + prevSignal age/dist guard + bot M15/M5/M1)
+// api/generate.js — v162 (simpleZonePlan M5 refine M1 + scalpStructPlan M1/M5 + smc_flex + pullbackPlan + scalpWatch + no old fallback on Scalping + standby cache fix + bars.live guard + prevSignal age/dist guard + bot M15/M5/M1 + XAUUSD dist override + standby checklist to AI)
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import {
@@ -77,7 +77,7 @@ const MANUAL_TF_NEEDED = {
 };
 const BOT_TF_NEEDED = ['m1', 'm5', 'm15'];
 const MAX_DIST_PIP = { 'Scalping': 150, 'Intraday': 500, 'Swing': 2000 };
-const MAX_DIST_OVERRIDE = { BTCUSD: 800 };
+const MAX_DIST_OVERRIDE = { BTCUSD: 800, XAUUSD: 1000 };
 
 const BOT_CFG = { storyTtlMs: 15000, signalTtlMs: 15 * 60e3 };
 const MANUAL_STORY_TTL_MS = 180000;
@@ -316,6 +316,7 @@ async function runDocManual(ctx, d, styleName) {
   if (!out.ok) {
     const why = out.reason || (checks.length ? checks[checks.length - 1] : 'Belum ada setup valid.');
     facts.standbyReason = why;
+    facts.checklist = checks.slice(-6);
     return standbyOut(facts, why, checks, regimeTxt);
   }
 
