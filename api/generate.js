@@ -7,8 +7,8 @@ import {
   pullbackPlan,
   simpleZonePlan,
   scalpWatch,
-  runBotSma as runBotFlex,
 } from '../lib/smc_flex.js';
+import { runBotSma as runBotFlex } from '../lib/bot_ea.js';
 
 export const config = { maxDuration: 60 };
 
@@ -473,8 +473,8 @@ function runBot(ctx, d) {
     price: F(ctx.price), bias: r.bias || 'NETRAL', dirTxt: r.dirTxt || '-',
     trigger: r.trigger || null, checklist: Array.isArray(r.checklist) ? r.checklist : [],
     htf: r.trendTxt || '-', m1: r.structTxt || '-', zone: null,
-    watch: watch,
-    tier: r.tier || 'STRICT',
+    watch: [],   // bot EA tidak memakai zona
+    tier: r.tier || 'EA_PULLBACK',
     status: r.ok ? 'SIGNAL' : 'STANDBY',
   };
   if (!r || !r.ok) return standbyOut(facts, r?.reason || 'Menunggu setup valid.', facts.checklist, facts.bias);
@@ -518,6 +518,17 @@ ATURAN MUTLAK ANTI-HALUSINASI:
 7. Jika status = "RUNNING" atau "PENDING": sebutkan arah, bias H1 (bias), zona POI, serta angka persis entry, SL, dan TP. Jika confirmed = false, sebutkan bahwa konfirmasi M1 belum ada.
 8. Jika status = "STANDBY": sebutkan alasan dari standbyReason, checklist yang OK dan yang BELUM, zona dari watch (jika ada), dan syarat dari syarat.
 9. Pakai "saya" atau "kita". JANGAN pakai daftar/bullet atau tanda bintang (*). WAJIB tulis 4 sampai 6 kalimat lengkap.
+Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}.`;
+
+const SYS_BOT_EA = `Kamu adalah mentor trading yang menjelaskan keputusan bot scalper bergaya EA (aturan pasti berbasis EMA dan ATR) dengan bahasa santai dan mengalir.
+ATURAN MUTLAK:
+1. DILARANG mengarang atau mengubah angka yang tidak ada di JSON input. Salin angka persis dari JSON.
+2. JANGAN pakai bullet, daftar, atau tanda bintang. Tulis paragraf utuh, 4 sampai 6 kalimat.
+3. Jelaskan alur bot: tren M5 (EMA20 vs EMA50, field "htf" dan "bias"), filter M15, lalu pemicu M1 yaitu pullback ke EMA20 dan candle konfirmasi (field "checklist" dan "m1").
+4. Jika STANDBY: sebutkan persis syarat mana yang BELUM terpenuhi dari "checklist" dan "standbyReason", dan apa yang ditunggu bot (misal pullback ke EMA20 M1, candle konfirmasi, tren jelas, jam sesi, cooldown).
+5. Jika RUNNING/PENDING: sebutkan arah, entry, SL, dan TP persis dari JSON. Jelaskan bahwa SL berbasis ATR dan TP hanya satu target (tp1, sama dengan tp2 dan tp3) dengan rasio 1:1,5 dari jarak SL.
+6. Jangan menyebut zona Supply/Demand, Order Block, atau CHoCH karena bot ini tidak memakainya.
+7. Pakai kata "saya" atau "kita".
 Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}.`;
 
 const SYS_BOT = `Kamu adalah mentor trading senior spesialis SMC (Market Structure, Order Block, FVG, Supply & Demand) yang sedang menjelaskan analisa bot scalper ke muridnya dengan gaya bercerita (story telling) yang santai, dinamis, dan mengalir.
@@ -695,7 +706,7 @@ async function getStory(facts, cacheKey, ttl = BOT_CFG.storyTtlMs) {
   let story = null, aiError = '';
   try {
     const deadlineMs = facts.mode === 'manual' ? QWEN_MANUAL_DEADLINE_MS : QWEN_DEADLINE_MS;
-    const { json, error } = await qwenJson(facts.mode === 'bot' ? SYS_BOT : SYS_MANUAL, facts, QWEN_MAX_TOKENS, deadlineMs);
+    const { json, error } = await qwenJson(facts.mode === 'bot' ? SYS_BOT_EA : SYS_MANUAL, facts, QWEN_MAX_TOKENS, deadlineMs);
     if (!json) aiError = error || 'AI tidak memberi jawaban';
     else if (!isUsableStory(json.id, facts) || !isUsableStory(json.en, facts)) {
       aiError = 'jawaban AI terlalu pendek atau hanya nama simbol';
@@ -948,10 +959,12 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
 
   const allTfs = ['m1', 'm5', 'm15', 'm30', 'h1', 'h4', 'd1'];
   const candleMap = {};
+  const src = {};
   for (const tf of allTfs) {
     const incoming = clientCandles(body, tf);
     if (incoming.length) {
       candleMap[tf] = incoming;
+      src[tf] = 'client';
       setCandleCache(symbol, tf, incoming);
     } else {
       candleMap[tf] = [];
@@ -966,6 +979,7 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
         const rows = await fetchTickerLayerRows(symbol, TF_IV[tf], TF_NEED[tf] || 200);
         if (rows.length) {
           candleMap[tf] = rows;
+          src[tf] = 'TL';
           setCandleCache(symbol, tf, rows);
           return;
         }
@@ -975,6 +989,7 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
       const cached = getCandleCache(symbol, tf);
       if (cached.length && (!candleMap[tf] || cached.length > candleMap[tf].length)) {
         candleMap[tf] = cached;
+        src[tf] = 'cache';
       }
     }));
   } catch (e) { console.warn('fallback TL parallel:', e.message); }
@@ -983,11 +998,14 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
   for (const tf of allTfs) {
     if (!candleMap[tf] || !candleMap[tf].length) {
       const cached = getCandleCache(symbol, tf);
-      if (cached.length) candleMap[tf] = cached;
+      if (cached.length) { candleMap[tf] = cached; src[tf] = 'cache'; }
     }
     data[tf] = candleMap[tf] || [];
   }
-  if (!data.m5.length && !data.m15.length && !data.m1.length) return fail(res, msg(lang, 'noCandles'));
+  if (!data.m5.length && !data.m15.length && !data.m1.length) {
+    console.warn(`DIAG ${isAutoBot ? 'BOT' : 'MANUAL'} ${symbol} ${styleName} noCandles src=${JSON.stringify(src)}`);
+    return fail(res, msg(lang, 'noCandles'));
+  }
 
   let out;
   try {
@@ -1005,6 +1023,21 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
     try { await markTrialAsUsed(email); } catch (e) { console.warn('markTrialAsUsed:', e.message); }
   }
 
+  // ── DIAGNOSA: dikirim di respons (diag) dan dicatat di log Vercel agar alasan STANDBY tidak hilang ──
+  const diagFacts = out.facts || {};
+  const diag = {
+    who: isAutoBot ? 'BOT' : 'MANUAL',
+    at: new Date().toISOString(),
+    status: out.signal.status,
+    reason: diagFacts.standbyReason || null,
+    checks: (Array.isArray(out.signal.checklist) ? out.signal.checklist : []).slice(-8),
+    bars: Object.fromEntries(['m1', 'm5', 'm15', 'h1'].map(t => [t, (data[t] || []).length])),
+    src,
+    liveM1: !!getFormingM1(data.m1),
+    sticky: false,
+  };
+  console.log(`DIAG ${diag.who} ${symbol} ${styleName} ${diag.status} | ${diag.reason || '-'} | bars=${JSON.stringify(diag.bars)} src=${JSON.stringify(src)} live=${diag.liveM1}`);
+
   const prev = validPrevSignal(body.prevSignal, symbol, styleName, price, ctx.pip);
   // Bot: sticky hanya saat hasil baru STANDBY/berlawanan arah.
   // Manual: sinyal lama dikunci selama masih valid (belum kena SL/TP1/invalid/expired), kecuali client kirim forceNew.
@@ -1014,7 +1047,7 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
   if (keepPrev) {
     const last = data.m1 && data.m1.length ? data.m1[data.m1.length - 1] : null;
     const nextCloseAt = isAutoBot && last ? tsMs(last.t) + TF_MS.m1 : undefined;
-    return res.status(200).json({ ok: true, mode: isAutoBot ? 'bot' : 'candles', symbol, style: styleName, price, signal: { ...prev, sticky: true, nextCloseAt } });
+    return res.status(200).json({ ok: true, mode: isAutoBot ? 'bot' : 'candles', symbol, style: styleName, price, signal: { ...prev, sticky: true, nextCloseAt }, diag: { ...diag, sticky: true } });
   }
 
   if (out.signal.status !== 'STANDBY') {
@@ -1039,7 +1072,7 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
     aiReasoning: !!story.ai,
     ...(ctx.debug ? { aiError: story.aiError || null } : {}),
   };
-  return res.status(200).json({ ok: true, mode: isAutoBot ? 'bot' : 'candles', symbol, style: styleName, price, signal });
+  return res.status(200).json({ ok: true, mode: isAutoBot ? 'bot' : 'candles', symbol, style: styleName, price, signal, diag });
 }
 
 export default async function handler(req, res) {
