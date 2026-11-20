@@ -1,4 +1,4 @@
-// api/generate.js — v153 (SMC manual + scalpStructPlan + smc_flex + pullbackPlan + primaryReason + bot M15/M5/M1, OCO, bounce, TP band, AI DeepSeek/GPT storytelling)
+// api/generate.js — v154 (SMC manual + scalpStructPlan + smc_flex + pullbackPlan + no old fallback on Scalping + standby cache fix + bot M15/M5/M1)
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import { scalpStructPlan, flexScalpPlan, pullbackPlan, runBotSma as runBotFlex } from '../lib/smc_flex.js';
@@ -64,6 +64,7 @@ const MAX_DIST_OVERRIDE = { BTCUSD: 800 };
 
 const BOT_CFG = { storyTtlMs: 15000, signalTtlMs: 15 * 60e3 };
 const MANUAL_STORY_TTL_MS = 180000;
+const MANUAL_STANDBY_TTL_MS = 20000;
 const GATE_TTL_MS = 10 * 60 * 1000;
 
 const isoDate = d => d.toISOString().slice(0, 10);
@@ -270,24 +271,22 @@ async function runDocManual(ctx, d, styleName) {
       const pb = pullbackPlan(barsClosed, pctx);
       out = pb.ok ? pb : { ...out, checks: [...(out.checks || []), ...(pb.checks || [])] };
     }
-  }
-  const primaryReason = out.reason || (out.checks || []).slice(-1)[0] || 'Belum ada setup valid.';
-  if (!out.ok) {
-    const prevChecks = out.checks || [];
+  } else {
     out = generateManualPlan({
       ...closed, tickSize: 10 ** -ctx.dec, price: ctx.price, pip: ctx.pip, rr: ctx.rr, symbol: ctx.symbol,
     }, styleName);
-    out.checks = [...prevChecks, ...(out.checks || [])];
-    if (!out.ok) out.reason = primaryReason;
   }
 
-  const regimeTxt = (out.regime ? out.regime.replace('_', ' ') : 'netral') + (out.regimeSrc ? ` · ${out.regimeSrc}` : '');
+  const rawBias = out.bias || (out.regime ? out.regime.replace('_', ' ') : 'netral');
+  const srcPart = out.biasTf ? ` · ${out.biasTf}` : (out.regimeSrc ? ` · ${out.regimeSrc}` : '');
+  const regimeTxt = `${rawBias}${srcPart}`;
   facts.bias = regimeTxt;
   const checks = Array.isArray(out.checks) ? out.checks : [];
 
   if (!out.ok) {
-    facts.standbyReason = out.reason;
-    return standbyOut(facts, out.reason, checks, regimeTxt);
+    const why = out.reason || (checks.length ? checks[checks.length - 1] : 'Belum ada setup valid.');
+    facts.standbyReason = why;
+    return standbyOut(facts, why, checks, regimeTxt);
   }
 
   const o = out.order;
@@ -502,7 +501,7 @@ Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}.`;
 
 const SYS_BOT = `Kamu adalah mentor trading senior spesialis SMC (Market Structure, Order Block, FVG, Supply & Demand) yang sedang menjelaskan analisa bot scalper ke muridnya dengan gaya bercerita (story telling) yang santai, dinamis, dan mengalir.
 ATURAN MUTLAK:
-1. DILARANG KERAS mengarang atau mengubah angka harga yang TIDAK ADA di dalam JSON input. Salin angka persis dari JSON.
+1. DILARANG KERAS mengarang atau mengubah angka harga yang tidak ada di JSON input. Salin angka persis dari JSON.
 2. JANGAN gunakan bullet points, daftar angka, atau tanda bintang (*). Tulis dalam bentuk paragraf utuh yang mengalir (minimal 5-7 kalimat).
 3. Buka cerita dengan kondisi HTF (H1/H4) berdasarkan field "bias" dan "htf". Sebutkan time framenya, apakah sedang tren naik, turun, atau ranging. Apakah terjadi BOS, MSS, atau CHoCH?
 4. Lanjut ke M5/M1 berdasarkan field "checklist" dan "m1": Jelaskan rencana scalping-nya. Apakah bot menunggu harga retracement ke area POI utama, ke area Fibonacci OTE, atau ke Supply/Demand utama? Jika ada field "watch", sebutkan zona Supply/Demand yang sedang dipantau beserta harga batas bawah dan atasnya.
@@ -663,7 +662,7 @@ const aiStickyCache = new Map();
 const AI_STICKY_MS = 3 * 60 * 1000;
 const sv = v => (v == null ? '' : String(v));
 function setupKey(f) {
-  return [f.mode, f.symbol, f.style, f.status, f.signal, f.entry, f.sl, f.trigger, f.tier, f.bias].map(sv).join('|');
+  return [f.mode, f.symbol, f.style, f.status, f.signal, f.entry, f.sl, f.trigger, f.tier, f.bias, f.standbyReason].map(sv).join('|');
 }
 
 async function getStory(facts, cacheKey, ttl = BOT_CFG.storyTtlMs) {
@@ -689,7 +688,7 @@ async function getStory(facts, cacheKey, ttl = BOT_CFG.storyTtlMs) {
   if (story) {
     aiStickyCache.set(key, { t: Date.now(), story });
     if (aiStickyCache.size > 300) aiStickyCache.delete(aiStickyCache.keys().next().value);
-  } else {
+  } else if (facts.status !== 'STANDBY') {
     const st = aiStickyCache.get(key);
     if (st && Date.now() - st.t < AI_STICKY_MS) story = { ...st.story, sticky: true, aiError };
   }
@@ -698,7 +697,10 @@ async function getStory(facts, cacheKey, ttl = BOT_CFG.storyTtlMs) {
     story = { id: fallbackStory(facts, 'id'), en: fallbackStory(facts, 'en'), ai: false, aiError };
   }
   if (cacheKey) {
-    storyCache.set(cacheKey, { t: Date.now(), ttl: story.ai ? ttl : Math.min(ttl, 60000), v: story });
+    const effTtl = facts.status === 'STANDBY' && facts.mode === 'manual'
+      ? Math.min(ttl, MANUAL_STANDBY_TTL_MS)
+      : (story.ai ? ttl : Math.min(ttl, 60000));
+    storyCache.set(cacheKey, { t: Date.now(), ttl: effTtl, v: story });
     if (storyCache.size > 300) storyCache.delete(storyCache.keys().next().value);
   }
   return story;
