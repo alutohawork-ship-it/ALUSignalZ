@@ -1,4 +1,4 @@
-// api/generate.js — v157 (SMC manual + scalpStructPlan M1/M5 + smc_flex + pullbackPlan + no old fallback on Scalping + standby cache fix + bars.live guard + bot M15/M5/M1)
+// api/generate.js — v158 (SMC manual + scalpStructPlan M1/M5 + smc_flex + pullbackPlan + no old fallback on Scalping + standby cache fix + bars.live guard + prevSignal age/dist guard + bot M15/M5/M1)
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import { scalpStructPlan, flexScalpPlan, pullbackPlan, runBotSma as runBotFlex } from '../lib/smc_flex.js';
@@ -421,12 +421,15 @@ function resolveOcoFill(prev, price) {
   return { ...prev, ...legFields(primary), oco: { ...prev.oco, alive: aliveIdx } };
 }
 
-function validPrevSignal(prev, symbol, styleName, price) {
+function validPrevSignal(prev, symbol, styleName, price, pip) {
   if (!prev || typeof prev !== 'object') return null;
   if (!['PENDING', 'RUNNING'].includes(prev.status) || (prev.signal !== 'BUY' && prev.signal !== 'SELL')) return null;
   if (prev.symbol !== symbol || prev.style !== styleName) return null;
   const exp = Number(prev.expiresAt);
   if (!Number.isFinite(exp) || Date.now() > exp) return null;
+  const created = Number(prev.createdAt || 0);
+  if (!created || Date.now() - created > 20 * 60e3) return null;
+  if (prev.status === 'PENDING' && Math.abs(Number(prev.entry) - price) > 60 * pip) return null;
 
   if (Array.isArray(prev.oco?.legs) && prev.oco.legs.length) return resolveOcoFill(prev, price);
 
@@ -990,11 +993,15 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
     try { await markTrialAsUsed(email); } catch (e) { console.warn('markTrialAsUsed:', e.message); }
   }
 
-  const prev = validPrevSignal(body.prevSignal, symbol, styleName, price);
+  const prev = validPrevSignal(body.prevSignal, symbol, styleName, price, ctx.pip);
   if (prev && (out.signal.status === 'STANDBY' || out.signal.signal !== prev.signal)) {
     const last = data.m1 && data.m1.length ? data.m1[data.m1.length - 1] : null;
     const nextCloseAt = isAutoBot && last ? tsMs(last.t) + TF_MS.m1 : undefined;
     return res.status(200).json({ ok: true, mode: isAutoBot ? 'bot' : 'candles', symbol, style: styleName, price, signal: { ...prev, sticky: true, nextCloseAt } });
+  }
+
+  if (out.signal.status !== 'STANDBY') {
+    out.signal.createdAt = Date.now();
   }
 
   if (isAutoBot) {
