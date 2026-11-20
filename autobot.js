@@ -109,7 +109,12 @@
   function toggle() {
     if (BOT.on) {
       BOT.on = false;
-      BOT.msg = 'Bot dihentikan. Trade yang berjalan tetap dipantau.';
+      trades.forEach(t => {
+        if (t.auto && t.status === 'PENDING') cancelTrade(t, 'Bot dihentikan'); //[span_4](start_span)[span_4](end_span)
+      });
+      saveTrades();
+      renderAll();
+      BOT.msg = 'Bot dihentikan. Order pending dibatalkan, posisi berjalan tetap dipantau.'; //[span_5](start_span)[span_5](end_span)
     } else {
       BOT.on = true;
       BOT.since = Date.now();
@@ -144,8 +149,33 @@
   }
 
   /* ---------- siklus bot ---------- */
+  function cleanupAutoPending() {
+    const px = prices[BSYM] && prices[BSYM].price;
+    const a = atr5();
+    let changed = false;
+    trades.forEach(t => {
+      if (!(t.auto && t.status === 'PENDING')) return; //[span_6](start_span)[span_6](end_span)
+      if (Date.now() > (t.expiresAt || 0)) {
+        cancelTrade(t, 'Kedaluwarsa');
+        changed = true;
+        return;
+      } //[span_7](start_span)[span_7](end_span)
+      if (a > 0 && px != null && t.px0 != null && t.dir * (px - t.px0) > RUN_AWAY_ATR * a) {
+        cancelTrade(t, 'Harga lari menjauh dari entry');
+        changed = true;
+      } //[span_8](start_span)[span_8](end_span)
+    });
+    if (changed) {
+      saveTrades();
+      renderAll();
+    } //[span_9](start_span)[span_9](end_span)
+  }
+
   async function tick() {
-    if (!BOT.on) return render();
+    if (!BOT.on) {
+      cleanupAutoPending(); //[span_10](start_span)[span_10](end_span)
+      return render();
+    }
     const now = Date.now();
     if (!marketOpen(BSYM)) { BOT.msg = 'Market tutup (weekend).'; return render(); }
 
@@ -228,26 +258,27 @@
     // PERBAIKAN: Tangkap response mentah untuk cek apakah JSON atau HTML
     let res;
     try {
-        const rawRes = await fetch('/api/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                email: localStorage.getItem(K.email),
-                symbol: mk, style, price: livePx, currentPrice: livePx,
-                candles: { m1: rowsOf('1m'), m5: rowsOf('5m'), m15: rowsOf('15m') },
-                lang
-            })
-        });
-        const text = await rawRes.text();
-        let data;
-        try {
-            data = JSON.parse(text);
-        } catch (e) {
-            throw new Error('Server mengembalikan format tidak valid (bukan JSON). Cek log server/API.');
-        }
-        res = { ok: rawRes.ok, data };
+      const rawRes = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: localStorage.getItem(K.email),
+          bot: !!auto, //[span_11](start_span)[span_11](end_span)
+          symbol: mk, style, price: livePx, currentPrice: livePx,
+          candles: { m1: rowsOf('1m'), m5: rowsOf('5m'), m15: rowsOf('15m') },
+          lang
+        })
+      });
+      const text = await rawRes.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        throw new Error('Server mengembalikan format tidak valid (bukan JSON). Cek log server/API.');
+      }
+      res = { ok: rawRes.ok, data };
     } catch (e) {
-        return { ok: false, msg: 'Koneksi/API Error: ' + e.message };
+      return { ok: false, msg: 'Koneksi/API Error: ' + e.message };
     }
 
     const data = res.data;
