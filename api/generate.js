@@ -79,7 +79,12 @@ const BOT_TF_NEEDED = ['m1', 'm5', 'm15'];
 const MAX_DIST_PIP = { 'Scalping': 150, 'Intraday': 500, 'Swing': 2000 };
 const MAX_DIST_OVERRIDE = { BTCUSD: 800, XAUUSD: 1000 };
 
-const BOT_CFG = { storyTtlMs: 15000, signalTtlMs: 15 * 60e3 };
+const BOT_CFG = {
+  storyTtlMs: 15000, storyTtlBotMs: 5 * 60e3, signalTtlMs: 15 * 60e3,
+  flipCooldownMs: 5 * 60e3,        // sinyal berlawanan arah baru boleh menggantikan sinyal lama setelah 5 menit
+  storyBudgetBotMs: 2500,          // respons bot tidak menunggu AI lebih dari 2,5 detik
+  storyBudgetManualMs: 3000,
+};
 const MANUAL_STORY_TTL_MS = 180000;
 const MANUAL_STANDBY_TTL_MS = 20000;
 const GATE_TTL_MS = 10 * 60 * 1000;
@@ -334,7 +339,8 @@ async function runDocManual(ctx, d, styleName) {
   };
 
   const arahHtf = out.regime === 'trending_up' ? 'BUY' : out.regime === 'trending_down' ? 'SELL' : 'NETRAL';
-  const jarakPip = Math.round(Math.abs(ctx.price - o.entryPrice) / ctx.pip);
+  const refPx = closed.m1.length ? closed.m1[closed.m1.length - 1].c : ctx.price;
+  const jarakPip = Math.round(Math.abs(refPx - o.entryPrice) / ctx.pip);
   const maxDist = MAX_DIST_OVERRIDE[ctx.symbol] ?? MAX_DIST_PIP[styleName] ?? 150;
   let gate;
 
@@ -351,7 +357,7 @@ async function runDocManual(ctx, d, styleName) {
   } else {
     const gKey = `${ctx.symbol}|${styleName}|${sideTxt}|${o.role}|${plan.orderType}|${ctx.f(o.entryPrice)}|${o.tpMode}|${out.oco ? 'oco' : ''}`;
     const hit = gateCache.get(gKey);
-    if (hit && Date.now() - hit.t < GATE_TTL_MS) gate = hit.v;
+    if (hit && Date.now() - hit.t < hit.ttl) gate = hit.v;
     else {
       gate = await aiGateManual({
         gaya: styleName, simbol: ctx.symbol, arah_setup: sideTxt,
@@ -362,10 +368,8 @@ async function runDocManual(ctx, d, styleName) {
         entry: ctx.f(o.entryPrice), harga_sekarang: ctx.f(ctx.price),
         jarak_entry_pip: jarakPip, batas_jarak_pip: maxDist,
       });
-      if (gate.ai) {
-        gateCache.set(gKey, { t: Date.now(), v: gate });
-        if (gateCache.size > 200) gateCache.delete(gateCache.keys().next().value);
-      }
+      gateCache.set(gKey, { t: Date.now(), ttl: gate.ai ? GATE_TTL_MS : 60e3, v: gate });
+      if (gateCache.size > 200) gateCache.delete(gateCache.keys().next().value);
     }
   }
 
@@ -474,7 +478,7 @@ function runBot(ctx, d) {
   const m15 = closedOnly(d.m15, TF_MS.m15);
   const live = getFormingM1(d.m1);
   const bars = { m1, m5, m15, live };
-  const r = runBotFlex(bars, { price: ctx.price, dec: ctx.dec, pip: ctx.pip, symbol: ctx.symbol });
+  const r = runBotFlex(bars, { price: ctx.price, dec: ctx.dec, pip: ctx.pip, symbol: ctx.symbol, prevCandleT: ctx.prevCandleT ?? null });
   const F = v => ctx.f(safeNum(v, ctx.price));
 
   const watch = scalpWatch({ m1: bars.m1, m5: bars.m5 }, { price: ctx.price, pip: ctx.pip, dec: ctx.dec, symbol: ctx.symbol });
@@ -502,6 +506,7 @@ function runBot(ctx, d) {
     checklist: facts.checklist, scanSummary: facts.checklist.join('\n'), topDown: facts.bias,
   });
   out.tier = r.tier || 'STRICT';
+  out.candleT = r.candleT ?? null;
   out.symbol = ctx.symbol;
   out.style = 'Scalping';
   out.expiresAt = Date.now() + BOT_CFG.signalTtlMs;
@@ -580,7 +585,7 @@ function findUnknownPrice(text, facts) {
     if (!(price > 0)) return null;
     const allowed = collectNums(facts);
     const dec = Number.isFinite(facts?.dec) ? facts.dec : 2;
-    const tol = Math.pow(10, -dec) * 0.6;
+    const tol = dec >= 2 ? 0.5 * Math.pow(10, -(dec - 1)) : 0.6 * Math.pow(10, -dec);   // AI sering membulatkan 1 desimal
     for (const t of text.match(NUM_RE) || []) {
       const n = parseNum(t);
       if (!Number.isFinite(n)) continue;
@@ -752,6 +757,27 @@ async function getStory(facts, cacheKey, ttl = BOT_CFG.storyTtlMs) {
     if (storyCache.size > 300) storyCache.delete(storyCache.keys().next().value);
   }
   return story;
+}
+
+// Penjelasan AI TIDAK menahan respons sinyal. Jika AI belum selesai dalam anggaran waktu,
+// teks aturan dikirim dulu dan AI tetap berjalan di belakang; hasilnya di-cache untuk polling berikutnya.
+const storyPending = new Map();
+async function getStoryFast(facts, cacheKey, ttl, budgetMs) {
+  if (cacheKey) {
+    const hit = storyCache.get(cacheKey);
+    if (hit && Date.now() - hit.t < hit.ttl) return hit.v;
+  }
+  let p = cacheKey ? storyPending.get(cacheKey) : null;
+  if (!p) {
+    p = getStory(facts, cacheKey, ttl).finally(() => { if (cacheKey) storyPending.delete(cacheKey); });
+    if (cacheKey) storyPending.set(cacheKey, p);
+  }
+  let timer;
+  const budget = new Promise(res => { timer = setTimeout(() => res(null), budgetMs); });
+  const got = await Promise.race([p, budget]);
+  clearTimeout(timer);
+  if (got) return got;
+  return { id: fallbackStory(facts, 'id'), en: fallbackStory(facts, 'en'), ai: false, aiError: 'AI masih berjalan', pending: true };
 }
 
 const SYS_GATE_MANUAL = `Kamu adalah filter veto untuk kandidat setup MANUAL SMC.
@@ -1025,6 +1051,7 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
 
   let out;
   try {
+    ctx.prevCandleT = Number.isFinite(Number(body.prevSignal?.candleT)) ? Number(body.prevSignal.candleT) : null;
     out = isAutoBot ? runBot(ctx, data) : await runManual(ctx, data, styleName);
   } catch (e) {
     console.error('engine error:', e);
@@ -1057,9 +1084,17 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
   const prev = validPrevSignal(body.prevSignal, symbol, styleName, price, ctx.pip);
   // Bot: sticky hanya saat hasil baru STANDBY/berlawanan arah.
   // Manual: sinyal lama dikunci selama masih valid (belum kena SL/TP1/invalid/expired), kecuali client kirim forceNew.
-  const keepPrev = prev && (isAutoBot
-    ? (out.signal.status === 'STANDBY' || out.signal.signal !== prev.signal)
-    : !body.forceNew);
+  // Bot: sinyal aktif dipertahankan selama masih valid.
+  //   STANDBY           -> pertahankan sinyal lama
+  //   arah sama         -> pertahankan (objek identik, tidak berkedip)
+  //   arah berlawanan   -> ganti hanya jika sinyal lama sudah lebih dari flipCooldownMs
+  // Manual: dikunci selama masih valid, kecuali client kirim forceNew.
+  let keepPrev = false;
+  if (prev) {
+    if (!isAutoBot) keepPrev = !body.forceNew;
+    else if (out.signal.status === 'STANDBY' || out.signal.signal === prev.signal) keepPrev = true;
+    else keepPrev = Date.now() - Number(prev.createdAt || 0) < BOT_CFG.flipCooldownMs;
+  }
   if (keepPrev) {
     const last = data.m1 && data.m1.length ? data.m1[data.m1.length - 1] : null;
     const nextCloseAt = isAutoBot && last ? tsMs(last.t) + TF_MS.m1 : undefined;
@@ -1079,7 +1114,7 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
   const cacheKey = isAutoBot
     ? `${symbol}|${styleName}|${f.status}|${f.signal || ''}|${f.trigger || ''}|${f.bias || ''}|${f.tier || ''}`
     : `M|${symbol}|${styleName}|${f.status}|${f.signal || ''}|${f.entry || ''}|${String(f.standbyReason || '').slice(0, 60)}`;
-  const story = await getStory(f, cacheKey, isAutoBot ? BOT_CFG.storyTtlMs : MANUAL_STORY_TTL_MS);
+  const story = await getStoryFast(f, cacheKey, isAutoBot ? BOT_CFG.storyTtlBotMs : MANUAL_STORY_TTL_MS, isAutoBot ? BOT_CFG.storyBudgetBotMs : BOT_CFG.storyBudgetManualMs);
   const signal = {
     ...out.signal,
     reason: lang === 'en' ? story.en : story.id,
