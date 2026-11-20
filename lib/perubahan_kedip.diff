@@ -1,0 +1,258 @@
+--- bot_ea.js (upload)
++++ bot_ea.js (v2)
+@@ -1,10 +1,11 @@
+-// lib/bot_ea.js — BOT SCALPER gaya EA (aturan pasti, tanpa zona/SMC)
++// lib/bot_ea.js — BOT SCALPER gaya EA (aturan pasti, tanpa zona/SMC) — v2 deterministik
+ // Tren   : M5 EMA20 > EMA50 dan harga di atas EMA50 (buy) / kebalikannya (sell). M15 EMA50 ikut jika data cukup.
+ // Pemicu : M1 pullback ke EMA20 lalu candle searah menutup di atas/bawah EMA20 dan menembus high/low candle sebelumnya.
+-// Filter : ATR M5 minimal, jam sesi (UTC), cooldown antar sinyal.
+-// Keputusan HANYA dari candle tertutup, jadi hasil stabil di dalam satu candle M1.
++// Filter : ATR M5 minimal, jam sesi (UTC, dari waktu candle), cooldown antar sinyal (dari candle sinyal sebelumnya).
++// Keputusan HANYA dari candle M1 tertutup. Entry = close candle tersebut (BUKAN harga live).
++// Fungsi murni: tidak menyimpan state di memori. Hasil sama untuk input sama, di instance mana pun.
+ // SL     : 1.5 x ATR M1, dijepit antara minSlPips dan maxSlPips.
+-// TP     : single TP 1:1.5 dari jarak SL (SL 20–30 pip -> TP 30–45 pip). TP1 = TP2 = TP3.
++// TP     : single TP 1:1.5 dari jarak SL. TP1 = TP2 = TP3.
+ // Kontrak output sama dengan runBotSma lama (dipakai generate.js -> runBot).
+ 
+ export const CFG = {
+@@ -19,13 +20,11 @@
+   minAtr5Pips: 12,             // ATR M5 di bawah ini dianggap sepi
+   sessionFilter: true,
+   sessionUtc: { start: 6, end: 21 },
+-  cooldownMs: 5 * 60e3,
++  cooldownMs: 5 * 60e3,        // cooldown dihitung terhadap candleT sinyal sebelumnya
+   minM5: 60,
+   minM1: 40,
+ };
+ 
+-const lastSignal = new Map();   // per simbol: { candleT, at, res }
+-
+ function ema(vals, p) {
+   const k = 2 / (p + 1);
+   const out = [];
+@@ -47,28 +46,28 @@
+   return a;
+ }
+ 
+-export function runBotSma(bars, { price, dec = 2, pip = 0.1, symbol = 'XAUUSD' }) {
++// opts.prevCandleT : candleT (ms) sinyal sebelumnya, dikirim client lewat prevSignal. Kosong = tanpa cooldown.
++export function runBotSma(bars, { price, dec = 2, pip = 0.1, symbol = 'XAUUSD', prevCandleT = null } = {}) {
+   const R = v => Number(Number(v).toFixed(dec));
+   const m1 = bars.m1 || [], m5 = bars.m5 || [], m15 = bars.m15 || [];
+   const checks = [];
+   const standby = (reason, extra = {}) => ({
+     ok: false, reason, dirTxt: '-', trigger: null,
+     bias: extra.bias || 'NETRAL', trendTxt: extra.trendTxt || '-', structTxt: extra.structTxt || '-',
+-    checklist: checks.slice(-12),
++    checklist: checks.slice(-12), candleT: null,
+   });
+ 
+   if (m5.length < CFG.minM5 || m1.length < CFG.minM1) {
+     return standby(`Data belum cukup (M5 ${m5.length}/${CFG.minM5}, M1 ${m1.length}/${CFG.minM1}).`);
+   }
+ 
+-  // Stabil dalam satu candle M1: hasil sinyal yang sama dikembalikan lagi
+-  const candleT = m1[m1.length - 1].t;
+-  const prevS = lastSignal.get(symbol);
+-  if (prevS && prevS.candleT === candleT) return prevS.res;
++  // Waktu referensi = candle M1 tertutup terakhir (deterministik, bukan jam server)
++  const n1 = m1.length - 1;
++  const candleT = m1[n1].t;
+ 
+-  // 1) Sesi
++  // 1) Sesi (jam dari waktu candle)
+   if (CFG.sessionFilter) {
+-    const h = new Date().getUTCHours();
++    const h = new Date(candleT).getUTCHours();
+     if (h < CFG.sessionUtc.start || h >= CFG.sessionUtc.end) {
+       checks.push(`BELUM: di luar jam sesi (${CFG.sessionUtc.start}:00–${CFG.sessionUtc.end}:00 UTC).`);
+       return standby('Di luar jam sesi bot.');
+@@ -118,7 +117,6 @@
+   // 4) Pemicu M1: pullback ke EMA20 lalu candle searah menutup menembus candle sebelumnya
+   const c1 = m1.map(x => x.c);
+   const e1 = ema(c1, CFG.emaFast);
+-  const n1 = m1.length - 1;
+   const last = m1[n1], prev = m1[n1 - 1];
+   let touched = false;
+   for (let i = Math.max(1, n1 - CFG.pullbackLookback); i <= n1; i++) {
+@@ -135,30 +133,30 @@
+   }
+   checks.push('OK: pullback EMA20 M1 + candle konfirmasi searah.');
+ 
+-  // 5) Cooldown
+-  if (prevS && Date.now() - prevS.at < CFG.cooldownMs) {
+-    checks.push(`BELUM: cooldown ${Math.ceil((CFG.cooldownMs - (Date.now() - prevS.at)) / 1000)} detik.`);
++  // 5) Cooldown (berdasarkan candle, bukan jam dinding)
++  if (prevCandleT && candleT - prevCandleT < CFG.cooldownMs) {
++    const sisa = Math.ceil((CFG.cooldownMs - (candleT - prevCandleT)) / 1000);
++    checks.push(`BELUM: cooldown ${sisa} detik.`);
+     return standby('Cooldown setelah sinyal terakhir.', { bias, trendTxt, structTxt });
+   }
+ 
+-  // 6) Order: MARKET saat candle tertutup. SL berbasis ATR, TP tetap (TP1 minimal 30 pip)
++  // 6) Order: MARKET di close candle M1 tertutup. SL berbasis ATR, TP tetap.
+   const slDist = Math.min(Math.max(CFG.slAtrMult * atr1, CFG.minSlPips * pip), CFG.maxSlPips * pip);
+-  const entry = R(price);
++  const entry = R(last.c);                 // close candle tertutup, stabil selama candle itu
+   const sl = R(entry - dir * slDist);
+   const tp = R(entry + dir * slDist * CFG.rr);
+-  const tps = [tp, tp, tp];   // single TP: TP1 = TP2 = TP3
++  const tps = [tp, tp, tp];
+   const slPips = slDist / pip;
+   const rr = Math.abs(tp - entry) / slDist;
+   checks.push(`OK: SL ${R(slPips)} pip, TP ${R(slPips * CFG.rr)} pip, RR 1:${R(rr)}.`);
+ 
+   const dirTxt = dir === 1 ? 'BUY' : 'SELL';
+   const trigger = `EA Pullback · ${trendTxt} · ${structTxt} · MARKET`;
+-  const res = {
++  return {
+     ok: true, dir, dirTxt, role: 'ea', tier: 'EA_PULLBACK', bias, trigger, checklist: checks.slice(-12),
+     trendTxt, structTxt,
+     entry, sl, tps, rr: R(rr), tpMode: 'EA_SINGLE_RR', orderType: 'MARKET', confidence: 'MEDIUM',
+     setup: `Bot EA · ${trigger}`, reason: null,
++    candleT,
+   };
+-  lastSignal.set(symbol, { candleT, at: Date.now(), res });
+-  return res;
+ }
+--- generate.js (upload)
++++ generate.js (v2)
+@@ -79,7 +79,12 @@
+ const MAX_DIST_PIP = { 'Scalping': 150, 'Intraday': 500, 'Swing': 2000 };
+ const MAX_DIST_OVERRIDE = { BTCUSD: 800, XAUUSD: 1000 };
+ 
+-const BOT_CFG = { storyTtlMs: 15000, signalTtlMs: 15 * 60e3 };
++const BOT_CFG = {
++  storyTtlMs: 15000, storyTtlBotMs: 5 * 60e3, signalTtlMs: 15 * 60e3,
++  flipCooldownMs: 5 * 60e3,        // sinyal berlawanan arah baru boleh menggantikan sinyal lama setelah 5 menit
++  storyBudgetBotMs: 2500,          // respons bot tidak menunggu AI lebih dari 2,5 detik
++  storyBudgetManualMs: 3000,
++};
+ const MANUAL_STORY_TTL_MS = 180000;
+ const MANUAL_STANDBY_TTL_MS = 20000;
+ const GATE_TTL_MS = 10 * 60 * 1000;
+@@ -334,7 +339,8 @@
+   };
+ 
+   const arahHtf = out.regime === 'trending_up' ? 'BUY' : out.regime === 'trending_down' ? 'SELL' : 'NETRAL';
+-  const jarakPip = Math.round(Math.abs(ctx.price - o.entryPrice) / ctx.pip);
++  const refPx = closed.m1.length ? closed.m1[closed.m1.length - 1].c : ctx.price;
++  const jarakPip = Math.round(Math.abs(refPx - o.entryPrice) / ctx.pip);
+   const maxDist = MAX_DIST_OVERRIDE[ctx.symbol] ?? MAX_DIST_PIP[styleName] ?? 150;
+   let gate;
+ 
+@@ -351,7 +357,7 @@
+   } else {
+     const gKey = `${ctx.symbol}|${styleName}|${sideTxt}|${o.role}|${plan.orderType}|${ctx.f(o.entryPrice)}|${o.tpMode}|${out.oco ? 'oco' : ''}`;
+     const hit = gateCache.get(gKey);
+-    if (hit && Date.now() - hit.t < GATE_TTL_MS) gate = hit.v;
++    if (hit && Date.now() - hit.t < hit.ttl) gate = hit.v;
+     else {
+       gate = await aiGateManual({
+         gaya: styleName, simbol: ctx.symbol, arah_setup: sideTxt,
+@@ -362,10 +368,8 @@
+         entry: ctx.f(o.entryPrice), harga_sekarang: ctx.f(ctx.price),
+         jarak_entry_pip: jarakPip, batas_jarak_pip: maxDist,
+       });
+-      if (gate.ai) {
+-        gateCache.set(gKey, { t: Date.now(), v: gate });
+-        if (gateCache.size > 200) gateCache.delete(gateCache.keys().next().value);
+-      }
++      gateCache.set(gKey, { t: Date.now(), ttl: gate.ai ? GATE_TTL_MS : 60e3, v: gate });
++      if (gateCache.size > 200) gateCache.delete(gateCache.keys().next().value);
+     }
+   }
+ 
+@@ -474,7 +478,7 @@
+   const m15 = closedOnly(d.m15, TF_MS.m15);
+   const live = getFormingM1(d.m1);
+   const bars = { m1, m5, m15, live };
+-  const r = runBotFlex(bars, { price: ctx.price, dec: ctx.dec, pip: ctx.pip, symbol: ctx.symbol });
++  const r = runBotFlex(bars, { price: ctx.price, dec: ctx.dec, pip: ctx.pip, symbol: ctx.symbol, prevCandleT: ctx.prevCandleT ?? null });
+   const F = v => ctx.f(safeNum(v, ctx.price));
+ 
+   const watch = scalpWatch({ m1: bars.m1, m5: bars.m5 }, { price: ctx.price, pip: ctx.pip, dec: ctx.dec, symbol: ctx.symbol });
+@@ -502,6 +506,7 @@
+     checklist: facts.checklist, scanSummary: facts.checklist.join('\n'), topDown: facts.bias,
+   });
+   out.tier = r.tier || 'STRICT';
++  out.candleT = r.candleT ?? null;
+   out.symbol = ctx.symbol;
+   out.style = 'Scalping';
+   out.expiresAt = Date.now() + BOT_CFG.signalTtlMs;
+@@ -580,7 +585,7 @@
+     if (!(price > 0)) return null;
+     const allowed = collectNums(facts);
+     const dec = Number.isFinite(facts?.dec) ? facts.dec : 2;
+-    const tol = Math.pow(10, -dec) * 0.6;
++    const tol = dec >= 2 ? 0.5 * Math.pow(10, -(dec - 1)) : 0.6 * Math.pow(10, -dec);   // AI sering membulatkan 1 desimal
+     for (const t of text.match(NUM_RE) || []) {
+       const n = parseNum(t);
+       if (!Number.isFinite(n)) continue;
+@@ -754,6 +759,27 @@
+   return story;
+ }
+ 
++// Penjelasan AI TIDAK menahan respons sinyal. Jika AI belum selesai dalam anggaran waktu,
++// teks aturan dikirim dulu dan AI tetap berjalan di belakang; hasilnya di-cache untuk polling berikutnya.
++const storyPending = new Map();
++async function getStoryFast(facts, cacheKey, ttl, budgetMs) {
++  if (cacheKey) {
++    const hit = storyCache.get(cacheKey);
++    if (hit && Date.now() - hit.t < hit.ttl) return hit.v;
++  }
++  let p = cacheKey ? storyPending.get(cacheKey) : null;
++  if (!p) {
++    p = getStory(facts, cacheKey, ttl).finally(() => { if (cacheKey) storyPending.delete(cacheKey); });
++    if (cacheKey) storyPending.set(cacheKey, p);
++  }
++  let timer;
++  const budget = new Promise(res => { timer = setTimeout(() => res(null), budgetMs); });
++  const got = await Promise.race([p, budget]);
++  clearTimeout(timer);
++  if (got) return got;
++  return { id: fallbackStory(facts, 'id'), en: fallbackStory(facts, 'en'), ai: false, aiError: 'AI masih berjalan', pending: true };
++}
++
+ const SYS_GATE_MANUAL = `Kamu adalah filter veto untuk kandidat setup MANUAL SMC.
+ Kamu DILARANG membuat setup baru dan DILARANG mengubah angka entry, SL, TP, atau tipe order.
+ Jawab "TUNGGU" HANYA jika terbukti ada salah satu kontradiksi berikut:
+@@ -1025,6 +1051,7 @@
+ 
+   let out;
+   try {
++    ctx.prevCandleT = Number.isFinite(Number(body.prevSignal?.candleT)) ? Number(body.prevSignal.candleT) : null;
+     out = isAutoBot ? runBot(ctx, data) : await runManual(ctx, data, styleName);
+   } catch (e) {
+     console.error('engine error:', e);
+@@ -1057,9 +1084,17 @@
+   const prev = validPrevSignal(body.prevSignal, symbol, styleName, price, ctx.pip);
+   // Bot: sticky hanya saat hasil baru STANDBY/berlawanan arah.
+   // Manual: sinyal lama dikunci selama masih valid (belum kena SL/TP1/invalid/expired), kecuali client kirim forceNew.
+-  const keepPrev = prev && (isAutoBot
+-    ? (out.signal.status === 'STANDBY' || out.signal.signal !== prev.signal)
+-    : !body.forceNew);
++  // Bot: sinyal aktif dipertahankan selama masih valid.
++  //   STANDBY           -> pertahankan sinyal lama
++  //   arah sama         -> pertahankan (objek identik, tidak berkedip)
++  //   arah berlawanan   -> ganti hanya jika sinyal lama sudah lebih dari flipCooldownMs
++  // Manual: dikunci selama masih valid, kecuali client kirim forceNew.
++  let keepPrev = false;
++  if (prev) {
++    if (!isAutoBot) keepPrev = !body.forceNew;
++    else if (out.signal.status === 'STANDBY' || out.signal.signal === prev.signal) keepPrev = true;
++    else keepPrev = Date.now() - Number(prev.createdAt || 0) < BOT_CFG.flipCooldownMs;
++  }
+   if (keepPrev) {
+     const last = data.m1 && data.m1.length ? data.m1[data.m1.length - 1] : null;
+     const nextCloseAt = isAutoBot && last ? tsMs(last.t) + TF_MS.m1 : undefined;
+@@ -1079,7 +1114,7 @@
+   const cacheKey = isAutoBot
+     ? `${symbol}|${styleName}|${f.status}|${f.signal || ''}|${f.trigger || ''}|${f.bias || ''}|${f.tier || ''}`
+     : `M|${symbol}|${styleName}|${f.status}|${f.signal || ''}|${f.entry || ''}|${String(f.standbyReason || '').slice(0, 60)}`;
+-  const story = await getStory(f, cacheKey, isAutoBot ? BOT_CFG.storyTtlMs : MANUAL_STORY_TTL_MS);
++  const story = await getStoryFast(f, cacheKey, isAutoBot ? BOT_CFG.storyTtlBotMs : MANUAL_STORY_TTL_MS, isAutoBot ? BOT_CFG.storyBudgetBotMs : BOT_CFG.storyBudgetManualMs);
+   const signal = {
+     ...out.signal,
+     reason: lang === 'en' ? story.en : story.id,
