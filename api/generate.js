@@ -1,7 +1,7 @@
-// api/generate.js — v152 (SMC manual + smc_flex + pullbackPlan + primaryReason + bot 3-tier, OCO, bounce, TP band, AI DeepSeek/GPT storytelling)
+// api/generate.js — v153 (SMC manual + scalpStructPlan + smc_flex + pullbackPlan + primaryReason + bot M15/M5/M1, OCO, bounce, TP band, AI DeepSeek/GPT storytelling)
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
-import { flexScalpPlan, pullbackPlan, runBotSma as runBotFlex } from '../lib/smc_flex.js';
+import { scalpStructPlan, flexScalpPlan, pullbackPlan, runBotSma as runBotFlex } from '../lib/smc_flex.js';
 
 export const config = { maxDuration: 60 };
 
@@ -58,7 +58,7 @@ const MANUAL_TF_NEEDED = {
   'Intraday': ['m15', 'h1', 'h4'],
   'Swing':    ['h4', 'd1'],
 };
-const BOT_TF_NEEDED = ['m1', 'm5', 'm15', 'h1'];
+const BOT_TF_NEEDED = ['m1', 'm5', 'm15'];
 const MAX_DIST_PIP = { 'Scalping': 150, 'Intraday': 500, 'Swing': 2000 };
 const MAX_DIST_OVERRIDE = { BTCUSD: 800 };
 
@@ -218,12 +218,12 @@ function standbyOut(facts, standbyReason, checklist, topDown) {
 
 // ── MANUAL ENGINE ──
 const DOC_STYLE_LABEL = {
-  'Scalping': 'Scalping SMC (H1→M5→M1)', 'Intraday': 'Intraday', 'Swing': 'Swing S&D/OB',
+  'Scalping': 'Scalping SMC (M15→M5→M1)', 'Intraday': 'Intraday', 'Swing': 'Swing S&D/OB',
 };
 const DOC_STYLE_TF = {
-  'Scalping': { htf: 'H1 MS', zone: 'OB/FVG/S&D M5 dekat OTE', trig: 'M1 (CHoCH + konfirmasi)' },
-  'Intraday': { htf: 'H4',    zone: 'VWAP M15',                trig: 'M15' },
-  'Swing':    { htf: 'D1',    zone: 'S&D/OB H4+D1',            trig: 'H4' },
+  'Scalping': { htf: 'M15/H1 MS', zone: 'OB/FVG/S&D M5 dekat OTE', trig: 'M1 (CHoCH + konfirmasi)' },
+  'Intraday': { htf: 'H4',        zone: 'VWAP M15',                trig: 'M15' },
+  'Swing':    { htf: 'D1',        zone: 'S&D/OB H4+D1',            trig: 'H4' },
 };
 
 const gateCache = new Map();
@@ -261,7 +261,11 @@ async function runDocManual(ctx, d, styleName) {
   let out = { ok: false, checks: [] };
   if (styleName === 'Scalping') {
     const pctx = { price: ctx.price, dec: ctx.dec, pip: ctx.pip, now: Date.now(), symbol: ctx.symbol };
-    out = flexScalpPlan(barsClosed, pctx);
+    out = scalpStructPlan(barsClosed, pctx);
+    if (!out.ok) {
+      const fx = flexScalpPlan(barsClosed, pctx);
+      out = fx.ok ? fx : { ...out, checks: [...(out.checks || []), ...(fx.checks || [])] };
+    }
     if (!out.ok) {
       const pb = pullbackPlan(barsClosed, pctx);
       out = pb.ok ? pb : { ...out, checks: [...(out.checks || []), ...(pb.checks || [])] };
@@ -435,13 +439,12 @@ function runBot(ctx, d) {
     m1: closedOnly(d.m1, TF_MS.m1),
     m5: closedOnly(d.m5, TF_MS.m5),
     m15: closedOnly(d.m15, TF_MS.m15),
-    h1: closedOnly(d.h1, TF_MS.h1),
   };
   const r = runBotFlex(bars, { price: ctx.price, dec: ctx.dec, pip: ctx.pip, symbol: ctx.symbol });
   const F = v => ctx.f(safeNum(v, ctx.price));
 
   const watch = buildWatchlist({
-    m5: bars.m5, m15: bars.m15, h1: bars.h1, h4: d.h4, d1: d.d1,
+    m5: bars.m5, m15: bars.m15, h1: d.h1, h4: d.h4, d1: d.d1,
     price: ctx.price, pip: ctx.pip, styleName: 'Scalping',
   });
 
@@ -499,7 +502,7 @@ Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}.`;
 
 const SYS_BOT = `Kamu adalah mentor trading senior spesialis SMC (Market Structure, Order Block, FVG, Supply & Demand) yang sedang menjelaskan analisa bot scalper ke muridnya dengan gaya bercerita (story telling) yang santai, dinamis, dan mengalir.
 ATURAN MUTLAK:
-1. DILARANG KERAS mengarang atau mengubah angka harga yang tidak ada di JSON input. Salin angka persis dari JSON.
+1. DILARANG KERAS mengarang atau mengubah angka harga yang TIDAK ADA di dalam JSON input. Salin angka persis dari JSON.
 2. JANGAN gunakan bullet points, daftar angka, atau tanda bintang (*). Tulis dalam bentuk paragraf utuh yang mengalir (minimal 5-7 kalimat).
 3. Buka cerita dengan kondisi HTF (H1/H4) berdasarkan field "bias" dan "htf". Sebutkan time framenya, apakah sedang tren naik, turun, atau ranging. Apakah terjadi BOS, MSS, atau CHoCH?
 4. Lanjut ke M5/M1 berdasarkan field "checklist" dan "m1": Jelaskan rencana scalping-nya. Apakah bot menunggu harga retracement ke area POI utama, ke area Fibonacci OTE, atau ke Supply/Demand utama? Jika ada field "watch", sebutkan zona Supply/Demand yang sedang dipantau beserta harga batas bawah dan atasnya.
