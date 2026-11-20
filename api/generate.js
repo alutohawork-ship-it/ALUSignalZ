@@ -1,4 +1,4 @@
-// api/generate.js — v160 (simpleZonePlan v19 + scalpStructPlan M1/M5 + smc_flex + pullbackPlan + scalpWatch + no old fallback on Scalping + standby cache fix + bars.live guard + prevSignal age/dist guard + bot M15/M5/M1)
+// api/generate.js — v161 (simpleZonePlan M5 + scalpStructPlan M1/M5 + smc_flex + pullbackPlan + scalpWatch + no old fallback on Scalping + standby cache fix + bars.live guard + prevSignal age/dist guard + bot M15/M5/M1)
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import {
@@ -199,7 +199,7 @@ function toSignal(plan, ctx, extra) {
     setup: plan.setup || '',
     confidence: extra.confidence || 'MEDIUM',
     risk: extra.risk || 'MEDIUM',
-    zone: plan.zone ? { min: f(plan.zone.lower), max: f(plan.zone.upper) } : null,
+    zone: plan.zone ? { min: f(plan.zone.lower), max: f(plan.zone.upper), timeframe: plan.zone.timeframe || '' } : null,
     zoneLabel: plan.zone ? plan.zone.label : '',
     zoneNote: '',
     chartContext: `${plan.setup || 'Signal'}: ${isMarket ? 'NOW' : 'LIMIT'} ${f(plan.entry)}`,
@@ -231,12 +231,12 @@ function standbyOut(facts, standbyReason, checklist, topDown) {
 
 // ── MANUAL ENGINE ──
 const DOC_STYLE_LABEL = {
-  'Scalping': 'Scalping SMC (M5/M1 Zona & Struktur)', 'Intraday': 'Intraday', 'Swing': 'Swing S&D/OB',
+  'Scalping': 'Scalping SMC (Zona M5)', 'Intraday': 'Intraday', 'Swing': 'Swing S&D/OB',
 };
 const DOC_STYLE_TF = {
-  'Scalping': { htf: 'M5/M1 Struktur', zone: 'S&D / FVG M5 & M1', trig: 'M1 / M5' },
-  'Intraday': { htf: 'H4',             zone: 'VWAP M15',           trig: 'M15' },
-  'Swing':    { htf: 'D1',             zone: 'S&D/OB H4+D1',       trig: 'H4' },
+  'Scalping': { htf: 'M5 Struktur', zone: 'S&D / FVG M5', trig: 'M5' },
+  'Intraday': { htf: 'H4',          zone: 'VWAP M15',     trig: 'M15' },
+  'Swing':    { htf: 'D1',          zone: 'S&D/OB H4+D1', trig: 'H4' },
 };
 
 const gateCache = new Map();
@@ -278,7 +278,7 @@ async function runDocManual(ctx, d, styleName) {
 
   if (styleName === 'Scalping') {
     const pctx = { price: ctx.price, dec: ctx.dec, pip: ctx.pip, now: Date.now(), symbol: ctx.symbol };
-    out = simpleZonePlan(barsClosed, pctx);
+    out = simpleZonePlan(barsClosed, pctx, { tfs: ['M5'] });
     if (!out.ok) {
       const st = scalpStructPlan(barsClosed, pctx);
       out = st.ok ? st : { ...out, checks: [...(out.checks || []), ...(st.checks || [])] };
@@ -319,7 +319,7 @@ async function runDocManual(ctx, d, styleName) {
     dir, entry: o.entryPrice, sl: o.sl, orderType: o.orderType || 'LIMIT',
     tps: [o.tp1, o.tp2, o.tp3], rr: o.rr, tpMode: o.tpMode, riskPips: o.riskPips, invalidLevel: o.invalidLevel,
     setup: `Manual · ${DOC_STYLE_LABEL[styleName] || styleName} · ${o.reason}`,
-    zone: z ? { lower: z.bottom, upper: z.top, label: `${z.timeframe} ${z.type}`, mid: (z.top + z.bottom) / 2 } : null,
+    zone: z ? { lower: z.bottom, upper: z.top, timeframe: z.timeframe || '', label: `${z.timeframe} ${z.type}`, mid: (z.top + z.bottom) / 2 } : null,
   };
 
   const arahHtf = out.regime === 'trending_up' ? 'BUY' : out.regime === 'trending_down' ? 'SELL' : 'NETRAL';
