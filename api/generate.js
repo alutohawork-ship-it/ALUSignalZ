@@ -1,4 +1,4 @@
-// api/generate.js — v159 (simpleZonePlan + scalpStructPlan M1/M5 + smc_flex + pullbackPlan + scalpWatch + no old fallback on Scalping + standby cache fix + bars.live guard + prevSignal age/dist guard + bot M15/M5/M1)
+// api/generate.js — v160 (simpleZonePlan v19 + scalpStructPlan M1/M5 + smc_flex + pullbackPlan + scalpWatch + no old fallback on Scalping + standby cache fix + bars.live guard + prevSignal age/dist guard + bot M15/M5/M1)
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import {
@@ -8,7 +8,7 @@ import {
   simpleZonePlan,
   scalpWatch,
   runBotSma as runBotFlex,
-} from '../lib/smc_flex.js'; //[span_10](start_span)[span_10](end_span)
+} from '../lib/smc_flex.js';
 
 export const config = { maxDuration: 60 };
 
@@ -65,13 +65,13 @@ const MANUAL_TF_NEEDED = {
   'Intraday': ['m15', 'h1', 'h4'],
   'Swing':    ['h4', 'd1'],
 };
-const BOT_TF_NEEDED = ['m1', 'm5', 'm15']; //[span_11](start_span)[span_11](end_span)
+const BOT_TF_NEEDED = ['m1', 'm5', 'm15'];
 const MAX_DIST_PIP = { 'Scalping': 150, 'Intraday': 500, 'Swing': 2000 };
 const MAX_DIST_OVERRIDE = { BTCUSD: 800 };
 
 const BOT_CFG = { storyTtlMs: 15000, signalTtlMs: 15 * 60e3 };
 const MANUAL_STORY_TTL_MS = 180000;
-const MANUAL_STANDBY_TTL_MS = 20000; //[span_12](start_span)[span_12](end_span)
+const MANUAL_STANDBY_TTL_MS = 20000;
 const GATE_TTL_MS = 10 * 60 * 1000;
 
 const isoDate = d => d.toISOString().slice(0, 10);
@@ -169,7 +169,7 @@ function closedOnly(c, ms) {
 function getFormingM1(m1) {
   if (!Array.isArray(m1) || !m1.length) return null;
   const forming = m1[m1.length - 1];
-  return forming && Date.now() < tsMs(forming.t) + TF_MS.m1 ? forming : null; //[span_13](start_span)[span_13](end_span)
+  return forming && Date.now() < tsMs(forming.t) + TF_MS.m1 ? forming : null;
 }
 
 function getKillzoneStatus(nowMs = Date.now()) {
@@ -269,16 +269,16 @@ async function runDocManual(ctx, d, styleName) {
   };
   facts.watch = styleName === 'Scalping'
     ? scalpWatch({ m1: closed.m1, m5: closed.m5 }, { price: ctx.price, pip: ctx.pip, dec: ctx.dec, symbol: ctx.symbol })
-    : buildWatchlist({ ...closed, price: ctx.price, pip: ctx.pip, styleName }); //[span_14](start_span)[span_14](end_span)
+    : buildWatchlist({ ...closed, price: ctx.price, pip: ctx.pip, styleName });
   facts.syarat = SYARAT_MASUK[styleName] || null;
 
-  const live = getFormingM1(d.m1); //[span_15](start_span)[span_15](end_span)
-  const barsClosed = { m1: closed.m1, m5: closed.m5, m15: closed.m15, h1: closed.h1, live }; //[span_16](start_span)[span_16](end_span)
+  const live = getFormingM1(d.m1);
+  const barsClosed = { m1: closed.m1, m5: closed.m5, m15: closed.m15, h1: closed.h1, live };
   let out = { ok: false, checks: [] };
 
   if (styleName === 'Scalping') {
     const pctx = { price: ctx.price, dec: ctx.dec, pip: ctx.pip, now: Date.now(), symbol: ctx.symbol };
-    out = simpleZonePlan(barsClosed, pctx); //[span_17](start_span)[span_17](end_span)
+    out = simpleZonePlan(barsClosed, pctx);
     if (!out.ok) {
       const st = scalpStructPlan(barsClosed, pctx);
       out = st.ok ? st : { ...out, checks: [...(out.checks || []), ...(st.checks || [])] };
@@ -291,7 +291,6 @@ async function runDocManual(ctx, d, styleName) {
       const pb = pullbackPlan(barsClosed, pctx);
       out = pb.ok ? pb : { ...out, checks: [...(out.checks || []), ...(pb.checks || [])] };
     }
-    // Tidak jatuh ke generateManualPlan untuk Scalping agar bias/alasan tetap dari engine baru[span_18](start_span)[span_18](end_span)
   } else {
     out = generateManualPlan({
       ...closed, tickSize: 10 ** -ctx.dec, price: ctx.price, pip: ctx.pip, rr: ctx.rr, symbol: ctx.symbol,
@@ -329,7 +328,7 @@ async function runDocManual(ctx, d, styleName) {
   let gate;
 
   if (styleName === 'Scalping') {
-    gate = { keputusan: 'AMBIL', alasan: 'Scalping zona/struktur valid', ai: false }; //[span_19](start_span)[span_19](end_span)
+    gate = { keputusan: 'AMBIL', alasan: 'Scalping zona/struktur valid', ai: false };
   } else if (isBounce) {
     gate = { keputusan: 'AMBIL', alasan: 'Bounce scalp di zona S&D fresh', ai: false };
   } else if (out.regime === 'choppy') {
@@ -445,8 +444,8 @@ function validPrevSignal(prev, symbol, styleName, price, pip) {
   const exp = Number(prev.expiresAt);
   if (!Number.isFinite(exp) || Date.now() > exp) return null;
   const created = Number(prev.createdAt || 0);
-  if (!created || Date.now() - created > 20 * 60e3) return null; //[span_20](start_span)[span_20](end_span)
-  if (prev.status === 'PENDING' && Math.abs(Number(prev.entry) - price) > 60 * pip) return null; //[span_21](start_span)[span_21](end_span)
+  if (!created || Date.now() - created > 20 * 60e3) return null;
+  if (prev.status === 'PENDING' && Math.abs(Number(prev.entry) - price) > 60 * pip) return null;
 
   if (Array.isArray(prev.oco?.legs) && prev.oco.legs.length) return resolveOcoFill(prev, price);
 
@@ -463,12 +462,12 @@ function runBot(ctx, d) {
   const m1 = closedOnly(d.m1, TF_MS.m1);
   const m5 = closedOnly(d.m5, TF_MS.m5);
   const m15 = closedOnly(d.m15, TF_MS.m15);
-  const live = getFormingM1(d.m1); //[span_22](start_span)[span_22](end_span)
-  const bars = { m1, m5, m15, live }; //[span_23](start_span)[span_23](end_span)
-  const r = runBotFlex(bars, { price: ctx.price, dec: ctx.dec, pip: ctx.pip, symbol: ctx.symbol }); //[span_24](start_span)[span_24](end_span)
+  const live = getFormingM1(d.m1);
+  const bars = { m1, m5, m15, live };
+  const r = runBotFlex(bars, { price: ctx.price, dec: ctx.dec, pip: ctx.pip, symbol: ctx.symbol });
   const F = v => ctx.f(safeNum(v, ctx.price));
 
-  const watch = scalpWatch({ m1: bars.m1, m5: bars.m5 }, { price: ctx.price, pip: ctx.pip, dec: ctx.dec, symbol: ctx.symbol }); //[span_25](start_span)[span_25](end_span)
+  const watch = scalpWatch({ m1: bars.m1, m5: bars.m5 }, { price: ctx.price, pip: ctx.pip, dec: ctx.dec, symbol: ctx.symbol });
 
   const facts = {
     mode: 'bot', symbol: ctx.symbol, style: 'Scalping', kz: ctx.kz.name, dec: ctx.dec,
@@ -685,7 +684,7 @@ const aiStickyCache = new Map();
 const AI_STICKY_MS = 3 * 60 * 1000;
 const sv = v => (v == null ? '' : String(v));
 function setupKey(f) {
-  return [f.mode, f.symbol, f.style, f.status, f.signal, f.entry, f.sl, f.trigger, f.tier, f.bias, f.standbyReason].map(sv).join('|'); //[span_26](start_span)[span_26](end_span)
+  return [f.mode, f.symbol, f.style, f.status, f.signal, f.entry, f.sl, f.trigger, f.tier, f.bias, f.standbyReason].map(sv).join('|');
 }
 
 async function getStory(facts, cacheKey, ttl = BOT_CFG.storyTtlMs) {
@@ -711,7 +710,7 @@ async function getStory(facts, cacheKey, ttl = BOT_CFG.storyTtlMs) {
   if (story) {
     aiStickyCache.set(key, { t: Date.now(), story });
     if (aiStickyCache.size > 300) aiStickyCache.delete(aiStickyCache.keys().next().value);
-  } else if (facts.status !== 'STANDBY') { //[span_27](start_span)[span_27](end_span)
+  } else if (facts.status !== 'STANDBY') {
     const st = aiStickyCache.get(key);
     if (st && Date.now() - st.t < AI_STICKY_MS) story = { ...st.story, sticky: true, aiError };
   }
@@ -721,7 +720,7 @@ async function getStory(facts, cacheKey, ttl = BOT_CFG.storyTtlMs) {
   }
   if (cacheKey) {
     const effTtl = facts.status === 'STANDBY' && facts.mode === 'manual'
-      ? Math.min(ttl, MANUAL_STANDBY_TTL_MS) //[span_28](start_span)[span_28](end_span)
+      ? Math.min(ttl, MANUAL_STANDBY_TTL_MS)
       : (story.ai ? ttl : Math.min(ttl, 60000));
     storyCache.set(cacheKey, { t: Date.now(), ttl: effTtl, v: story });
     if (storyCache.size > 300) storyCache.delete(storyCache.keys().next().value);
@@ -1015,7 +1014,7 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
   }
 
   if (out.signal.status !== 'STANDBY') {
-    out.signal.createdAt = Date.now(); //[span_29](start_span)[span_29](end_span)
+    out.signal.createdAt = Date.now();
   }
 
   if (isAutoBot) {
