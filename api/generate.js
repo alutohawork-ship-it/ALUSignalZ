@@ -1,4 +1,4 @@
-// api/generate.js — v156 (SMC manual + scalpStructPlan + smc_flex + pullbackPlan + no old fallback on Scalping + standby cache fix + bars.live guard + bot M15/M5/M1)
+// api/generate.js — v157 (SMC manual + scalpStructPlan M1/M5 + smc_flex + pullbackPlan + no old fallback on Scalping + standby cache fix + bars.live guard + bot M15/M5/M1)
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import { scalpStructPlan, flexScalpPlan, pullbackPlan, runBotSma as runBotFlex } from '../lib/smc_flex.js';
