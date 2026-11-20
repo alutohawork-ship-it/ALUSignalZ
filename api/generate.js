@@ -1,4 +1,4 @@
-// api/generate.js — v155 (SMC manual + scalpStructPlan + smc_flex + pullbackPlan + no old fallback on Scalping + standby cache fix + bot M15/M5/M1)
+// api/generate.js — v156 (SMC manual + scalpStructPlan + smc_flex + pullbackPlan + no old fallback on Scalping + standby cache fix + bars.live guard + bot M15/M5/M1)
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import { scalpStructPlan, flexScalpPlan, pullbackPlan, runBotSma as runBotFlex } from '../lib/smc_flex.js';
@@ -159,6 +159,11 @@ function closedOnly(c, ms) {
   if (!c || !c.length) return c || [];
   return Date.now() < tsMs(c[c.length - 1].t) + ms ? c.slice(0, -1) : c;
 }
+function getFormingM1(m1) {
+  if (!Array.isArray(m1) || !m1.length) return null;
+  const forming = m1[m1.length - 1];
+  return forming && Date.now() < tsMs(forming.t) + TF_MS.m1 ? forming : null;
+}
 
 function getKillzoneStatus(nowMs = Date.now()) {
   try {
@@ -258,7 +263,8 @@ async function runDocManual(ctx, d, styleName) {
   facts.watch = buildWatchlist({ ...closed, price: ctx.price, pip: ctx.pip, styleName });
   facts.syarat = SYARAT_MASUK[styleName] || null;
 
-  const barsClosed = { m1: closed.m1, m5: closed.m5, m15: closed.m15, h1: closed.h1 };
+  const live = getFormingM1(d.m1);
+  const barsClosed = { m1: closed.m1, m5: closed.m5, m15: closed.m15, h1: closed.h1, live };
   let out = { ok: false, checks: [] };
   if (styleName === 'Scalping') {
     const pctx = { price: ctx.price, dec: ctx.dec, pip: ctx.pip, now: Date.now(), symbol: ctx.symbol };
@@ -434,11 +440,11 @@ function validPrevSignal(prev, symbol, styleName, price) {
 
 // ── BOT ENGINE ──
 function runBot(ctx, d) {
-  const bars = {
-    m1: closedOnly(d.m1, TF_MS.m1),
-    m5: closedOnly(d.m5, TF_MS.m5),
-    m15: closedOnly(d.m15, TF_MS.m15),
-  };
+  const m1 = closedOnly(d.m1, TF_MS.m1);
+  const m5 = closedOnly(d.m5, TF_MS.m5);
+  const m15 = closedOnly(d.m15, TF_MS.m15);
+  const live = getFormingM1(d.m1);
+  const bars = { m1, m5, m15, live };
   const r = runBotFlex(bars, { price: ctx.price, dec: ctx.dec, pip: ctx.pip, symbol: ctx.symbol });
   const F = v => ctx.f(safeNum(v, ctx.price));
 
