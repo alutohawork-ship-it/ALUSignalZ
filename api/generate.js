@@ -1,7 +1,7 @@
-// api/generate.js — v149 (SMC manual + bot 3-tier, OCO, bounce, TP band, AI DeepSeek/GPT storytelling)
+// api/generate.js — v150 (SMC manual + smc_flex + bot 3-tier, OCO, bounce, TP band, AI DeepSeek/GPT storytelling)
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
-import { runBotSma } from '../lib/bot_sma.js';
+import { flexScalpPlan, runBotSma as runBotFlex } from '../lib/smc_flex.js';
 
 export const config = { maxDuration: 60 };
 
@@ -19,13 +19,16 @@ const QWEN_KEYS = [process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process
 const QWEN_MODELS = [...new Set([process.env.QWEN_MODEL || 'deepseek-v4-flash', process.env.QWEN_MODEL_2 || 'gpt-6-luna', AI_VISION_MODEL].filter(Boolean))];
 const QWEN_TIMEOUT_MS = 25000;
 const QWEN_DEADLINE_MS = 30000;
-const QWEN_MAX_TOKENS = 2000;
+const QWEN_MANUAL_DEADLINE_MS = 12000;
+const QWEN_MAX_TOKENS = 3000;
 const QWEN_MANUAL_MODEL = process.env.QWEN_MANUAL_MODEL || 'deepseek-v4-flash';
 
 const TL_KEY_NAMES = ['TICKERLAYER_API_KEY', ...Array.from({ length: 19 }, (_, i) => `TICKERLAYER_API_KEY_${i + 1}`)];
 const API_KEYS = TL_KEY_NAMES.map(n => process.env[n] || '');
-const TL_MAX_TRY = Math.max(1, Number(process.env.TICKERLAYER_MAX_TRY || 6));
+const TL_MAX_TRY = Math.max(1, Number(process.env.TICKERLAYER_MAX_TRY || 3));
+const TL_TIMEOUT_MS = 6000;
 const TL_DISABLED = process.env.TICKERLAYER_DISABLED === '1';
+const CANDLE_CACHE_TTL_MS = 90 * 1000;
 
 const DECIMALS = {
   DXY: 2, EURUSD: 5, GBPUSD: 5, USDJPY: 3, AUDUSD: 5, USDCAD: 5, USDCHF: 5, NZDUSD: 5,
@@ -51,15 +54,15 @@ const TF_NEED = { d1: 60, h4: 80, h1: 100, m30: 100, m15: 200, m5: 200, m1: 200 
 const MIN_BARS = { m1: 60, m5: 40, m15: 40, m30: 35, h1: 35, h4: 25, d1: 20 };
 
 const MANUAL_TF_NEEDED = {
-  'Scalping': ['m1', 'm5', 'h1'],
+  'Scalping': ['m1', 'm5', 'm15', 'h1'],
   'Intraday': ['m15', 'h1', 'h4'],
   'Swing':    ['h4', 'd1'],
 };
-const BOT_TF_NEEDED = ['m1', 'm5', 'h1'];
+const BOT_TF_NEEDED = ['m1', 'm5', 'm15', 'h1'];
 const MAX_DIST_PIP = { 'Scalping': 150, 'Intraday': 500, 'Swing': 2000 };
 const MAX_DIST_OVERRIDE = { BTCUSD: 800 };
 
-const BOT_CFG = { storyTtlMs: 15000 };  // AI selalu update tiap 15 detik
+const BOT_CFG = { storyTtlMs: 15000, signalTtlMs: 15 * 60e3 };
 const MANUAL_STORY_TTL_MS = 180000;
 const GATE_TTL_MS = 10 * 60 * 1000;
 
@@ -87,15 +90,30 @@ const MSG = {
 const msg = (lang, key) => ((MSG[lang] || MSG.id)[key] || key);
 const markTrialAsUsed = markTrialBotUsed;
 
-// ── DATA CANDLE ──
+// ── DATA CANDLE & CACHE ──
 const tlCooldown = new Map();
+const candleCache = new Map();
+
+function setCandleCache(symbol, tf, rows) {
+  if (!Array.isArray(rows) || !rows.length) return;
+  candleCache.set(`${symbol}:${tf}`, { t: Date.now(), rows });
+  if (candleCache.size > 400) candleCache.delete(candleCache.keys().next().value);
+}
+
+function getCandleCache(symbol, tf) {
+  const hit = candleCache.get(`${symbol}:${tf}`);
+  if (!hit) return [];
+  if (Date.now() - hit.t > CANDLE_CACHE_TTL_MS) return [];
+  return hit.rows;
+}
+
 async function tlGet(url) {
   if (TL_DISABLED) return null;
   const now = Date.now();
   const usable = API_KEYS.map((_, i) => i).filter(i => API_KEYS[i] && (tlCooldown.get(i) || 0) <= now).slice(0, TL_MAX_TRY);
   for (const i of usable) {
     try {
-      const r = await httpJson(url, { headers: { 'x-api-key': API_KEYS[i] } }, 8000);
+      const r = await httpJson(url, { headers: { 'x-api-key': API_KEYS[i] } }, TL_TIMEOUT_MS);
       if (r.status === 429) { tlCooldown.set(i, Date.now() + 60000); continue; }
       if (r.ok && r.data) return r.data;
     } catch (e) { console.warn(`TL key ${i}:`, e.message); }
@@ -239,9 +257,18 @@ async function runDocManual(ctx, d, styleName) {
   facts.watch = buildWatchlist({ ...closed, price: ctx.price, pip: ctx.pip, styleName });
   facts.syarat = SYARAT_MASUK[styleName] || null;
 
-  const out = generateManualPlan({
-    ...closed, tickSize: 10 ** -ctx.dec, price: ctx.price, pip: ctx.pip, rr: ctx.rr, symbol: ctx.symbol,
-  }, styleName);
+  const barsClosed = { m1: closed.m1, m5: closed.m5, m15: closed.m15, h1: closed.h1 };
+  let out = styleName === 'Scalping'
+    ? flexScalpPlan(barsClosed, { price: ctx.price, dec: ctx.dec, pip: ctx.pip, now: Date.now(), symbol: ctx.symbol })
+    : { ok: false, checks: [] };
+  if (!out.ok) {
+    const flexChecks = out.checks || [];
+    out = generateManualPlan({
+      ...closed, tickSize: 10 ** -ctx.dec, price: ctx.price, pip: ctx.pip, rr: ctx.rr, symbol: ctx.symbol,
+    }, styleName);
+    out.checks = [...flexChecks, ...(out.checks || [])];
+  }
+
   const regimeTxt = (out.regime ? out.regime.replace('_', ' ') : 'netral') + (out.regimeSrc ? ` · ${out.regimeSrc}` : '');
   facts.bias = regimeTxt;
   const checks = Array.isArray(out.checks) ? out.checks : [];
@@ -379,7 +406,7 @@ function resolveOcoFill(prev, price) {
 
 function validPrevSignal(prev, symbol, styleName, price) {
   if (!prev || typeof prev !== 'object') return null;
-  if (prev.status !== 'PENDING' || (prev.signal !== 'BUY' && prev.signal !== 'SELL')) return null;
+  if (!['PENDING', 'RUNNING'].includes(prev.status) || (prev.signal !== 'BUY' && prev.signal !== 'SELL')) return null;
   if (prev.symbol !== symbol || prev.style !== styleName) return null;
   const exp = Number(prev.expiresAt);
   if (!Number.isFinite(exp) || Date.now() > exp) return null;
@@ -399,14 +426,14 @@ function runBot(ctx, d) {
   const bars = {
     m1: closedOnly(d.m1, TF_MS.m1),
     m5: closedOnly(d.m5, TF_MS.m5),
+    m15: closedOnly(d.m15, TF_MS.m15),
     h1: closedOnly(d.h1, TF_MS.h1),
   };
-  const r = runBotSma(bars, { price: ctx.price, dec: ctx.dec, pip: ctx.pip, symbol: ctx.symbol });
+  const r = runBotFlex(bars, { price: ctx.price, dec: ctx.dec, pip: ctx.pip, symbol: ctx.symbol });
   const F = v => ctx.f(safeNum(v, ctx.price));
 
-  // Watchlist untuk cerita AI
   const watch = buildWatchlist({
-    m5: bars.m5, m15: d.m15, h1: bars.h1, h4: d.h4, d1: d.d1,
+    m5: bars.m5, m15: bars.m15, h1: bars.h1, h4: d.h4, d1: d.d1,
     price: ctx.price, pip: ctx.pip, styleName: 'Scalping',
   });
 
@@ -414,7 +441,7 @@ function runBot(ctx, d) {
     mode: 'bot', symbol: ctx.symbol, style: 'Scalping', kz: ctx.kz.name, dec: ctx.dec,
     price: F(ctx.price), bias: r.bias || 'NETRAL', dirTxt: r.dirTxt || '-',
     trigger: r.trigger || null, checklist: Array.isArray(r.checklist) ? r.checklist : [],
-    sma: r.trendTxt || '-', m1: r.structTxt || '-', zone: null,
+    htf: r.trendTxt || '-', m1: r.structTxt || '-', zone: null,
     watch: watch,
     tier: r.tier || 'STRICT',
     status: r.ok ? 'SIGNAL' : 'STANDBY',
@@ -429,10 +456,13 @@ function runBot(ctx, d) {
   };
   const out = toSignal(plan, ctx, {
     confidence: r.confidence || 'HIGH',
-    risk: r.tier === 'LOOSE' || r.tier === 'MOMENTUM' ? 'HIGH' : 'MEDIUM',
+    risk: ['LOOSE', 'MOMENTUM', 'PEMBALIKAN'].includes(r.tier) ? 'HIGH' : 'MEDIUM',
     checklist: facts.checklist, scanSummary: facts.checklist.join('\n'), topDown: facts.bias,
   });
   out.tier = r.tier || 'STRICT';
+  out.symbol = ctx.symbol;
+  out.style = 'Scalping';
+  out.expiresAt = Date.now() + BOT_CFG.signalTtlMs;
   facts.tier = out.tier;
   facts.signal = r.dirTxt;
   facts.role = r.role || 'main';
@@ -463,11 +493,11 @@ const SYS_BOT = `Kamu adalah mentor trading senior spesialis SMC (Market Structu
 ATURAN MUTLAK:
 1. DILARANG KERAS mengarang atau mengubah angka harga yang tidak ada di JSON input. Salin angka persis dari JSON.
 2. JANGAN gunakan bullet points, daftar angka, atau tanda bintang (*). Tulis dalam bentuk paragraf utuh yang mengalir (minimal 5-7 kalimat).
-3. Buka cerita dengan kondisi HTF (H1/H4) berdasarkan field "bias" dan "sma". Sebutkan time framenya, apakah sedang tren naik, turun, atau ranging. Apakah terjadi BOS, MSS, atau CHoCH?
+3. Buka cerita dengan kondisi HTF (H1/H4) berdasarkan field "bias" dan "htf". Sebutkan time framenya, apakah sedang tren naik, turun, atau ranging. Apakah terjadi BOS, MSS, atau CHoCH?
 4. Lanjut ke M5/M1 berdasarkan field "checklist" dan "m1": Jelaskan rencana scalping-nya. Apakah bot menunggu harga retracement ke area POI utama, ke area Fibonacci OTE, atau ke Supply/Demand utama? Jika ada field "watch", sebutkan zona Supply/Demand yang sedang dipantau beserta harga batas bawah dan atasnya.
 5. Berikan skenario dinamis: Jika harga reversal, apa rencananya? Jika lanjut tren (continuation), targetnya ke mana? Sebutkan syarat konfirmasi struktur yang jelas (misal: tunggu candle close di atas/bawah level X).
 6. Jika bot sedang STANDBY (belum entry): Jelaskan dengan santai apa yang sedang ditunggu berdasarkan field "checklist" dan "watch". Misal: "Bot kita sedang sabar menunggu, karena POI di OTE baru terkumpul 1 dari 2 syarat, dan kita memantau zona Supply di harga X..."
-7. Jika bot sedang RUNNING/PENDING: Jelaskan arah, tier (STRICT/LOOSE/MOMENTUM), trigger, entry, SL, dan TP persis dari JSON.
+7. Jika bot sedang RUNNING/PENDING: Jelaskan arah, tier (STRICT/LOOSE/MOMENTUM/KONTINUITAS/PEMBALIKAN), trigger, entry, SL, dan TP persis dari JSON. Jika tier PEMBALIKAN, tegaskan bahwa arahnya melawan bias H1 dan hanya valid karena struktur sweep dan CHoCH M5.
 8. Gunakan kata "saya" atau "kita". 
 Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}.`;
 
@@ -490,11 +520,11 @@ function collectNums(v, out = []) {
   return out;
 }
 
-function verifyNoHallucinatedPrices(text, facts) {
+function findUnknownPrice(text, facts) {
   try {
-    if (!text || typeof text !== 'string') return false;
+    if (!text || typeof text !== 'string') return null;
     const price = Number(facts?.price);
-    if (!(price > 0)) return true;
+    if (!(price > 0)) return null;
     const allowed = collectNums(facts);
     const dec = Number.isFinite(facts?.dec) ? facts.dec : 2;
     const tol = Math.pow(10, -dec) * 0.6;
@@ -502,10 +532,10 @@ function verifyNoHallucinatedPrices(text, facts) {
       const n = parseNum(t);
       if (!Number.isFinite(n)) continue;
       if (Math.abs(n - price) / price >= 0.05) continue;
-      if (!allowed.some(a => Math.abs(a - n) <= tol)) return false;
+      if (!allowed.some(a => Math.abs(a - n) <= tol)) return t;
     }
-    return true;
-  } catch { return true; }
+    return null;
+  } catch { return null; }
 }
 
 function extractContent(data) {
@@ -524,15 +554,15 @@ function parseJsonLoose(text) {
   try { return JSON.parse(s.slice(a, b + 1)); } catch { return null; }
 }
 
-async function qwenJson(sys, userObj, maxTokens = QWEN_MAX_TOKENS) {
+async function qwenJson(sys, userObj, maxTokens = QWEN_MAX_TOKENS, deadlineMs = QWEN_DEADLINE_MS) {
   if (!QWEN_KEYS.length) return { json: null, error: 'API key AI belum diatur (QWEN_API_KEY / OPENAI_API_KEY)' };
   const user = JSON.stringify(userObj);
-  const deadline = Date.now() + QWEN_DEADLINE_MS;
+  const deadline = Date.now() + deadlineMs;
   let lastErr = 'semua model gagal';
   for (const m of QWEN_MODELS) {
     for (const k of QWEN_KEYS.slice(0, 2)) {
       const left = deadline - Date.now();
-      if (left < 5000) return { json: null, error: `timeout AI (sisa ${left} ms)` };
+      if (left < 2500) return { json: null, error: `timeout AI (sisa ${left} ms)` };
       try {
         const r = await httpJson(`${QWEN_BASE_URL}/chat/completions`, {
           method: 'POST',
@@ -553,7 +583,10 @@ async function qwenJson(sys, userObj, maxTokens = QWEN_MAX_TOKENS) {
         const raw = stripThink(extractContent(r.data));
         const parsed = parseJsonLoose(raw);
         if (parsed && parsed.id && parsed.en) return { json: parsed, error: '' };
-        lastErr = `${m}: respons bukan JSON {id,en}. Potongan: ${raw.slice(0, 120)}`;
+        const finish = r.data?.choices?.[0]?.finish_reason || '-';
+        lastErr = raw
+          ? `${m}: respons bukan JSON {id,en}. Potongan: ${raw.slice(0, 120)}`
+          : `${m}: respons kosong (finish_reason=${finish})`;
         console.warn('qwenJson:', lastErr);
       } catch (e) {
         lastErr = `${m}: ${e.message}`;
@@ -615,23 +648,40 @@ function isUsableStory(s, facts) {
 }
 
 const storyCache = new Map();
+const aiStickyCache = new Map();
+const AI_STICKY_MS = 3 * 60 * 1000;
+const sv = v => (v == null ? '' : String(v));
+function setupKey(f) {
+  return [f.mode, f.symbol, f.style, f.status, f.signal, f.entry, f.sl, f.trigger, f.tier, f.bias].map(sv).join('|');
+}
+
 async function getStory(facts, cacheKey, ttl = BOT_CFG.storyTtlMs) {
   if (cacheKey) {
     const hit = storyCache.get(cacheKey);
     if (hit && Date.now() - hit.t < hit.ttl) return hit.v;
   }
+  const key = setupKey(facts);
   let story = null, aiError = '';
   try {
-    const { json, error } = await qwenJson(facts.mode === 'bot' ? SYS_BOT : SYS_MANUAL, facts);
+    const deadlineMs = facts.mode === 'manual' ? QWEN_MANUAL_DEADLINE_MS : QWEN_DEADLINE_MS;
+    const { json, error } = await qwenJson(facts.mode === 'bot' ? SYS_BOT : SYS_MANUAL, facts, QWEN_MAX_TOKENS, deadlineMs);
     if (!json) aiError = error || 'AI tidak memberi jawaban';
     else if (!isUsableStory(json.id, facts) || !isUsableStory(json.en, facts)) {
       aiError = 'jawaban AI terlalu pendek atau hanya nama simbol';
-    } else if (!verifyNoHallucinatedPrices(json.id, facts) || !verifyNoHallucinatedPrices(json.en, facts)) {
-      aiError = 'angka di jawaban AI tidak cocok dengan data';
     } else {
-      story = { id: String(json.id), en: String(json.en), ai: true };
+      const badNum = findUnknownPrice(json.id, facts) || findUnknownPrice(json.en, facts);
+      if (badNum) aiError = `angka ${badNum} di jawaban AI tidak ada di data`;
+      else story = { id: String(json.id), en: String(json.en), ai: true };
     }
   } catch (e) { aiError = e.message; }
+
+  if (story) {
+    aiStickyCache.set(key, { t: Date.now(), story });
+    if (aiStickyCache.size > 300) aiStickyCache.delete(aiStickyCache.keys().next().value);
+  } else {
+    const st = aiStickyCache.get(key);
+    if (st && Date.now() - st.t < AI_STICKY_MS) story = { ...st.story, sticky: true, aiError };
+  }
   if (!story) {
     console.warn('getStory fallback:', aiError);
     story = { id: fallbackStory(facts, 'id'), en: fallbackStory(facts, 'en'), ai: false, aiError };
@@ -658,10 +708,10 @@ FORMAT OUTPUT (hanya JSON, tanpa markdown):
 async function aiGateManual(input) {
   const fallback = { keputusan: 'AMBIL', alasan: 'Sesuai validasi aturan SMC', ai: false };
   if (!QWEN_KEYS.length) return fallback;
-  const deadline = Date.now() + QWEN_DEADLINE_MS;
+  const deadline = Date.now() + QWEN_MANUAL_DEADLINE_MS;
   for (const k of QWEN_KEYS.slice(0, 2)) {
     const left = deadline - Date.now();
-    if (left < 3000) return fallback;
+    if (left < 1500) return fallback;
     try {
       const r = await httpJson(`${QWEN_BASE_URL}/chat/completions`, {
         method: 'POST',
@@ -670,7 +720,7 @@ async function aiGateManual(input) {
           model: QWEN_MANUAL_MODEL, max_tokens: 800, temperature: 0,
           messages: [{ role: 'system', content: SYS_GATE_MANUAL }, { role: 'user', content: JSON.stringify(input) }],
         }),
-      }, Math.min(QWEN_TIMEOUT_MS, left));
+      }, Math.min(QWEN_MANUAL_DEADLINE_MS, left));
       if (!r.ok) continue;
       const parsed = parseJsonLoose(stripThink(extractContent(r.data)));
       if (parsed && ['AMBIL', 'TUNGGU'].includes(parsed.keputusan)) {
@@ -862,19 +912,47 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
     f: v => Number(safeNum(v, price).toFixed(dec)),
   };
 
+  const allTfs = ['m1', 'm5', 'm15', 'm30', 'h1', 'h4', 'd1'];
   const candleMap = {};
-  for (const tf of ['m1', 'm5', 'm15', 'm30', 'h1', 'h4', 'd1']) candleMap[tf] = clientCandles(body, tf);
+  for (const tf of allTfs) {
+    const incoming = clientCandles(body, tf);
+    if (incoming.length) {
+      candleMap[tf] = incoming;
+      setCandleCache(symbol, tf, incoming);
+    } else {
+      candleMap[tf] = [];
+    }
+  }
+
   const need = isAutoBot ? BOT_TF_NEEDED : manualTfs(styleName);
   try {
-    for (const tf of need) {
-      if (candleMap[tf] && candleMap[tf].length >= (MIN_BARS[tf] || 25)) continue;
-      const rows = await fetchTickerLayerRows(symbol, TF_IV[tf], TF_NEED[tf] || 200);
-      if (rows.length) candleMap[tf] = rows;
-    }
-  } catch (e) { console.warn('fallback TL:', e.message); }
+    await Promise.all(need.map(async tf => {
+      if (candleMap[tf] && candleMap[tf].length >= (MIN_BARS[tf] || 25)) return;
+      try {
+        const rows = await fetchTickerLayerRows(symbol, TF_IV[tf], TF_NEED[tf] || 200);
+        if (rows.length) {
+          candleMap[tf] = rows;
+          setCandleCache(symbol, tf, rows);
+          return;
+        }
+      } catch (e) {
+        console.warn(`TL ${symbol} ${tf}:`, e.message);
+      }
+      const cached = getCandleCache(symbol, tf);
+      if (cached.length && (!candleMap[tf] || cached.length > candleMap[tf].length)) {
+        candleMap[tf] = cached;
+      }
+    }));
+  } catch (e) { console.warn('fallback TL parallel:', e.message); }
 
   const data = { price };
-  for (const tf of ['m1', 'm5', 'm15', 'm30', 'h1', 'h4', 'd1']) data[tf] = candleMap[tf] || [];
+  for (const tf of allTfs) {
+    if (!candleMap[tf] || !candleMap[tf].length) {
+      const cached = getCandleCache(symbol, tf);
+      if (cached.length) candleMap[tf] = cached;
+    }
+    data[tf] = candleMap[tf] || [];
+  }
   if (!data.m5.length && !data.m15.length && !data.m1.length) return fail(res, msg(lang, 'noCandles'));
 
   let out;
@@ -893,11 +971,11 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
     try { await markTrialAsUsed(email); } catch (e) { console.warn('markTrialAsUsed:', e.message); }
   }
 
-  if (!isAutoBot && out.signal.status === 'STANDBY') {
-    const prev = validPrevSignal(body.prevSignal, symbol, styleName, price);
-    if (prev) {
-      return res.status(200).json({ ok: true, mode: 'candles', symbol, style: styleName, price, signal: { ...prev, sticky: true } });
-    }
+  const prev = validPrevSignal(body.prevSignal, symbol, styleName, price);
+  if (prev && (out.signal.status === 'STANDBY' || out.signal.signal !== prev.signal)) {
+    const last = data.m1 && data.m1.length ? data.m1[data.m1.length - 1] : null;
+    const nextCloseAt = isAutoBot && last ? tsMs(last.t) + TF_MS.m1 : undefined;
+    return res.status(200).json({ ok: true, mode: isAutoBot ? 'bot' : 'candles', symbol, style: styleName, price, signal: { ...prev, sticky: true, nextCloseAt } });
   }
 
   if (isAutoBot) {
