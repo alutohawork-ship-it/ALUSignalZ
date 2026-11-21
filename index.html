@@ -724,6 +724,7 @@ const srcLabel = (k, iv) => `${k} · ${iv} · WIB · ${srcOf(k, iv)}`;
 const activeTrade = () => {
   const t = market === 'VISION' ? visionTrade : (trades.find(x => x.id === activeId && x.key === market && x.src !== 'bot') || null);
   if (t && !t.hits) t.hits = {};
+  if (t && t.status === 'CLOSED' && t.result === 'CANCEL') return null; // sinyal batal: kartu ditutup
   return t;
 };
 const toMs = v => {
@@ -1111,6 +1112,7 @@ async function monStartServer(style, key) {
   syncServer();
 }
 function srvTabLabels() {
+  return; // status tab dikelola renderStyleTabs
   const box = $('styleTabs');
   if (!box) return;
   const taken = srvTaken();
@@ -1998,6 +2000,29 @@ function pickStyleTab(style) {
   activeId = pick ? pick.id : null;
   renderAll();
 }
+function srvStyleState(style) {
+  const taken = srvTaken();
+  if (srvMon.some(m => m.style === style && m.symbol === market && m.status === 'pending' && m.pending && !taken.has(m.id))) return 'pending';
+  if (srvMon.some(m => m.style === style && m.symbol === market && m.status === 'watch')) return 'watch';
+  return null;
+}
+function srvPaintWaiting() {
+  const sv = $('standbyView');
+  if (!sv || market === 'VISION' || isBotView() || isChatBotView()) return;
+  const style = $('tradingStyleSelect') ? $('tradingStyleSelect').value : '';
+  if (!MON_STYLES_SRV.includes(style) || activeTrade()) return;
+  if (srvStyleState(style) !== 'watch') {
+    if (sv.dataset.waitHtml && sv.innerHTML === sv.dataset.waitHtml) { sv.innerHTML = T('standby1'); delete sv.dataset.waitHtml; }
+    return;
+  }
+  const html = `<div class="bg-darkbg border border-yellow-500/40 rounded-lg p-3 text-center space-y-1">
+    <p class="text-sm font-black text-yellow-300">⌛ TUNGGU SIGNAL</p>
+    <p class="text-[10px] font-mono text-gray-300">${style} · ${market} · cek tiap ${style === 'Intraday' ? '5' : '15'} menit</p>
+    <p class="text-[9px] text-gray-500">Batas tunggu ${style === 'Intraday' ? '8 jam' : '1 hari'}. Sinyal akan muncul otomatis.</p></div>`;
+  if (sv.dataset.waitHtml !== html) { sv.innerHTML = html; sv.dataset.waitHtml = html; }
+  sv.classList.remove('hidden');
+}
+
 function renderStyleTabs() {
   const box = $('styleTabs');
   if (!box) return;
@@ -2008,13 +2033,15 @@ function renderStyleTabs() {
   [...box.children].forEach(b => {
     const s = b.dataset.styleTab;
     const n = trades.filter(x => x.key === market && x.src !== 'bot' && x.style === s && x.status !== 'CLOSED').length;
-    b.textContent = s.toUpperCase() + (n ? ` · ${n}` : '');
+    const stt = srvStyleState(s);
+    b.textContent = stt === 'pending' ? `🔔 ${s.toUpperCase()} · SIGNAL AKTIF` : stt === 'watch' ? `⌛ ${s.toUpperCase()} · TUNGGU` : s.toUpperCase() + (n ? ` · ${n}` : '');
     const on = s === sel;
     b.classList.toggle('bg-accentblue', on);
     b.classList.toggle('text-white', on);
     b.classList.toggle('border-accentblue', on);
   });
   box.classList.toggle('hidden', market === 'VISION' || isBotView() || isChatBotView());
+  srvPaintWaiting();
 }
 function deleteActiveSignal() {
   const t = activeTrade();
@@ -3511,7 +3538,7 @@ async function generateSignal() {
   }
   const originalText = btnText.textContent;
 
-  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+
   btnText.textContent = 'Menganalisa...';
   btn.disabled = true;
   // Dengan trade aktif, overlay dilewati agar kartu tidak berkedip/tertutup
