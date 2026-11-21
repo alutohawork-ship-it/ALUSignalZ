@@ -349,6 +349,10 @@ def main():
     with open(path, encoding="utf-8") as f:
         src = f.read()
 
+    # Lewati potongan yang sudah ada (mis. konstanta LIVE_FOCUS_N dari versi sebelumnya)
+    global PATCHES
+    PATCHES = [p for p in PATCHES if not (p[0].startswith('konstanta') and 'const LIVE_FOCUS_N' in src)]
+
     # 1) Cek semua potongan dulu, sebelum menulis apa pun
     for name, old, _ in PATCHES:
         n = src.count(old)
