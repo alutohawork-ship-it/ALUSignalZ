@@ -286,11 +286,12 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
 
       <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2 relative">
         <div id="standbyView" class="py-3 text-center text-xs text-gray-400" data-i18n="standby1"></div>
+        <div id="styleTabs" class="flex gap-1"></div>
         <div id="activeCard" class="hidden space-y-3">
           <div class="bg-darkbg/80 border border-panelborder rounded-xl p-3 text-center space-y-1">
             <div class="flex justify-center items-center gap-2">
                 <span id="sigBadge" class="bg-sky-500 text-white px-4 py-1 rounded-full text-xs font-black tracking-wider shadow-lg">BUY</span>
-                <button onclick="copySignal()" class="text-gray-400 hover:text-white transition" title="Copy Signal"><i class="fa-solid fa-copy"></i></button>
+                <button onclick="copySignal()" class="text-gray-400 hover:text-white transition" title="Copy Signal"><i class="fa-solid fa-copy"></i></button> <button onclick="deleteActiveSignal()" class="text-gray-400 hover:text-red-400 transition" title="Hapus sinyal"><i class="fa-solid fa-trash"></i></button>
             </div>
             <p id="cardSub" class="text-[9px] text-gray-400 pt-1">--</p>
             <p data-i18n="entryZone" class="text-[9px] font-bold text-gray-400 tracking-widest pt-1"></p>
@@ -358,6 +359,15 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
             </div>
           </div>
           <span id="tradeStatus" class="hidden text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40 whitespace-nowrap">RUNNING</span>
+        </div>
+        <div class="flex flex-wrap gap-1 pb-1">
+          <button data-live-type="candle" onclick="setLiveType('candle')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">CANDLE</button>
+          <button data-live-type="line" onclick="setLiveType('line')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">LINE</button>
+          <button data-live-ind="fvg" onclick="toggleLiveInd('fvg')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">FVG</button>
+          <button data-live-ind="ob" onclick="toggleLiveInd('ob')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">OB</button>
+          <button data-live-ind="liq" onclick="toggleLiveInd('liq')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">BSL/SSL</button>
+          <button data-live-ind="str" onclick="toggleLiveInd('str')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">BOS/CHoCH</button>
+          <button data-live-ind="sma" onclick="toggleLiveInd('sma')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">SMA20</button>
         </div>
         <p id="tradePnl" class="text-[10px] font-mono font-bold text-gray-400"></p>
         <p id="tradeLive" class="text-[8px] font-mono text-gray-400"></p>
@@ -540,6 +550,7 @@ const LIVE_KEY = 'aluLive_v1';
 const K = { type: 'alu_session_type', email: 'alu_user_email', admin: 'alu_admin_code' };
 const JSON_H = { 'Content-Type': 'application/json' };
 const HISTORY_MS = 600000, STALE_MS = 30000, CHART_GUT = 80, CH_PAD = 4;
+const LIVE_FOCUS_N = 60; // jumlah candle minimum yang tampil saat trade berjalan
 const LIVE_FOCUS_N = 60;
 const TFS = [1, 5, 15, 30, 60, 240, 1440];
 const HL_TF = [[1, 'M1'], [5, 'M5'], [15, 'M15'], [60, 'H1'], [240, 'H4'], [1440, 'D1']];
@@ -744,6 +755,7 @@ function reasonFor(t) {
 let lang = 'id', market = 'XAUUSD', ws = null, connId = 0, reconT = null, pingT = null, authFailed = false, streamStarted = false;
 let trades = [], activeId = null, tvOn = false, showSMC = true;
 let visionTrade = null;
+let standbyNote = null; // alasan STANDBY saat sinyal aktif tetap berjalan
 let smcTfOverride = null;
 let smcZoom = 1;
 let smcPan = 0;
@@ -1485,7 +1497,11 @@ function checkTrades(k, p) {
   let ch = false;
   for (const t of trades) {
     if (t.key !== k || t.status === 'CLOSED') continue;
-    if (evalTrade(t, p, lo, hi, now)) ch = true;
+    // Trade yang baru terisi (limit kesentuh) hanya dicek TP/SL dari tick setelah fill,
+    // bukan dari rentang harga sebelum fill
+    const fillFresh = t.filledAt && (!prev || t.filledAt >= prev.at);
+    const tlo = fillFresh ? p : lo, thi = fillFresh ? p : hi;
+    if (evalTrade(t, p, tlo, thi, now)) ch = true;
   }
   if (ch) { saveTrades(); renderHistory(); }
 }
@@ -1499,6 +1515,11 @@ function evalTrade(t, p, lo = p, hi = p, now = Date.now()) {
   if (t.status === 'PENDING') {
     if (t.expiresAt && now > t.expiresAt) {
       cancelTrade(t, 'Zona tidak tersentuh (Expired)');
+      return true;
+    }
+    // Pending menjauh dari harga (XAUUSD Scalping > 50 pip): batalkan, sama dengan batas di server
+    if (t.key === 'XAUUSD' && t.style === 'Scalping' && Math.abs(p - t.entry) / (t.pip || 0.1) > 50) {
+      cancelTrade(t, 'Harga menjauh dari entry (> 50 pip)');
       return true;
     }
     const slTouched = d > 0 ? lo <= t.sl + eps : hi >= t.sl - eps;
@@ -1575,10 +1596,16 @@ function replayMissed() {
       if (end <= scanned) continue;
       if (end > nowT) continue;            // candle berjalan ditangani tick live
       if (s1.at < end) continue;           // data server diambil sebelum candle ini tutup -> tunggu refresh
+      // Candle tempat limit terisi: urutan harga di dalam candle tidak diketahui, dan
+      // sejak fill sudah dipantau live. Lewati agar TP/BE tidak tercatat dari candle yang sama.
+      if (t.filledAt && c.t <= Math.floor(t.filledAt / 60000) * 60000) { t.scanAt = end; continue; }
       const path = c.c >= c.o ? [c.o, c.l, c.h, c.c] : [c.o, c.h, c.l, c.c];
+      const wasPending = t.status === 'PENDING';
       for (const pt of path) {
         if (t.status === 'CLOSED') break;
         if (evalTrade(t, pt, pt, pt, end)) ch = true;
+        // Limit terisi di candle ini: urutan intra-candle tidak diketahui, jadi TP/SL candle ini dilewati
+        if (wasPending && t.status !== 'PENDING') break;
       }
       t.scanAt = end;
     }
@@ -1707,7 +1734,45 @@ function renderHistory() {
 }
 
 const BADGE = 'text-[8px] font-mono font-bold px-2 py-0.5 rounded border ';
+// ── Satu kartu, pindah antar style lewat tab ──
+const STYLE_TABS = ['Scalping', 'Intraday', 'Swing'];
+function pickStyleTab(style) {
+  const sel = $('tradingStyleSelect');
+  if (sel) sel.value = style;
+  const list = trades.filter(x => x.key === market && x.src !== 'bot' && x.style === style);
+  const open = list.filter(x => x.status !== 'CLOSED');
+  const pick = (open.length ? open : list).slice(-1)[0];
+  activeId = pick ? pick.id : null;
+  renderAll();
+}
+function renderStyleTabs() {
+  const box = $('styleTabs');
+  if (!box) return;
+  if (!box.children.length) {
+    box.innerHTML = STYLE_TABS.map(s => `<button data-style-tab="${s}" onclick="pickStyleTab('${s}')" class="flex-1 text-[9px] font-bold py-1 rounded border border-panelborder text-gray-400"></button>`).join('');
+  }
+  const sel = $('tradingStyleSelect') ? $('tradingStyleSelect').value : 'Scalping';
+  [...box.children].forEach(b => {
+    const s = b.dataset.styleTab;
+    const n = trades.filter(x => x.key === market && x.src !== 'bot' && x.style === s && x.status !== 'CLOSED').length;
+    b.textContent = s.toUpperCase() + (n ? ` · ${n}` : '');
+    const on = s === sel;
+    b.classList.toggle('bg-accentblue', on);
+    b.classList.toggle('text-white', on);
+    b.classList.toggle('border-accentblue', on);
+  });
+  box.classList.toggle('hidden', market === 'VISION' || isBotView() || isChatBotView());
+}
+function deleteActiveSignal() {
+  const t = activeTrade();
+  if (!t || !confirm('Hapus sinyal ini? Slot akan kembali kosong untuk sinyal baru.')) return;
+  cancelTrade(t, 'Dihapus pengguna');
+  activeId = null;
+  saveTrades();
+  renderAll();
+}
 function refreshCard() {
+  renderStyleTabs();
   if (isBotView() || isChatBotView()) {
     $('standbyView').classList.add('hidden');
     $('activeCard').classList.add('hidden');
@@ -1755,7 +1820,7 @@ function refreshCard() {
   br.textContent = 'RISK ' + (t.risk || '--');
   br.className = BADGE + (RISK_CLS[t.risk] || 'bg-darkbg text-gray-300 border-panelborder');
   setTxt('cardLive', priceTxt);
-  setTxt('cardReason', cleanReason(reasonFor(t)));
+  setTxt('cardReason', standbyNote ? standbyNote : cleanReason(reasonFor(t)));
 
   const LV = ['sl', 'tp1', 'tp2', 'tp3'];
   if (oco) {
@@ -2587,15 +2652,44 @@ function drawBotChart() {
   drawBotMap(bcv, bcx, activeBotSig, 'XAUUSD');
 }
 
+// ── Tombol LIVE MAP: indikator on/off dan tipe chart ──
+const LIVE_IND = { fvg: true, ob: true, liq: true, str: true, sma: true };
+let LIVE_TYPE = 'candle';
+function toggleLiveInd(key) { LIVE_IND[key] = !LIVE_IND[key]; syncLiveBtns(); }
+function setLiveType(tp) { LIVE_TYPE = tp; syncLiveBtns(); }
+function syncLiveBtns() {
+  const mark = (el, on) => {
+    el.classList.toggle('bg-accentblue/30', on);
+    el.classList.toggle('text-white', on);
+    el.classList.toggle('text-gray-500', !on);
+  };
+  document.querySelectorAll('[data-live-ind]').forEach(b => mark(b, !!LIVE_IND[b.dataset.liveInd]));
+  document.querySelectorAll('[data-live-type]').forEach(b => mark(b, b.dataset.liveType === LIVE_TYPE));
+}
+
+// Mode fokus: trade sudah terisi (RUNNING/BE) -> tampil dari sekitar candle fill sampai sekarang
+function liveViewRows(rows, t) {
+  if (!t || t.status === 'CLOSED' || t.status === 'PENDING') return rows;
+  let start = rows.length - LIVE_FOCUS_N;
+  if (t.filledAt) {
+    const fillMin = Math.floor(t.filledAt / 60000) * 60000;
+    const idx = rows.findIndex(c => c.t >= fillMin);
+    if (idx >= 0) start = idx - 10;
+  }
+  start = Math.max(0, Math.min(start, rows.length - 30));
+  return rows.slice(start);
+}
+
 function drawLiveMap(cv, cx, t, k) {
   if (!cx) return;
+  syncLiveBtns();
   const d = fitCv(cv, cx);
   if (!d) return;
   const CW = d.w, CH = d.h;
 
   const iv = '1m';
   const tfMs = TF_MIN[iv] * 60000;
-  const rows = displayRows(k, iv);
+  const allRows = displayRows(k, iv);
   const live = prices[k] ? prices[k].price : null;
   const liveDir = prices[k] ? prices[k].dir : 0;
   const plotL = 6, plotT = 20, plotB = CH - 14, plotR = CW - CHART_GUT;
@@ -2605,9 +2699,9 @@ function drawLiveMap(cv, cx, t, k) {
   cx.textAlign = 'left';
   cx.textBaseline = 'top';
   cx.fillStyle = 'rgba(148,163,184,.9)';
-  cx.fillText(srcLabel(k, iv), plotL + 2, 3);
+  cx.fillText(srcLabel(k, iv) + (LIVE_TYPE === 'line' ? ' · LINE' : ''), plotL + 2, 3);
 
-  if (!rows.length && live == null) {
+  if (!allRows.length && live == null) {
     cx.font = 'bold 11px ui-monospace, monospace';
     cx.fillStyle = '#94a3b8';
     cx.textAlign = 'center';
@@ -2617,13 +2711,13 @@ function drawLiveMap(cv, cx, t, k) {
     return;
   }
 
-  const focus = !!t && t.status !== 'CLOSED' && t.status !== 'PENDING';
-  const viewRows = focus ? rows.slice(-LIVE_FOCUS_N) : rows;
-  const { vis, slot, xOfT } = layoutX(viewRows, plotL, plotR, tfMs);
+  const rows = liveViewRows(allRows, t);
+  const { vis, slot, xOfT } = layoutX(rows, plotL, plotR, tfMs);
   const smcData = getSmc(k, iv);
 
-  const pre = t && t.ocoId ? (t.signal === 'BUY' ? 'B ' : 'S ') : '';
+  // Level trade hanya tampil saat trade belum CLOSED
   const showLv = !!t && t.status !== 'CLOSED';
+  const pre = t && t.ocoId ? (t.signal === 'BUY' ? 'B ' : 'S ') : '';
   const L = showLv ? [
     { label: pre + 'ENTRY', main: true, v: t.entry, c: '#93c5fd', bg: 'rgba(147,197,253,.14)', dash: [] },
     { label: pre + slLabel(t), v: effSL(t), c: '#f87171', bg: 'rgba(248,113,113,.14)', dash: [4, 4], hit: t.result === 'SL' },
@@ -2632,13 +2726,14 @@ function drawLiveMap(cv, cx, t, k) {
     { label: pre + 'TP3', v: t.tp3, c: '#38bdf8', bg: 'rgba(56,189,248,.14)', dash: [4, 4], hit: !!t.hits.tp3 }
   ].filter(l => Number.isFinite(l.v)) : [];
 
+  // Rentang harga: candle yang tampil + harga live + seluruh level (SL sampai TP3)
   let lo = Infinity, hi = -Infinity;
   vis.forEach(c => {
     if (c.h < lo) lo = c.h; if (c.h > hi) hi = c.h;
     if (c.l < lo) lo = c.l; if (c.l > hi) hi = c.l;
   });
   if (live != null) { if (live < lo) lo = live; if (live > hi) hi = live; }
-  if (showLv) L.forEach(l => { if (l.v < lo) lo = l.v; if (l.v > hi) hi = l.v; });
+  L.forEach(l => { if (l.v < lo) lo = l.v; if (l.v > hi) hi = l.v; });
 
   if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
   if (!(hi - lo > 0)) { const dd = Math.abs(hi) * 0.001 || 1; lo -= dd; hi += dd; }
@@ -2654,25 +2749,29 @@ function drawLiveMap(cv, cx, t, k) {
   }
 
   if (smcData.status === 'ok') {
-    smcData.fvgs.forEach(z => {
-      const x0 = clampX(xOfT(z.t), plotL, plotR);
-      if (plotR - x0 < 2) return;
-      const y1 = yOf(z.top), y2 = yOf(z.bottom);
-      cx.save();
-      cx.fillStyle = z.dir > 0 ? 'rgba(59,130,246,.12)' : 'rgba(168,85,247,.12)';
-      cx.fillRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
-      cx.restore();
-    });
-    smcData.obs.forEach(z => {
-      const x0 = clampX(xOfT(z.t), plotL, plotR);
-      if (plotR - x0 < 2) return;
-      const y1 = yOf(z.top), y2 = yOf(z.bottom);
-      cx.save();
-      cx.fillStyle = z.dir > 0 ? 'rgba(16,185,129,.15)' : 'rgba(239,68,68,.15)';
-      cx.fillRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
-      cx.restore();
-    });
-    if (smcData.liq && smcData.liq.pools) {
+    if (LIVE_IND.fvg) {
+      smcData.fvgs.forEach(z => {
+        const x0 = clampX(xOfT(z.t), plotL, plotR);
+        if (plotR - x0 < 2) return;
+        const y1 = yOf(z.top), y2 = yOf(z.bottom);
+        cx.save();
+        cx.fillStyle = z.dir > 0 ? 'rgba(59,130,246,.12)' : 'rgba(168,85,247,.12)';
+        cx.fillRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
+        cx.restore();
+      });
+    }
+    if (LIVE_IND.ob) {
+      smcData.obs.forEach(z => {
+        const x0 = clampX(xOfT(z.t), plotL, plotR);
+        if (plotR - x0 < 2) return;
+        const y1 = yOf(z.top), y2 = yOf(z.bottom);
+        cx.save();
+        cx.fillStyle = z.dir > 0 ? 'rgba(16,185,129,.15)' : 'rgba(239,68,68,.15)';
+        cx.fillRect(x0, Math.min(y1, y2), plotR - x0, Math.abs(y2 - y1));
+        cx.restore();
+      });
+    }
+    if (LIVE_IND.liq && smcData.liq && smcData.liq.pools) {
       smcData.liq.pools.forEach(p => {
         const y = yOf(p.p);
         cx.save();
@@ -2689,7 +2788,7 @@ function drawLiveMap(cv, cx, t, k) {
         cx.restore();
       });
     }
-    if (smcData.ev) {
+    if (LIVE_IND.str && smcData.ev) {
       smcData.ev.forEach(e => {
         const x0 = clampX(xOfT(e.fromT), plotL, plotR), x1 = clampX(xOfT(e.toT), plotL, plotR), y = yOf(e.p);
         const col = e.dir > 0 ? '125,211,252' : '251,146,60';
@@ -2707,9 +2806,10 @@ function drawLiveMap(cv, cx, t, k) {
     }
   }
 
-  if (rows.length > 20) {
-    const smaArr = smaSeries(rows, 20);
-    const off = rows.length - vis.length;
+  // SMA20 dihitung dari seluruh candle agar garisnya tidak terpotong saat zoom
+  if (LIVE_IND.sma && allRows.length > 20) {
+    const smaArr = smaSeries(allRows, 20);
+    const off = allRows.length - vis.length;
     cx.save();
     cx.strokeStyle = '#facc15';
     cx.lineWidth = 1.5;
@@ -2724,33 +2824,48 @@ function drawLiveMap(cv, cx, t, k) {
     cx.stroke();
     cx.restore();
   }
-  const bodyW = Math.max(1.5, slot * 0.62);
-  cx.lineWidth = 1;
-  for (const c of vis) {
-    const x = xOfT(c.t);
-    if (x < plotL || x > plotR) continue;
-    const up = c.c >= c.o;
-    const col = up ? '#34d399' : '#f87171';
-    const yH = yOf(c.h), yL = yOf(c.l), yO = yOf(c.o), yC = yOf(c.c);
 
-    cx.strokeStyle = col;
-    cx.beginPath(); cx.moveTo(x, yH); cx.lineTo(x, yL); cx.stroke();
-    cx.fillStyle = col;
-    cx.fillRect(x - bodyW / 2, Math.min(yO, yC), bodyW, Math.max(1, Math.abs(yC - yO)));
-  }
-
-  if (showLv) {
-    L.forEach(l => {
-      const y = yOf(l.v);
-      cx.save();
-      cx.strokeStyle = l.c;
-      cx.globalAlpha = l.main ? .95 : .8;
-      cx.lineWidth = l.main ? 1.4 : 1;
-      cx.setLineDash(l.dash);
-      cx.beginPath(); cx.moveTo(plotL, y); cx.lineTo(plotR, y); cx.stroke();
-      cx.restore();
+  if (LIVE_TYPE === 'line') {
+    cx.save();
+    cx.strokeStyle = '#93c5fd';
+    cx.lineWidth = 1.4;
+    cx.beginPath();
+    vis.forEach((c, j) => {
+      const x = xOfT(c.t), y = yOf(c.c);
+      if (j) cx.lineTo(x, y); else cx.moveTo(x, y);
     });
+    cx.stroke();
+    cx.restore();
+  } else {
+    const bodyW = Math.max(1.5, slot * 0.62);
+    cx.lineWidth = 1;
+    for (const c of vis) {
+      const x = xOfT(c.t);
+      if (x < plotL || x > plotR) continue;
+      const up = c.c >= c.o;
+      const col = up ? '#34d399' : '#f87171';
+      const yH = yOf(c.h), yL = yOf(c.l), yO = yOf(c.o), yC = yOf(c.c);
+      cx.strokeStyle = col;
+      cx.beginPath(); cx.moveTo(x, yH); cx.lineTo(x, yL); cx.stroke();
+      cx.fillStyle = col;
+      cx.fillRect(x - bodyW / 2, Math.min(yO, yC), bodyW, Math.max(1, Math.abs(yC - yO)));
+    }
   }
+
+  // Garis entry, SL, dan TP sampai ujung plot
+  L.forEach(l => {
+    const y = yOf(l.v);
+    cx.save();
+    cx.strokeStyle = l.c;
+    cx.globalAlpha = l.main ? .95 : .8;
+    cx.lineWidth = l.main ? 1.4 : 1;
+    cx.setLineDash(l.dash);
+    // Garis mulai dari candle entry (saat trade berjalan), bukan dari tepi kiri layar
+    const lx = (t && t.status !== 'CLOSED' && t.status !== 'PENDING' && t.filledAt)
+      ? clampX(xOfT(Math.floor(t.filledAt / 60000) * 60000), plotL, plotR) : plotL;
+    cx.beginPath(); cx.moveTo(lx, y); cx.lineTo(plotR, y); cx.stroke();
+    cx.restore();
+  });
 
   if (live != null) {
     const y = yOf(live);
@@ -3080,12 +3195,25 @@ function showManualStandby(sig) {
   const sv = $('standbyView');
   const ac = $('activeCard');
   if (ac && !activeId) ac.classList.add('hidden');
+  if (activeTrade()) { standbyNote = 'STANDBY · sinyal aktif tetap berjalan\n' + text; renderAll(); return; }
   if (sv) {
     sv.classList.remove('hidden');
     sv.innerHTML = `<div class="text-left bg-darkbg border border-panelborder rounded-lg p-2.5 max-h-[60vh] overflow-y-auto">
       <p class="text-[9px] font-bold text-emerald-400 mb-1">🤖 AI REASONING · STANDBY</p>
       <p class="text-[10px] font-mono text-gray-300 whitespace-pre-line leading-relaxed">${esc(text)}</p></div>`;
   }
+}
+
+// Sinyal manual aktif dikirim ke server agar dikunci selama masih valid (tidak berkedip)
+function prevSignalOf(t) {
+  if (!t || t.src === 'bot' || t.status === 'CLOSED' || t.ocoId) return null;
+  return {
+    status: t.status === 'PENDING' ? 'PENDING' : 'RUNNING',
+    signal: t.signal, symbol: t.key, style: t.style,
+    entry: t.entry, sl: t.sl, tp1: t.tp1,
+    expiresAt: t.expiresAt, createdAt: t.createdAt,
+    invalidLevel: t.invalidLevel ?? null,
+  };
 }
 
 async function generateSignal() {
@@ -3123,11 +3251,17 @@ async function generateSignal() {
 
   const btn = $('signalBtn');
   const btnText = $('btnText');
+  {
+    const selStyle = $('tradingStyleSelect').value;
+    const openSc = trades.filter(x => x.key === market && x.src !== 'bot' && x.style === selStyle && x.status !== 'CLOSED' && Date.now() < (x.expiresAt || 0));
+    if (selStyle === 'Scalping' && openSc.length >= 3) return alert('Batas 3 sinyal Scalping aktif. Tunggu expired / SL / TP max, atau hapus salah satu sinyal.');
+  }
   const originalText = btnText.textContent;
 
   btnText.textContent = 'Menganalisa...';
   btn.disabled = true;
-  await runValidationSteps();
+  // Dengan trade aktif, overlay dilewati agar kartu tidak berkedip/tertutup
+  if (!activeTrade()) await runValidationSteps();
 
   try {
     const style = $('tradingStyleSelect').value;
@@ -3149,7 +3283,8 @@ async function generateSignal() {
         h4: rowsOf('4h'),
         d1: rowsOf('1d')
       },
-      lang: lang
+      lang: lang,
+      prevSignal: prevSignalOf(activeTrade())
     };
 
     const res = await post('/api/generate', payload);
@@ -3162,6 +3297,8 @@ async function generateSignal() {
 
     fetchUserStatus();
     const sig = data.signal;
+    standbyNote = null;
+    if (sig && sig.sticky && activeTrade()) { renderAll(); return; }
     if (sig && sig.reason) sig.reason = cleanReason(sig.reason);
 
     if (!sig || sig.status === 'STANDBY' || sig.signal === 'NONE' || sig.entry == null || !Number.isFinite(Number(sig.entry))) {
