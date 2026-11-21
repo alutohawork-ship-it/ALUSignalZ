@@ -25,10 +25,12 @@ export default async function handler(req, res) {
 
   try {
     await ensureTable();
+    await db.query(`alter table notices add column if not exists title_en text`);
+    await db.query(`alter table notices add column if not exists body_en text`);
 
     // ── BACA NOTIFIKASI (klien) ──
     if (req.method === 'GET') {
-      const r = await db.query('select id, title, body, created_at from notices order by id desc limit 20');
+      const r = await db.query('select id, title, body, title_en, body_en, created_at from notices order by id desc limit 200');
       return res.status(200).json(r.rows);
     }
 
@@ -40,6 +42,9 @@ export default async function handler(req, res) {
       if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
       const title = String(body.title || '').trim().slice(0, 120);
       const text = String(body.body || '').trim().slice(0, 1000);
+      // Versi Inggris opsional; kalau kosong dipakai versi Indonesia
+      const titleEn = String(body.title_en || '').trim().slice(0, 120) || title;
+      const textEn = String(body.body_en || '').trim().slice(0, 1000) || text;
       if (!title || !text) return res.status(200).json({ ok: false, msg: 'Judul dan isi wajib diisi.' });
       // Cegah duplikat: judul+isi yang sama dalam 10 menit terakhir tidak disimpan ulang
       const dup = await db.query(
@@ -47,7 +52,7 @@ export default async function handler(req, res) {
         [title, text]
       );
       if (dup.rows.length) return res.status(200).json({ ok: true, msg: 'Notifikasi sudah ada (duplikat diabaikan).' });
-      await db.query('insert into notices (title, body) values ($1, $2)', [title, text]);
+      await db.query('insert into notices (title, body, title_en, body_en) values ($1, $2, $3, $4)', [title, text, titleEn, textEn]);
       // Kirim juga sebagai push ke perangkat yang sudah mengaktifkan notifikasi (gagal push tidak membatalkan notifikasi)
       sendPush({ title: '🔔 ' + title, body: text.slice(0, 200), url: '/' }).catch(e => console.error('push gagal:', e.message));
       return res.status(200).json({ ok: true, msg: 'Notifikasi ditambahkan.' });
