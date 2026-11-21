@@ -124,6 +124,13 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
       </div>
       <div id="adminClientTableList" class="space-y-1.5 max-h-[300px] overflow-y-auto pr-1"></div>
     </div>
+    <div class="bg-cardbg border border-panelborder rounded-xl p-4 space-y-2 shadow-lg">
+      <h3 class="text-xs font-bold text-white flex items-center gap-1.5"><i class="fa-solid fa-bell text-yellow-400"></i> Notifikasi ke Klien (Bell)</h3>
+      <input id="noticeTitle" placeholder="Judul, misal: Maintenance" class="w-full bg-darkbg border border-panelborder rounded-lg p-2 text-xs text-white focus:outline-none">
+      <textarea id="noticeBody" rows="3" placeholder="Isi pesan" class="w-full bg-darkbg border border-panelborder rounded-lg p-2 text-xs text-white focus:outline-none"></textarea>
+      <button onclick="adminAddNotice()" class="w-full bg-yellow-500 hover:bg-yellow-400 text-darkbg font-bold py-2 rounded-lg text-xs">+ TAMBAH NOTIFIKASI</button>
+      <div id="adminNoticeList" class="space-y-1.5 max-h-[200px] overflow-y-auto pr-1"></div>
+    </div>
   </div>
 </div>
 
@@ -148,6 +155,8 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
         <span id="statusUsage" class="text-emerald-400 border-l border-panelborder pl-1.5">0/2 req</span>
       </div>
       <button onclick="logout()" data-i18n="btnLogout" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40"></button>
+      <button id="bellBtn" onclick="toggleBell()" class="relative text-[10px] px-2 py-0.5 rounded bg-panelborder text-gray-300 border border-panelborder hover:border-accentblue"><i class="fa-solid fa-bell"></i><span id="bellBadge" class="hidden absolute -top-1 -right-1 bg-red-500 text-white text-[8px] rounded-full px-1"></span></button>
+      <div id="bellPanel" class="hidden fixed top-12 right-2 z-50 w-72 max-h-[60vh] overflow-y-auto bg-cardbg border border-panelborder rounded-xl p-2 shadow-2xl"></div>
       <button onclick="toggleLang()" id="langBtn" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-panelborder text-gray-300 border border-panelborder hover:border-accentblue">ID 🌐</button>
       <button onclick="connect()" id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40 cursor-pointer" title="Klik untuk Reconnect WebSocket">WS: OFF</button>
     </div>
@@ -189,7 +198,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
             </select>
           </div>
           <label class="flex items-center gap-1.5 text-[9px] text-gray-400 cursor-pointer"><input type="checkbox" id="botSess" class="rounded bg-cardbg border-panelborder"> Hanya sesi London/NY (07–21 UTC)</label>
-          <button id="botBtn" onclick="toggleBot()" class="w-full font-bold py-2 rounded-lg text-xs transition bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20">START SCANNER BOT</button>
+          <button id="botBtn" onclick="toggleBot()" class="hidden w-full font-bold py-2 rounded-lg text-xs transition bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20">START SCANNER BOT</button>
 
           <p id="botCloseTimer" class="text-[10px] font-mono font-bold text-amber-300"></p>
           <div class="grid grid-cols-2 gap-2 items-stretch">
@@ -1017,6 +1026,182 @@ async function delClient(id) {
   if (!r.ok) alert(errOf(r, 'Gagal menghapus klien.'));
   loadClients();
 }
+
+// ── Notifikasi (bell) ──
+const NOTICE_SEEN_KEY = 'aluNoticeSeen_v1';
+let noticeList = [];
+function noticeSeen() { return Number(localStorage.getItem(NOTICE_SEEN_KEY)) || 0; }
+async function loadNotices() {
+  const r = await api('/api/notices');
+  if (!r.ok || !Array.isArray(r.data)) return;
+  const prevTop = noticeList[0] ? noticeList[0].id : null;
+  noticeList = r.data;
+  const unread = noticeList.filter(n => n.id > noticeSeen()).length;
+  const badge = $('bellBadge');
+  if (badge) { badge.textContent = unread; badge.classList.toggle('hidden', !unread); }
+  if (prevTop && noticeList[0] && noticeList[0].id !== prevTop) noticeBubble(noticeList[0]);
+  renderBell();
+  renderAdminNotices();
+}
+function noticeBubble(n) {
+  const text = '🔔 ' + n.title + ' — ' + n.body;
+  try {
+    if ('Notification' in window && Notification.permission === 'granted') new Notification(n.title, { body: n.body, tag: 'notice-' + n.id });
+  } catch (e) {}
+  const b = document.createElement('div');
+  b.textContent = text;
+  b.style.cssText = 'position:fixed;top:12px;left:12px;right:12px;z-index:9999;background:#1e293b;color:#fde68a;border:1px solid #f59e0b;border-radius:10px;padding:8px 12px;font:11px monospace;box-shadow:0 4px 14px rgba(0,0,0,.4)';
+  document.body.appendChild(b);
+  setTimeout(() => b.remove(), 8000);
+}
+function renderBell() {
+  const box = $('bellPanel');
+  if (!box) return;
+  if (!noticeList.length) { box.innerHTML = '<p class="text-[10px] text-gray-500 text-center py-3">Belum ada notifikasi.</p>'; return; }
+  box.innerHTML = noticeList.map(n => {
+    const d = new Date(n.created_at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' });
+    return `<div class="bg-darkbg border border-panelborder rounded-lg p-2 mb-1.5">
+      <p class="text-[10px] font-bold text-yellow-300">${esc(n.title)}</p>
+      <p class="text-[9px] text-gray-300 whitespace-pre-line leading-relaxed">${esc(n.body)}</p>
+      <p class="text-[8px] text-gray-500 font-mono mt-1">${esc(d)}</p></div>`;
+  }).join('');
+}
+function toggleBell() {
+  const box = $('bellPanel');
+  if (!box) return;
+  const opening = box.classList.contains('hidden');
+  box.classList.toggle('hidden');
+  if (opening && noticeList[0]) {
+    localStorage.setItem(NOTICE_SEEN_KEY, String(noticeList[0].id));
+    const badge = $('bellBadge');
+    if (badge) { badge.textContent = '0'; badge.classList.add('hidden'); }
+  }
+}
+function renderAdminNotices() {
+  const box = $('adminNoticeList');
+  if (!box) return;
+  if (!noticeList.length) { box.innerHTML = '<p class="text-[10px] text-gray-500 text-center py-2">Belum ada notifikasi.</p>'; return; }
+  box.innerHTML = noticeList.map(n => `<div class="bg-darkbg border border-panelborder p-2 rounded flex justify-between items-start gap-2">
+      <div class="min-w-0"><p class="text-[10px] font-bold text-white truncate">${esc(n.title)}</p>
+      <p class="text-[9px] text-gray-400 whitespace-pre-line">${esc(n.body)}</p></div>
+      <button onclick="adminDelNotice(${Number(n.id)})" class="text-red-400 hover:text-red-300 text-[10px] px-2 py-1 shrink-0"><i class="fa-solid fa-trash"></i> Hapus</button>
+    </div>`).join('');
+}
+async function adminAddNotice() {
+  const title = $('noticeTitle').value.trim();
+  const body = $('noticeBody').value.trim();
+  if (!title || !body) return alert('Judul dan isi wajib diisi.');
+  const r = await post('/api/notices', { title, body }, adminH());
+  if (!r.ok || !r.data || !r.data.ok) return alert((r.data && r.data.msg) || 'Gagal menambah notifikasi.');
+  $('noticeTitle').value = '';
+  $('noticeBody').value = '';
+  loadNotices();
+}
+async function adminDelNotice(id) {
+  if (!confirm('Hapus notifikasi ini?')) return;
+  const r = await api('/api/notices?id=' + encodeURIComponent(id), { method: 'DELETE', headers: adminH() });
+  if (!r.ok || !r.data || !r.data.ok) alert((r.data && r.data.msg) || 'Gagal menghapus.');
+  loadNotices();
+}
+setTimeout(loadNotices, 1500);
+setInterval(loadNotices, 60000);
+
+// ── Sinkron dengan server: pemantauan Intraday/Swing + sinyal bot server ──
+const MON_STYLES_SRV = ['Intraday', 'Swing'];
+const SRV_TAKEN_KEY = 'aluSrvTaken_v1';
+let srvMon = [];
+function srvTaken() { try { return new Set(JSON.parse(localStorage.getItem(SRV_TAKEN_KEY)) || []); } catch (e) { return new Set(); } }
+function srvMarkTaken(id) { const s = srvTaken(); s.add(id); localStorage.setItem(SRV_TAKEN_KEY, JSON.stringify([...s])); }
+async function monStartServer(style, key) {
+  const email = localStorage.getItem(K.email);
+  if (!email || !MON_STYLES_SRV.includes(style)) return;
+  await post('/api/monitor', { email, style, symbol: key });
+  syncServer();
+}
+function srvTabLabels() {
+  const box = $('styleTabs');
+  if (!box) return;
+  const taken = srvTaken();
+  [...box.children].forEach(b => {
+    const s = b.dataset.styleTab;
+    const pend = srvMon.find(m => m.style === s && m.status === 'pending' && m.pending && !taken.has(m.id));
+    const watch = srvMon.find(m => m.style === s && m.status === 'watch');
+    if (pend) b.textContent = `🔔 ${s.toUpperCase()} · SIGNAL AKTIF`;
+    else if (watch) b.textContent = `⌛ ${s.toUpperCase()} · TUNGGU SIGNAL`;
+  });
+}
+function addPendingTrade(m) {
+  const sig = m.pending;
+  const key = m.symbol;
+  const num = v => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
+  const tr = {
+    id: 'srv_' + m.id, no: nextNo(), key, style: m.style, signal: sig.signal,
+    dir: sig.signal === 'BUY' ? 1 : -1,
+    mode: sig.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET',
+    orderType: sig.orderType || 'MARKET', fill: sig.fill || 'NOW',
+    entry: Number(sig.entry), sl: Number(sig.sl),
+    tp1: num(sig.tp1), tp2: num(sig.tp2), tp3: num(sig.tp3),
+    status: sig.orderType === 'LIMIT' ? 'PENDING' : 'RUNNING',
+    createdAt: Date.now(), expiresAt: Date.now() + (EXPIRY_MS[m.style] || 4 * 3600e3),
+    setup: sig.setup || (m.style + ' (server)'), confidence: sig.confidence || 'MEDIUM', risk: sig.risk || 'MEDIUM',
+    pip: MARKETS[key] ? MARKETS[key].pip : 0.1, hits: {},
+    card: { reason: cleanReason(sig.reason || ''), reasons: pickReasons(sig, lang), reasonLang: lang }
+  };
+  trades.push(tr);
+  activeId = tr.id;
+  srvMarkTaken(m.id);
+  saveTrades();
+  renderAll();
+}
+const _pickStyleTabSrv = pickStyleTab;
+pickStyleTab = function (style) {
+  const taken = srvTaken();
+  const pend = srvMon.find(m => m.style === style && m.status === 'pending' && m.pending && !taken.has(m.id));
+  if (pend) addPendingTrade(pend);
+  _pickStyleTabSrv(style);
+  srvTabLabels();
+};
+async function syncBotServer(email) {
+  const r = await api('/api/bot-signals?email=' + encodeURIComponent(email));
+  if (!r.ok || !r.data || !r.data.ok || !Array.isArray(r.data.signals)) return;
+  let ch = false;
+  for (const s of r.data.signals) {
+    const id = 'bot_srv_' + s.id;
+    const existing = trades.find(t => t.id === id);
+    const closed = s.status === 'closed';
+    const hits = s.hits && s.hits.tp1 ? { tp1: { at: Number(s.hits.tp1), price: Number(s.tp1) } } : {};
+    if (!existing) {
+      const tr = {
+        id, src: 'bot', no: nextNo(), key: 'XAUUSD', style: 'Scalping',
+        signal: s.dir > 0 ? 'BUY' : 'SELL', dir: s.dir > 0 ? 1 : -1,
+        mode: 'MARKET', orderType: 'MARKET', fill: 'NOW',
+        entry: Number(s.entry), sl: Number(s.sl),
+        tp1: s.tp1 != null ? Number(s.tp1) : null, tp2: null, tp3: null,
+        status: closed ? 'CLOSED' : 'RUNNING',
+        createdAt: Date.parse(s.created_at) || Date.now(), expiresAt: 0,
+        setup: 'Bot Three Candle (server)', confidence: 'MEDIUM', risk: 'MEDIUM', pip: 0.1, hits,
+        card: { reason: 'Sinyal bot server (three candle).', reasons: {}, reasonLang: lang }
+      };
+      if (closed) Object.assign(tr, { result: s.result, exitPrice: Number(s.exit_price), closedAt: Date.parse(s.closed_at), pips: Number(s.pips), maxTp: hits.tp1 ? 1 : 0 });
+      trades.push(tr);
+      ch = true;
+    } else if (closed && existing.status !== 'CLOSED') {
+      Object.assign(existing, { status: 'CLOSED', result: s.result, exitPrice: Number(s.exit_price), closedAt: Date.parse(s.closed_at), pips: Number(s.pips), maxTp: hits.tp1 ? 1 : 0, hits });
+      ch = true;
+    }
+  }
+  if (ch) { saveTrades(); renderAll(); }
+}
+async function syncServer() {
+  const email = localStorage.getItem(K.email);
+  if (!email) return;
+  const m = await api('/api/monitor?email=' + encodeURIComponent(email));
+  if (m.ok && m.data && m.data.ok) srvMon = m.data.monitors || [];
+  await syncBotServer(email);
+  srvTabLabels();
+}
+setTimeout(syncServer, 2500);
+setInterval(syncServer, 30000);
 
 function toggleLang() { lang = lang === 'id' ? 'en' : 'id'; applyLang(); }
 function applyLang() {
@@ -3282,6 +3467,7 @@ async function generateSignal() {
   }
   const originalText = btnText.textContent;
 
+  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
   btnText.textContent = 'Menganalisa...';
   btn.disabled = true;
   // Dengan trade aktif, overlay dilewati agar kartu tidak berkedip/tertutup
@@ -3326,6 +3512,7 @@ async function generateSignal() {
     if (sig && sig.reason) sig.reason = cleanReason(sig.reason);
 
     if (!sig || sig.status === 'STANDBY' || sig.signal === 'NONE' || sig.entry == null || !Number.isFinite(Number(sig.entry))) {
+      monStartServer(style, market);
       showManualStandby(sig);
       return;
     }
