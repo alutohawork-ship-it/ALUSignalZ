@@ -18,6 +18,7 @@ STEPS = [
     "patch_manual_flicker.py",
     "patch_no_blink.py",
     "patch_line_visual.py",
+    "patch_style_cards.py",
 ]
 
 def main():
