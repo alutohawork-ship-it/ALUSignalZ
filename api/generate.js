@@ -963,6 +963,15 @@ async function runVisionAnalysis(images, style, lang) {
     return { ok: false, reason: `AI gagal: ${e.message}` };
   }
   if (!r.ok) { const detail = r.data?.error?.message || (typeof r.data?.error === 'string' ? r.data.error : '') || r.text.slice(0, 160); return { ok: false, reason: `AI gagal (HTTP ${r.status}): ${detail}` }; }
+  // Diagnostik: pastikan gambar benar-benar sampai ke model (prompt_tokens kecil = gambar tidak terbaca)
+  const usage = r.data?.usage || {};
+  console.log(`VISION model=${AI_VISION_MODEL} images=${imgs.length} promptTokens=${usage.prompt_tokens ?? '?'} completionTokens=${usage.completion_tokens ?? '?'}`);
+  // Penjaga: jika prompt_tokens terlalu kecil untuk jumlah gambar, model tidak menerima gambar.
+  // Lebih baik gagal dengan pesan jelas daripada menampilkan analisa dari pair yang salah.
+  const pt = Number(usage.prompt_tokens);
+  if (Number.isFinite(pt) && pt < 300 * imgs.length) {
+    return { ok: false, reason: `Gambar tidak terbaca oleh model AI (${AI_VISION_MODEL}, prompt_tokens=${pt}). Cek AI_VISION_MODEL atau format gambar.` };
+  }
   let parsed = parseJsonLoose(extractContent(r.data));
   const isNone = p => !p || String(p.signal || 'NONE').toUpperCase() === 'NONE' || checkVisionSignal(p);
   if (isNone(parsed) && deadline - Date.now() > 22000) {
@@ -972,7 +981,9 @@ async function runVisionAnalysis(images, style, lang) {
     } catch (e) { console.warn('vision retry:', e.message); }
   }
   const bad = checkVisionSignal(parsed); if (bad) return { ok: false, reason: bad };
-  return { ok: true, signal: buildVisionSignal(parsed, style, lang, imgs.length) };
+  const sigOut = buildVisionSignal(parsed, style, lang, imgs.length);
+  sigOut.visionDebug = { model: AI_VISION_MODEL, images: imgs.length, promptTokens: usage.prompt_tokens ?? null };
+  return { ok: true, signal: sigOut };
 }
 async function handleVision(body, lang, res) {
   const images = Array.isArray(body.images) ? body.images.slice(0, 3) : [];
