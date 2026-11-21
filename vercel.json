@@ -1,7 +1,9 @@
 {
-  "version": 2,
-  "routes": [
-    { "src": "/api/(.*)", "dest": "/api/$1" },
-    { "src": "/(.*)", "dest": "/index.html" }
+  "rewrites": [
+    { "source": "/api/push-key",       "destination": "/api/push?a=key" },
+    { "source": "/api/push-subscribe", "destination": "/api/push?a=subscribe" },
+    { "source": "/api/push-send",      "destination": "/api/push?a=send" },
+    { "source": "/api/bot-tick",       "destination": "/api/bot?a=tick" },
+    { "source": "/api/bot-signals",    "destination": "/api/bot?a=signals" }
   ]
 }
