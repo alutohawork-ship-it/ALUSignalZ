@@ -41,6 +41,12 @@ export default async function handler(req, res) {
       const title = String(body.title || '').trim().slice(0, 120);
       const text = String(body.body || '').trim().slice(0, 1000);
       if (!title || !text) return res.status(200).json({ ok: false, msg: 'Judul dan isi wajib diisi.' });
+      // Cegah duplikat: judul+isi yang sama dalam 10 menit terakhir tidak disimpan ulang
+      const dup = await db.query(
+        `select id from notices where title = $1 and body = $2 and created_at > now() - interval '10 minutes' limit 1`,
+        [title, text]
+      );
+      if (dup.rows.length) return res.status(200).json({ ok: true, msg: 'Notifikasi sudah ada (duplikat diabaikan).' });
       await db.query('insert into notices (title, body) values ($1, $2)', [title, text]);
       // Kirim juga sebagai push ke perangkat yang sudah mengaktifkan notifikasi (gagal push tidak membatalkan notifikasi)
       sendPush({ title: '🔔 ' + title, body: text.slice(0, 200), url: '/' }).catch(e => console.error('push gagal:', e.message));
