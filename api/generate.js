@@ -835,9 +835,11 @@ ATURAN MUTLAK:
 6. SL di luar distal zona + buffer kecil. BUY: sl < entry. SELL: sl > entry.
 7. Semua level (entry, sl, tp, zoneLow, zoneHigh) WAJIB dibaca persis dari skala sumbu kanan chart.
 8. reason maksimal 3 kalimat diawali nama pair, sebutkan angka persis seperti di field JSON.
+0. PAIR: baca NAMA PAIR dari judul/header chart (contoh 'PEPE / TetherUS' -> PEPEUSDT, 'EUR/USD' -> EURUSD, 'XAUUSD' -> XAUUSD). Jangan menebak dari harga. Jika tidak terbaca, isi pair dengan "".
+0b. DESIMAL: hitung jumlah digit desimal dari label harga sumbu kanan (contoh 0,00000338 -> 8 desimal; 1.0975 -> 4 desimal) dan isi "decimals". Semua harga harus memakai desimal itu.
 
 Balas HANYA JSON valid tanpa kode blok:
-{"signal":"BUY|SELL","orderType":"MARKET|LIMIT","entry":0,"sl":0,"tp1":0,"tp2":0,"tp3":0,"setup":"","confidence":"HIGH|MEDIUM|LOW","risk":"LOW|MEDIUM|HIGH","perImageAnalyses":["Gambar 1: ..."],"reason":"XAUUSD: ...","topDown":"...","zone":"Demand","pair":"XAUUSD","zoneLow":0,"zoneHigh":0}`;
+{"signal":"BUY|SELL","orderType":"MARKET|LIMIT","entry":0,"sl":0,"tp1":0,"tp2":0,"tp3":0,"setup":"","confidence":"HIGH|MEDIUM|LOW","risk":"LOW|MEDIUM|HIGH","perImageAnalyses":["Gambar 1: ..."],"reason":"PAIR: ...","topDown":"...","zone":"Demand","pair":"PEPEUSDT","pairRaw":"PEPE / TetherUS","decimals":0,"zoneLow":0,"zoneHigh":0}`;
 
 function buildVisionSystem(style) {
   const map = {
@@ -862,15 +864,17 @@ function normPair(raw) {
   if (PAIR_ALIAS[k]) k = PAIR_ALIAS[k];
   return k;
 }
-function pairSpec(pair, price) {
+function pairSpec(pair, price, decHint) {
   const sym = normPair(pair);
   let dec = sym ? DECIMALS[sym] : undefined;
+  if (dec === undefined && Number.isInteger(decHint) && decHint >= 0 && decHint <= 10) dec = decHint;
   if (dec === undefined) {
     if (sym && /^[A-Z]{6}$/.test(sym)) dec = sym.includes('JPY') ? 3 : 5;
     else dec = price < 10 ? 5 : price < 500 ? 3 : 2;
   }
-  const pip = pipSizeOf(sym || '', dec);
-  return { sym: sym || 'VISION', dec, pip };
+  let pip = pipSizeOf(sym || '', dec);
+  if (!(Number.isFinite(pip) && pip > 0)) pip = Math.pow(10, -dec) * 10;
+  return { sym: sym || 'CHART', dec, pip };
 }
 function fmtPriceText(text, entry, dec) {
   return String(text || '').replace(/\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+/g, tok => {
@@ -897,7 +901,7 @@ function buildVisionSignal(j, style, lang, imgCount) {
   const isLimit = String(j.orderType || '').toUpperCase() === 'LIMIT';
   const lvl = (v, allowed, dflt) => (allowed.includes(String(v || '').toUpperCase()) ? String(v).toUpperCase() : dflt);
   const rawEntry = Number(j.entry), rawSl = Number(j.sl);
-  const { sym, dec, pip } = pairSpec(j.pair, rawEntry);
+  const { sym, dec, pip } = pairSpec(j.pair || j.pairRaw, rawEntry, Number(j.decimals));
   const f = v => Number(Number(v).toFixed(dec));
   const dir = sig === 'BUY' ? 1 : -1;
   const entry = f(rawEntry);
