@@ -82,14 +82,24 @@
   setInterval(() => {
     ensureStyleSelect();
     ensureClearBtn();
-    // Sembunyikan elemen manual saat mode Vision (gaya manual, tombol hapus manual, pesan standby manual)
+    // Sembunyikan elemen manual HANYA saat berpindah ke/dari mode Vision (tidak tiap detik),
+    // supaya tidak mengganggu panel Bot/Manual.
     const isV = typeof market !== 'undefined' && market === 'VISION';
-    const manualBits = ['styleContainer', 'btnDelSig'];
-    manualBits.forEach(id => { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', isV || (window.__vHid && window.__vHid[id] && false)); });
-    const sv = document.getElementById('standbyView');
-    if (sv && isV && !(visionTrade && visionTrade.vision)) sv.classList.add('hidden');
-    if (isV) { window.__vWasV = true; }
-    else if (window.__vWasV) { window.__vWasV = false; const sc = document.getElementById('styleContainer'); if (sc && !(typeof isBotView === 'function' && isBotView())) sc.classList.remove('hidden'); }
+    const isBot = (typeof isBotView === 'function' && isBotView()) || (typeof isChatBotView === 'function' && isChatBotView());
+    if (isV !== !!window.__vWasV) {
+      window.__vWasV = isV;
+      window.__vHidden = window.__vHidden || {};
+      ['styleContainer', 'btnDelSig'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (isV) { if (!el.classList.contains('hidden')) { el.classList.add('hidden'); window.__vHidden[id] = true; } }
+        else if (window.__vHidden[id]) { window.__vHidden[id] = false; if (!(id === 'styleContainer' && isBot)) el.classList.remove('hidden'); }
+      });
+    }
+    if (isV) {
+      const sv = document.getElementById('standbyView');
+      if (sv && !(visionTrade && visionTrade.vision) && !sv.classList.contains('hidden')) sv.classList.add('hidden');
+    }
     if (typeof market !== 'undefined' && market === 'VISION' && visionTrade && visionTrade.vision) {
       setTxt('cardSub', label(visionTrade));
     }
