@@ -21,7 +21,8 @@
     const head = '<div class="flex justify-between items-center border-b border-panelborder pb-1 mb-1.5">' +
       '<span class="text-[9px] font-bold text-gray-400">' + tr('title') + '</span>' +
       '<button onclick="toggleBell()" class="text-gray-300 hover:text-white text-sm px-2 leading-none" title="' + tr('close') + '">✕</button></div>';
-    const list = dedupe(window.noticeList);
+    const list = dedupe(typeof noticeList !== 'undefined' ? noticeList : []);
+    if (window.__noticeErr) { box.innerHTML = head + '<p class="text-[10px] text-red-400 text-center py-3">Gagal memuat: ' + esc2(window.__noticeErr) + '</p>'; return; }
     if (!list.length) { box.innerHTML = head + '<p class="text-[10px] text-gray-500 text-center py-3">' + tr('empty') + '</p>'; return; }
     box.innerHTML = head + list.map(n => {
       const d = new Date(n.created_at).toLocaleString(L() === 'en' ? 'en-US' : 'id-ID', { dateStyle: 'short', timeStyle: 'short' });
@@ -54,6 +55,33 @@
     b.appendChild(txt); b.appendChild(x); wrap.appendChild(b);
     try { if ('Notification' in window && Notification.permission === 'granted') new Notification(pick(n, 'title'), { body: pick(n, 'body'), tag: 'notice-' + n.id }); } catch (e) {}
   };
+
+
+  const BUB_KEY = 'aluNoticeBubbled_v1';
+  window.loadNotices = async function () {
+    const r = await api('/api/notices');
+    if (!r.ok || !Array.isArray(r.data)) {
+      window.__noticeErr = (r.data && r.data.msg) || ('HTTP ' + r.status);
+      try { renderBell(); } catch (e) {}
+      return;
+    }
+    window.__noticeErr = '';
+    noticeList = r.data;
+    const top = r.data.length ? r.data[0].id : 0;
+    const lastB = Number(localStorage.getItem(BUB_KEY));
+    if (!Number.isFinite(lastB) || lastB === 0) {
+      localStorage.setItem(BUB_KEY, String(top));          // pertama kali: jangan bubble notifikasi lama
+    } else if (top > lastB) {
+      r.data.filter(n => n.id > lastB).reverse().forEach(n => window.noticeBubble(n));
+      localStorage.setItem(BUB_KEY, String(top));
+    }
+    const unread = dedupe(r.data).filter(n => n.id > Number(localStorage.getItem('aluNoticeSeen_v1') || 0)).length;
+    const badge = document.getElementById('bellBadge');
+    if (badge) { badge.textContent = unread; badge.classList.toggle('hidden', !unread); }
+    renderBell();
+    if (typeof renderAdminNotices === 'function') renderAdminNotices();
+  };
+  setInterval(() => window.loadNotices(), 60000);
 
   // Form admin: tambah kolom Inggris, lalu kirim dua bahasa
   function ensureAdminFields() {
