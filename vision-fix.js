@@ -50,17 +50,46 @@
     const text = String(sg.reason || '').trim();
     visionTrade = Object.assign({}, sg, {
       key: 'VISION', vision: true, symbolLabel: sg.symbol || 'CHART', dec, pip, style,
+      dir: sg.signal === 'BUY' ? 1 : -1,
       hits: {}, expiresAt: sg.expiresAt,
       card: { reason: text, reasons: { id: text, en: text }, reasonLang: lang },
     });
+    window.visionDone = true;
     ensureStyleSelect();
     refreshCard();
     setTxt('cardSub', label(visionTrade));
   };
 
+  const origUpload = window.handleImageUpload;
+  if (typeof origUpload === 'function') {
+    window.handleImageUpload = function () {
+      if (window.visionDone) { visionImages.length = 0; window.visionDone = false; try { renderVisionPreview(); } catch (e) {} }
+      return origUpload.apply(this, arguments);
+    };
+  }
+  function ensureClearBtn() {
+    const wrap = document.getElementById('visionStyleWrap');
+    if (!wrap || document.getElementById('visionClearBtn')) return;
+    const b = document.createElement('button');
+    b.id = 'visionClearBtn';
+    b.textContent = 'Kosongkan semua gambar';
+    b.className = 'w-full text-[10px] font-bold py-1 rounded border border-panelborder text-gray-400 hover:text-red-400';
+    b.onclick = () => { visionImages.length = 0; window.visionDone = false; try { renderVisionPreview(); } catch (e) {} };
+    wrap.appendChild(b);
+  }
+
   // Jaga label & pilihan gaya tetap tampil (refreshCard menulis ulang setiap detik)
   setInterval(() => {
     ensureStyleSelect();
+    ensureClearBtn();
+    // Sembunyikan elemen manual saat mode Vision (gaya manual, tombol hapus manual, pesan standby manual)
+    const isV = typeof market !== 'undefined' && market === 'VISION';
+    const manualBits = ['styleContainer', 'btnDelSig'];
+    manualBits.forEach(id => { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', isV || (window.__vHid && window.__vHid[id] && false)); });
+    const sv = document.getElementById('standbyView');
+    if (sv && isV && !(visionTrade && visionTrade.vision)) sv.classList.add('hidden');
+    if (isV) { window.__vWasV = true; }
+    else if (window.__vWasV) { window.__vWasV = false; const sc = document.getElementById('styleContainer'); if (sc && !(typeof isBotView === 'function' && isBotView())) sc.classList.remove('hidden'); }
     if (typeof market !== 'undefined' && market === 'VISION' && visionTrade && visionTrade.vision) {
       setTxt('cardSub', label(visionTrade));
     }
