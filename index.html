@@ -287,6 +287,9 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
       <div class="bg-cardbg rounded-xl border border-panelborder p-2.5 shadow-md space-y-2 relative">
         <div id="standbyView" class="py-3 text-center text-xs text-gray-400" data-i18n="standby1"></div>
         <div id="styleTabs" class="flex gap-1"></div>
+        <div class="flex justify-end -mb-1">
+          <button id="btnDelSig" onclick="deleteActiveSignal()" class="text-gray-500 hover:text-red-400 transition text-[10px] px-2 py-0.5 rounded border border-panelborder" title="Hapus sinyal aktif"><i class="fa-solid fa-trash"></i> Hapus</button>
+        </div>
         <div id="activeCard" class="hidden space-y-3">
           <div class="bg-darkbg/80 border border-panelborder rounded-xl p-3 text-center space-y-1">
             <div class="flex justify-center items-center gap-2">
@@ -359,6 +362,15 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
             </div>
           </div>
           <span id="tradeStatus" class="hidden text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40 whitespace-nowrap">RUNNING</span>
+        </div>
+        <div class="flex flex-wrap gap-1 pb-1">
+          <button data-live-type="candle" onclick="setLiveType('candle')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">CANDLE</button>
+          <button data-live-type="line" onclick="setLiveType('line')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">LINE</button>
+          <button data-live-ind="fvg" onclick="toggleLiveInd('fvg')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">FVG</button>
+          <button data-live-ind="ob" onclick="toggleLiveInd('ob')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">OB</button>
+          <button data-live-ind="liq" onclick="toggleLiveInd('liq')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">BSL/SSL</button>
+          <button data-live-ind="str" onclick="toggleLiveInd('str')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">BOS/CHoCH</button>
+          <button data-live-ind="sma" onclick="toggleLiveInd('sma')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">SMA20</button>
         </div>
         <div class="flex flex-wrap gap-1 pb-1">
           <button data-live-type="candle" onclick="setLiveType('candle')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">CANDLE</button>
@@ -963,11 +975,24 @@ function showAdmin() {
 async function registerClient() {
   const email = $('newClientEmail').value.trim().toLowerCase();
   if (!email) return alert('Masukkan email klien.');
+  // Cek dulu: email yang sudah terdaftar tidak didaftarkan ulang
+  const cur = await api('/api/clients', { headers: adminH() });
+  const existing = cur.ok && Array.isArray(cur.data) ? cur.data.find(d => String(d.email).toLowerCase() === email) : null;
+  if (existing) {
+    const exp = existing.expires_at ? new Date(existing.expires_at).toLocaleDateString('id-ID') : '-';
+    return alert(`Email ini sudah terdaftar.\nStatus: ${existing.status}\nBerlaku s/d: ${exp}\n\nHapus dulu dari daftar jika ingin mendaftarkan ulang.`);
+  }
   const r = await post('/api/clients', { email, status: $('newClientStatus').value }, adminH());
-  if (!r.ok) return alert(errOf(r, 'Gagal mendaftarkan klien.'));
+  // Server membalas HTTP 200 dengan ok:false untuk email duplikat, jadi cek data.ok juga
+  if (!r.ok || !r.data || !r.data.ok) return alert((r.data && r.data.msg) || errOf(r, 'Gagal mendaftarkan klien.'));
   alert('Berhasil mendaftarkan klien: ' + email);
   $('newClientEmail').value = '';
-  loadClients();
+  await loadClients();
+  // Tampilkan klien baru di tengah daftar agar tidak tertinggal di bawah
+  setTimeout(() => {
+    const el = [...document.querySelectorAll('#adminClientTableList p.font-mono')].find(p => p.textContent === email);
+    if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, 300);
 }
 async function loadClients() {
   const box = $('adminClientTableList');
