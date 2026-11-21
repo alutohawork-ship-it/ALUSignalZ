@@ -835,8 +835,8 @@ ATURAN MUTLAK:
 6. SL di luar distal zona + buffer kecil. BUY: sl < entry. SELL: sl > entry.
 7. Semua level (entry, sl, tp, zoneLow, zoneHigh) WAJIB dibaca persis dari skala sumbu kanan chart.
 8. reason maksimal 3 kalimat diawali nama pair, sebutkan angka persis seperti di field JSON.
-0. PAIR: baca NAMA PAIR dari judul/header chart (contoh 'PEPE / TetherUS' -> PEPEUSDT, 'EUR/USD' -> EURUSD, 'XAUUSD' -> XAUUSD). Jangan menebak dari harga. Jika tidak terbaca, isi pair dengan "".
-0b. DESIMAL: hitung jumlah digit desimal dari label harga sumbu kanan (contoh 0,00000338 -> 8 desimal; 1.0975 -> 4 desimal) dan isi "decimals". Semua harga harus memakai desimal itu.
+0. PAIR: salin NAMA PAIR persis seperti tertulis di judul/header chart, lalu ubah ke format tanpa spasi/garis miring (contoh: judul 'XXX / YYY' -> XXXYYY). Jangan memakai contoh pair lain dan jangan menebak dari harga atau pengetahuanmu. Jika tidak terbaca, isi pair dengan "".
+0b. DESIMAL: hitung jumlah digit desimal dari label harga pada sumbu harga chart yang sedang dianalisa, lalu isi "decimals". Semua harga harus memakai desimal itu.
 
 Balas HANYA JSON valid tanpa kode blok:
 {"signal":"BUY|SELL","orderType":"MARKET|LIMIT","entry":0,"sl":0,"tp1":0,"tp2":0,"tp3":0,"setup":"","confidence":"HIGH|MEDIUM|LOW","risk":"LOW|MEDIUM|HIGH","perImageAnalyses":["Gambar 1: ..."],"reason":"PAIR: ...","topDown":"...","zone":"Demand","pair":"PEPEUSDT","pairRaw":"PEPE / TetherUS","decimals":0,"zoneLow":0,"zoneHigh":0}`;
