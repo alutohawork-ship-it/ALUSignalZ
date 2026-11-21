@@ -299,7 +299,7 @@ async function runDocManual(ctx, d, styleName) {
 
   if (styleName === 'Scalping') {
     const pctx = { price: ctx.price, dec: ctx.dec, pip: ctx.pip, now: Date.now(), symbol: ctx.symbol };
-    out = simpleZonePlan(barsClosed, pctx, { tfs: ['M5'] });
+    out = simpleZonePlan(barsClosed, pctx, { tfs: ['M5', 'M1'] });
     if (!out.ok) {
       const st = scalpStructPlan(barsClosed, pctx);
       out = st.ok ? st : { ...out, checks: [...(out.checks || []), ...(st.checks || [])] };
