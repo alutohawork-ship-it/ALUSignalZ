@@ -1,6 +1,7 @@
 // api/notices.js — notifikasi (bell) untuk klien: dibaca publik, ditulis/dihapus admin
 // Env: DATABASE_URL, ADMIN_CODE
 import { db } from '../lib/db.js';
+import { sendPush } from '../lib/push.js';
 
 function isAdmin(req) {
   const code = process.env.ADMIN_CODE;
@@ -41,6 +42,8 @@ export default async function handler(req, res) {
       const text = String(body.body || '').trim().slice(0, 1000);
       if (!title || !text) return res.status(200).json({ ok: false, msg: 'Judul dan isi wajib diisi.' });
       await db.query('insert into notices (title, body) values ($1, $2)', [title, text]);
+      // Kirim juga sebagai push ke perangkat yang sudah mengaktifkan notifikasi (gagal push tidak membatalkan notifikasi)
+      sendPush({ title: '🔔 ' + title, body: text.slice(0, 200), url: '/' }).catch(e => console.error('push gagal:', e.message));
       return res.status(200).json({ ok: true, msg: 'Notifikasi ditambahkan.' });
     }
 
