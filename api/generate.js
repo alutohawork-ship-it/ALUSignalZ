@@ -1,4 +1,4 @@
-// api/generate.js — v166 (batas jarak Scalping XAUUSD 50 pip; BOT = three candle, gaya 'scalperbot' terpisah dari MANUAL 'Scalping') (simpleZonePlan M5 refine M1 + scalpStructPlan M1/M5 + smc_flex + pullbackPlan + scalpWatch + no old fallback on Scalping + standby cache fix + bars.live guard + prevSignal age/dist guard + bot M15/M5/M1 + XAUUSD dist override + standby checklist to AI)
+// api/generate.js — v167 (kebutuhan timeframe Intraday/Swing sesuai struktur baru; batas jarak Scalping XAUUSD 50 pip; BOT = three candle, gaya 'scalperbot' terpisah dari MANUAL 'Scalping') (simpleZonePlan M5 refine M1 + scalpStructPlan M1/M5 + smc_flex + pullbackPlan + scalpWatch + no old fallback on Scalping + standby cache fix + bars.live guard + prevSignal age/dist guard + bot M15/M5/M1 + XAUUSD dist override + standby checklist to AI)
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import {
@@ -71,9 +71,9 @@ const TF_NEED = { d1: 60, h4: 80, h1: 100, m30: 100, m15: 200, m5: 200, m1: 200 
 const MIN_BARS = { m1: 60, m5: 40, m15: 40, m30: 35, h1: 35, h4: 25, d1: 20 };
 
 const MANUAL_TF_NEEDED = {
-  'Scalping': ['m1', 'm5', 'm15', 'h1'],
-  'Intraday': ['m15', 'h1', 'h4'],
-  'Swing':    ['h4', 'd1'],
+  'Scalping': ['m1', 'm5', 'm15', 'h1'],   // eksekusi M1+M5, arah HTF M15 (h1 cadangan)
+  'Intraday': ['m5', 'm15', 'h4'],         // struktur & zona M15+M5, bias H4
+  'Swing':    ['m15', 'h1', 'd1'],         // struktur & zona M15+H1, bias D1
 };
 const BOT_TF_NEEDED = ['m1', 'm5', 'm15'];
 const MAX_DIST_PIP = { 'Scalping': 150, 'Intraday': 500, 'Swing': 2000 };
