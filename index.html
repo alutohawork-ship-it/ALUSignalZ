@@ -157,6 +157,7 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
       <button onclick="logout()" data-i18n="btnLogout" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40"></button>
       <button id="bellBtn" onclick="toggleBell()" class="relative text-[10px] px-2 py-0.5 rounded bg-panelborder text-gray-300 border border-panelborder hover:border-accentblue"><i class="fa-solid fa-bell"></i><span id="bellBadge" class="hidden absolute -top-1 -right-1 bg-red-500 text-white text-[8px] rounded-full px-1"></span></button>
       <div id="bellPanel" class="hidden fixed top-12 right-2 z-50 w-72 max-h-[60vh] overflow-y-auto bg-cardbg border border-panelborder rounded-xl p-2 shadow-2xl"></div>
+      <button onclick="enablePush()" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-panelborder text-gray-300 border border-panelborder hover:border-accentblue" title="Aktifkan notifikasi push">🔔 PUSH</button>
       <button onclick="toggleLang()" id="langBtn" class="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-panelborder text-gray-300 border border-panelborder hover:border-accentblue">ID 🌐</button>
       <button onclick="connect()" id="wsStatus" class="text-[8px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40 cursor-pointer" title="Klik untuk Reconnect WebSocket">WS: OFF</button>
     </div>
@@ -371,15 +372,6 @@ if (window.tailwind) tailwind.config = { darkMode: 'class', theme: { extend: { c
             </div>
           </div>
           <span id="tradeStatus" class="hidden text-[8px] font-mono font-bold px-2 py-0.5 rounded border bg-blue-500/20 text-blue-400 border-blue-500/40 whitespace-nowrap">RUNNING</span>
-        </div>
-        <div class="flex flex-wrap gap-1 pb-1">
-          <button data-live-type="candle" onclick="setLiveType('candle')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">CANDLE</button>
-          <button data-live-type="line" onclick="setLiveType('line')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">LINE</button>
-          <button data-live-ind="fvg" onclick="toggleLiveInd('fvg')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">FVG</button>
-          <button data-live-ind="ob" onclick="toggleLiveInd('ob')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">OB</button>
-          <button data-live-ind="liq" onclick="toggleLiveInd('liq')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">BSL/SSL</button>
-          <button data-live-ind="str" onclick="toggleLiveInd('str')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">BOS/CHoCH</button>
-          <button data-live-ind="sma" onclick="toggleLiveInd('sma')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">SMA20</button>
         </div>
         <div class="flex flex-wrap gap-1 pb-1">
           <button data-live-type="candle" onclick="setLiveType('candle')" class="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-panelborder text-gray-500 hover:text-white transition">CANDLE</button>
@@ -1192,16 +1184,68 @@ async function syncBotServer(email) {
   }
   if (ch) { saveTrades(); renderAll(); }
 }
+function srvBubble(text) {
+  const b = document.createElement('div');
+  b.textContent = text;
+  b.style.cssText = 'position:fixed;top:12px;left:12px;right:12px;z-index:9999;background:#1e293b;color:#fde68a;border:1px solid #f59e0b;border-radius:10px;padding:8px 12px;font:11px monospace;box-shadow:0 4px 14px rgba(0,0,0,.4)';
+  document.body.appendChild(b);
+  setTimeout(() => b.remove(), 8000);
+}
+function srvSeen() { try { return new Set(JSON.parse(localStorage.getItem('aluSrvSeen_v1')) || []); } catch (e) { return new Set(); } }
+function srvMarkSeen(id) { const s = srvSeen(); s.add(id); localStorage.setItem('aluSrvSeen_v1', JSON.stringify([...s])); }
 async function syncServer() {
   const email = localStorage.getItem(K.email);
   if (!email) return;
   const m = await api('/api/monitor?email=' + encodeURIComponent(email));
   if (m.ok && m.data && m.data.ok) srvMon = m.data.monitors || [];
+  const seen = srvSeen();
+  srvMon.forEach(m => {
+    if (m.status === 'pending' && m.pending && !seen.has(m.id) && !srvTaken().has(m.id)) {
+      srvBubble(`🔔 NEW SIGNAL VALID — ${m.style} ${m.symbol} ${m.pending.signal}`);
+      srvMarkSeen(m.id);
+    }
+  });
   await syncBotServer(email);
   srvTabLabels();
 }
 setTimeout(syncServer, 2500);
 setInterval(syncServer, 30000);
+
+// ── Web Push: notifikasi walaupun browser tertutup ──
+function urlB64ToUint8(b64) {
+  const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+  const s = (b64 + pad).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(s);
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+async function enablePush(quiet) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+    if (!quiet) alert('Browser ini tidak mendukung notifikasi push.');
+    return;
+  }
+  if (!quiet) {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') return alert('Izin notifikasi ditolak. Aktifkan lewat pengaturan situs Chrome.');
+  } else if (Notification.permission !== 'granted') {
+    return;
+  }
+  try {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+    const k = await api('/api/push-key');
+    if (!k.ok || !k.data || !k.data.ok) { if (!quiet) alert((k.data && k.data.msg) || 'Kunci push belum siap.'); return; }
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8(k.data.key) });
+    }
+    const email = localStorage.getItem(K.email) || '';
+    const r = await post('/api/push-subscribe', { subscription: sub.toJSON(), email });
+    if (!quiet) alert((r.data && r.data.ok) ? 'Notifikasi aktif di perangkat ini.' : ((r.data && r.data.msg) || 'Gagal menyimpan langganan.'));
+  } catch (e) {
+    if (!quiet) alert('Gagal mengaktifkan notifikasi: ' + e.message);
+  }
+}
+setTimeout(() => enablePush(true), 4000);
 
 function toggleLang() { lang = lang === 'id' ? 'en' : 'id'; applyLang(); }
 function applyLang() {
