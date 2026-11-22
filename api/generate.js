@@ -1,6 +1,7 @@
 // api/generate.js — v167 (kebutuhan timeframe Intraday/Swing sesuai struktur baru; batas jarak Scalping XAUUSD 50 pip; BOT = three candle, gaya 'scalperbot' terpisah dari MANUAL 'Scalping') (simpleZonePlan M5 refine M1 + scalpStructPlan M1/M5 + smc_flex + pullbackPlan + scalpWatch + no old fallback on Scalping + standby cache fix + bars.live guard + prevSignal age/dist guard + bot M15/M5/M1 + XAUUSD dist override + standby checklist to AI)
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
+import { planCrt } from '../lib/crt-engine.js';
 import {
   scalpStructPlan,
   flexScalpPlan,
@@ -277,6 +278,43 @@ function legView(l, ctx) {
   };
 }
 
+// Engine CRT untuk manual Intraday (range H4, mid M15, exec M5) dan Swing (range D1, mid H1, exec M15)
+function runCrtManual(ctx, closed, styleName, facts) {
+  const isSwing = styleName === 'Swing';
+  const range = isSwing ? closed.d1 : closed.h4;
+  const mid = isSwing ? closed.h1 : closed.m15;
+  const exec = isSwing ? closed.m15 : closed.m5;
+  const plan = planCrt({ style: styleName, range, mid, exec, price: ctx.price, sym: ctx.symbol, tNow: Date.now() });
+  facts.crtStatus = plan.status;
+
+  if (plan.status !== 'limit') {
+    let why = plan.reason || 'Menunggu setup CRT';
+    if (plan.wns) why = `WNS SELL ${ctx.f(plan.wns.sell.lo)}–${ctx.f(plan.wns.sell.hi)} · BUY ${ctx.f(plan.wns.buy.lo)}–${ctx.f(plan.wns.buy.hi)}. ${why}`;
+    facts.standbyReason = why;
+    facts.wns = plan.wns ? { sell: plan.wns.sell, buy: plan.wns.buy } : null;
+    return standbyOut(facts, why, [], `CRT ${styleName}`);
+  }
+
+  const dir = plan.dir === 'BUY' ? 1 : -1;
+  const riskPips = Math.round(Math.abs(plan.entry - plan.sl) / ctx.pip);
+  const p = {
+    dir, entry: plan.entry, sl: plan.sl, orderType: 'LIMIT',
+    tps: [plan.tp1, plan.tp2, plan.tp3], rr: 1, tpMode: 'CRT', riskPips,
+    setup: `Manual · ${DOC_STYLE_LABEL[styleName] || styleName} · CRT ${plan.zone.kind}`,
+    zone: { lower: plan.zone.lo, upper: plan.zone.hi, timeframe: '', label: `CRT ${plan.zone.kind}`, mid: (plan.zone.lo + plan.zone.hi) / 2 },
+  };
+  const sig = toSignal(p, ctx, { confidence: 'MEDIUM', risk: 'MEDIUM', checklist: [], topDown: `CRT ${styleName}` });
+  sig.expiresAt = plan.expiresAt;
+  sig.symbol = ctx.symbol;
+  sig.style = styleName;
+  sig.role = 'main';
+  sig.crt = { wns: plan.wns || null, sweep: plan.sweep || null };
+  facts.signal = plan.dir;
+  facts.entry = sig.entry; facts.sl = sig.sl; facts.tp = [sig.tp1, sig.tp2, sig.tp3];
+  facts.tpMode = 'CRT'; facts.riskPips = riskPips;
+  return { signal: sig, facts: { ...facts, status: sig.status } };
+}
+
 async function runDocManual(ctx, d, styleName) {
   const tf = DOC_STYLE_TF[styleName] || DOC_STYLE_TF['Scalping'];
   const facts = {
@@ -292,6 +330,11 @@ async function runDocManual(ctx, d, styleName) {
     ? scalpWatch({ m1: closed.m1, m5: closed.m5 }, { price: ctx.price, pip: ctx.pip, dec: ctx.dec, symbol: ctx.symbol })
     : buildWatchlist({ ...closed, price: ctx.price, pip: ctx.pip, styleName });
   facts.syarat = SYARAT_MASUK[styleName] || null;
+
+  // Intraday & Swing: engine CRT (WNS dari wick, sweep, CHoCH, limit). Tidak memakai jalur generic.
+  if (styleName === 'Intraday' || styleName === 'Swing') {
+    return runCrtManual(ctx, closed, styleName, facts);
+  }
 
   const live = getFormingM1(d.m1);
   const barsClosed = { m1: closed.m1, m5: closed.m5, m15: closed.m15, h1: closed.h1, live };
