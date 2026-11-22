@@ -1,188 +1,213 @@
+// api/bot.js — Bot ICT: POI dari M15, struktur dan limit dari M5, TP psikologis, kunci sesi.
+//   GET /api/bot?a=tick&secret=CRON_SECRET   (dipanggil cron-check tiap 5 menit)
+//   GET /api/bot?a=signals&email=...         (riwayat untuk browser)
+// URL lama (/api/bot-tick, /api/bot-signals) tetap jalan lewat vercel.json.
 import { db } from '../lib/db.js';
-import { sendPush } from '../lib/push.js';
-import { detectSignal, trackSignal, closedBars } from '../lib/bot-engine.js';
 import { checkAccess } from '../lib/access.js';
+import { sendPush } from '../lib/push.js';
+import { planBot, reviewLimit, structure } from '../lib/bot-ict.js';
+import {
+  M1, M5, PIP, closedBars, applyOutcome, isLocked, checkFill, trackTrade, utcDay,
+  msgPoi, msgCancel, msgMoved, msgFilled, msgResult, msgLock,
+} from '../lib/bot-engine.js';
 
 export const config = { maxDuration: 60 };
-
-// ── bot-tick ──
-// api/bot-tick.js — bot server XAUUSD: deteksi sinyal tiap candle M5 tutup, lacak TP/SL/BE, kirim push.
-// Dipanggil dari cron-check (GET ?secret=CRON_SECRET). Memakai akun sistem BOT_SYS_EMAIL untuk akses candle.
-// Env: CRON_SECRET, DATABASE_URL, VAPID_*. Opsional: BOT_SYS_EMAIL (kalau kosong, otomatis pilih klien aktif).
-
 const SYM = 'XAUUSD';
+const M15 = 15 * 60e3;
 
-async function ensureBotTables() {
-  await db.query(`create table if not exists bot_signals (
-    id serial primary key,
-    dir int not null,
-    entry double precision not null,
-    sl double precision not null,
-    tp1 double precision,
-    candle_t bigint not null,
-    created_at timestamptz not null default now(),
-    status text not null default 'open',
-    result text,
-    exit_price double precision,
-    pips double precision,
-    hits jsonb not null default '{}',
-    closed_at timestamptz
-  )`);
-  await db.query(`create table if not exists bot_state (k text primary key, v text)`);
+let tablesReady = false;
+async function ensureTables() {
+  if (tablesReady) return;
+  await db.query(`create table if not exists bot_state (key text primary key, value jsonb not null default '{}'::jsonb)`);
+  await db.query(`create table if not exists bot_signals (id bigserial primary key, created_at timestamptz not null default now())`);
+  const cols = [
+    ['side', 'text'], ['sym', 'text'], ['poi_no', 'int'], ['poi_kind', 'text'], ['poi_lo', 'double precision'],
+    ['poi_hi', 'double precision'], ['entry', 'double precision'], ['sl', 'double precision'],
+    ['tp1', 'double precision'], ['tp2', 'double precision'], ['tp3', 'double precision'],
+    ['status', 'text'], ['mode', 'text'], ['day', 'text'], ['placed_at', 'bigint'], ['filled_at', 'bigint'],
+    ['hits', 'jsonb default \'{}\'::jsonb'], ['result', 'text'], ['exit_price', 'double precision'],
+    ['pips', 'double precision'], ['closed_at', 'bigint'],
+  ];
+  for (const [c, t] of cols) await db.query(`alter table bot_signals add column if not exists ${c} ${t}`);
+  await db.query(`create table if not exists bot_deliveries (email text, signal_id bigint, primary key (email, signal_id))`);
+  tablesReady = true;
 }
 
-async function candles(base, email, interval, limit) {
-  const r = await fetch(`${base}/api/candles`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, symbol: SYM, interval, limit }),
-  });
-  const j = await r.json().catch(() => ({}));
-  return Array.isArray(j.candles) ? j.candles : [];
+async function getState(key, fallback) {
+  const r = await db.query('select value from bot_state where key = $1', [key]);
+  return r.rows.length ? r.rows[0].value : fallback;
+}
+async function setState(key, value) {
+  await db.query(
+    `insert into bot_state (key, value) values ($1, $2) on conflict (key) do update set value = excluded.value`,
+    [key, JSON.stringify(value)]
+  );
 }
 
 async function pickSysEmail() {
-  if (process.env.BOT_SYS_EMAIL) return process.env.BOT_SYS_EMAIL;
+  const env = (process.env.BOT_SYS_EMAIL || '').trim().toLowerCase();
+  if (env) return env;
   const r = await db.query(
     `select email from clients where expires_at > now()
-     order by case status when 'lifetime' then 0 when 'monthly' then 1 else 2 end, expires_at desc
-     limit 1`
+     order by case status when 'lifetime' then 0 when 'monthly' then 1 else 2 end limit 1`
   );
   return r.rows.length ? r.rows[0].email : null;
 }
 
-const dirTxt = d => (d > 0 ? 'BUY' : 'SELL');
+async function candles(base, email, interval, limit) {
+  const res = await fetch(`${base}/api/candles`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value: email, email, symbol: SYM, interval, limit }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data || !Array.isArray(data.candles)) return [];
+  return data.candles
+    .map(c => ({ t: Number(c.t ?? c.time ?? c.openTime), o: +c.o, h: +c.h, l: +c.l, c: +c.c }))
+    .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite))
+    .sort((a, b) => a.t - b.t);
+}
+
+// Kirim notifikasi ke semua perangkat, bahasa sesuai langganan masing-masing
+function notifyAll(builder) {
+  return sendPush(lang => ({ ...builder(lang), url: '/' })).catch(() => {});
+}
+
+async function nextPoiNo(now, seqState) {
+  const day = utcDay(now);
+  const seq = seqState.day === day ? seqState.seq + 1 : 1;
+  return { poi_no: seq, state: { day, seq } };
+}
 
 async function botTick(req, res) {
-  if (!process.env.CRON_SECRET || req.query?.secret !== process.env.CRON_SECRET) {
-    return res.status(401).json({ ok: false, msg: 'Unauthorized' });
+  if (req.query.secret !== process.env.CRON_SECRET) return res.status(401).json({ ok: false, msg: 'secret salah' });
+  await ensureTables();
+  const now = Date.now();
+  const lock = await getState('lock', {});
+  if (isLocked(lock, now)) return res.status(200).json({ ok: true, locked: true, until: lock.locked_until, reason: lock.lock_reason });
+  if (lock.locked_until && now >= lock.locked_until) {
+    lock.locked_until = null; lock.lock_reason = null; lock.consec_sl = 0;
+    await setState('lock', lock);
   }
-  try {
-    await ensureBotTables();
-    // Akun untuk akses candle: otomatis pilih klien aktif (lifetime > monthly > trial).
-    // Kalau BOT_SYS_EMAIL diisi, itu dipakai dulu (opsional).
-    const sys = await pickSysEmail();
-    if (!sys) return res.status(200).json({ ok: false, msg: 'Tidak ada klien aktif untuk akses candle.' });
 
-    const base = `https://${req.headers.host}`;
-    const report = { signal: null, closed: [] };
+  const email = await pickSysEmail();
+  if (!email) return res.status(200).json({ ok: false, msg: 'Tidak ada akun sistem aktif untuk ambil candle.' });
+  const base = `https://${req.headers.host}`;
+  const [m1r, m5r, m15r] = await Promise.all([
+    candles(base, email, '1m', 600), candles(base, email, '5m', 300), candles(base, email, '15m', 300),
+  ]);
+  const m1 = closedBars(m1r, M1, now);
+  const m5 = closedBars(m5r, M5, now);
+  const m15 = closedBars(m15r, M15, now);
+  if (m1.length < 10 || m5.length < 60 || m15.length < 60) {
+    return res.status(200).json({ ok: false, msg: 'Data candle belum cukup.', n: { m1: m1.length, m5: m5.length, m15: m15.length } });
+  }
+  const price = m1[m1.length - 1].c;
+  const newM5 = (await getState('last_m5', 0)) !== m5[m5.length - 1].t;
+  const events = [];
 
-    // 1) Deteksi sinyal hanya saat candle M5 baru sudah tutup
-    const m5 = closedBars(await candles(base, sys, '5m', 300), 5 * 60000);
-    const m1 = closedBars(await candles(base, sys, '1m', 600), 60000);
-    const last = m1.length ? m1[m1.length - 1].c : 0;
+  // Satu posisi aktif sekaligus
+  const cur = (await db.query(
+    `select * from bot_signals where side is not null and status in ('pending','open') order by id desc limit 1`
+  )).rows[0];
 
-    if (m5.length && last) {
-      const lastM5 = String(m5[m5.length - 1].t);
-      const st = await db.query(`select v from bot_state where k = 'last_m5'`);
-      if (!st.rows.length || st.rows[0].v !== lastM5) {
-        await db.query(
-          `insert into bot_state (k, v) values ('last_m5', $1)
-           on conflict (k) do update set v = excluded.v`, [lastM5]
-        );
-        const prev = await db.query(`select candle_t from bot_signals order by id desc limit 1`);
-        const prevT = prev.rows.length ? Number(prev.rows[0].candle_t) : null;
-        const sig = detectSignal(m5, last, prevT);
-        if (sig && sig.ok && sig.tps && sig.tps.length) {
-          const ins = await db.query(
-            `insert into bot_signals (dir, entry, sl, tp1, candle_t) values ($1,$2,$3,$4,$5) returning id`,
-            [sig.dir, sig.entry, sig.sl, sig.tps[0], Number(sig.candleT)]
+  if (cur && cur.status === 'pending') {
+    const sig = { ...cur, sym: SYM };
+    const fill = checkFill({ dir: cur.side === 'BUY' ? 1 : -1, entry: cur.entry, placed_at: cur.placed_at, sym: SYM }, m1);
+    if (fill) {
+      await db.query(`update bot_signals set status = 'open', filled_at = $1 where id = $2`, [fill.filledAt, cur.id]);
+      events.push(notifyAll(l => msgFilled(l, sig)));
+    } else {
+      const after = m5.filter(c => c.t >= cur.placed_at);
+      const rev = reviewLimit({ dir: cur.side, placedAt: cur.placed_at }, after, m5);
+      if (rev.action === 'cancel') {
+        await db.query(`update bot_signals set status = 'closed', result = 'CANCEL', closed_at = $1 where id = $2`, [now, cur.id]);
+        events.push(notifyAll(l => msgCancel(l, sig, rev.reason)));
+      } else if (newM5) {
+        const plan = planBot({ m15, m5, price, sym: SYM, tNow: now });
+        if (plan.status !== 'limit') {
+          await db.query(`update bot_signals set status = 'closed', result = 'CANCEL', closed_at = $1 where id = $2`, [now, cur.id]);
+          events.push(notifyAll(l => msgCancel(l, sig, plan.reason || 'setup tidak valid lagi')));
+        } else if (plan.poi.lo !== cur.poi_lo || plan.poi.hi !== cur.poi_hi || plan.poi.kind !== cur.poi_kind) {
+          await db.query(
+            `update bot_signals set poi_kind=$1, poi_lo=$2, poi_hi=$3, entry=$4, sl=$5, tp1=$6, tp2=$7, tp3=$8, side=$9, placed_at=$10 where id=$11`,
+            [plan.poi.kind, plan.poi.lo, plan.poi.hi, plan.entry, plan.sl, plan.tp1, plan.tp2, plan.tp3,
+             plan.dir, plan.placedAt, cur.id]
           );
-          report.signal = { id: ins.rows[0].id, dir: dirTxt(sig.dir), entry: sig.entry };
-          await sendPush({
-            title: `🤖 Bot ${dirTxt(sig.dir)} ${SYM}`,
-            body: `Entry ${sig.entry} · SL ${sig.sl} · TP ${sig.tps[0]}`,
-            url: '/', tag: `bot-${ins.rows[0].id}`,
-          });
+          const moved = { ...sig, ...plan, side: plan.dir, sym: SYM, poi_no: cur.poi_no };
+          events.push(notifyAll(l => msgMoved(l, moved, plan.poi.kind)));
         }
       }
     }
-
-    // 2) Lacak sinyal yang masih berjalan terhadap candle M1
-    const open = await db.query(`select * from bot_signals where status = 'open' order by id asc limit 50`);
-    for (const row of open.rows) {
-      const sig = {
-        id: row.id, dir: row.dir, entry: row.entry, sl: row.sl, tp1: row.tp1,
-        candle_t: Number(row.candle_t), hits: row.hits || {},
-      };
-      const done = trackSignal(sig, m1);
-      if (!done) continue;
+  } else if (cur && cur.status === 'open') {
+    const trade = { side: cur.side, dir: cur.side === 'BUY' ? 1 : -1, entry: cur.entry, sl: cur.sl, tp1: cur.tp1, tp2: cur.tp2, tp3: cur.tp3, filled_at: cur.filled_at, sym: SYM, hits: cur.hits || {} };
+    const tr = trackTrade(trade, m1);
+    const sig = { ...cur, sym: SYM };
+    if (tr.done) {
       await db.query(
-        `update bot_signals set status = 'closed', result = $1, exit_price = $2, pips = $3, hits = $4, closed_at = now()
-         where id = $5`,
-        [done.result, done.exit, done.pips, JSON.stringify(done.hits), row.id]
+        `update bot_signals set status='closed', result=$1, exit_price=$2, pips=$3, closed_at=$4, hits=$5 where id=$6`,
+        [tr.result, tr.exit, tr.pips, now, JSON.stringify(tr.hits), cur.id]
       );
-      report.closed.push({ id: row.id, result: done.result, pips: done.pips });
-      const icon = done.result === 'TP' ? '✅' : done.result === 'BE' ? '🟡' : '❌';
-      await sendPush({
-        title: `${icon} Bot ${done.result} ${dirTxt(row.dir)} ${SYM}`,
-        body: `${done.pips > 0 ? '+' : ''}${done.pips} pip`,
-        url: '/', tag: `bot-close-${row.id}`,
-      });
+      events.push(notifyAll(l => msgResult(l, sig, tr.result, tr.pips)));
+      const { state: nextLock, lock: why } = applyOutcome(lock, tr.outcome, now);
+      if (why) {
+        await setState('lock', nextLock);
+        events.push(notifyAll(l => msgLock(l, nextLock.locked_until, why)));
+      } else {
+        await setState('lock', nextLock);
+      }
+    } else {
+      if (tr.hits.tp1 && !(cur.hits || {}).tp1) {
+        events.push(notifyAll(l => msgResult(l, sig, 'TP1', 0)));
+        await db.query(`update bot_signals set hits=$1 where id=$2`, [JSON.stringify(tr.hits), cur.id]);
+      }
     }
-
-    return res.status(200).json({ ok: true, ...report });
-  } catch (err) {
-    console.error('bot-tick error:', err);
-    return res.status(500).json({ ok: false, msg: 'Server error: ' + err.message });
+  } else if (newM5) {
+    const plan = planBot({ m15, m5, price, sym: SYM, tNow: now });
+    if (plan.status === 'limit') {
+      const seq = await getState('poi_day', { day: '', seq: 0 });
+      const { poi_no, state: nextSeq } = await nextPoiNo(now, seq);
+      const ins = await db.query(
+        `insert into bot_signals (side, sym, poi_no, poi_kind, poi_lo, poi_hi, entry, sl, tp1, tp2, tp3, status, mode, day, placed_at, hits)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending',$12,$13,$14,'{}'::jsonb) returning id`,
+        [plan.dir, SYM, poi_no, plan.poi.kind, plan.poi.lo, plan.poi.hi, plan.entry, plan.sl, plan.tp1, plan.tp2, plan.tp3,
+         plan.mode, nextSeq.day, plan.placedAt]
+      );
+      await setState('poi_day', nextSeq);
+      const row = { id: ins.rows[0].id, poi_no, sym: SYM, side: plan.dir, entry: plan.entry, sl: plan.sl, tp1: plan.tp1, tp2: plan.tp2, tp3: plan.tp3 };
+      events.push(notifyAll(l => msgPoi(l, row)));
+    }
   }
-}
 
-// ── bot-signals ──
-// api/bot-signals.js — daftar sinyal bot untuk browser (dipakai untuk rekap & tampilan)
-//   GET ?email=...  -> sinyal bot yang boleh dilihat email itu
-// Aturan: trial hanya mendapat 2 sinyal bot (dicatat di bot_deliveries); monthly/lifetime semua.
-
-const TRIAL_LIMIT = 2;
-
-async function ensureDeliveryTables() {
-  await db.query(`create table if not exists bot_deliveries (
-    email text not null, signal_id int not null, primary key (email, signal_id))`);
+  await setState('last_m5', m5[m5.length - 1].t);
+  return res.status(200).json({ ok: true, events: events.length, price, newM5 });
 }
 
 async function botSignals(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'GET') return res.status(405).json({ ok: false, msg: 'Method not allowed' });
-
-  const email = String(req.query?.email || '').trim().toLowerCase();
-  const access = await checkAccess(email, false);
-  if (!access.ok) return res.status(403).json({ ok: false, msg: 'Akses ditolak.' });
-
-  try {
-    await ensureDeliveryTables();
-    if (access.status === 'trial') {
-      const have = await db.query(`select count(*)::int as n from bot_deliveries where email = $1`, [email]);
-      const left = TRIAL_LIMIT - have.rows[0].n;
-      if (left > 0) {
-        // Catat sinyal terbaru yang belum pernah dikirim ke email ini, sampai batas trial
-        await db.query(
-          `insert into bot_deliveries (email, signal_id)
-           select $1, id from bot_signals
-           where id not in (select signal_id from bot_deliveries where email = $1)
-           order by id asc limit $2
-           on conflict do nothing`,
-          [email, left]
-        );
-      }
-      const r = await db.query(
-        `select s.* from bot_signals s
-         join bot_deliveries d on d.signal_id = s.id and d.email = $1
-         order by s.id asc`, [email]);
-      return res.status(200).json({ ok: true, signals: r.rows, trial: true });
-    }
-    const r = await db.query(`select * from bot_signals order by id desc limit 50`);
-    return res.status(200).json({ ok: true, signals: r.rows.reverse(), trial: false });
-  } catch (err) {
-    console.error('bot-signals error:', err);
-    return res.status(500).json({ ok: false, msg: 'Server error: ' + err.message });
-  }
+  const email = String(req.query.email || '').trim().toLowerCase();
+  if (!email) return res.status(400).json({ ok: false, msg: 'email wajib' });
+  const access = await checkAccess(email);
+  if (!access.ok) return res.status(200).json({ ok: false, msg: 'Akses tidak aktif.' });
+  await ensureTables();
+  const rows = (await db.query(
+    `select id, side, poi_no, poi_kind, entry, sl, tp1, tp2, tp3, status, result, pips, placed_at, closed_at, hits
+     from bot_signals where side is not null order by id desc limit 50`
+  )).rows;
+  const lock = await getState('lock', {});
+  const pending = (await db.query(`select id, side, poi_no, entry, sl, tp1, tp2, tp3 from bot_signals where side is not null and status = 'pending' order by id desc limit 1`)).rows[0] || null;
+  const open = (await db.query(`select id, side, entry, sl, tp1, tp2, tp3 from bot_signals where side is not null and status = 'open' order by id desc limit 1`)).rows[0] || null;
+  return res.status(200).json({ ok: true, signals: rows, lock: { locked_until: lock.locked_until ? new Date(lock.locked_until).toISOString() : null, lock_reason: lock.lock_reason || null }, pending, open });
 }
 
-// Router: /api/bot?a=tick | signals  (URL lama tetap jalan lewat vercel.json rewrites)
 export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
   const a = String(req.query?.a || '');
-  if (a === 'tick') return botTick(req, res);
-  if (a === 'signals') return botSignals(req, res);
-  return res.status(404).json({ ok: false, msg: 'Unknown action' });
+  try {
+    if (a === 'tick') return botTick(req, res);
+    if (a === 'signals') return botSignals(req, res);
+    return res.status(404).json({ ok: false, msg: 'Unknown action' });
+  } catch (err) {
+    console.error('bot error:', err);
+    return res.status(500).json({ ok: false, msg: 'Server error: ' + err.message });
+  }
 }
