@@ -31,17 +31,17 @@ const VISION_EXPIRY_MS = { 'Scalping': 30 * 60e3, 'Intraday': 8 * 3600e3, 'Swing
 
 const QWEN_BASE_URL = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/$/, '');
 const QWEN_KEYS = [process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
-const QWEN_MODELS = [...new Set([process.env.QWEN_MODEL || 'deepseek-v4-flash', process.env.QWEN_MODEL_2 || 'gpt-6-luna', AI_VISION_MODEL].filter(Boolean))];
+const QWEN_MODELS = [...new Set([process.env.QWEN_MODEL || 'deepseek-v4-flash', process.env.QWEN_MODEL_2 || 'deepseek-v4-flash'].filter(Boolean))];
 const QWEN_TIMEOUT_MS = 25000;
 const QWEN_DEADLINE_MS = 30000;
 const QWEN_MANUAL_DEADLINE_MS = Number(process.env.QWEN_MANUAL_DEADLINE_MS) > 0 ? Number(process.env.QWEN_MANUAL_DEADLINE_MS) : 12000;
 const QWEN_MAX_TOKENS = 3000;
-const QWEN_MANUAL_MODEL = process.env.QWEN_MANUAL_MODEL || 'deepseek-v4-flash';
+const QWEN_MANUAL_MODEL = process.env.QWEN_MANUAL_MODEL || 'qwen-4-max';
 const envList = v => String(v || '').split(',').map(s => s.trim()).filter(Boolean);
 const QWEN_MANUAL_KEYS = [...new Set([process.env.QWEN_MANUAL_API_KEY, ...QWEN_KEYS].filter(Boolean))];
 const QWEN_MANUAL_MODELS = envList(process.env.QWEN_MANUAL_MODELS).length
   ? envList(process.env.QWEN_MANUAL_MODELS)
-  : (process.env.QWEN_MANUAL_MODEL ? [process.env.QWEN_MANUAL_MODEL] : QWEN_MODELS);
+  : [QWEN_MANUAL_MODEL];
 const QWEN_BOT_MODELS = envList(process.env.QWEN_BOT_MODELS).length ? envList(process.env.QWEN_BOT_MODELS) : QWEN_MODELS;
 
 const TL_KEY_NAMES = ['TICKERLAYER_API_KEY', ...Array.from({ length: 19 }, (_, i) => `TICKERLAYER_API_KEY_${i + 1}`)];
