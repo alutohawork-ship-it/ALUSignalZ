@@ -505,6 +505,9 @@ async function runDocManual(ctx, d, styleName) {
     return standbyOut(facts, why, checks, regimeTxt);
   }
 
+  let slNote = null;
+  if (styleName === 'Scalping' && ctx.symbol === 'XAUUSD') slNote = clampScalpSl(plan, ctx);
+  if (slNote && slNote.clamped) plan.setup = `${plan.setup} · SL ${slNote.before}→${slNote.after} pip`;
   plan.setup = `${plan.setup}${gate.ai ? ' · AI AMBIL' : ''}`;
   const sig = toSignal(plan, ctx, {
     confidence: o.confirmed && z?.fresh ? 'HIGH' : 'MEDIUM', risk: 'MEDIUM',
@@ -533,6 +536,18 @@ async function runDocManual(ctx, d, styleName) {
   if (sig.oco) facts.oco = sig.oco;
   if (plan.zone) facts.zone = { label: plan.zone.label, lower: sig.zone.min, upper: sig.zone.max };
   return { signal: sig, facts: { ...facts, status: sig.status } };
+}
+
+// SL Scalping XAUUSD dibatasi maksimal SCALP_GOLD_MAX_SL_PIPS pip (dari tepi zona yang terlalu jauh).
+// SL dipersempit ke batas itu; TP tetap dari plan asal, sehingga RR ikut naik.
+const SCALP_GOLD_MAX_SL_PIPS = 50;
+function clampScalpSl(plan, ctx) {
+  if (!plan || !Number.isFinite(plan.entry) || !Number.isFinite(plan.sl) || !(ctx.pip > 0)) return null;
+  const dir = plan.dir === 1 ? 1 : -1;
+  const before = Math.abs(plan.entry - plan.sl) / ctx.pip;
+  if (before <= SCALP_GOLD_MAX_SL_PIPS) return { before: Math.round(before), after: Math.round(before), clamped: false };
+  plan.sl = plan.entry - dir * SCALP_GOLD_MAX_SL_PIPS * ctx.pip;
+  return { before: Math.round(before), after: SCALP_GOLD_MAX_SL_PIPS, clamped: true };
 }
 
 function runManual(ctx, d, styleName) {
