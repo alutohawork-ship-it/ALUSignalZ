@@ -2,7 +2,7 @@
 // - TP4 dan TP5 dihitung di browser dari entry dan SL (tidak menambah panggilan API).
 // - Kartu SL/TP dibuat kecil: 3 kolom, 2 baris (SL, TP1, TP2 / TP3, TP4, TP5).
 // - Trade: TP1 kena -> stop ke entry (BE). Trade ditutup saat TP5 kena, stop kena, atau batas waktu.
-//   Dicatat dengan pips terbaik yang sempat tercapai jika tidak sampai TP5.
+//   Jika kena BE/stop setelah TP sudah tercapai: label 'TP{n} → BE' (pips 0). Batas waktu: BE di harga pasar.
 // Trade CRT, Vision, dan Bot tidak diubah.
 (function () {
   const origEval = window.evalTrade;
@@ -57,13 +57,13 @@
     const stopHit = d > 0 ? worst <= c.stop + eps : worst >= c.stop - eps;
     if (stopHit) {
       const mx = maxHit();
-      if (mx >= 1) return finish('TP', c.stop, mx, c.maxPips);      // sudah ada TP: catat pips terbaik
+      if (mx >= 1) return finish('BE', c.stop, mx, 0);              // sudah ada TP lalu kena stop/BE: label BE (TP terakhir tercapai)
       return finish('SL', c.stop, 0, px(c.stop));
     }
 
     if (now >= (t.expiresAt || 0)) {
       const mx = maxHit();
-      if (mx >= 1) return finish('TP', p, mx, c.maxPips);
+      if (mx >= 1) return finish('BE', p, mx, px(p));              // batas waktu: ditutup di harga pasar, label BE
       return finish('BE', p, 0, px(p));
     }
     if (maxHit() >= 1) t.status = 'BE';
