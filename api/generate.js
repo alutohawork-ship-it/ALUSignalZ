@@ -2,6 +2,11 @@
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import { planCrt } from '../lib/crt-engine.js';
+import { planIntraday, planSwing, planScalping } from '../lib/mtf-engine.js';
+
+// Mode manual multi-timeframe: 'mtf' = Intraday H4/H1/M15/M5, Swing D1/H4/H1/M15, Scalping M15/M5 + cadangan M1
+// 'legacy' = Intraday & Swing pakai CRT (WNS), Scalping pakai aturan lama
+const MTF_MODE = 'mtf';
 import { planBot } from '../lib/bot-ict.js';
 import {
   scalpStructPlan,
@@ -388,6 +393,55 @@ function runCrtManual(ctx, closed, styleName, facts) {
   return { signal: sig, facts: { ...facts, status: sig.status } };
 }
 
+// Satu fungsi untuk Scalping, Intraday, dan Swing berbasis multi-timeframe (lib/mtf-engine.js)
+function runMtfStyle(ctx, closed, styleName, facts) {
+  const now = Date.now();
+  let plan;
+  if (styleName === 'Intraday') plan = planIntraday({ h4: closed.h4, h1: closed.h1, m15: closed.m15, m5: closed.m5, price: ctx.price, sym: ctx.symbol, tNow: now });
+  else if (styleName === 'Swing') plan = planSwing({ d1: closed.d1, h4: closed.h4, h1: closed.h1, m15: closed.m15, price: ctx.price, sym: ctx.symbol, tNow: now });
+  else plan = planScalping({ m15: closed.m15, m5: closed.m5, m1: closed.m1, price: ctx.price, sym: ctx.symbol, tNow: now });
+  facts.styleMode = 'mtf';
+  if (plan.status !== 'limit') {
+    facts.standbyReason = plan.reason;
+    return standbyOut(facts, plan.reason, [], `${styleName} MTF`);
+  }
+  const dir = plan.dir === 'BUY' ? 1 : -1;
+  const riskPips = Math.round(Math.abs(plan.entry - plan.sl) / ctx.pip);
+  const label = plan.source ? `${styleName} · ${plan.source}` : styleName;
+  const p = {
+    dir, entry: plan.entry, sl: plan.sl, orderType: plan.orderType || 'LIMIT',
+    tps: [plan.tps[0], plan.tps[1], plan.tps[2]], rr: 1, tpMode: 'RISK_R', riskPips,
+    setup: `Manual · ${label} · ${plan.zone.kind}`,
+    zone: { lower: plan.zone.lo, upper: plan.zone.hi, timeframe: '', label: plan.zone.kind, mid: (plan.zone.lo + plan.zone.hi) / 2 },
+  };
+  const sig = toSignal(p, ctx, { confidence: 'MEDIUM', risk: 'MEDIUM', checklist: [plan.reason], scanSummary: plan.reason, topDown: label });
+  sig.tp4 = Number(ctx.f(plan.tps[3]));
+  sig.tp5 = Number(ctx.f(plan.tps[4]));
+  // Alasan: tanpa keterangan TP band, daftar target sesuai TP yang benar-benar dipasang (TP1 sampai TP5)
+  const tpList = [sig.tp1, sig.tp2, sig.tp3, sig.tp4, sig.tp5].filter(v => Number.isFinite(Number(v)));
+  const en = ctx.lang === 'en';
+  const tpTxt = tpListTxt(tpList, !en);
+  const dirWord = plan.dir;
+  const orderWord = plan.orderType === 'MARKET' ? (en ? 'MARKET (NOW)' : 'MARKET (NOW)') : 'LIMIT';
+  const stepLines = (plan.steps || []).map(st => `${st.tf} : ${st.text}`);
+  const reasonTxt = [
+    en ? 'Analysis' : 'Analisa',
+    ...stepLines,
+    `${en ? 'Final decision' : 'Keputusan analisa final'} : ${dirWord} ${orderWord} @ ${sig.entry} · SL ${sig.sl} · TP ${tpTxt}`,
+  ].join('\n');
+  sig.reason = reasonTxt;
+  sig.sym = ctx.symbol;
+  sig.expiresAt = plan.expiresAt;
+  sig.symbol = ctx.symbol;
+  sig.style = styleName;
+  sig.role = 'main';
+  facts.signal = plan.dir;
+  facts.entry = sig.entry; facts.sl = sig.sl;
+  facts.tp = [sig.tp1, sig.tp2, sig.tp3, sig.tp4, sig.tp5];
+  facts.riskPips = riskPips; facts.tpMode = 'RISK_R';
+  return { signal: sig, facts: { ...facts, status: sig.status } };
+}
+
 async function runDocManual(ctx, d, styleName) {
   const tf = DOC_STYLE_TF[styleName] || DOC_STYLE_TF['Scalping'];
   const facts = {
@@ -404,8 +458,14 @@ async function runDocManual(ctx, d, styleName) {
     : buildWatchlist({ ...closed, price: ctx.price, pip: ctx.pip, styleName });
   facts.syarat = SYARAT_MASUK[styleName] || null;
 
+  if ((styleName === 'Intraday' || styleName === 'Swing') && MTF_MODE === 'mtf') {
+    return runMtfStyle(ctx, closed, styleName, facts);
+  }
   if (styleName === 'Intraday' || styleName === 'Swing') {
     return runCrtManual(ctx, closed, styleName, facts);
+  }
+  if (styleName === 'Scalping' && MTF_MODE === 'mtf' && (ctx.symbol === 'XAUUSD' || ctx.symbol === 'BTCUSD')) {
+    return runMtfStyle(ctx, closed, 'Scalping', facts);
   }
 
   const live = getFormingM1(d.m1);
@@ -909,9 +969,7 @@ function fallbackStory(f, lang) {
         : `I am still waiting for a valid setup on ${f.symbol}. Current bias is ${f.bias}. ${wns} ${f.standbyReason || ''} ${checkTxt} ${fbWatch(f, false)}`;
     }
     const now = f.orderType === 'MARKET';
-    const bandTxt = f.tpMode && f.tpMode !== 'RR' && f.tpMode !== 'SWING_INTRADAY' && f.tpMode !== 'CRT'
-      ? ` (TP band ${f.tpMode === 'LOW_RISK' ? '1:1.5/1:2.5/1:4' : '1:1/1:2/1:3'}, risk ${f.riskPips} pip)`
-      : '';
+    const bandTxt = ''; // keterangan TP band dihapus dari alasan (permintaan pengguna)
     const crtTxt = f.tpMode === 'CRT'
       ? (id ? ' Ini setup CRT: TP3 menuju sisi range berlawanan.' : ' This is a CRT setup: TP3 targets the opposite side of the range.')
       : '';
