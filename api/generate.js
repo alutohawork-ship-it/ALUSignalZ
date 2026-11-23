@@ -505,6 +505,12 @@ async function runDocManual(ctx, d, styleName) {
     return standbyOut(facts, why, checks, regimeTxt);
   }
 
+  // Penjaga arah: BUY tidak boleh memakai zona SELL (supply), dan SELL tidak boleh memakai zona BUY (demand)
+  if (styleName === 'Scalping' && !zoneSideOk(plan)) {
+    const why = `Setup ditolak: arah ${plan.dir === 1 ? 'BUY' : 'SELL'} bertabrakan dengan ${zoneTxt(plan)}. Menunggu zona searah.`;
+    facts.standbyReason = why;
+    return standbyOut(facts, why, checks, regimeTxt);
+  }
   let slNote = null;
   if (styleName === 'Scalping' && ctx.symbol === 'XAUUSD') slNote = clampScalpSl(plan, ctx);
   if (slNote && slNote.clamped) plan.setup = `${plan.setup} · SL ${slNote.before}→${slNote.after} pip`;
@@ -536,6 +542,18 @@ async function runDocManual(ctx, d, styleName) {
   if (sig.oco) facts.oco = sig.oco;
   if (plan.zone) facts.zone = { label: plan.zone.label, lower: sig.zone.min, upper: sig.zone.max };
   return { signal: sig, facts: { ...facts, status: sig.status } };
+}
+
+// Penjaga arah zona: label zona menentukan sisi yang boleh dipakai
+const zoneTxt = plan => String((plan.zone && plan.zone.label) || plan.zoneLabel || plan.setup || '');
+function zoneSideOk(plan) {
+  const lab = zoneTxt(plan);
+  const isSupply = /SELL|Supply/i.test(lab);
+  const isDemand = /BUY|Demand/i.test(lab);
+  if (!isSupply && !isDemand) return true;          // tidak diketahui: tidak diblokir
+  if (plan.dir === 1 && isSupply && !isDemand) return false;
+  if (plan.dir !== 1 && isDemand && !isSupply) return false;
+  return true;
 }
 
 // SL Scalping XAUUSD dibatasi maksimal SCALP_GOLD_MAX_SL_PIPS pip (dari tepi zona yang terlalu jauh).
