@@ -1,11 +1,12 @@
-// api/generate.js — v171
-// Perubahan v171:
-// 1) Invalidasi = swing high/low / tepi gap (FVG) / distal zona (di LUAR zona demand/supply).
-//    SL wajib di luar invalidasi + buffer; melebihi batas style => STANDBY.
-// 2) Intraday: 3 TP rasio 1:1.5, 1:3, 1:5. XAUUSD max SL 100 pip; BTCUSD 0.50%-1.20% entry.
-// 3) Scalping: gold 35-50 pip (TP 1/1.5/2/3/5 R); BTC 0.25%-0.60% (tidak disamakan dengan gold).
-// v170: dual bahasa reason (bot/manual/vision) + fallback translate.
-// v169: reasoning manual format vision (per-TF + [Setup]), guard sisi order, vision TP searah.
+// api/generate.js — v174
+// v174 = gabungan v169..v173:
+// - Reasoning manual (Scalping/Intraday/Swing) format vision: [PAIR · Analisa Multi-TF] + bullet per-TF + [Setup], dual bahasa.
+// - Scalping: gate internal LTF (M5 BOS/CHoCH + EMA20, trigger M1) tidak boleh melawan HTF sendirian; follow internal / tunggu zona / STANDBY.
+// - Pertimbangan entry NOW vs LIMIT pullback (zona + momentum internal + trigger M1), tertulis di reason.
+// - Invalidasi = swing high/low / tepi gap (FVG) / distal zona; SL di luar invalidasi + buffer; melebihi batas style => STANDBY.
+// - SL/TP per style: Scalping gold 35-50 pip (TP 1/1.5/2/3/5 R), BTC 0.25-0.60%; Intraday gold 35-100 pip (TP 1.5/3/5), BTC 0.50-1.20%; Swing longgar.
+// - Lifecycle signal hidup: tidak dibatalkan scanner/gate; PENDING->FILLED->TP1_HIT(BE)->TP2_HIT; cooldown 5 menit arah sama setelah SL/INVALID.
+// - Vision: TP pakai angka AI bila valid, tp4/tp5 selalu searah, dual bahasa (reasonEn/perImageAnalysesEn) + fallback translate.
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import { planCrt } from '../lib/crt-engine.js';
@@ -77,8 +78,8 @@ const TF_NEED = { d1: 60, h4: 80, h1: 100, m30: 100, m15: 200, m5: 200, m1: 200 
 const MIN_BARS = { m1: 60, m5: 40, m15: 40, m30: 35, h1: 35, h4: 25, d1: 20 };
 const MANUAL_TF_NEEDED = {
   'Scalping': ['m1', 'm5', 'm15', 'h1'],
-  'Intraday': ['m5', 'm15', 'h4'],
-  'Swing':    ['m15', 'h1', 'd1'],
+  'Intraday': ['m5', 'm15', 'h1', 'h4'],
+  'Swing':    ['m15', 'h1', 'h4', 'd1'],
 };
 const BOT_TF_NEEDED = ['m1', 'm5', 'm15'];
 const MAX_DIST_PIP = { 'Scalping': 150, 'Intraday': 500, 'Swing': 2000 };
@@ -98,6 +99,7 @@ const BOT_CFG = {
 const MANUAL_STORY_TTL_MS = 180000;
 const MANUAL_STANDBY_TTL_MS = 20000;
 const GATE_TTL_MS = 10 * 60 * 1000;
+const OUTCOME_COOLDOWN_MS = 5 * 60e3;
 
 const isoDate = d => d.toISOString().slice(0, 10);
 function fail(res, reason, status = 200) { return res.status(status).json({ ok:false, reason, message:reason, msg:reason, error:reason }); }
@@ -289,7 +291,7 @@ function nearestZonePlan(watch, ctx, m5) {
       lo: Number(w.bawah ?? w.bottom ?? w.lo),
       hi: Number(w.atas ?? w.top ?? w.hi),
       tf: String(w.tf || 'M5'),
-      type: String(w.tipe || w.type || ''),
+      type: String(w.tipe ?? w.type ?? ''),
       jarak: Number.isFinite(Number(w.jarak_pip)) ? Number(w.jarak_pip) : null,
     }))
     .filter(w => Number.isFinite(w.lo) && Number.isFinite(w.hi) && w.hi > w.lo && (w.hi - w.lo) / ctx.price < 0.02);
@@ -377,6 +379,7 @@ function runCrtManual(ctx, closed, styleName, facts) {
   return { signal: sig, facts: { ...facts, status: sig.status } };
 }
 
+// ── Multi-TF manual (Scalping/Intraday/Swing) + gate LTF + entry NOW/LIMIT ──
 function runMtfStyle(ctx, closed, styleName, facts) {
   const now = Date.now();
   let plan;
@@ -387,7 +390,8 @@ function runMtfStyle(ctx, closed, styleName, facts) {
   facts.styleMode = 'mtf';
   facts.steps = plan?.steps || [];
   facts.bias = plan?.bias || plan?.regime || 'netral';
-  const stepChecks = facts.steps.map(st => `${st.tf}: ${st.text}`);
+  let stepChecks = facts.steps.map(st => `${st.tf}: ${st.text}`);
+  const push = (tf, text) => { facts.steps = [...facts.steps, { tf, text }]; stepChecks = facts.steps.map(st => `${st.tf}: ${st.text}`); };
 
   const finishStandby = (why) => {
     facts.standbyReason = why;
@@ -403,46 +407,76 @@ function runMtfStyle(ctx, closed, styleName, facts) {
 
   if (!plan || plan.status !== 'limit') return finishStandby(plan?.reason || 'Menunggu setup MTF valid.');
 
-  const dir = plan.dir === 'BUY' ? 1 : -1;
+  const dir0 = plan.dir === 'BUY' ? 1 : -1;
   let orderType = plan.orderType || 'LIMIT';
   let entry = safeNum(plan.entry, ctx.price);
-  const sl = safeNum(plan.sl, ctx.price);
-
+  const sl0 = safeNum(plan.sl, ctx.price);
   const wrongSide = orderType === 'LIMIT' &&
-    ((dir === 1 && entry > ctx.price) || (dir === -1 && entry < ctx.price));
+    ((dir0 === 1 && entry > ctx.price) || (dir0 === -1 && entry < ctx.price));
   if (wrongSide) { orderType = 'MARKET'; entry = ctx.price; }
-  if ((dir === 1 && sl >= entry) || (dir === -1 && sl <= entry))
+  if ((dir0 === 1 && sl0 >= entry) || (dir0 === -1 && sl0 <= entry))
     return finishStandby('Harga sudah melewati SL setup. Menunggu zona baru.');
 
-  const label = plan.source ? `${styleName} · ${plan.source}` : styleName;
-  const p = {
-    dir, entry, sl, orderType,
+  const label0 = plan.source ? `${styleName} · ${plan.source}` : styleName;
+  let p = {
+    dir: dir0, entry, sl: sl0, orderType,
     tps: [plan.tps?.[0], plan.tps?.[1], plan.tps?.[2]],
     rr: 1, tpMode: 'RISK_R',
-    riskPips: Math.round(Math.abs(entry - sl) / ctx.pip),
-    setup: `Manual · ${label} · ${plan.zone.kind}`,
+    riskPips: Math.round(Math.abs(entry - sl0) / ctx.pip),
+    setup: `Manual · ${label0} · ${plan.zone.kind}`,
     zone: { lower: plan.zone.lo, upper: plan.zone.hi, timeframe: plan.zone.tf || '', label: plan.zone.kind, mid: (plan.zone.lo + plan.zone.hi) / 2 },
   };
-  // Swing tetap 5 TP dari engine; Intraday 3 TP (1.5/3/5 R) diatur oleh applySlTpRules.
   if (styleName === 'Swing') { p.tp4 = plan.tps?.[3]; p.tp5 = plan.tps?.[4]; }
 
-  // Invalidasi struktur (swing/gap/distal zona) + batas SL/TP per style
   const execBars = styleName === 'Intraday' ? closed.m15 : styleName === 'Swing' ? closed.h4 : closed.m5;
-  const slAdj = applySlTpRules(p, ctx, execBars, styleName);
-  if (slAdj && slAdj.reject) {
-    return finishStandby(`Risk ${styleName} ${slAdj.need} pip melebihi batas ${slAdj.max} pip (invalidasi ${slAdj.invalid ?? '-'} di luar zona terlalu jauh). Menunggu zona lebih rapat.`);
+  let confidence = 'MEDIUM';
+
+  if (styleName === 'Scalping') {
+    // 1) gate internal LTF: HTF tidak boleh sendirian menentukan arah
+    const gate = scalpLtfGate(ctx, closed, p, facts);
+    const { htf, itf, ltf } = gate.info;
+    facts.internal = { m15: htf.dir, m5: itf.dir, m1: ltf.dir, m5Event: itf.event, m1Event: ltf.event };
+    push('M15', `Bias ${htf.dir === 1 ? 'bullish' : htf.dir === -1 ? 'bearish' : 'netral'} (${htf.event || 'momentum EMA20'}).`);
+    push('M5', `Internal ${itf.dir === 1 ? 'bullish' : 'bearish'}${itf.event ? ` · ${itf.event}` : ''} · harga ${itf.momentum === 1 ? 'di atas' : 'di bawah'} EMA20.`);
+    push('M1', `Trigger ${ltf.dir === 1 ? 'bullish' : 'bearish'}${ltf.event ? ` · ${ltf.event}` : ''}.`);
+    if (!gate.ok) return finishStandby(gate.reason);
+    if (gate.follow) {
+      p = gate.follow;
+      push('M5', `Follow internal: ${p.source} di ${p.zone.label} ${ctx.f(p.zone.lower)}–${ctx.f(p.zone.upper)}.`);
+    } else if (gate.bounce) {
+      push('M1', 'Harga di zona HTF + konfirmasi balik M1: bounce searah HTF diizinkan.');
+    }
+    // 2) pertimbangan NOW vs LIMIT pullback
+    const em = decideEntryMode(ctx, closed, p, gate.info);
+    if (em.reject) return finishStandby(em.note);
+    p.orderType = em.orderType;
+    p.entry = em.entry;
+    facts.entryNote = em.note;
+    push('Entry', em.note);
+    // 3) SL/TP final setelah entry diputuskan
+    const adj = applySlTpRules(p, ctx, execBars, styleName);
+    if (adj && adj.reject)
+      return finishStandby(`Risk ${styleName} ${adj.need} pip melebihi batas ${adj.max} pip (invalidasi ${adj.invalid ?? '-'} di luar zona terlalu jauh). Menunggu zona lebih rapat.`);
+    p.riskPips = Math.round(Math.abs(p.entry - p.sl) / ctx.pip);
+    if (adj && adj.invalid != null) p.invalidLevel = adj.invalid;
+  } else {
+    const adj = applySlTpRules(p, ctx, execBars, styleName);
+    if (adj && adj.reject)
+      return finishStandby(`Risk ${styleName} ${adj.need} pip melebihi batas ${adj.max} pip (invalidasi ${adj.invalid ?? '-'} di luar zona terlalu jauh). Menunggu zona lebih rapat.`);
+    p.riskPips = Math.round(Math.abs(p.entry - p.sl) / ctx.pip);
+    if (adj && adj.invalid != null) p.invalidLevel = adj.invalid;
   }
-  p.riskPips = Math.round(Math.abs(p.entry - p.sl) / ctx.pip);
-  if (slAdj && slAdj.invalid != null) p.invalidLevel = slAdj.invalid;
 
   if (!zoneSideOk(p))
-    return finishStandby(`Setup ditolak: arah ${plan.dir} bertabrakan dengan ${zoneTxt(p)}. Menunggu zona searah.`);
+    return finishStandby(`Setup ditolak: arah ${p.dir === 1 ? 'BUY' : 'SELL'} bertabrakan dengan ${zoneTxt(p)}. Menunggu zona searah.`);
 
   const sig = toSignal(p, ctx, {
-    confidence: 'MEDIUM', risk: 'MEDIUM',
+    confidence, risk: 'MEDIUM',
     checklist: stepChecks.length ? stepChecks : [plan.reason || ''],
-    scanSummary: plan.reason || '', topDown: label,
+    scanSummary: plan.reason || '', topDown: p.source ? `${styleName} · ${p.source}` : label0,
   });
+  sig.entryMode = p.orderType === 'MARKET' ? 'NOW' : 'PULLBACK';
+  sig.entryNote = facts.entryNote || null;
   if (Number.isFinite(Number(p.tp4))) sig.tp4 = Number(ctx.f(p.tp4));
   if (Number.isFinite(Number(p.tp5))) sig.tp5 = Number(ctx.f(p.tp5));
   sig.expiresAt = plan.expiresAt;
@@ -450,17 +484,17 @@ function runMtfStyle(ctx, closed, styleName, facts) {
   sig.style = styleName;
   sig.role = 'main';
 
-  facts.signal = plan.dir;
+  facts.signal = p.dir === 1 ? 'BUY' : 'SELL';
   facts.role = 'main';
   facts.orderType = sig.orderType;
-  facts.trigger = `${plan.zone.kind}${plan.source ? ' · ' + plan.source : ''}`;
+  facts.trigger = `${p.zone.label}${p.source ? ' · ' + p.source : ''}`;
   facts.entry = sig.entry;
   facts.sl = sig.sl;
   facts.tp = [sig.tp1, sig.tp2, sig.tp3, sig.tp4, sig.tp5].filter(v => Number.isFinite(Number(v)));
   facts.rr = Number(p.rr).toFixed(2);
   facts.riskPips = sig.riskPips;
   facts.tpMode = p.tpMode;
-  facts.confirmed = orderType === 'MARKET';
+  facts.confirmed = p.orderType === 'MARKET';
   facts.zone = { label: p.zone.label, lower: sig.zone.min, upper: sig.zone.max };
   facts.invalid = sig.invalidLevel;
   facts.status = sig.status;
@@ -654,13 +688,11 @@ function zoneSideOk(plan) {
   return true;
 }
 
-// ── ATURAN SL/TP PER STYLE (v171) ──
-// Invalidasi = level struktur DI LUAR zona: swing low/high, tepi gap (FVG), atau distal zona.
-// SL wajib di luar invalidasi + buffer; jika melebihi batas style => STANDBY (tidak dipotong ke dalam zona).
+// ── ATURAN SL/TP PER STYLE + INVALIDASI STRUKTUR ──
 const SL_TP_RULES = {
   Scalping: { goldMinPip: 35, goldMaxPip: 50,  btcMinPct: 0.0025, btcMaxPct: 0.0060, tps: [1, 1.5, 2, 3, 5] },
   Intraday: { goldMinPip: 35, goldMaxPip: 100, btcMinPct: 0.0050, btcMaxPct: 0.0120, tps: [1.5, 3, 5] },
-  Swing:    { goldMinPip: 50, goldMaxPip: 300, btcMinPct: 0.0100, btcMaxPct: 0.0250, tps: null }, // null = TP engine
+  Swing:    { goldMinPip: 50, goldMaxPip: 300, btcMinPct: 0.0100, btcMaxPct: 0.0250, tps: null },
 };
 const INV_LOOKBACK = 30;
 const INV_SWING_LR = 2;
@@ -690,8 +722,8 @@ function gapEdges(rows, lookback = INV_LOOKBACK) {
   if (!Array.isArray(rows) || rows.length < 3) return out;
   const a = rows.slice(-lookback);
   for (let i = 1; i < a.length - 1; i++) {
-    if (a[i - 1].h < a[i + 1].l) out.bullLower.push(a[i - 1].h); // tepi bawah gap bullish
-    if (a[i - 1].l > a[i + 1].h) out.bearUpper.push(a[i - 1].l); // tepi atas gap bearish
+    if (a[i - 1].h < a[i + 1].l) out.bullLower.push(a[i - 1].h);
+    if (a[i - 1].l > a[i + 1].h) out.bearUpper.push(a[i - 1].l);
   }
   return out;
 }
@@ -709,9 +741,7 @@ function deriveInvalidation(plan, ctx, bars) {
   const sw = swingLevels(bars);
   const gp = gapEdges(bars);
   if (dir === 1) {
-    // swing low / tepi bawah gap yang berada di luar (bawah) distal demand, maksimal 1 lebar zona
     for (const v of [...sw.lows, ...gp.bullLower]) if (Number.isFinite(v) && Number.isFinite(distal) && v <= distal && v >= distal - reach) cands.push(v);
-    // gap yang overlap zona: tepi bawahnya di dalam zona juga kandidat invalidasi
     for (const v of gp.bullLower) if (Number.isFinite(v) && hasZone && v > distal && v <= zHi) cands.push(v);
     const valid = cands.filter(v => v < plan.entry);
     return valid.length ? Math.min(...valid) : NaN;
@@ -732,7 +762,6 @@ function applySlTpRules(plan, ctx, bars, styleName) {
   const zoneWidth = Number(plan.zone?.upper) - Number(plan.zone?.lower);
   const buffer = atr > 0 ? 0.1 * atr : 0.1 * (zoneWidth > 0 ? zoneWidth : ctx.pip * 10);
   const invDist = Number.isFinite(inv) ? Math.abs(plan.entry - inv) + buffer : 0;
-  // SL tidak boleh lebih rapat dari invalidasi struktur, dan tidak boleh di bawah batas minimal
   const dist = Math.max(beforeDist, invDist, b.min);
   const needPip = Math.round(dist / ctx.pip);
   const maxPip = Math.round(b.max / ctx.pip);
@@ -760,6 +789,7 @@ function tpListTxt(tp, id) {
   return id ? `${head.join(', ')}, serta ${last}` : `${head.join(', ')}, and ${last}`;
 }
 
+// ── Layout reasoning manual = format vision ──
 function mtfLayoutReason(f, en, perTfLines, setupText) {
   const head = `[${f.symbol} · ${en ? 'Multi-TF Analysis' : 'Analisa Multi-TF'} · ${f.style}]`;
   const bullets = (perTfLines || []).map(t => `• ${t}`).join('\n');
@@ -778,6 +808,163 @@ function mtfFallbackReason(f, en) {
       : `${f.symbol}: keputusan final ${f.signal} ${orderWord} @ ${f.entry}, SL ${f.sl}, target ${tpListTxt(f.tp, true)}.${invTxt}`;
   }
   return mtfLayoutReason(f, en, lines, setup);
+}
+
+// ── v172: SCALPING LTF INTERNAL-STRUCTURE GATE ──
+function emaLast(rows, n = 20) {
+  if (!Array.isArray(rows) || !rows.length) return null;
+  const k = 2 / (n + 1);
+  let e = rows[0].c;
+  for (let i = 1; i < rows.length; i++) e = rows[i].c * k + e * (1 - k);
+  return e;
+}
+function readInternal(rows, lookback = 60, lr = 2) {
+  const out = { dir: 0, event: null, fresh: false, momentum: 0, run: 0, ema: null, close: null, swingHigh: null, swingLow: null, strong: false };
+  if (!Array.isArray(rows) || rows.length < 25) return out;
+  const a = rows.slice(-lookback);
+  const n = a.length;
+  out.ema = emaLast(a, 20);
+  out.close = a[n - 1].c;
+  out.momentum = out.close > out.ema ? 1 : out.close < out.ema ? -1 : 0;
+  const lastDir = a[n - 1].c >= a[n - 1].o ? 1 : -1;
+  let run = 0;
+  for (let i = n - 1; i >= 0; i--) { const d = a[i].c >= a[i].o ? 1 : -1; if (d === lastDir) run++; else break; }
+  out.run = run;
+  const highs = [], lows = [];
+  for (let i = lr; i < n - lr; i++) {
+    let isH = true, isL = true;
+    for (let j = i - lr; j <= i + lr; j++) { if (j === i) continue; if (a[j].h >= a[i].h) isH = false; if (a[j].l <= a[i].l) isL = false; }
+    if (isH) highs.push({ i, v: a[i].h });
+    if (isL) lows.push({ i, v: a[i].l });
+  }
+  out.swingHigh = highs.length ? highs[highs.length - 1].v : null;
+  out.swingLow = lows.length ? lows[lows.length - 1].v : null;
+  let trend = 0, event = null, breakI = -1, hi = 0, li = 0;
+  for (let i = lr * 2; i < n; i++) {
+    while (hi < highs.length && highs[hi].i < i - lr) hi++;
+    while (li < lows.length && lows[li].i < i - lr) li++;
+    const pH = hi > 0 ? highs[hi - 1] : null;
+    const pL = li > 0 ? lows[li - 1] : null;
+    const c = a[i].c;
+    if (pH && c > pH.v) { event = trend === -1 ? 'CHOCH_UP' : 'BOS_UP'; trend = 1; breakI = i; }
+    else if (pL && c < pL.v) { event = trend === 1 ? 'CHOCH_DOWN' : 'BOS_DOWN'; trend = -1; breakI = i; }
+  }
+  out.fresh = breakI >= n - 12;
+  out.event = event;
+  out.dir = trend !== 0 && out.fresh ? trend : out.momentum;
+  out.strong = out.fresh && trend !== 0 && out.momentum === trend;
+  return out;
+}
+function fvgZones(rows, lookback = 40) {
+  const out = [];
+  if (!Array.isArray(rows) || rows.length < 3) return out;
+  const a = rows.slice(-lookback);
+  for (let i = 1; i < a.length - 1; i++) {
+    if (a[i - 1].h < a[i + 1].l) out.push({ lo: a[i - 1].h, hi: a[i + 1].l, side: 'demand', kind: 'FVG bull' });
+    if (a[i - 1].l > a[i + 1].h) out.push({ lo: a[i + 1].h, hi: a[i - 1].l, side: 'supply', kind: 'FVG bear' });
+  }
+  return out;
+}
+function zoneSideOf(label, fallback) {
+  const s = String(label || '');
+  if (/supply|sell|rbd|dbd|bear/i.test(s)) return 'supply';
+  if (/demand|buy|rbr|dbr|bull/i.test(s)) return 'demand';
+  return fallback || null;
+}
+function nearestSideZone(ctx, closed, facts, dir) {
+  const atr = atrSimple(closed.m5) || ctx.pip * 10;
+  const list = [];
+  for (const w of facts.watch || []) {
+    const lo = Number(w.bawah ?? w.bottom ?? w.lo), hi = Number(w.atas ?? w.top ?? w.hi);
+    if (!(Number.isFinite(lo) && Number.isFinite(hi) && hi > lo)) continue;
+    if ((hi - lo) / ctx.price > 0.02) continue;
+    const side = zoneSideOf(w.tipe ?? w.type, null) || (lo >= ctx.price ? 'supply' : hi <= ctx.price ? 'demand' : null);
+    list.push({ lo, hi, tf: String(w.tf || 'M5'), kind: String(w.tipe ?? w.type || 'Zona'), side });
+  }
+  for (const z of fvgZones(closed.m5)) list.push({ ...z, tf: 'M5' });
+  const want = dir === 1 ? 'demand' : 'supply';
+  return list
+    .filter(z => z.side === want || z.side == null)
+    .filter(z => dir === 1 ? z.hi <= ctx.price + 0.2 * atr : z.lo >= ctx.price - 0.2 * atr)
+    .map(z => ({ ...z, d: dir === 1 ? ctx.price - z.hi : z.lo - ctx.price }))
+    .filter(z => z.d > -0.5 * atr)
+    .sort((a, b) => a.d - b.d)[0] || null;
+}
+function oppositeRoomOk(ctx, closed, facts, dir, entry, tp1) {
+  const opp = nearestSideZone(ctx, closed, facts, -dir);
+  if (!opp) return true;
+  const dist = dir === 1 ? opp.lo - entry : entry - opp.hi;
+  return !(dist > 0 && Math.abs(tp1 - entry) > dist);
+}
+function buildFollowPlan(ctx, closed, facts, dir) {
+  const z = nearestSideZone(ctx, closed, facts, dir);
+  if (!z) return null;
+  const width = z.hi - z.lo;
+  const atr = atrSimple(closed.m5) || ctx.pip * 10;
+  const inside = ctx.price >= z.lo && ctx.price <= z.hi;
+  const entry = inside ? ctx.price : (dir === 1 ? z.hi - 0.4 * width : z.lo + 0.4 * width);
+  const buf = 0.1 * atr;
+  const sl = dir === 1 ? z.lo - buf : z.hi + buf;
+  const p = {
+    dir, entry, sl, orderType: inside ? 'MARKET' : 'LIMIT',
+    tps: [entry, entry, entry], rr: 1, tpMode: 'RISK_R',
+    riskPips: Math.round(Math.abs(entry - sl) / ctx.pip),
+    setup: `Manual · Scalping · LTF follow ${z.kind}`,
+    zone: { lower: z.lo, upper: z.hi, timeframe: z.tf, label: `${z.tf} ${z.kind}`, mid: (z.lo + z.hi) / 2 },
+    source: `LTF ${dir === 1 ? 'BUY' : 'SELL'} follow`,
+    steps: [{ tf: 'M5', text: `Internal ${dir === 1 ? 'bullish' : 'bearish'}; harga ${inside ? 'di dalam' : 'menuju'} ${z.kind} ${ctx.f(z.lo)}–${ctx.f(z.hi)}.` }],
+    invalidLevel: dir === 1 ? z.lo : z.hi,
+  };
+  const adj = applySlTpRules(p, ctx, closed.m5, 'Scalping');
+  if (!adj || adj.reject) return null;
+  if (!oppositeRoomOk(ctx, closed, facts, dir, p.entry, p.tps[0])) return null;
+  return p;
+}
+function scalpLtfGate(ctx, closed, plan, facts) {
+  const htf = readInternal(closed.m15, 60);
+  const itf = readInternal(closed.m5, 60);
+  const ltf = readInternal(closed.m1, 40);
+  const dir = plan.dir === 1 ? 1 : -1;
+  const info = { htf, itf, ltf };
+  if (itf.dir === 0 || itf.dir === dir) return { ok: true, info };
+  const atr = atrSimple(closed.m5) || ctx.pip * 10;
+  const zl = plan.zone?.lower, zh = plan.zone?.upper;
+  const atZone = Number.isFinite(zl) && Number.isFinite(zh) && ctx.price >= zl - 0.15 * atr && ctx.price <= zh + 0.15 * atr;
+  const ltfTurn = ltf.dir === dir && ltf.fresh;
+  if (atZone && ltfTurn) return { ok: true, bounce: true, info };
+  const follow = buildFollowPlan(ctx, closed, facts, itf.dir);
+  if (follow) return { ok: true, follow, info };
+  const ev = itf.event || (itf.dir === -1 ? 'BOS_DOWN' : 'BOS_UP');
+  const wait = nearestSideZone(ctx, closed, facts, dir);
+  const reason = `HTF ${htf.dir === 1 ? 'bullish' : htf.dir === -1 ? 'bearish' : 'netral'} tapi internal M5 ${itf.dir === 1 ? 'bullish' : 'bearish'} (${ev}, harga ${itf.momentum === -1 ? 'di bawah' : 'di atas'} EMA20). Scalping tidak melawan internal: menunggu ${wait ? `${wait.kind} ${ctx.f(wait.lo)}–${ctx.f(wait.hi)}` : 'zona searah internal'} + konfirmasi M1.`;
+  return { ok: false, info, reason };
+}
+
+// ── v173: pertimbangan entry NOW vs LIMIT pullback ──
+function decideEntryMode(ctx, closed, p, info) {
+  const dir = p.dir === 1 ? 1 : -1;
+  const zl = Number(p.zone?.lower), zh = Number(p.zone?.upper);
+  if (!(Number.isFinite(zl) && Number.isFinite(zh) && zh > zl))
+    return { orderType: p.orderType || 'LIMIT', entry: p.entry, note: 'Zona tidak terbaca; memakai entry engine.' };
+  const width = zh - zl;
+  const atr = atrSimple(closed.m5) || ctx.pip * 10;
+  const prox = dir === 1 ? zh : zl;
+  const inZone = ctx.price >= zl && ctx.price <= zh;
+  const beyond = dir === 1 ? ctx.price < zl : ctx.price > zh;
+  if (beyond) return { reject: true, note: `Harga sudah menembus ${p.zone.label} (${ctx.f(dir === 1 ? zl : zh)}); setup batal, menunggu zona baru.` };
+  const itf = info?.itf, ltf = info?.ltf;
+  const mom = !!itf && itf.dir === dir && itf.strong;
+  const ltfOk = !!ltf && ltf.dir === dir;
+  const distProx = dir === 1 ? ctx.price - prox : prox - ctx.price;
+  if (inZone) {
+    if (mom && ltfOk) return { orderType: 'MARKET', entry: ctx.price, note: `NOW: harga di dalam ${p.zone.label} + internal M5 dan trigger M1 searah ${dir === 1 ? 'BUY' : 'SELL'}.` };
+    const lim = dir === 1 ? Math.min(zl + 0.5 * width, ctx.price - 0.05 * atr) : Math.max(zh - 0.5 * width, ctx.price + 0.05 * atr);
+    return { orderType: 'LIMIT', entry: lim, note: `LIMIT pullback dalam zona @ ${ctx.f(lim)}: harga di zona tapi konfirmasi internal/M1 belum searah.` };
+  }
+  if (mom && ltfOk && distProx <= 0.3 * atr)
+    return { orderType: 'MARKET', entry: ctx.price, note: `NOW: momentum internal kuat searah dan harga hanya ${Math.round(distProx / ctx.pip)} pip dari proximal zona.` };
+  const lim = dir === 1 ? zh - 0.4 * width : zl + 0.4 * width;
+  return { orderType: 'LIMIT', entry: lim, note: `LIMIT pullback @ ${ctx.f(lim)} (40% zona): harga belum retest zona; tunggu pantulan, bukan kejar harga.` };
 }
 
 function runManual(ctx, d, styleName) {
@@ -817,21 +1004,38 @@ function resolveOcoFill(prev, price) {
   const primary = aliveIdx.includes(0) ? legs[0] : legs[aliveIdx[0]];
   return { ...prev, ...legFields(primary), oco: { ...prev.oco, alive: aliveIdx } };
 }
-function validPrevSignal(prev, symbol, styleName, price, pip) {
+
+// ── v173: lifecycle signal hidup (anti berkedip/batal) + cooldown setelah SL ──
+const outcomeCache = new Map();
+function prevLifecycle(prev, symbol, styleName, price, pip) {
   if (!prev || typeof prev !== 'object') return null;
-  if (!['PENDING', 'RUNNING'].includes(prev.status) || (prev.signal !== 'BUY' && prev.signal !== 'SELL')) return null;
   if (prev.symbol !== symbol || prev.style !== styleName) return null;
+  if (prev.signal !== 'BUY' && prev.signal !== 'SELL') return null;
+  if (Array.isArray(prev.oco?.legs) && prev.oco.legs.length) {
+    const r = resolveOcoFill(prev, price);
+    if (!r) return { dead: true, outcome: 'OCO_DEAD', prev };
+    prev = r;
+  }
   const exp = Number(prev.expiresAt);
-  if (!Number.isFinite(exp) || Date.now() > exp) return null;
-  const maxDist = maxDistFor(symbol, styleName) * (prev.fallback ? 3 : 1);
-  if (prev.status === 'PENDING' && Math.abs(Number(prev.entry) - price) > maxDist * pip) return null;
-  if (Array.isArray(prev.oco?.legs) && prev.oco.legs.length) return resolveOcoFill(prev, price);
-  const sl = Number(prev.sl), tp1 = Number(prev.tp1), entry = Number(prev.entry);
+  if (!Number.isFinite(exp) || Date.now() > exp) return { dead: true, outcome: 'EXPIRED', prev };
+  const dir = prev.signal === 'BUY' ? 1 : -1;
+  const sl = Number(prev.sl), tp1 = Number(prev.tp1), tp2 = Number(prev.tp2), tp3 = Number(prev.tp3), entry = Number(prev.entry);
   const inv = prev.invalidLevel != null ? Number(prev.invalidLevel) : null;
   if (![sl, tp1, entry].every(Number.isFinite)) return null;
-  if (prev.signal === 'BUY' && (price <= sl || price >= tp1 || (inv !== null && price < inv))) return null;
-  if (prev.signal === 'SELL' && (price >= sl || price <= tp1 || (inv !== null && price > inv))) return null;
-  return prev;
+  const hit = v => dir === 1 ? price >= v : price <= v;
+  if (hit(sl)) return { dead: true, outcome: 'SL', prev };
+  if (inv != null && (dir === 1 ? price < inv : price > inv)) return { dead: true, outcome: 'INVALID', prev };
+  if (Number.isFinite(tp3) && hit(tp3)) return { dead: true, outcome: 'TP3', prev };
+  const maxDist = maxDistFor(symbol, styleName) * (prev.fallback ? 3 : 1);
+  if (prev.status === 'PENDING' && Math.abs(entry - price) > maxDist * pip) return { dead: true, outcome: 'TOO_FAR', prev };
+  let status = prev.status, state = prev.state || 'CONFIRMED', be = !!prev.be;
+  if (Number.isFinite(tp2) && hit(tp2)) { status = 'TP2_HIT'; state = 'TP2'; be = true; }
+  else if (hit(tp1)) { status = 'TP1_HIT'; state = 'TP1'; be = true; }
+  else if (prev.status === 'PENDING') {
+    const filled = dir === 1 ? price <= entry : price >= entry;
+    if (filled) { status = 'RUNNING'; state = 'FILLED'; }
+  } else { status = 'RUNNING'; }
+  return { dead: false, prev, patch: { status, state, be, slBe: be ? entry : null, tp1Hit: hit(tp1), tp2Hit: Number.isFinite(tp2) && hit(tp2) } };
 }
 
 // ── BOT ENGINE ──
@@ -925,6 +1129,7 @@ Jika field oco ada: jelaskan dua limit (legs) beserta angkanya, dan bahwa jika s
 Jika tpMode ada: sebutkan bahwa TP mengikuti band risk (riskPips) beserta rasio TP-nya. Jika tpMode = "CRT", sebutkan TP3 menuju sisi range berlawanan.
 Jika field crtHigh dan crtLow ada (Intraday/Swing): sebutkan CRT High dan CRT Low serta area WNS SELL dan WNS BUY persis angkanya, walau status STANDBY.
 Jika field invalid ada: sebutkan bahwa SL berada di luar level invalidasi struktur (swing/gap/distal zona) pada angka itu.
+Jika field entryNote ada: sebutkan alasan pilihan NOW atau LIMIT pullback persis dari field itu.
 Jika status = "RUNNING" atau "PENDING": sebutkan arah, bias HTF (bias), zona POI, serta angka persis entry, SL, dan TP. Jika confirmed = false, sebutkan bahwa konfirmasi M1 belum ada.
 Jika status = "STANDBY": sebutkan alasan dari standbyReason, checklist yang OK dan yang BELUM, zona dari watch (jika ada), dan syarat dari syarat.
 Pakai "saya" atau "kita". JANGAN pakai daftar/bullet atau tanda bintang (*). WAJIB tulis 4 sampai 6 kalimat lengkap.
@@ -1185,6 +1390,7 @@ DILARANG mengubah tipe order: orderType "MARKET" = eksekusi sekarang, "LIMIT" = 
 Untuk SETIAP item di array "steps" (urutan TF tertinggi ke terendah), tulis maksimal 2 kalimat pendek: struktur tren TF tersebut + zona S&D/OB/FVG terdekat dan posisi harga terhadap zona itu. Awali tiap item dengan nama TF-nya, contoh "M15: ...".
 Lalu tulis ringkasan setup 2-3 kalimat diawali nama pair: keputusan final (arah + tipe order + entry + SL + TP persis dari JSON) dan alasan konfluensi utama dari steps.
 Jika field "invalid" ada: sebutkan bahwa SL ditempatkan di luar level invalidasi struktur (swing high/low, tepi gap, atau distal zona) pada angka itu.
+Jika field "entryNote" ada: sebutkan alasan pilihan NOW atau LIMIT pullback persis dari field itu.
 Jika status "STANDBY": ringkasan menjelaskan apa yang ditunggu berdasarkan standbyReason dan steps, tanpa menyebut entry/SL/TP.
 Pakai "saya" atau "kita". Jangan pakai bullet atau tanda bintang di dalam string.
 WAJIB dual bahasa: perTfId & id dalam Bahasa Indonesia; perTfEn & en dalam Bahasa Inggris natural, isi dan angka sama persis.
@@ -1588,6 +1794,8 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
     crtHigh: diagFacts.crtHigh ?? null,
     crtLow: diagFacts.crtLow ?? null,
     tier: diagFacts.tier || null,
+    internal: diagFacts.internal || null,
+    entryNote: diagFacts.entryNote || null,
     checks: (Array.isArray(out.signal.checklist) ? out.signal.checklist : []).slice(-8),
     bars: Object.fromEntries(['m1', 'm5', 'm15', 'h1', 'h4', 'd1'].map(t => [t, (data[t] || []).length])),
     src,
@@ -1595,22 +1803,36 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
     sticky: false,
   };
   console.log(`DIAG ${diag.who} ${symbol} ${styleName} ${diag.status} tier=${diag.tier || '-'} | ${diag.reason || '-'} | bars=${JSON.stringify(diag.bars)} src=${JSON.stringify(src)} live=${diag.liveM1}`);
-  const prev = validPrevSignal(body.prevSignal, symbol, styleName, price, ctx.pip);
-  let keepPrev = false;
-  if (prev) {
-    if (!isAutoBot) keepPrev = !body.forceNew;
-    else if (out.signal.status === 'STANDBY' || out.signal.signal === prev.signal) keepPrev = true;
-    else keepPrev = Date.now() - Number(prev.createdAt || 0) < BOT_CFG.flipCooldownMs;
-  }
-  if (keepPrev) {
-    const last = data.m1 && data.m1.length ? data.m1[data.m1.length - 1] : null;
-    const nextCloseAt = isAutoBot && last ? tsMs(last.t) + TF_MS.m1 : undefined;
-    const prevSig = { ...prev, sticky: true, nextCloseAt };
-    if (prevSig.reasons && (prevSig.reasons.id || prevSig.reasons.en)) {
-      prevSig.reason = lang === 'en' ? (prevSig.reasons.en || prevSig.reasons.id) : (prevSig.reasons.id || prevSig.reasons.en);
+
+  // Lifecycle: signal hidup dipertahankan & dikelola, tidak dibatalkan scanner/gate.
+  const life = prevLifecycle(body.prevSignal, symbol, styleName, price, ctx.pip);
+  const ocKey = `${symbol}|${styleName}`;
+  if (life && life.dead) outcomeCache.set(ocKey, { dir: life.prev.signal, outcome: life.outcome, t: Date.now() });
+  if (life && !life.dead) {
+    const managed = { ...life.prev, ...life.patch, sticky: true };
+    const newSig = out.signal;
+    const oc = outcomeCache.get(ocKey);
+    const cooldownBlock = oc && oc.outcome !== 'TP3' && Date.now() - oc.t < OUTCOME_COOLDOWN_MS && newSig.signal === oc.dir;
+    const oppositeNew = newSig.status !== 'STANDBY' && newSig.signal !== managed.signal;
+    const replace = oppositeNew && !cooldownBlock &&
+      (body.forceNew || (isAutoBot && Date.now() - Number(managed.createdAt || 0) > BOT_CFG.flipCooldownMs));
+    if (!replace) {
+      const lastM1 = data.m1 && data.m1.length ? data.m1[data.m1.length - 1] : null;
+      if (isAutoBot) managed.nextCloseAt = lastM1 ? tsMs(lastM1.t) + TF_MS.m1 : null;
+      if (managed.reasons) managed.reason = lang === 'en' ? (managed.reasons.en || managed.reasons.id) : (managed.reasons.id || managed.reasons.en);
+      return res.status(200).json({ ok: true, mode: isAutoBot ? 'bot' : 'candles', symbol, style: styleName, price, signal: managed, diag: { ...diag, sticky: true, lifecycle: managed.state } });
     }
-    return res.status(200).json({ ok: true, mode: isAutoBot ? 'bot' : 'candles', symbol, style: styleName, price, signal: prevSig, diag: { ...diag, sticky: true } });
   }
+  // Cooldown arah sama setelah SL/INVALID (mencegah entry berulang ke arah yang sama).
+  const oc2 = outcomeCache.get(ocKey);
+  if (out.signal.status !== 'STANDBY' && oc2 && ['SL', 'INVALID'].includes(oc2.outcome) &&
+      Date.now() - oc2.t < OUTCOME_COOLDOWN_MS && out.signal.signal === oc2.dir) {
+    const mins = Math.ceil((OUTCOME_COOLDOWN_MS - (Date.now() - oc2.t)) / 60000);
+    out = standbyOut(out.facts || { mode: isAutoBot ? 'bot' : 'manual', symbol, style: styleName, dec },
+      `Cooldown ${mins} menit setelah ${oc2.outcome} ${oc2.dir}; menunggu struktur internal baru searah.`,
+      out.signal.checklist || [], out.signal.topDown);
+  }
+
   if (out.signal.status !== 'STANDBY') {
     out.signal.createdAt = Date.now();
   }
@@ -1647,17 +1869,4 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return fail(res, 'Method not allowed', 405);
   try {
     let body = req.body || {};
-    if (typeof body === 'string') try { body = JSON.parse(body); } catch { return fail(res, 'Body tidak valid (JSON).'); }
-    const lang = body.lang === 'en' ? 'en' : 'id';
-    const email = String(body.email || body.value || '').trim().toLowerCase();
-    const isAutoBot = !!(body.auto || body.bot || body.mode === 'bot' || body.source === 'bot');
-    const isVision = body.symbol === 'VISION' || body.mode === 'vision' || (Array.isArray(body.images) && body.images.length > 0);
-    const access = await checkAccess(email, isAutoBot);
-    if (!access.ok) return fail(res, msg(lang, access.key));
-    if (isVision) return await handleVision(body, lang, res);
-    return await handleCandles(body, lang, res, { email, isAutoBot });
-  } catch (err) {
-    console.error('Fatal API Error:', err);
-    if (!res.headersSent) return fail(res, `Server error: ${err.message || 'unknown'}`, 500);
-  }
-}
+    if (typeof body === 'string') try
