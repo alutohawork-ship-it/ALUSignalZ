@@ -9,7 +9,7 @@
   if (typeof origEval !== 'function') return;
 
   const MULTS = [1, 1.5, 2, 3, 5];
-  const is5 = t => !!t && t.style === 'Scalping' && t.key === 'XAUUSD' && t.src !== 'bot' && !/CRT/.test(String(t.setup || ''));
+  const is5 = t => !!t && t.style === 'Scalping' && (t.key === 'XAUUSD' || t.key === 'BTCUSD') && t.src !== 'bot' && !/CRT/.test(String(t.setup || ''));
   const levels = t => { const R = Math.abs(t.entry - t.sl); return MULTS.map(m => t.entry + t.dir * R * m); };
   const ensureLevels = t => {
     if (t.tp5 == null || t.tp4 == null) {
