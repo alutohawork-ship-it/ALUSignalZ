@@ -1,9 +1,16 @@
-// api/generate.js — v168 (WNS/CRT High-Low selalu tampil di Intraday & Swing; Scalping fallback zona terdekat saat generate; BOT selalu bersinyal: EA bot_3candle -> fallback planBot ICT + narasi dinamis)
+// api/generate.js — v169
+// Perubahan v169:
+// 1) Reasoning manual (Scalping/Intraday/Swing) berformat SAMA seperti vision:
+//    [PAIR · Analisa Multi-TF · Style] + bullet per-TF + [Setup].
+// 2) AI menulis analisa per-TF dari plan.steps (tervalidasi anti-halusinasi angka).
+// 3) Fallback MTF tetap layout yang sama (tidak ada paragraf lama / "undefined").
+// 4) Guard sisi order: LIMIT BUY di atas harga / LIMIT SELL di bawah harga -> MARKET (NOW).
+// 5) Scalping MTF: clamp SL (gold 25-50 pip, BTC %) + TP 1/1.5/2/3/5 R + zoneSideOk.
+// 6) Vision: TP pakai angka AI bila valid; tp4/tp5 selalu dikirim & searah sinyal.
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import { planCrt } from '../lib/crt-engine.js';
 import { planIntraday, planSwing, planScalping } from '../lib/mtf-engine.js';
-
 // Mode manual multi-timeframe: 'mtf' = Intraday H4/H1/M15/M5, Swing D1/H4/H1/M15, Scalping M15/M5 + cadangan M1
 // 'legacy' = Intraday & Swing pakai CRT (WNS), Scalping pakai aturan lama
 const MTF_MODE = 'mtf';
@@ -20,7 +27,6 @@ import { runBotSma as runBotFlex } from '../lib/bot_3candle.js';
 export const config = { maxDuration: 60 };
 
 const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
-
 const OPENAI_BASE_URL = (process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/$/, '');
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const AI_VISION_MODEL = process.env.AI_VISION_MODEL || 'gpt-6-luna';
@@ -68,12 +74,10 @@ const pipSizeOf = (symbol, dec) => PIP_OVERRIDE[symbol] ?? Math.pow(10, -(dec - 
 const TL_SPAN = { '1m': { mult:1, span:'minute', minutes:1 }, '5m': { mult:5, span:'minute', minutes:5 }, '15m': { mult:15, span:'minute', minutes:15 }, '30m': { mult:30, span:'minute', minutes:30 }, '1h': { mult:1, span:'hour', minutes:60 }, '4h': { mult:4, span:'hour', minutes:240 }, '1d': { mult:1, span:'day', minutes:1440 } };
 const TL_MIN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const TL_ROUTE = { XAUUSD: ['commodities','XAUUSD'], XAUUSDX: ['commodities','XAUUSD'], XAGUSD: ['commodities','XAGUSD'], US30: ['indices','US30'], SPX500: ['indices','US500'], NAS100: ['indices','US100'] };
-
 const TF_MS = { m1: 60000, m5: 300000, m15: 900000, m30: 1800000, h1: 3600000, h4: 14400000, d1: 86400000 };
 const TF_IV = { m1: '1m', m5: '5m', m15: '15m', m30: '30m', h1: '1h', h4: '4h', d1: '1d' };
 const TF_NEED = { d1: 60, h4: 80, h1: 100, m30: 100, m15: 200, m5: 200, m1: 200 };
 const MIN_BARS = { m1: 60, m5: 40, m15: 40, m30: 35, h1: 35, h4: 25, d1: 20 };
-
 const MANUAL_TF_NEEDED = {
   'Scalping': ['m1', 'm5', 'm15', 'h1'],
   'Intraday': ['m5', 'm15', 'h4'],
@@ -125,20 +129,17 @@ const markTrialAsUsed = markTrialBotUsed;
 // ── DATA CANDLE & CACHE ──
 const tlCooldown = new Map();
 const candleCache = new Map();
-
 function setCandleCache(symbol, tf, rows) {
   if (!Array.isArray(rows) || !rows.length) return;
   candleCache.set(`${symbol}:${tf}`, { t: Date.now(), rows });
   if (candleCache.size > 400) candleCache.delete(candleCache.keys().next().value);
 }
-
 function getCandleCache(symbol, tf) {
   const hit = candleCache.get(`${symbol}:${tf}`);
   if (!hit) return [];
   if (Date.now() - hit.t > CANDLE_CACHE_TTL_MS) return [];
   return hit.rows;
 }
-
 async function tlGet(url) {
   if (TL_DISABLED) return null;
   const now = Date.now();
@@ -195,7 +196,6 @@ function getFormingM1(m1) {
   const forming = m1[m1.length - 1];
   return forming && Date.now() < tsMs(forming.t) + TF_MS.m1 ? forming : null;
 }
-
 function getKillzoneStatus(nowMs = Date.now()) {
   try {
     const ny = new Date(new Date(nowMs).toLocaleString('en-US', { timeZone: 'America/New_York' }));
@@ -206,7 +206,6 @@ function getKillzoneStatus(nowMs = Date.now()) {
     return { active: false, name: 'di luar KZ' };
   } catch { return { active: true, name: 'sesi aktif' }; }
 }
-
 const safeNum = (v, fallback = 0) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
 
 function toSignal(plan, ctx, extra) {
@@ -262,7 +261,6 @@ const DOC_STYLE_TF = {
   'Intraday': { htf: 'H4',          zone: 'VWAP M15',     trig: 'M15' },
   'Swing':    { htf: 'D1',          zone: 'S&D/OB H4+D1', trig: 'H4' },
 };
-
 const gateCache = new Map();
 
 function legView(l, ctx) {
@@ -279,7 +277,6 @@ function legView(l, ctx) {
     reason: l.reason,
   };
 }
-
 function atrSimple(rows, n = 14) {
   if (!Array.isArray(rows) || rows.length < n + 1) return 0;
   const tr = i => Math.max(rows[i].h - rows[i].l, Math.abs(rows[i].h - rows[i - 1].c), Math.abs(rows[i].l - rows[i - 1].c));
@@ -289,7 +286,6 @@ function atrSimple(rows, n = 14) {
   for (let i = n + 1; i < rows.length; i++) a = (a * (n - 1) + tr(i)) / n;
   return a;
 }
-
 function nearestZonePlan(watch, ctx, m5) {
   const list = (Array.isArray(watch) ? watch : [])
     .map(w => ({
@@ -301,20 +297,17 @@ function nearestZonePlan(watch, ctx, m5) {
     }))
     .filter(w => Number.isFinite(w.lo) && Number.isFinite(w.hi) && w.hi > w.lo && (w.hi - w.lo) / ctx.price < 0.02);
   if (!list.length) return { ok: false, checks: ['Belum ada zona M5 valid di sekitar harga.'] };
-
   list.sort((a, b) => (a.jarak ?? 1e9) - (b.jarak ?? 1e9));
   const z = list[0];
   const dir = ctx.price <= z.lo ? -1
     : ctx.price >= z.hi ? 1
-      : (m5.length > 1 && m5[m5.length - 1].c >= m5[m5.length - 2].c ? 1 : -1);
-
+    : (m5.length > 1 && m5[m5.length - 1].c >= m5[m5.length - 2].c ? 1 : -1);
   const entry = dir === 1 ? z.hi - 0.4 * (z.hi - z.lo) : z.lo + 0.4 * (z.hi - z.lo);
   const atr = atrSimple(m5);
   const buf = atr > 0 ? 0.1 * atr : 0.15 * (z.hi - z.lo);
   const sl = dir === 1 ? z.lo - buf : z.hi + buf;
   const risk = Math.abs(entry - sl);
   if (!(risk > ctx.pip * 2)) return { ok: false, checks: ['Zona terlalu tipis untuk SL.'] };
-
   const tp = k => entry + dir * risk * k;
   const label = z.type || (dir === 1 ? 'Demand' : 'Supply');
   const distPip = Math.round(Math.abs(ctx.price - entry) / ctx.pip);
@@ -332,13 +325,11 @@ function nearestZonePlan(watch, ctx, m5) {
     checks: ['Fallback dipakai: struktur M1/M5 belum memberi setup, memakai zona terdekat.'],
   };
 }
-
 function wnsLine(ctx, p) {
   if (!p || !p.wns) return '';
   const f = ctx.f;
   return `CRT High ${f(p.wns.rh)} · CRT Low ${f(p.wns.rl)} | WNS SELL ${f(p.wns.sell.lo)}–${f(p.wns.sell.hi)} · WNS BUY ${f(p.wns.buy.lo)}–${f(p.wns.buy.hi)}`;
 }
-
 function runCrtManual(ctx, closed, styleName, facts) {
   const isSwing = styleName === 'Swing';
   const plan = planCrt({
@@ -348,19 +339,16 @@ function runCrtManual(ctx, closed, styleName, facts) {
     exec:  isSwing ? closed.m15 : closed.m5,
     price: ctx.price, sym: ctx.symbol, tNow: Date.now(),
   });
-
   const line = wnsLine(ctx, plan);
   facts.crtStatus = plan.status;
   if (plan.wns) facts.wns = plan.wns;
   facts.crtHigh = plan.crtHigh != null ? ctx.f(plan.crtHigh) : null;
   facts.crtLow = plan.crtLow != null ? ctx.f(plan.crtLow) : null;
-
   if (plan.status !== 'limit') {
     const why = `${line ? line + '. ' : ''}${plan.reason || 'Menunggu setup CRT'}`;
     facts.standbyReason = why;
     return standbyOut(facts, why, line ? [line] : [], `CRT ${styleName}`);
   }
-
   const dir = plan.dir === 'BUY' ? 1 : -1;
   const riskPips = Math.round(Math.abs(plan.entry - plan.sl) / ctx.pip);
   const p = {
@@ -378,7 +366,6 @@ function runCrtManual(ctx, closed, styleName, facts) {
   sig.style = styleName;
   sig.role = 'main';
   sig.crt = { wns: plan.wns || null, sweep: plan.sweep || null, crtHigh: facts.crtHigh, crtLow: facts.crtLow };
-
   facts.signal = plan.dir;
   facts.role = 'main';
   facts.orderType = 'LIMIT';
@@ -400,45 +387,95 @@ function runMtfStyle(ctx, closed, styleName, facts) {
   if (styleName === 'Intraday') plan = planIntraday({ h4: closed.h4, h1: closed.h1, m15: closed.m15, m5: closed.m5, price: ctx.price, sym: ctx.symbol, tNow: now });
   else if (styleName === 'Swing') plan = planSwing({ d1: closed.d1, h4: closed.h4, h1: closed.h1, m15: closed.m15, price: ctx.price, sym: ctx.symbol, tNow: now });
   else plan = planScalping({ m15: closed.m15, m5: closed.m5, m1: closed.m1, price: ctx.price, sym: ctx.symbol, tNow: now });
+
   facts.styleMode = 'mtf';
-  if (plan.status !== 'limit') {
-    facts.standbyReason = plan.reason;
-    return standbyOut(facts, plan.reason, [], `${styleName} MTF`);
-  }
+  facts.steps = plan?.steps || [];
+  facts.bias = plan?.bias || plan?.regime || 'netral';
+  const stepChecks = facts.steps.map(st => `${st.tf}: ${st.text}`);
+
+  const finishStandby = (why) => {
+    facts.standbyReason = why;
+    facts.status = 'STANDBY';
+    facts.reasonId = mtfFallbackReason(facts, false);
+    facts.reasonEn = mtfFallbackReason(facts, true);
+    const so = standbyOut(facts, why, plan?.checks || stepChecks, `${styleName} MTF`);
+    so.signal.reasonFormat = 'mtf';
+    so.signal.reasonId = facts.reasonId;
+    so.signal.reasonEn = facts.reasonEn;
+    return so;
+  };
+
+  if (!plan || plan.status !== 'limit') return finishStandby(plan?.reason || 'Menunggu setup MTF valid.');
+
   const dir = plan.dir === 'BUY' ? 1 : -1;
-  const riskPips = Math.round(Math.abs(plan.entry - plan.sl) / ctx.pip);
+  let orderType = plan.orderType || 'LIMIT';
+  let entry = safeNum(plan.entry, ctx.price);
+  const sl = safeNum(plan.sl, ctx.price);
+
+  // Guard sisi order: LIMIT BUY wajib di bawah harga, LIMIT SELL wajib di atas harga.
+  // Jika harga sudah melewati entry, eksekusi NOW lebih jelas dan valid.
+  const wrongSide = orderType === 'LIMIT' &&
+    ((dir === 1 && entry > ctx.price) || (dir === -1 && entry < ctx.price));
+  if (wrongSide) { orderType = 'MARKET'; entry = ctx.price; }
+  if ((dir === 1 && sl >= entry) || (dir === -1 && sl <= entry))
+    return finishStandby('Harga sudah melewati SL setup. Menunggu zona baru.');
+
   const label = plan.source ? `${styleName} · ${plan.source}` : styleName;
   const p = {
-    dir, entry: plan.entry, sl: plan.sl, orderType: plan.orderType || 'LIMIT',
-    tps: [plan.tps[0], plan.tps[1], plan.tps[2]], rr: 1, tpMode: 'RISK_R', riskPips,
+    dir, entry, sl, orderType,
+    tps: [plan.tps?.[0], plan.tps?.[1], plan.tps?.[2]],
+    rr: 1, tpMode: 'RISK_R',
+    riskPips: Math.round(Math.abs(entry - sl) / ctx.pip),
     setup: `Manual · ${label} · ${plan.zone.kind}`,
-    zone: { lower: plan.zone.lo, upper: plan.zone.hi, timeframe: '', label: plan.zone.kind, mid: (plan.zone.lo + plan.zone.hi) / 2 },
+    zone: { lower: plan.zone.lo, upper: plan.zone.hi, timeframe: plan.zone.tf || '', label: plan.zone.kind, mid: (plan.zone.lo + plan.zone.hi) / 2 },
   };
-  const sig = toSignal(p, ctx, { confidence: 'MEDIUM', risk: 'MEDIUM', checklist: [plan.reason], scanSummary: plan.reason, topDown: label });
-  sig.tp4 = Number(ctx.f(plan.tps[3]));
-  sig.tp5 = Number(ctx.f(plan.tps[4]));
-  // Alasan: tanpa keterangan TP band, daftar target sesuai TP yang benar-benar dipasang (TP1 sampai TP5)
-  const tpList = [sig.tp1, sig.tp2, sig.tp3, sig.tp4, sig.tp5].filter(v => Number.isFinite(Number(v)));
-  const en = ctx.lang === 'en';
-  const tpTxt = tpListTxt(tpList, !en);
-  const dirWord = plan.dir;
-  const orderWord = plan.orderType === 'MARKET' ? (en ? 'MARKET (NOW)' : 'MARKET (NOW)') : 'LIMIT';
-  const stepLines = (plan.steps || []).map(st => `${st.tf} : ${st.text}`);
-  const reasonTxt = [
-    en ? 'Analysis' : 'Analisa',
-    ...stepLines,
-    `${en ? 'Final decision' : 'Keputusan analisa final'} : ${dirWord} ${orderWord} @ ${sig.entry} · SL ${sig.sl} · TP ${tpTxt}`,
-  ].join('\n');
-  sig.reason = reasonTxt;
-  sig.sym = ctx.symbol;
+
+  // Scalping MTF: samakan aturan dengan legacy (SL gold 25-50 pip / BTC %, TP 1-1.5-2-3-5 R)
+  if (styleName === 'Scalping') {
+    clampScalpSl(p, ctx);
+    p.riskPips = Math.round(Math.abs(p.entry - p.sl) / ctx.pip);
+  } else {
+    p.tp4 = plan.tps?.[3];
+    p.tp5 = plan.tps?.[4];
+  }
+
+  if (!zoneSideOk(p))
+    return finishStandby(`Setup ditolak: arah ${plan.dir} bertabrakan dengan ${zoneTxt(p)}. Menunggu zona searah.`);
+
+  const sig = toSignal(p, ctx, {
+    confidence: 'MEDIUM', risk: 'MEDIUM',
+    checklist: stepChecks.length ? stepChecks : [plan.reason || ''],
+    scanSummary: plan.reason || '', topDown: label,
+  });
+  if (Number.isFinite(Number(p.tp4))) sig.tp4 = Number(ctx.f(p.tp4));
+  if (Number.isFinite(Number(p.tp5))) sig.tp5 = Number(ctx.f(p.tp5));
   sig.expiresAt = plan.expiresAt;
   sig.symbol = ctx.symbol;
   sig.style = styleName;
   sig.role = 'main';
+
+  // Facts lengkap: dipakai AI per-TF dan anti-"undefined" di fallback.
   facts.signal = plan.dir;
-  facts.entry = sig.entry; facts.sl = sig.sl;
-  facts.tp = [sig.tp1, sig.tp2, sig.tp3, sig.tp4, sig.tp5];
-  facts.riskPips = riskPips; facts.tpMode = 'RISK_R';
+  facts.role = 'main';
+  facts.orderType = sig.orderType;
+  facts.trigger = `${plan.zone.kind}${plan.source ? ' · ' + plan.source : ''}`;
+  facts.entry = sig.entry;
+  facts.sl = sig.sl;
+  facts.tp = [sig.tp1, sig.tp2, sig.tp3, sig.tp4, sig.tp5].filter(v => Number.isFinite(Number(v)));
+  facts.rr = Number(p.rr).toFixed(2);
+  facts.riskPips = sig.riskPips;
+  facts.tpMode = p.tpMode;
+  facts.confirmed = orderType === 'MARKET';
+  facts.zone = { label: p.zone.label, lower: sig.zone.min, upper: sig.zone.max };
+  facts.status = sig.status;
+  facts.reasonId = mtfFallbackReason(facts, false);
+  facts.reasonEn = mtfFallbackReason(facts, true);
+
+  // Reasoning terstruktur dikunci: tidak boleh ditimpa story format lama.
+  sig.reasonFormat = 'mtf';
+  sig.reasonId = facts.reasonId;
+  sig.reasonEn = facts.reasonEn;
+  sig.reason = ctx.lang === 'en' ? sig.reasonEn : sig.reasonId;
   return { signal: sig, facts: { ...facts, status: sig.status } };
 }
 
@@ -471,7 +508,6 @@ async function runDocManual(ctx, d, styleName) {
   const live = getFormingM1(d.m1);
   const barsClosed = { m1: closed.m1, m5: closed.m5, m15: closed.m15, h1: closed.h1, live };
   let out = { ok: false, checks: [] };
-
   if (styleName === 'Scalping') {
     const pctx = { price: ctx.price, dec: ctx.dec, pip: ctx.pip, now: Date.now(), symbol: ctx.symbol };
     out = simpleZonePlan(barsClosed, pctx, { tfs: ['M5', 'M1'] });
@@ -498,11 +534,10 @@ async function runDocManual(ctx, d, styleName) {
   }
 
   const rawBias = out.bias || (out.regime ? out.regime.replace('_', ' ') : 'netral');
-  const srcPart = out.biasTf ? ` · ${out.biasTf}` : (out.regimeSrc ? ` · ${out.regimeSrc}` : '');
+  const srcPart = out.biasTf ? `· ${out.biasTf}` : (out.regimeSrc ? `· ${out.regimeSrc}` : '');
   const regimeTxt = `${rawBias}${srcPart}`;
   facts.bias = regimeTxt;
   const checks = Array.isArray(out.checks) ? out.checks : [];
-
   if (!out.ok) {
     const why = out.reason || (checks.length ? checks[checks.length - 1] : 'Belum ada setup valid.');
     facts.standbyReason = why;
@@ -522,13 +557,12 @@ async function runDocManual(ctx, d, styleName) {
     setup: `Manual · ${DOC_STYLE_LABEL[styleName] || styleName} · ${o.reason}`,
     zone: z ? { lower: z.bottom, upper: z.top, timeframe: z.timeframe || '', label: `${z.timeframe} ${z.type}`, mid: (z.top + z.bottom) / 2 } : null,
   };
-
   const arahHtf = out.regime === 'trending_up' ? 'BUY' : out.regime === 'trending_down' ? 'SELL' : 'NETRAL';
   const refPx = closed.m1.length ? closed.m1[closed.m1.length - 1].c : ctx.price;
   const jarakPip = Math.round(Math.abs(refPx - o.entryPrice) / ctx.pip);
   const maxDist = maxDistFor(ctx.symbol, styleName);
-  let gate;
 
+  let gate;
   if (styleName === 'Scalping') {
     gate = { keputusan: 'AMBIL', alasan: 'Scalping zona/struktur valid', ai: false };
   } else if (isBounce) {
@@ -557,7 +591,6 @@ async function runDocManual(ctx, d, styleName) {
       if (gateCache.size > 200) gateCache.delete(gateCache.keys().next().value);
     }
   }
-
   if (gate.keputusan !== 'AMBIL') {
     const why = `Gate TUNGGU: ${gate.alasan}`;
     facts.standbyReason = why;
@@ -571,10 +604,12 @@ async function runDocManual(ctx, d, styleName) {
     facts.standbyReason = why;
     return standbyOut(facts, why, checks, regimeTxt);
   }
+
   let slNote = null;
   if (styleName === 'Scalping' && (ctx.symbol === 'XAUUSD' || ctx.symbol === 'BTCUSD')) slNote = clampScalpSl(plan, ctx);
   if (slNote && slNote.clamped) plan.setup = `${plan.setup} · SL ${slNote.before}→${slNote.after} pip`;
   plan.setup = `${plan.setup}${gate.ai ? ' · AI AMBIL' : ''}`;
+
   const sig = toSignal(plan, ctx, {
     confidence: o.confirmed && z?.fresh ? 'HIGH' : 'MEDIUM', risk: 'MEDIUM',
     checklist: checks, scanSummary: (checks || []).join('\n'), topDown: regimeTxt,
@@ -587,9 +622,9 @@ async function runDocManual(ctx, d, styleName) {
   if (out.oco) {
     sig.oco = { rule: out.oco.rule, legs: out.oco.legs.map(l => legView(l, ctx)) };
   }
-
   if (Number.isFinite(Number(plan.tp4))) sig.tp4 = Number(ctx.f(plan.tp4));
   if (Number.isFinite(Number(plan.tp5))) sig.tp5 = Number(ctx.f(plan.tp5));
+
   facts.signal = sideTxt;
   facts.role = o.role || 'main';
   facts.orderType = plan.orderType;
@@ -612,20 +647,18 @@ function zoneSideOk(plan) {
   const lab = zoneTxt(plan);
   const isSupply = /SELL|Supply/i.test(lab);
   const isDemand = /BUY|Demand/i.test(lab);
-  if (!isSupply && !isDemand) return true;          // tidak diketahui: tidak diblokir
+  if (!isSupply && !isDemand) return true;
   if (plan.dir === 1 && isSupply && !isDemand) return false;
   if (plan.dir !== 1 && isDemand && !isSupply) return false;
   return true;
 }
 
-// SL Scalping XAUUSD dibatasi 25-50 pip: terlalu lebar dipersempit ke 50, terlalu rapat dilebarkan ke 25.
-// SL dipersempit ke batas itu; TP tetap dari plan asal, sehingga RR ikut naik.
+// Batas SL Scalping: XAUUSD 25-50 pip; BTCUSD 0.04%-0.12% dari harga entry.
 const SCALP_GOLD_MAX_SL_PIPS = 50;
-const SCALP_GOLD_MIN_SL_PIPS = 25;   // SL minimal 25 pip (bisa dinaikkan ke 30)
-// Batas SL Scalping: XAUUSD 25-50 pip; BTCUSD 0.04%-0.12% dari harga entry (bisa diubah di sini).
+const SCALP_GOLD_MIN_SL_PIPS = 25;
 const SCALP_BTC_MIN_SL_PCT = 0.0004;
 const SCALP_BTC_MAX_SL_PCT = 0.0012;
-const SCALP_TP_R = [1, 1.5, 2, 3, 5];   // TP Scalping manual: 1:1, 1:1.5, 1:2, 1:3, 1:5 (semua pair)
+const SCALP_TP_R = [1, 1.5, 2, 3, 5];
 function scalpSlBounds(entry, ctx) {
   if (ctx.symbol === 'XAUUSD') return { min: SCALP_GOLD_MIN_SL_PIPS * ctx.pip, max: SCALP_GOLD_MAX_SL_PIPS * ctx.pip };
   return { min: entry * SCALP_BTC_MIN_SL_PCT, max: entry * SCALP_BTC_MAX_SL_PCT };
@@ -639,7 +672,7 @@ function clampScalpSl(plan, ctx) {
   if (dist > b.max) { dist = b.max; clamped = true; }
   else if (dist < b.min) { dist = b.min; clamped = true; }
   plan.sl = plan.entry - dir * dist;
-  // TP dihitung dari SL akhir dengan kelipatan R yang sama untuk semua pair
+  // TP dihitung ulang dari SL akhir dengan kelipatan R yang sama untuk semua pair
   plan.tps = [SCALP_TP_R[0], SCALP_TP_R[1], SCALP_TP_R[2]].map(m => plan.entry + dir * dist * m);
   plan.tp4 = plan.entry + dir * dist * SCALP_TP_R[3];
   plan.tp5 = plan.entry + dir * dist * SCALP_TP_R[4];
@@ -647,8 +680,6 @@ function clampScalpSl(plan, ctx) {
   plan.tpMode = 'RISK_R';
   return { before: Math.round(beforeDist / ctx.pip), after: Math.round(dist / ctx.pip), clamped };
 }
-
-// Daftar TP di kalimat alasan: 3 target atau 5 target (Scalping)
 function tpListTxt(tp, id) {
   const v = (tp || []).filter(x => x != null);
   if (v.length <= 1) return String(v[0] ?? '-');
@@ -656,10 +687,29 @@ function tpListTxt(tp, id) {
   return id ? `${head.join(', ')}, serta ${last}` : `${head.join(', ')}, and ${last}`;
 }
 
+// Layout reasoning manual SAMA PERSIS dengan vision: header + bullet per-TF + [Setup]
+function mtfLayoutReason(f, en, perTfLines, setupText) {
+  const head = `[${f.symbol} · ${en ? 'Multi-TF Analysis' : 'Analisa Multi-TF'} · ${f.style}]`;
+  const bullets = (perTfLines || []).map(t => `• ${t}`).join('\n');
+  return `${head}\n${bullets}\n\n[Setup]\n${setupText}`;
+}
+function mtfFallbackReason(f, en) {
+  const lines = (f.steps || []).map(s => `${s.tf}: ${s.text}`);
+  let setup;
+  if (f.status === 'STANDBY') {
+    setup = `${f.symbol}: ${f.standbyReason || (en ? 'Waiting for a valid setup.' : 'Menunggu setup valid.')}`;
+  } else {
+    const orderWord = f.orderType === 'MARKET' ? 'MARKET (NOW)' : 'LIMIT';
+    setup = en
+      ? `${f.symbol}: final decision ${f.signal} ${orderWord} @ ${f.entry}, SL ${f.sl}, targets ${tpListTxt(f.tp, false)}.`
+      : `${f.symbol}: keputusan final ${f.signal} ${orderWord} @ ${f.entry}, SL ${f.sl}, target ${tpListTxt(f.tp, true)}.`;
+  }
+  return mtfLayoutReason(f, en, lines, setup);
+}
+
 function runManual(ctx, d, styleName) {
   return runDocManual(ctx, d, styleName);
 }
-
 function legFields(l) {
   return {
     signal: l.signal, orderType: l.orderType,
@@ -669,7 +719,6 @@ function legFields(l) {
     invalidLevel: l.invalidLevel, role: l.role,
   };
 }
-
 function resolveOcoFill(prev, price) {
   const legs = prev.oco.legs;
   const aliveIdx = legs.map((_, i) => i).filter(i => {
@@ -679,12 +728,10 @@ function resolveOcoFill(prev, price) {
       : price < Math.min(l.sl, l.invalidLevel ?? Infinity);
   });
   if (!aliveIdx.length) return null;
-
   const filledIdx = aliveIdx.find(i => {
     const l = legs[i];
     return l.signal === 'BUY' ? price <= l.entry : price >= l.entry;
   });
-
   if (filledIdx !== undefined) {
     const l = legs[filledIdx];
     return {
@@ -694,11 +741,9 @@ function resolveOcoFill(prev, price) {
       oco: { ...prev.oco, filled: filledIdx, cancelled: legs.map((_, i) => i).filter(i => i !== filledIdx) },
     };
   }
-
   const primary = aliveIdx.includes(0) ? legs[0] : legs[aliveIdx[0]];
   return { ...prev, ...legFields(primary), oco: { ...prev.oco, alive: aliveIdx } };
 }
-
 function validPrevSignal(prev, symbol, styleName, price, pip) {
   if (!prev || typeof prev !== 'object') return null;
   if (!['PENDING', 'RUNNING'].includes(prev.status) || (prev.signal !== 'BUY' && prev.signal !== 'SELL')) return null;
@@ -707,9 +752,7 @@ function validPrevSignal(prev, symbol, styleName, price, pip) {
   if (!Number.isFinite(exp) || Date.now() > exp) return null;
   const maxDist = maxDistFor(symbol, styleName) * (prev.fallback ? 3 : 1);
   if (prev.status === 'PENDING' && Math.abs(Number(prev.entry) - price) > maxDist * pip) return null;
-
   if (Array.isArray(prev.oco?.legs) && prev.oco.legs.length) return resolveOcoFill(prev, price);
-
   const sl = Number(prev.sl), tp1 = Number(prev.tp1), entry = Number(prev.entry);
   const inv = prev.invalidLevel != null ? Number(prev.invalidLevel) : null;
   if (![sl, tp1, entry].every(Number.isFinite)) return null;
@@ -720,7 +763,6 @@ function validPrevSignal(prev, symbol, styleName, price, pip) {
 
 // ── BOT ENGINE ──
 const BOT_STYLE = 'scalperbot';
-
 function ictToBot(p) {
   return {
     ok: true,
@@ -742,25 +784,20 @@ function ictToBot(p) {
     watch: [{ tf: 'M15', tipe: p.poi.kind, bawah: p.poi.lo, atas: p.poi.hi, status: p.mode, di_dalam: false, jarak_pip: 0 }],
   };
 }
-
 function runBot(ctx, d) {
   const m1 = closedOnly(d.m1, TF_MS.m1);
   const m5 = closedOnly(d.m5, TF_MS.m5);
   const m15 = closedOnly(d.m15, TF_MS.m15);
   const live = getFormingM1(d.m1);
   const bars = { m1, m5, m15, live };
-
   let r = runBotFlex(bars, { price: ctx.price, dec: ctx.dec, pip: ctx.pip, symbol: ctx.symbol, prevCandleT: ctx.prevCandleT ?? null });
-
   if (!r || !r.ok) {
     let ict = null;
     try { ict = planBot({ m15, m5, price: ctx.price, sym: ctx.symbol, tNow: Date.now() }); }
     catch (e) { console.warn('planBot:', e.message); }
     if (ict && ict.status === 'limit') r = ictToBot(ict);
   }
-
   const F = v => ctx.f(safeNum(v, ctx.price));
-
   const facts = {
     mode: 'bot', symbol: ctx.symbol, style: 'Scalping', kz: ctx.kz.name, dec: ctx.dec,
     price: F(ctx.price), bias: r.bias || 'NETRAL', dirTxt: r.dirTxt || '-',
@@ -772,7 +809,6 @@ function runBot(ctx, d) {
     status: r.ok ? 'SIGNAL' : 'STANDBY',
   };
   if (!r || !r.ok) return standbyOut(facts, r?.reason || 'Menunggu setup valid.', facts.checklist, facts.bias);
-
   const tpsArr = Array.isArray(r.tps) && r.tps.length >= 3 ? r.tps : [r.entry, r.entry, r.entry];
   const plan = {
     dir: r.dir, entry: safeNum(r.entry, ctx.price), sl: safeNum(r.sl, ctx.price),
@@ -807,44 +843,43 @@ function runBot(ctx, d) {
 // ── AI REASONING ──
 const SYS_MANUAL = `Kamu adalah konsultan analis trading spesialis SMC (Market Structure, Fibonacci OTE, Order Block, FVG, Supply & Demand) yang menjelaskan hasil scan sistem secara faktual dan santai.
 ATURAN MUTLAK ANTI-HALUSINASI:
-1. DILARANG KERAS mengarang atau mengubah angka harga yang TIDAK ADA di dalam JSON input. Salin angka persis dari JSON.
-2. DILARANG mengubah tipe order (jika orderType = "MARKET" sebut eksekusi sekarang; jika orderType = "LIMIT" sebut pending LIMIT).
-3. Jika role = "counter": jelaskan bahwa ini counter-trend yang valid karena struktur M5 dan zona pantulan sendiri, dan targetnya mengarah ke zona utama.
-4. Jika role = "bounce": jelaskan bahwa ini bounce scalp di zona Supply/Demand fresh, tanpa konfirmasi CHoCH M5, dan tunggu harga menyentuh zona.
-5. Jika role = "nearest": jelaskan bahwa ini sinyal zona terdekat karena belum ada setup struktur, sebut jarak entry dari harga persis dari JSON, dan sebutkan CRT High/CRT Low bila ada field crtHigh/crtLow.
-6. Jika field oco ada: jelaskan dua limit (legs) beserta angkanya, dan bahwa jika salah satu terisi, yang lain dibatalkan.
-7. Jika tpMode ada: sebutkan bahwa TP mengikuti band risk (riskPips) beserta rasio TP-nya. Jika tpMode = "CRT", sebutkan TP3 menuju sisi range berlawanan.
-8. Jika field crtHigh dan crtLow ada (Intraday/Swing): sebutkan CRT High dan CRT Low serta area WNS SELL dan WNS BUY persis angkanya, walau status STANDBY.
-9. Jika status = "RUNNING" atau "PENDING": sebutkan arah, bias HTF (bias), zona POI, serta angka persis entry, SL, dan TP. Jika confirmed = false, sebutkan bahwa konfirmasi M1 belum ada.
-10. Jika status = "STANDBY": sebutkan alasan dari standbyReason, checklist yang OK dan yang BELUM, zona dari watch (jika ada), dan syarat dari syarat.
-11. Pakai "saya" atau "kita". JANGAN pakai daftar/bullet atau tanda bintang (*). WAJIB tulis 4 sampai 6 kalimat lengkap.
-Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}.`;
+DILARANG KERAS mengarang atau mengubah angka harga yang TIDAK ADA di dalam JSON input. Salin angka persis dari JSON.
+DILARANG mengubah tipe order (jika orderType = "MARKET" sebut eksekusi sekarang; jika orderType = "LIMIT" sebut pending LIMIT).
+Jika role = "counter": jelaskan bahwa ini counter-trend yang valid karena struktur M5 dan zona pantulan sendiri, dan targetnya mengarah ke zona utama.
+Jika role = "bounce": jelaskan bahwa ini bounce scalp di zona Supply/Demand fresh, tanpa konfirmasi CHoCH M5, dan tunggu harga menyentuh zona.
+Jika role = "nearest": jelaskan bahwa ini sinyal zona terdekat karena belum ada setup struktur, sebut jarak entry dari harga persis dari JSON, dan sebutkan CRT High/CRT Low bila ada field crtHigh/crtLow.
+Jika field oco ada: jelaskan dua limit (legs) beserta angkanya, dan bahwa jika salah satu terisi, yang lain dibatalkan.
+Jika tpMode ada: sebutkan bahwa TP mengikuti band risk (riskPips) beserta rasio TP-nya. Jika tpMode = "CRT", sebutkan TP3 menuju sisi range berlawanan.
+Jika field crtHigh dan crtLow ada (Intraday/Swing): sebutkan CRT High dan CRT Low serta area WNS SELL dan WNS BUY persis angkanya, walau status STANDBY.
+Jika status = "RUNNING" atau "PENDING": sebutkan arah, bias HTF (bias), zona POI, serta angka persis entry, SL, dan TP. Jika confirmed = false, sebutkan bahwa konfirmasi M1 belum ada.
+Jika status = "STANDBY": sebutkan alasan dari standbyReason, checklist yang OK dan yang BELUM, zona dari watch (jika ada), dan syarat dari syarat.
+Pakai "saya" atau "kita". JANGAN pakai daftar/bullet atau tanda bintang (*). WAJIB tulis 4 sampai 6 kalimat lengkap.
+Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}`;
 
 const SYS_BOT_EA = `Kamu adalah mentor trading yang menjelaskan keputusan bot scalper bergaya EA (aturan pasti berbasis EMA dan ATR) dengan bahasa santai dan mengalir.
 ATURAN MUTLAK:
-1. DILARANG mengarang atau mengubah angka yang tidak ada di JSON input. Salin angka persis dari JSON.
-2. JANGAN pakai bullet, daftar, atau tanda bintang. Tulis paragraf utuh, 4 sampai 6 kalimat.
-3. Jelaskan alur bot: tren M5 (EMA20 vs EMA50, field "htf" dan "bias"), filter M15, lalu pemicu M1 yaitu pullback ke EMA20 dan candle konfirmasi (field "checklist" dan "m1").
-4. Jika STANDBY: sebutkan persis syarat mana yang BELUM terpenuhi dari "checklist" dan "standbyReason", dan apa yang ditunggu bot.
-5. Jika RUNNING/PENDING: sebutkan arah, entry, SL, dan TP persis dari JSON. Jelaskan bahwa SL berbasis ATR dan TP hanya satu target (tp1, sama dengan tp2 dan tp3) dengan rasio 1:1,5 dari jarak SL.
-6. Jangan menyebut zona Supply/Demand, Order Block, atau CHoCH karena bot ini tidak memakainya.
-7. Pakai kata "saya" atau "kita".
-Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}.`;
+DILARANG mengarang atau mengubah angka yang tidak ada di JSON input. Salin angka persis dari JSON.
+JANGAN pakai bullet, daftar, atau tanda bintang. Tulis paragraf utuh, 4 sampai 6 kalimat.
+Jelaskan alur bot: tren M5 (EMA20 vs EMA50, field "htf" dan "bias"), filter M15, lalu pemicu M1 yaitu pullback ke EMA20 dan candle konfirmasi (field "checklist" dan "m1").
+Jika STANDBY: sebutkan persis syarat mana yang BELUM terpenuhi dari "checklist" dan "standbyReason", dan apa yang ditunggu bot.
+Jika RUNNING/PENDING: sebutkan arah, entry, SL, dan TP persis dari JSON. Jelaskan bahwa SL berbasis ATR dan TP hanya satu target (tp1, sama dengan tp2 dan tp3) dengan rasio 1:1,5 dari jarak SL.
+Jangan menyebut zona Supply/Demand, Order Block, atau CHoCH karena bot ini tidak memakainya.
+Pakai kata "saya" atau "kita".
+Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}`;
 
 const SYS_BOT = `Kamu adalah mentor trading senior spesialis SMC (Market Structure, Order Block, FVG, Supply & Demand) yang sedang menjelaskan analisa bot scalper ke muridnya dengan gaya bercerita (story telling) yang santai, dinamis, dan mengalir.
 ATURAN MUTLAK:
-1. DILARANG KERAS mengarang atau mengubah angka harga yang tidak ada di JSON input. Salin angka persis dari JSON.
-2. JANGAN gunakan bullet points, daftar angka, atau tanda bintang (*). Tulis dalam bentuk paragraf utuh yang mengalir (minimal 5-7 kalimat).
-3. Buka cerita dengan kondisi HTF berdasarkan field "bias" dan "htf" (misal M15 atau H1), apakah sedang tren naik, turun, atau ranging, dan apakah ada BOS, MSS, atau CHoCH mengacu ke field "m1".
-4. Lanjut ke rencana eksekusi dari field "checklist" dan "trigger": POI mana yang dipakai bot, apakah bot menunggu retracement ke POI, dan sebutkan batas bawah dan atas zona dari field "watch" bila ada.
-5. Berikan skenario dinamis: jika harga berbalik (reversal) apa rencananya, jika lanjut (continuation) targetnya ke mana, dan syarat konfirmasi strukturnya, memakai level yang ada di JSON.
-6. Jika bot STANDBY: jelaskan dengan santai apa yang sedang ditunggu berdasarkan "checklist" dan "standbyReason", serta zona dari "watch".
-7. Jika bot RUNNING/PENDING: jelaskan arah, tier, trigger, entry, SL, dan TP persis dari JSON. Jika tier diawali "ICT", tegaskan bahwa ini setup POI ICT M15 dengan eksekusi limit M5.
-8. Gunakan kata "saya" atau "kita".
-Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}.`;
+DILARANG KERAS mengarang atau mengubah angka harga yang tidak ada di JSON input. Salin angka persis dari JSON.
+JANGAN gunakan bullet points, daftar angka, atau tanda bintang (*). Tulis dalam bentuk paragraf utuh yang mengalir (minimal 5-7 kalimat).
+Buka cerita dengan kondisi HTF berdasarkan field "bias" dan "htf" (misal M15 atau H1), apakah sedang tren naik, turun, atau ranging, dan apakah ada BOS, MSS, atau CHoCH mengacu ke field "m1".
+Lanjut ke rencana eksekusi dari field "checklist" dan "trigger": POI mana yang dipakai bot, apakah bot menunggu retracement ke POI, dan sebutkan batas bawah dan atas zona dari field "watch" bila ada.
+Berikan skenario dinamis: jika harga berbalik (reversal) apa rencananya, jika lanjut (continuation) targetnya ke mana, dan syarat konfirmasi strukturnya, memakai level yang ada di JSON.
+Jika bot STANDBY: jelaskan dengan santai apa yang sedang ditunggu berdasarkan "checklist" dan "standbyReason", serta zona dari "watch".
+Jika bot RUNNING/PENDING: jelaskan arah, tier, trigger, entry, SL, dan TP persis dari JSON. Jika tier diawali "ICT", tegaskan bahwa ini setup POI ICT M15 dengan eksekusi limit M5.
+Gunakan kata "saya" atau "kita".
+Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}`;
 
 const NUM_RE = /\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?/g;
-
 function parseNum(tok) {
   let s = String(tok);
   if (s.includes('.') && s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
@@ -852,7 +887,6 @@ function parseNum(tok) {
   else if ((s.match(/\./g) || []).length > 1) s = s.replace(/\./g, '');
   return Number(s);
 }
-
 function collectNums(v, out = []) {
   if (typeof v === 'number' && Number.isFinite(v)) out.push(v);
   else if (typeof v === 'string') {
@@ -861,7 +895,6 @@ function collectNums(v, out = []) {
   else if (v && typeof v === 'object') Object.values(v).forEach(x => collectNums(x, out));
   return out;
 }
-
 function findUnknownPrice(text, facts) {
   try {
     if (!text || typeof text !== 'string') return null;
@@ -879,7 +912,6 @@ function findUnknownPrice(text, facts) {
     return null;
   } catch { return null; }
 }
-
 function extractContent(data) {
   const c = data?.choices?.[0]?.message?.content;
   if (typeof c === 'string') return c;
@@ -887,19 +919,17 @@ function extractContent(data) {
   return '';
 }
 function stripThink(s) {
-  return String(s || '').replace(/[\s\S]*?<\/think>/gi, '').trim();
+  return String(s || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 }
 function parseJsonLoose(text) {
   const s = String(text || '')
     .replace(/```(?:json)?\s*([\s\S]*?)```/gi, '$1')
     .trim();
-
   const a = s.indexOf('{');
   const b = s.lastIndexOf('}');
   if (a < 0 || b <= a) return null;
   try { return JSON.parse(s.slice(a, b + 1)); } catch { return null; }
 }
-
 async function qwenJson(sys, userObj, maxTokens = QWEN_MAX_TOKENS, deadlineMs = QWEN_DEADLINE_MS, models = QWEN_MODELS, keys = QWEN_KEYS) {
   if (!keys.length) return { json: null, error: 'API key AI belum diatur (QWEN_API_KEY / OPENAI_API_KEY)' };
   const user = JSON.stringify(userObj);
@@ -942,20 +972,19 @@ async function qwenJson(sys, userObj, maxTokens = QWEN_MAX_TOKENS, deadlineMs = 
   }
   return { json: null, error: lastErr };
 }
-
 function fbZone(f, id) {
-  if (!f.zone) return id ? `area ${f.zoneTf || f.trigTf}` : `${f.zoneTf || f.trigTf} area`;
+  if (!f.zone) return id ? `area ${f.zoneTf || f.trigTf || 'M5'}` : `${f.zoneTf || f.trigTf || 'M5'} area`;
   return id ? `zona ${f.zone.label} di ${f.zone.lower}–${f.zone.upper}` : `${f.zone.label} zone at ${f.zone.lower}–${f.zone.upper}`;
 }
-
 function fbWatch(f, id) {
   const list = (f.watch || []).map(w => `${w.tf} ${w.tipe} ${w.bawah}–${w.atas} (${w.status}, ${w.di_dalam ? 'harga di dalam' : w.jarak_pip + ' pip'})`).join('; ');
   if (!list) return id ? 'Belum ada zona POI fresh di dekat harga.' : 'No fresh POI zone near price yet.';
   return id ? `Zona yang sedang saya pantau: ${list}.` : `Zones currently watched: ${list}.`;
 }
-
 function fallbackStory(f, lang) {
   const id = lang === 'id';
+  const biasTxt = f.bias || (id ? 'netral' : 'neutral');
+  const trigTxt = f.trigger || (f.zone && f.zone.label) || f.style || 'setup';
   if (f.mode === 'manual') {
     const wns = f.crtHigh != null && f.crtLow != null
       ? (id
@@ -965,20 +994,19 @@ function fallbackStory(f, lang) {
     if (f.status === 'STANDBY') {
       const checkTxt = (f.checklist || []).slice(0, 4).join(' ');
       return id
-        ? `Saya masih menunggu setup valid di ${f.symbol}. Bias saat ini ${f.bias}. ${wns} ${f.standbyReason || ''} ${checkTxt} ${fbWatch(f, true)}`
-        : `I am still waiting for a valid setup on ${f.symbol}. Current bias is ${f.bias}. ${wns} ${f.standbyReason || ''} ${checkTxt} ${fbWatch(f, false)}`;
+        ? `Saya masih menunggu setup valid di ${f.symbol}. Bias saat ini ${biasTxt}. ${wns} ${f.standbyReason || ''} ${checkTxt} ${fbWatch(f, true)}`
+        : `I am still waiting for a valid setup on ${f.symbol}. Current bias is ${biasTxt}. ${wns} ${f.standbyReason || ''} ${checkTxt} ${fbWatch(f, false)}`;
     }
     const now = f.orderType === 'MARKET';
-    const bandTxt = ''; // keterangan TP band dihapus dari alasan (permintaan pengguna)
     const crtTxt = f.tpMode === 'CRT'
       ? (id ? ' Ini setup CRT: TP3 menuju sisi range berlawanan.' : ' This is a CRT setup: TP3 targets the opposite side of the range.')
       : '';
     const roleTxt = f.role === 'nearest' ? (id ? 'Zona terdekat' : 'Nearest zone')
       : f.role === 'bounce' ? 'Bounce scalp'
-        : f.role === 'counter' ? 'Counter-trend' : 'Main';
+      : f.role === 'counter' ? 'Counter-trend' : 'Main';
     return id
-      ? `${roleTxt} ${f.signal} valid di ${f.symbol} dengan bias ${f.bias} pada ${fbZone(f, true)} (${f.trigger}). ${wns} ${now ? `Eksekusi MARKET sekarang di ${f.entry}` : `Pasang pending LIMIT di ${f.entry}`}, SL di ${f.sl}, dan target TP di ${tpListTxt(f.tp, true)}${bandTxt}.${crtTxt}`
-      : `${roleTxt} ${f.signal} valid on ${f.symbol} aligned with ${f.bias} bias at ${fbZone(f, false)} (${f.trigger}). ${wns} ${now ? `Execute MARKET now at ${f.entry}` : `Place pending LIMIT at ${f.entry}`}, SL at ${f.sl}, and targets at ${tpListTxt(f.tp, false)}${bandTxt}.${crtTxt}`;
+      ? `${roleTxt} ${f.signal} valid di ${f.symbol} dengan bias ${biasTxt} pada ${fbZone(f, true)} (${trigTxt}). ${wns} ${now ? `Eksekusi MARKET sekarang di ${f.entry}` : `Pasang pending LIMIT di ${f.entry}`}, SL di ${f.sl}, dan target TP di ${tpListTxt(f.tp, true)}.${crtTxt}`
+      : `${roleTxt} ${f.signal} valid on ${f.symbol} aligned with ${biasTxt} bias at ${fbZone(f, false)} (${trigTxt}). ${wns} ${now ? `Execute MARKET now at ${f.entry}` : `Place pending LIMIT at ${f.entry}`}, SL at ${f.sl}, and targets at ${tpListTxt(f.tp, false)}.${crtTxt}`;
   }
   if (f.signal === 'BUY' || f.signal === 'SELL') {
     const now = f.orderType === 'MARKET';
@@ -988,10 +1016,9 @@ function fallbackStory(f, lang) {
   }
   const checkTxt = (f.checklist || []).slice(0, 3).join(' ');
   return id
-    ? `Bot sedang memantau ${f.symbol} M1. Bias HTF ${f.bias}. Status: ${f.m1 || '-'}. ${f.standbyReason || ''} ${checkTxt} ${fbWatch(f, true)}`
-    : `Bot is scanning ${f.symbol} M1. HTF bias ${f.bias}. Status: ${f.m1 || '-'}. ${f.standbyReason || ''} ${checkTxt} ${fbWatch(f, false)}`;
+    ? `Bot sedang memantau ${f.symbol} M1. Bias HTF ${biasTxt}. Status: ${f.m1 || '-'}. ${f.standbyReason || ''} ${checkTxt} ${fbWatch(f, true)}`
+    : `Bot is scanning ${f.symbol} M1. HTF bias ${biasTxt}. Status: ${f.m1 || '-'}. ${f.standbyReason || ''} ${checkTxt} ${fbWatch(f, false)}`;
 }
-
 function isUsableStory(s, facts) {
   if (typeof s !== 'string') return false;
   const t = s.trim();
@@ -1000,7 +1027,6 @@ function isUsableStory(s, facts) {
   if (facts?.symbol && t.toUpperCase() === String(facts.symbol).toUpperCase()) return false;
   return true;
 }
-
 const storyCache = new Map();
 const aiStickyCache = new Map();
 const AI_STICKY_MS = 3 * 60 * 1000;
@@ -1008,7 +1034,6 @@ const sv = v => (v == null ? '' : String(v));
 function setupKey(f) {
   return [f.mode, f.symbol, f.style, f.status, f.signal, f.entry, f.sl, f.trigger, f.tier, f.bias, f.standbyReason].map(sv).join('|');
 }
-
 async function getStory(facts, cacheKey, ttl = BOT_CFG.storyTtlMs) {
   if (cacheKey) {
     const hit = storyCache.get(cacheKey);
@@ -1036,7 +1061,6 @@ async function getStory(facts, cacheKey, ttl = BOT_CFG.storyTtlMs) {
       else story = { id: String(json.id), en: String(json.en), ai: true };
     }
   } catch (e) { aiError = e.message; }
-
   if (story) {
     aiStickyCache.set(key, { t: Date.now(), story });
     if (aiStickyCache.size > 300) aiStickyCache.delete(aiStickyCache.keys().next().value);
@@ -1057,7 +1081,6 @@ async function getStory(facts, cacheKey, ttl = BOT_CFG.storyTtlMs) {
   }
   return story;
 }
-
 const storyPending = new Map();
 async function getStoryFast(facts, cacheKey, ttl, budgetMs) {
   if (cacheKey) {
@@ -1077,18 +1100,93 @@ async function getStoryFast(facts, cacheKey, ttl, budgetMs) {
   return { id: fallbackStory(facts, 'id'), en: fallbackStory(facts, 'en'), ai: false, aiError: 'AI masih berjalan', pending: true };
 }
 
+// ── AI REASONING MANUAL MTF (format sama seperti vision) ──
+const SYS_MANUAL_MTF = `Kamu analis trading spesialis SMC (Market Structure, Order Block, FVG, Supply & Demand). Kamu menjelaskan hasil scan multi-timeframe sistem secara faktual dan santai, seperti analis yang membaca beberapa chart sekaligus.
+ATURAN MUTLAK ANTI-HALUSINASI:
+DILARANG mengarang atau mengubah angka harga yang TIDAK ADA di JSON input. Salin angka persis dari JSON.
+DILARANG mengubah tipe order: orderType "MARKET" = eksekusi sekarang, "LIMIT" = pending limit.
+Untuk SETIAP item di array "steps" (urutan TF tertinggi ke terendah), tulis maksimal 2 kalimat pendek: struktur tren TF tersebut + zona S&D/OB/FVG terdekat dan posisi harga terhadap zona itu. Awali tiap item dengan nama TF-nya, contoh "M15: ...".
+Lalu tulis ringkasan setup 2-3 kalimat diawali nama pair: keputusan final (arah + tipe order + entry + SL + TP persis dari JSON) dan alasan konfluensi utama dari steps.
+Jika status "STANDBY": ringkasan menjelaskan apa yang ditunggu berdasarkan standbyReason dan steps, tanpa menyebut entry/SL/TP.
+Pakai "saya" atau "kita". Jangan pakai bullet atau tanda bintang di dalam string.
+Balas HANYA JSON valid tanpa kode blok: {"perTfId":["M15: ...","M5: ..."],"perTfEn":["M15: ...","M5: ..."],"id":"...","en":"..."}`;
+
+async function getMtfStory(facts, cacheKey, ttl = MANUAL_STORY_TTL_MS) {
+  if (cacheKey) {
+    const hit = storyCache.get(cacheKey);
+    if (hit && Date.now() - hit.t < hit.ttl) return hit.v;
+  }
+  const fb = {
+    id: facts.reasonId || mtfFallbackReason(facts, false),
+    en: facts.reasonEn || mtfFallbackReason(facts, true),
+    ai: false,
+  };
+  let story = null, aiError = '';
+  try {
+    const { json, error } = await qwenJson(SYS_MANUAL_MTF, facts, QWEN_MAX_TOKENS, QWEN_MANUAL_DEADLINE_MS, QWEN_MANUAL_MODELS, QWEN_MANUAL_KEYS);
+    if (!json) aiError = error || 'AI tidak memberi jawaban';
+    else if (!isUsableStory(json.id, facts) || !isUsableStory(json.en, facts)) aiError = 'jawaban AI terlalu pendek';
+    else {
+      const perId = Array.isArray(json.perTfId) ? json.perTfId.map(String) : null;
+      const perEn = Array.isArray(json.perTfEn) ? json.perTfEn.map(String) : null;
+      const allTxt = [json.id, json.en, ...(perId || []), ...(perEn || [])].join(' ');
+      const badNum = findUnknownPrice(allTxt, facts);
+      if (badNum) aiError = `angka ${badNum} di jawaban AI tidak ada di data`;
+      else {
+        const sym = String(facts.symbol || '');
+        const sumId = String(json.id).toUpperCase().includes(sym) ? String(json.id) : `${sym}: ${json.id}`;
+        const sumEn = String(json.en).toUpperCase().includes(sym) ? String(json.en) : `${sym}: ${json.en}`;
+        const defLines = (facts.steps || []).map(s => `${s.tf}: ${s.text}`);
+        story = {
+          id: mtfLayoutReason(facts, false, perId || defLines, sumId),
+          en: mtfLayoutReason(facts, true, perEn || defLines, sumEn),
+          ai: true,
+        };
+      }
+    }
+  } catch (e) { aiError = e.message; }
+  if (!story) { console.warn('getMtfStory fallback:', aiError); story = { ...fb, aiError }; }
+  if (cacheKey) {
+    const effTtl = facts.status === 'STANDBY' ? Math.min(ttl, MANUAL_STANDBY_TTL_MS) : (story.ai ? ttl : Math.min(ttl, 60000));
+    storyCache.set(cacheKey, { t: Date.now(), ttl: effTtl, v: story });
+    if (storyCache.size > 300) storyCache.delete(storyCache.keys().next().value);
+  }
+  return story;
+}
+async function getMtfStoryFast(facts, cacheKey, ttl, budgetMs) {
+  if (cacheKey) {
+    const hit = storyCache.get(cacheKey);
+    if (hit && Date.now() - hit.t < hit.ttl) return hit.v;
+  }
+  let p = cacheKey ? storyPending.get(cacheKey) : null;
+  if (!p) {
+    p = getMtfStory(facts, cacheKey, ttl).finally(() => { if (cacheKey) storyPending.delete(cacheKey); });
+    if (cacheKey) storyPending.set(cacheKey, p);
+  }
+  let timer;
+  const budget = new Promise(res => { timer = setTimeout(() => res(null), budgetMs); });
+  const got = await Promise.race([p, budget]);
+  clearTimeout(timer);
+  if (got) return got;
+  // Budget habis: tetap layout vision, bukan paragraf lama.
+  return {
+    id: facts.reasonId || mtfFallbackReason(facts, false),
+    en: facts.reasonEn || mtfFallbackReason(facts, true),
+    ai: false, aiError: 'AI masih berjalan', pending: true,
+  };
+}
+
 const SYS_GATE_MANUAL = `Kamu adalah filter veto untuk kandidat setup MANUAL SMC.
 Kamu DILARANG membuat setup baru dan DILARANG mengubah angka entry, SL, TP, atau tipe order.
 Jawab "TUNGGU" HANYA jika terbukti ada salah satu kontradiksi berikut:
-1. arah_setup berlawanan dengan arah_htf, KECUALI role = "counter" atau role = "bounce". Counter-trend dan bounce sudah divalidasi struktur/zona sendiri, jadi jangan tolak karena arah.
-2. regime_htf = "choppy".
-3. jarak_entry_pip > batas_jarak_pip.
-4. alasan_aturan kosong.
+arah_setup berlawanan dengan arah_htf, KECUALI role = "counter" atau role = "bounce". Counter-trend dan bounce sudah divalidasi struktur/zona sendiri, jadi jangan tolak karena arah.
+regime_htf = "choppy".
+jarak_entry_pip > batas_jarak_pip.
+alasan_aturan kosong.
 Jika tidak ada satupun dari 4 pelanggaran di atas, WAJIB jawab "AMBIL".
 Jangan terlalu kaku pada syarat POI jika struktur M5 atau zona bounce sudah valid. Prioritaskan arah dan momentum.
 FORMAT OUTPUT (hanya JSON, tanpa markdown):
 {"keputusan":"AMBIL" atau "TUNGGU","alasan":"..."}`;
-
 async function aiGateManual(input) {
   const fallback = { keputusan: 'AMBIL', alasan: 'Sesuai validasi aturan SMC', ai: false };
   if (!QWEN_MANUAL_KEYS.length) return fallback;
@@ -1118,20 +1216,18 @@ async function aiGateManual(input) {
 // ── VISION ──
 const VISION_BASE = `Kamu adalah analis trading spesialis SUPPLY & DEMAND (RBR/DBR/RBD/DBD), Order Block, dan Market Structure.
 ATURAN MUTLAK:
-1. Analisis SETIAP GAMBAR di array "perImageAnalyses" (maks 2 kalimat pendek per gambar: struktur tren + zona S&D/OB terdekat).
-2. Top-down: struktur tren dari TF tertinggi menentukan arah utama, zona S&D dari TF menengah, Order Block dari TF terendah.
-3. Pilih SATU zona S&D/OB terbaik yang searah struktur tren dan terdekat dengan harga sekarang.
-4. WAJIB MENGHASILKAN SIGNAL BUY atau SELL. Jawab "NONE" HANYA jika gambar bukan chart atau tidak terbaca.
-5. Entry: LIMIT di proximal atau 50% body OB jika harga belum menyentuh zona. MARKET hanya jika harga sudah berada di dalam zona OB dan ada penolakan (wick / engulfing / CHoCH mikro).
-6. SL di luar distal zona + buffer kecil. BUY: sl < entry. SELL: sl > entry.
-7. Semua level (entry, sl, tp, zoneLow, zoneHigh) WAJIB dibaca persis dari skala sumbu kanan chart.
-8. reason maksimal 3 kalimat diawali nama pair, sebutkan angka persis seperti di field JSON.
-0. PAIR: salin NAMA PAIR persis seperti tertulis di judul/header chart, lalu ubah ke format tanpa spasi/garis miring (contoh: judul 'XXX / YYY' -> XXXYYY). Jangan memakai contoh pair lain dan jangan menebak dari harga atau pengetahuanmu. Jika tidak terbaca, isi pair dengan "".
-0b. DESIMAL: hitung jumlah digit desimal dari label harga pada sumbu harga chart yang sedang dianalisa, lalu isi "decimals". Semua harga harus memakai desimal itu.
-
+Analisis SETIAP GAMBAR di array "perImageAnalyses" (maks 2 kalimat pendek per gambar: struktur tren + zona S&D/OB terdekat).
+Top-down: struktur tren dari TF tertinggi menentukan arah utama, zona S&D dari TF menengah, Order Block dari TF terendah.
+Pilih SATU zona S&D/OB terbaik yang searah struktur tren dan terdekat dengan harga sekarang.
+WAJIB MENGHASILKAN SIGNAL BUY atau SELL. Jawab "NONE" HANYA jika gambar bukan chart atau tidak terbaca.
+Entry: LIMIT di proximal atau 50% body OB jika harga belum menyentuh zona. MARKET hanya jika harga sudah berada di dalam zona OB dan ada penolakan (wick / engulfing / CHoCH mikro).
+SL di luar distal zona + buffer kecil. BUY: sl < entry. SELL: sl > entry.
+Semua level (entry, sl, tp, zoneLow, zoneHigh) WAJIB dibaca persis dari skala sumbu kanan chart.
+reason maksimal 3 kalimat diawali nama pair, sebutkan angka persis seperti di field JSON.
+PAIR: salin NAMA PAIR persis seperti tertulis di judul/header chart, lalu ubah ke format tanpa spasi/garis miring (contoh: judul 'XXX / YYY' -> XXXYYY). Jangan memakai contoh pair lain dan jangan menebak dari harga atau pengetahuanmu. Jika tidak terbaca, isi pair dengan "".
+DESIMAL: hitung jumlah digit desimal dari label harga pada sumbu harga chart yang sedang dianalisa, lalu isi "decimals". Semua harga harus memakai desimal itu.
 Balas HANYA JSON valid tanpa kode blok:
 {"signal":"BUY|SELL","orderType":"MARKET|LIMIT","entry":0,"sl":0,"tp1":0,"tp2":0,"tp3":0,"setup":"","confidence":"HIGH|MEDIUM|LOW","risk":"LOW|MEDIUM|HIGH","perImageAnalyses":["Gambar 1: ..."],"reason":"PAIR: ...","topDown":"...","zone":"Demand","pair":"PEPEUSDT","pairRaw":"PEPE / TetherUS","decimals":0,"zoneLow":0,"zoneHigh":0}`;
-
 function buildVisionSystem(style) {
   const map = {
     'Scalping': 'STYLE: SCALPING S&D/OB (M15 Bias & S&D -> M5 OB -> M1 Konfirmasi). Cari zona S&D/OB terdekat searah struktur M15.',
@@ -1140,13 +1236,12 @@ function buildVisionSystem(style) {
   };
   return `${VISION_BASE}\n\n${map[style] || map['Scalping']}`;
 }
-
 const PAIR_ALIAS = {
   GOLD: 'XAUUSD', XAUUSDX: 'XAUUSD', SILVER: 'XAGUSD', XAGUSDX: 'XAGUSD',
   BTCUSDT: 'BTCUSD', ETHUSDT: 'ETHUSD', SOLUSDT: 'SOLUSD', XRPUSDT: 'XRPUSD', BNBUSDT: 'BNBUSD', ADAUSDT: 'ADAUSD', DOGEUSDT: 'DOGEUSD',
   US500: 'SPX500', SPX: 'SPX500', SP500: 'SPX500', US100: 'NAS100', NDX: 'NAS100', NASDAQ: 'NAS100', NASDAQ100: 'NAS100',
   DJI: 'US30', DOW: 'US30', DOWJONES: 'US30', DE40: 'GER40', DAX: 'GER40', GER30: 'GER40', DE30: 'GER40',
-  JP225: 'JPN225', NIKKEI: 'JPN225', NI225: 'JPN225', FTSE: 'UK100', FTSE100: 'UK100', CAC40: 'FRA40',
+  JP225: 'JPN225', NIKKEI: 'JPN225', NI225: 'JPN225', FTSE: 'UK100', FTSE100: 'UK100', 'CAC 40': 'FRA40',
   USOIL: 'WTI', CRUDEOIL: 'WTI', UKOIL: 'BRENT', BRENTOIL: 'BRENT', DOLLARINDEX: 'DXY', USDX: 'DXY',
 };
 function normPair(raw) {
@@ -1174,7 +1269,6 @@ function fmtPriceText(text, entry, dec) {
     return Math.abs(v - entry) / entry < 0.05 ? v.toFixed(dec) : tok;
   });
 }
-
 function checkVisionSignal(j) {
   if (!j || typeof j !== 'object') return 'Respons AI tidak bisa dibaca.';
   const sig = String(j.signal || 'NONE').toUpperCase();
@@ -1198,25 +1292,42 @@ function buildVisionSignal(j, style, lang, imgCount) {
   let risk = Math.abs(rawEntry - rawSl);
   if (!(risk > 0)) risk = pip * 10;
   const sl = f(entry - dir * risk);
-  const [tp1, tp2, tp3] = [1.5, 2.25, 3].map(k => f(entry + dir * risk * k));
+
+  // TP: pakai angka AI HANYA jika valid, searah, berurutan, dan sesuai skala chart.
+  const aiTps = [j.tp1, j.tp2, j.tp3].map(Number);
+  const sideOk = aiTps.every(v => Number.isFinite(v) && v > 0 && (dir === 1 ? v > entry : v < entry));
+  const orderOk = dir === 1 ? (aiTps[0] < aiTps[1] && aiTps[1] < aiTps[2]) : (aiTps[0] > aiTps[1] && aiTps[1] > aiTps[2]);
+  const scaleOk = aiTps.every(v => Math.abs(v - entry) / entry < 0.05);
+  const tpsFromAi = sideOk && orderOk && scaleOk;
+  const [tp1, tp2, tp3] = tpsFromAi ? aiTps.map(f) : [1.5, 2.25, 3].map(k => f(entry + dir * risk * k));
+  // TP4/TP5 selalu dikirim backend dan selalu searah sinyal.
+  const tp4 = f(entry + dir * risk * 4);
+  const tp5 = f(entry + dir * risk * 5);
+
   let zLo = Number(j.zoneLow), zHi = Number(j.zoneHigh);
   const zOk = Number.isFinite(zLo) && Number.isFinite(zHi) && zLo > 0 && zHi > zLo && Math.abs(zLo - entry) / entry < 0.05 && Math.abs(zHi - entry) / entry < 0.05;
   if (!zOk) { zLo = Math.min(entry, entry - dir * risk * 0.5); zHi = Math.max(entry, entry - dir * risk * 0.5); }
   zLo = f(zLo); zHi = f(zHi);
-  const zoneName = String(j.zone || (dir === 1 ? 'Demand' : 'Supply')).replace(/[0-9.,\s\-–]+$/g, '').trim() || (dir === 1 ? 'Demand' : 'Supply');
+  const zoneName = String(j.zone || (dir === 1 ? 'Demand' : 'Supply')).replace(/[0-9.,\s-–]+$/g, '').trim() || (dir === 1 ? 'Demand' : 'Supply');
   const fix = t => fmtPriceText(t, entry, dec);
   const perImg = Array.isArray(j.perImageAnalyses) && j.perImageAnalyses.length ? j.perImageAnalyses.map(item => `• ${fix(String(item).trim())}`).join('\n') : '';
   let summary = fix(String(j.reason || '').trim()) || 'Analisis AI dari chart.';
   if (!summary.toUpperCase().includes(sym)) summary = `${sym}: ${summary}`;
+  if (!tpsFromAi) {
+    summary += lang === 'en'
+      ? ` Final targets: TP1 ${tp1}, TP2 ${tp2}, TP3 ${tp3}.`
+      : ` Target final: TP1 ${tp1}, TP2 ${tp2}, TP3 ${tp3}.`;
+  }
   const fullReason = perImg ? `[${sym} · Analisa ${imgCount} Gambar]\n${perImg}\n\n[Setup]\n${summary}` : summary;
   const now = Date.now();
   const pips = v => Number((Math.abs(v - entry) / pip).toFixed(1));
+  const rr = Number((Math.abs(tp3 - entry) / risk).toFixed(2));
   return {
     signal: sig, orderType: isLimit ? 'LIMIT' : 'MARKET', fill: isLimit ? 'LIMIT' : 'NOW', status: isLimit ? 'PENDING' : 'RUNNING',
     state: isLimit ? 'LIMIT_PLACED' : 'CONFIRMED',
     symbol: sym, pair: sym, dec, pip, style,
-    entry, sl, tp1, tp2, tp3, rr: 3,
-    slPips: pips(sl), tp1Pips: pips(tp1), tp2Pips: pips(tp2), tp3Pips: pips(tp3),
+    entry, sl, tp1, tp2, tp3, tp4, tp5, rr,
+    slPips: pips(sl), tp1Pips: pips(tp1), tp2Pips: pips(tp2), tp3Pips: pips(tp3), tp4Pips: pips(tp4), tp5Pips: pips(tp5),
     setup: fix(String(j.setup || `Vision ${style}`)),
     confidence: lvl(j.confidence, ['HIGH', 'MEDIUM', 'LOW'], 'MEDIUM'), risk: lvl(j.risk, ['LOW', 'MEDIUM', 'HIGH'], 'MEDIUM'),
     reason: fullReason, reasons: { id: fullReason, en: fullReason },
@@ -1292,13 +1403,11 @@ function normStyle(raw) {
 function manualTfs(styleName) {
   return MANUAL_TF_NEEDED[styleName] || MANUAL_TF_NEEDED['Scalping'];
 }
-
 async function handleCandles(body, lang, res, { email, isAutoBot }) {
   const symbol = String(body.symbol || 'XAUUSD').toUpperCase();
   const styleName = isAutoBot ? BOT_STYLE : normStyle(body.style || body.mode || 'Scalping');
   const price = Number(body.price ?? body.livePrice ?? body.currentPrice ?? 0);
   if (!(price > 0)) return fail(res, msg(lang, 'noPrice'));
-
   const rrChoice = [0.5, 1, 1.5, 2].includes(Number(body.rr)) ? Number(body.rr) : 1;
   const dec = DECIMALS[symbol] ?? 2;
   const ctx = {
@@ -1306,7 +1415,6 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
     kz: getKillzoneStatus(), rr: rrChoice, debug: !!body.debug,
     f: v => Number(safeNum(v, price).toFixed(dec)),
   };
-
   const allTfs = ['m1', 'm5', 'm15', 'm30', 'h1', 'h4', 'd1'];
   const candleMap = {};
   const src = {};
@@ -1320,7 +1428,6 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
       candleMap[tf] = [];
     }
   }
-
   const need = isAutoBot ? BOT_TF_NEEDED : manualTfs(styleName);
   try {
     await Promise.all(need.map(async tf => {
@@ -1343,7 +1450,6 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
       }
     }));
   } catch (e) { console.warn('fallback TL parallel:', e.message); }
-
   const data = { price };
   for (const tf of allTfs) {
     if (!candleMap[tf] || !candleMap[tf].length) {
@@ -1356,7 +1462,6 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
     console.warn(`DIAG ${isAutoBot ? 'BOT' : 'MANUAL'} ${symbol} ${styleName} noCandles src=${JSON.stringify(src)}`);
     return fail(res, msg(lang, 'noCandles'));
   }
-
   let out;
   try {
     ctx.prevCandleT = (isAutoBot && body.prevSignal?.style === BOT_STYLE && Number.isFinite(Number(body.prevSignal?.candleT))) ? Number(body.prevSignal.candleT) : null;
@@ -1365,15 +1470,12 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
     console.error('engine error:', e);
     out = standbyOut({ mode: isAutoBot ? 'bot' : 'manual', symbol, style: styleName, status: 'STANDBY', dec }, `Analisa sementara gagal (${e.message}). Akan dicoba lagi.`, [], null);
   }
-
   if (!out || !out.signal) {
     out = standbyOut({ mode: isAutoBot ? 'bot' : 'manual', symbol, style: styleName, status: 'STANDBY', dec }, 'Menunggu data/setup valid.', [], null);
   }
-
   if (isAutoBot && out.signal.status !== 'STANDBY') {
     try { await markTrialAsUsed(email); } catch (e) { console.warn('markTrialAsUsed:', e.message); }
   }
-
   const diagFacts = out.facts || {};
   const diag = {
     who: isAutoBot ? 'BOT' : 'MANUAL',
@@ -1391,7 +1493,6 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
     sticky: false,
   };
   console.log(`DIAG ${diag.who} ${symbol} ${styleName} ${diag.status} tier=${diag.tier || '-'} | ${diag.reason || '-'} | bars=${JSON.stringify(diag.bars)} src=${JSON.stringify(src)} live=${diag.liveM1}`);
-
   const prev = validPrevSignal(body.prevSignal, symbol, styleName, price, ctx.pip);
   let keepPrev = false;
   if (prev) {
@@ -1404,26 +1505,29 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
     const nextCloseAt = isAutoBot && last ? tsMs(last.t) + TF_MS.m1 : undefined;
     return res.status(200).json({ ok: true, mode: isAutoBot ? 'bot' : 'candles', symbol, style: styleName, price, signal: { ...prev, sticky: true, nextCloseAt }, diag: { ...diag, sticky: true } });
   }
-
   if (out.signal.status !== 'STANDBY') {
     out.signal.createdAt = Date.now();
   }
-
   if (isAutoBot) {
     const last = data.m1 && data.m1.length ? data.m1[data.m1.length - 1] : null;
     out.signal.nextCloseAt = last ? tsMs(last.t) + TF_MS.m1 : null;
   }
-
   const f = out.facts || { mode: isAutoBot ? 'bot' : 'manual', symbol, style: styleName, status: out.signal.status, dec };
   const cacheKey = isAutoBot
     ? `${symbol}|${styleName}|${f.status}|${f.signal || ''}|${f.trigger || ''}|${f.bias || ''}|${f.tier || ''}`
     : `M|${symbol}|${styleName}|${f.status}|${f.signal || ''}|${f.entry || ''}|${String(f.standbyReason || '').slice(0, 60)}`;
-  const story = await getStoryFast(f, cacheKey, isAutoBot ? BOT_CFG.storyTtlBotMs : MANUAL_STORY_TTL_MS, isAutoBot ? BOT_CFG.storyBudgetBotMs : BOT_CFG.storyBudgetManualMs);
+
+  // Manual MTF: reasoning format vision (per-TF + [Setup]), tidak lewat story lama.
+  const isMtf = !isAutoBot && out.signal.reasonFormat === 'mtf';
+  const story = isMtf
+    ? await getMtfStoryFast(f, `MTF|${cacheKey}`, MANUAL_STORY_TTL_MS, BOT_CFG.storyBudgetManualMs)
+    : await getStoryFast(f, cacheKey, isAutoBot ? BOT_CFG.storyTtlBotMs : MANUAL_STORY_TTL_MS, isAutoBot ? BOT_CFG.storyBudgetBotMs : BOT_CFG.storyBudgetManualMs);
+
   const signal = {
     ...out.signal,
     reason: lang === 'en' ? story.en : story.id,
     reasons: { id: story.id, en: story.en },
-    reasonSource: story.ai ? 'AI' : 'RULES',
+    reasonSource: story.ai ? 'AI' : (isMtf ? 'MTF' : 'RULES'),
     aiReasoning: !!story.ai,
     ...(ctx.debug ? { aiError: story.aiError || null } : {}),
   };
@@ -1436,19 +1540,15 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-user-email');
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return fail(res, 'Method not allowed', 405);
-
   try {
     let body = req.body || {};
     if (typeof body === 'string') try { body = JSON.parse(body); } catch { return fail(res, 'Body tidak valid (JSON).'); }
-
     const lang = body.lang === 'en' ? 'en' : 'id';
     const email = String(body.email || body.value || '').trim().toLowerCase();
     const isAutoBot = !!(body.auto || body.bot || body.mode === 'bot' || body.source === 'bot');
     const isVision = body.symbol === 'VISION' || body.mode === 'vision' || (Array.isArray(body.images) && body.images.length > 0);
-
     const access = await checkAccess(email, isAutoBot);
     if (!access.ok) return fail(res, msg(lang, access.key));
-
     if (isVision) return await handleVision(body, lang, res);
     return await handleCandles(body, lang, res, { email, isAutoBot });
   } catch (err) {
