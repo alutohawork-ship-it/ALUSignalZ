@@ -528,12 +528,14 @@ async function runDocManual(ctx, d, styleName) {
     sig.oco = { rule: out.oco.rule, legs: out.oco.legs.map(l => legView(l, ctx)) };
   }
 
+  if (Number.isFinite(Number(plan.tp4))) sig.tp4 = Number(ctx.f(plan.tp4));
+  if (Number.isFinite(Number(plan.tp5))) sig.tp5 = Number(ctx.f(plan.tp5));
   facts.signal = sideTxt;
   facts.role = o.role || 'main';
   facts.orderType = plan.orderType;
   facts.entry = sig.entry;
   facts.sl = sig.sl;
-  facts.tp = [sig.tp1, sig.tp2, sig.tp3];
+  facts.tp = [sig.tp1, sig.tp2, sig.tp3, sig.tp4, sig.tp5].filter(v => Number.isFinite(Number(v)));
   facts.rr = Number(o.rr).toFixed(2);
   facts.tpMode = o.tpMode;
   facts.riskPips = sig.riskPips;
@@ -584,6 +586,14 @@ function clampScalpSl(plan, ctx) {
   plan.rr = 1;
   plan.tpMode = 'RISK_R';
   return { before: Math.round(beforeDist / ctx.pip), after: Math.round(dist / ctx.pip), clamped };
+}
+
+// Daftar TP di kalimat alasan: 3 target atau 5 target (Scalping)
+function tpListTxt(tp, id) {
+  const v = (tp || []).filter(x => x != null);
+  if (v.length <= 1) return String(v[0] ?? '-');
+  const last = v[v.length - 1], head = v.slice(0, -1);
+  return id ? `${head.join(', ')}, serta ${last}` : `${head.join(', ')}, and ${last}`;
 }
 
 function runManual(ctx, d, styleName) {
@@ -909,8 +919,8 @@ function fallbackStory(f, lang) {
       : f.role === 'bounce' ? 'Bounce scalp'
         : f.role === 'counter' ? 'Counter-trend' : 'Main';
     return id
-      ? `${roleTxt} ${f.signal} valid di ${f.symbol} dengan bias ${f.bias} pada ${fbZone(f, true)} (${f.trigger}). ${wns} ${now ? `Eksekusi MARKET sekarang di ${f.entry}` : `Pasang pending LIMIT di ${f.entry}`}, SL di ${f.sl}, dan target TP di ${f.tp[0]}, ${f.tp[1]}, serta ${f.tp[2]}${bandTxt}.${crtTxt}`
-      : `${roleTxt} ${f.signal} valid on ${f.symbol} aligned with ${f.bias} bias at ${fbZone(f, false)} (${f.trigger}). ${wns} ${now ? `Execute MARKET now at ${f.entry}` : `Place pending LIMIT at ${f.entry}`}, SL at ${f.sl}, and targets at ${f.tp[0]}, ${f.tp[1]}, and ${f.tp[2]}${bandTxt}.${crtTxt}`;
+      ? `${roleTxt} ${f.signal} valid di ${f.symbol} dengan bias ${f.bias} pada ${fbZone(f, true)} (${f.trigger}). ${wns} ${now ? `Eksekusi MARKET sekarang di ${f.entry}` : `Pasang pending LIMIT di ${f.entry}`}, SL di ${f.sl}, dan target TP di ${tpListTxt(f.tp, true)}${bandTxt}.${crtTxt}`
+      : `${roleTxt} ${f.signal} valid on ${f.symbol} aligned with ${f.bias} bias at ${fbZone(f, false)} (${f.trigger}). ${wns} ${now ? `Execute MARKET now at ${f.entry}` : `Place pending LIMIT at ${f.entry}`}, SL at ${f.sl}, and targets at ${tpListTxt(f.tp, false)}${bandTxt}.${crtTxt}`;
   }
   if (f.signal === 'BUY' || f.signal === 'SELL') {
     const now = f.orderType === 'MARKET';
