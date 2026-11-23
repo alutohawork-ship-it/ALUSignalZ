@@ -556,16 +556,29 @@ function zoneSideOk(plan) {
   return true;
 }
 
-// SL Scalping XAUUSD dibatasi maksimal SCALP_GOLD_MAX_SL_PIPS pip (dari tepi zona yang terlalu jauh).
+// SL Scalping XAUUSD dibatasi 25-50 pip: terlalu lebar dipersempit ke 50, terlalu rapat dilebarkan ke 25.
 // SL dipersempit ke batas itu; TP tetap dari plan asal, sehingga RR ikut naik.
 const SCALP_GOLD_MAX_SL_PIPS = 50;
+const SCALP_GOLD_MIN_SL_PIPS = 25;   // SL minimal 25 pip (bisa dinaikkan ke 30)
 function clampScalpSl(plan, ctx) {
   if (!plan || !Number.isFinite(plan.entry) || !Number.isFinite(plan.sl) || !(ctx.pip > 0)) return null;
   const dir = plan.dir === 1 ? 1 : -1;
   const before = Math.abs(plan.entry - plan.sl) / ctx.pip;
-  if (before <= SCALP_GOLD_MAX_SL_PIPS) return { before: Math.round(before), after: Math.round(before), clamped: false };
-  plan.sl = plan.entry - dir * SCALP_GOLD_MAX_SL_PIPS * ctx.pip;
-  return { before: Math.round(before), after: SCALP_GOLD_MAX_SL_PIPS, clamped: true };
+  let clamped = false;
+  if (before > SCALP_GOLD_MAX_SL_PIPS) {
+    plan.sl = plan.entry - dir * SCALP_GOLD_MAX_SL_PIPS * ctx.pip;
+    clamped = true;
+  } else if (before < SCALP_GOLD_MIN_SL_PIPS) {
+    // SL terlalu rapat: dilebarkan ke batas minimum
+    plan.sl = plan.entry - dir * SCALP_GOLD_MIN_SL_PIPS * ctx.pip;
+    clamped = true;
+  }
+  // TP Scalping selalu dihitung dari SL akhir: TP1 1R, TP2 1.5R, TP3 2R (tidak mengikuti SL asal)
+  const risk = Math.abs(plan.entry - plan.sl);
+  plan.tps = [1, 1.5, 2].map(m => plan.entry + dir * risk * m);
+  plan.rr = 1;
+  plan.tpMode = 'RISK_R';
+  return { before: Math.round(before), after: Math.round(risk / ctx.pip), clamped };
 }
 
 function runManual(ctx, d, styleName) {
