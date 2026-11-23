@@ -1,18 +1,15 @@
-// api/generate.js — v169
-// Perubahan v169:
-// 1) Reasoning manual (Scalping/Intraday/Swing) berformat SAMA seperti vision:
-//    [PAIR · Analisa Multi-TF · Style] + bullet per-TF + [Setup].
-// 2) AI menulis analisa per-TF dari plan.steps (tervalidasi anti-halusinasi angka).
-// 3) Fallback MTF tetap layout yang sama (tidak ada paragraf lama / "undefined").
-// 4) Guard sisi order: LIMIT BUY di atas harga / LIMIT SELL di bawah harga -> MARKET (NOW).
-// 5) Scalping MTF: clamp SL (gold 25-50 pip, BTC %) + TP 1/1.5/2/3/5 R + zoneSideOk.
-// 6) Vision: TP pakai angka AI bila valid; tp4/tp5 selalu dikirim & searah sinyal.
+// api/generate.js — v171
+// Perubahan v171:
+// 1) Invalidasi = swing high/low / tepi gap (FVG) / distal zona (di LUAR zona demand/supply).
+//    SL wajib di luar invalidasi + buffer; melebihi batas style => STANDBY.
+// 2) Intraday: 3 TP rasio 1:1.5, 1:3, 1:5. XAUUSD max SL 100 pip; BTCUSD 0.50%-1.20% entry.
+// 3) Scalping: gold 35-50 pip (TP 1/1.5/2/3/5 R); BTC 0.25%-0.60% (tidak disamakan dengan gold).
+// v170: dual bahasa reason (bot/manual/vision) + fallback translate.
+// v169: reasoning manual format vision (per-TF + [Setup]), guard sisi order, vision TP searah.
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import { planCrt } from '../lib/crt-engine.js';
 import { planIntraday, planSwing, planScalping } from '../lib/mtf-engine.js';
-// Mode manual multi-timeframe: 'mtf' = Intraday H4/H1/M15/M5, Swing D1/H4/H1/M15, Scalping M15/M5 + cadangan M1
-// 'legacy' = Intraday & Swing pakai CRT (WNS), Scalping pakai aturan lama
 const MTF_MODE = 'mtf';
 import { planBot } from '../lib/bot-ict.js';
 import {
@@ -88,7 +85,7 @@ const MAX_DIST_PIP = { 'Scalping': 150, 'Intraday': 500, 'Swing': 2000 };
 const MAX_DIST_OVERRIDE = { BTCUSD: 800, XAUUSD: 1000 };
 const MAX_DIST_SCALP_GOLD_PIP = 50;
 function maxDistFor(symbol, styleName) {
-  if (styleName === 'Scalping' && symbol === 'XAUUSD') return MAX_DIST_SCALP_GOLD_PIP;
+  if (styleName === 'Scalping' && isGold(symbol)) return MAX_DIST_SCALP_GOLD_PIP;
   return MAX_DIST_OVERRIDE[symbol] ?? MAX_DIST_PIP[styleName] ?? 150;
 }
 
@@ -380,7 +377,6 @@ function runCrtManual(ctx, closed, styleName, facts) {
   return { signal: sig, facts: { ...facts, status: sig.status } };
 }
 
-// Satu fungsi untuk Scalping, Intraday, dan Swing berbasis multi-timeframe (lib/mtf-engine.js)
 function runMtfStyle(ctx, closed, styleName, facts) {
   const now = Date.now();
   let plan;
@@ -412,8 +408,6 @@ function runMtfStyle(ctx, closed, styleName, facts) {
   let entry = safeNum(plan.entry, ctx.price);
   const sl = safeNum(plan.sl, ctx.price);
 
-  // Guard sisi order: LIMIT BUY wajib di bawah harga, LIMIT SELL wajib di atas harga.
-  // Jika harga sudah melewati entry, eksekusi NOW lebih jelas dan valid.
   const wrongSide = orderType === 'LIMIT' &&
     ((dir === 1 && entry > ctx.price) || (dir === -1 && entry < ctx.price));
   if (wrongSide) { orderType = 'MARKET'; entry = ctx.price; }
@@ -429,15 +423,17 @@ function runMtfStyle(ctx, closed, styleName, facts) {
     setup: `Manual · ${label} · ${plan.zone.kind}`,
     zone: { lower: plan.zone.lo, upper: plan.zone.hi, timeframe: plan.zone.tf || '', label: plan.zone.kind, mid: (plan.zone.lo + plan.zone.hi) / 2 },
   };
+  // Swing tetap 5 TP dari engine; Intraday 3 TP (1.5/3/5 R) diatur oleh applySlTpRules.
+  if (styleName === 'Swing') { p.tp4 = plan.tps?.[3]; p.tp5 = plan.tps?.[4]; }
 
-  // Scalping MTF: samakan aturan dengan legacy (SL gold 25-50 pip / BTC %, TP 1-1.5-2-3-5 R)
-  if (styleName === 'Scalping') {
-    clampScalpSl(p, ctx);
-    p.riskPips = Math.round(Math.abs(p.entry - p.sl) / ctx.pip);
-  } else {
-    p.tp4 = plan.tps?.[3];
-    p.tp5 = plan.tps?.[4];
+  // Invalidasi struktur (swing/gap/distal zona) + batas SL/TP per style
+  const execBars = styleName === 'Intraday' ? closed.m15 : styleName === 'Swing' ? closed.h4 : closed.m5;
+  const slAdj = applySlTpRules(p, ctx, execBars, styleName);
+  if (slAdj && slAdj.reject) {
+    return finishStandby(`Risk ${styleName} ${slAdj.need} pip melebihi batas ${slAdj.max} pip (invalidasi ${slAdj.invalid ?? '-'} di luar zona terlalu jauh). Menunggu zona lebih rapat.`);
   }
+  p.riskPips = Math.round(Math.abs(p.entry - p.sl) / ctx.pip);
+  if (slAdj && slAdj.invalid != null) p.invalidLevel = slAdj.invalid;
 
   if (!zoneSideOk(p))
     return finishStandby(`Setup ditolak: arah ${plan.dir} bertabrakan dengan ${zoneTxt(p)}. Menunggu zona searah.`);
@@ -454,7 +450,6 @@ function runMtfStyle(ctx, closed, styleName, facts) {
   sig.style = styleName;
   sig.role = 'main';
 
-  // Facts lengkap: dipakai AI per-TF dan anti-"undefined" di fallback.
   facts.signal = plan.dir;
   facts.role = 'main';
   facts.orderType = sig.orderType;
@@ -467,11 +462,11 @@ function runMtfStyle(ctx, closed, styleName, facts) {
   facts.tpMode = p.tpMode;
   facts.confirmed = orderType === 'MARKET';
   facts.zone = { label: p.zone.label, lower: sig.zone.min, upper: sig.zone.max };
+  facts.invalid = sig.invalidLevel;
   facts.status = sig.status;
   facts.reasonId = mtfFallbackReason(facts, false);
   facts.reasonEn = mtfFallbackReason(facts, true);
 
-  // Reasoning terstruktur dikunci: tidak boleh ditimpa story format lama.
   sig.reasonFormat = 'mtf';
   sig.reasonId = facts.reasonId;
   sig.reasonEn = facts.reasonEn;
@@ -501,7 +496,7 @@ async function runDocManual(ctx, d, styleName) {
   if (styleName === 'Intraday' || styleName === 'Swing') {
     return runCrtManual(ctx, closed, styleName, facts);
   }
-  if (styleName === 'Scalping' && MTF_MODE === 'mtf' && (ctx.symbol === 'XAUUSD' || ctx.symbol === 'BTCUSD')) {
+  if (styleName === 'Scalping' && MTF_MODE === 'mtf' && (isGold(ctx.symbol) || ctx.symbol === 'BTCUSD')) {
     return runMtfStyle(ctx, closed, 'Scalping', facts);
   }
 
@@ -598,7 +593,6 @@ async function runDocManual(ctx, d, styleName) {
     return standbyOut(facts, why, checks, regimeTxt);
   }
 
-  // Penjaga arah: BUY tidak boleh memakai zona SELL (supply), dan SELL tidak boleh memakai zona BUY (demand)
   if (styleName === 'Scalping' && !zoneSideOk(plan)) {
     const why = `Setup ditolak: arah ${plan.dir === 1 ? 'BUY' : 'SELL'} bertabrakan dengan ${zoneTxt(plan)}. Menunggu zona searah.`;
     facts.standbyReason = why;
@@ -606,7 +600,15 @@ async function runDocManual(ctx, d, styleName) {
   }
 
   let slNote = null;
-  if (styleName === 'Scalping' && (ctx.symbol === 'XAUUSD' || ctx.symbol === 'BTCUSD')) slNote = clampScalpSl(plan, ctx);
+  if (styleName === 'Scalping' && (isGold(ctx.symbol) || ctx.symbol === 'BTCUSD')) {
+    slNote = applySlTpRules(plan, ctx, closed.m5, 'Scalping');
+    if (slNote && slNote.reject) {
+      const why = `Risk scalping ${slNote.need} pip melebihi batas ${slNote.max} pip (invalidasi ${slNote.invalid ?? '-'} di luar zona terlalu jauh). Menunggu zona lebih rapat.`;
+      facts.standbyReason = why;
+      return standbyOut(facts, why, checks, regimeTxt);
+    }
+    if (slNote && slNote.invalid != null) plan.invalidLevel = slNote.invalid;
+  }
   if (slNote && slNote.clamped) plan.setup = `${plan.setup} · SL ${slNote.before}→${slNote.after} pip`;
   plan.setup = `${plan.setup}${gate.ai ? ' · AI AMBIL' : ''}`;
 
@@ -641,7 +643,6 @@ async function runDocManual(ctx, d, styleName) {
   return { signal: sig, facts: { ...facts, status: sig.status } };
 }
 
-// Penjaga arah zona: label zona menentukan sisi yang boleh dipakai
 const zoneTxt = plan => String((plan.zone && plan.zone.label) || plan.zoneLabel || plan.setup || '');
 function zoneSideOk(plan) {
   const lab = zoneTxt(plan);
@@ -653,32 +654,104 @@ function zoneSideOk(plan) {
   return true;
 }
 
-// Batas SL Scalping: XAUUSD 25-50 pip; BTCUSD 0.04%-0.12% dari harga entry.
-const SCALP_GOLD_MAX_SL_PIPS = 50;
-const SCALP_GOLD_MIN_SL_PIPS = 25;
-const SCALP_BTC_MIN_SL_PCT = 0.0004;
-const SCALP_BTC_MAX_SL_PCT = 0.0012;
-const SCALP_TP_R = [1, 1.5, 2, 3, 5];
-function scalpSlBounds(entry, ctx) {
-  if (ctx.symbol === 'XAUUSD') return { min: SCALP_GOLD_MIN_SL_PIPS * ctx.pip, max: SCALP_GOLD_MAX_SL_PIPS * ctx.pip };
-  return { min: entry * SCALP_BTC_MIN_SL_PCT, max: entry * SCALP_BTC_MAX_SL_PCT };
+// ── ATURAN SL/TP PER STYLE (v171) ──
+// Invalidasi = level struktur DI LUAR zona: swing low/high, tepi gap (FVG), atau distal zona.
+// SL wajib di luar invalidasi + buffer; jika melebihi batas style => STANDBY (tidak dipotong ke dalam zona).
+const SL_TP_RULES = {
+  Scalping: { goldMinPip: 35, goldMaxPip: 50,  btcMinPct: 0.0025, btcMaxPct: 0.0060, tps: [1, 1.5, 2, 3, 5] },
+  Intraday: { goldMinPip: 35, goldMaxPip: 100, btcMinPct: 0.0050, btcMaxPct: 0.0120, tps: [1.5, 3, 5] },
+  Swing:    { goldMinPip: 50, goldMaxPip: 300, btcMinPct: 0.0100, btcMaxPct: 0.0250, tps: null }, // null = TP engine
+};
+const INV_LOOKBACK = 30;
+const INV_SWING_LR = 2;
+function slBounds(entry, ctx, styleName) {
+  const r = SL_TP_RULES[styleName] || SL_TP_RULES.Scalping;
+  if (isGold(ctx.symbol)) return { min: r.goldMinPip * ctx.pip, max: r.goldMaxPip * ctx.pip };
+  return { min: entry * r.btcMinPct, max: entry * r.btcMaxPct };
 }
-function clampScalpSl(plan, ctx) {
-  if (!plan || !Number.isFinite(plan.entry) || !Number.isFinite(plan.sl) || !(ctx.pip > 0)) return null;
+function swingLevels(rows, lookback = INV_LOOKBACK, lr = INV_SWING_LR) {
+  const out = { highs: [], lows: [] };
+  if (!Array.isArray(rows) || rows.length < lr * 2 + 3) return out;
+  const a = rows.slice(-lookback);
+  for (let i = lr; i < a.length - lr; i++) {
+    let isH = true, isL = true;
+    for (let j = i - lr; j <= i + lr; j++) {
+      if (j === i) continue;
+      if (a[j].h >= a[i].h) isH = false;
+      if (a[j].l <= a[i].l) isL = false;
+    }
+    if (isH) out.highs.push(a[i].h);
+    if (isL) out.lows.push(a[i].l);
+  }
+  return out;
+}
+function gapEdges(rows, lookback = INV_LOOKBACK) {
+  const out = { bullLower: [], bearUpper: [] };
+  if (!Array.isArray(rows) || rows.length < 3) return out;
+  const a = rows.slice(-lookback);
+  for (let i = 1; i < a.length - 1; i++) {
+    if (a[i - 1].h < a[i + 1].l) out.bullLower.push(a[i - 1].h); // tepi bawah gap bullish
+    if (a[i - 1].l > a[i + 1].h) out.bearUpper.push(a[i - 1].l); // tepi atas gap bearish
+  }
+  return out;
+}
+function deriveInvalidation(plan, ctx, bars) {
   const dir = plan.dir === 1 ? 1 : -1;
-  const b = scalpSlBounds(plan.entry, ctx);
+  const zLo = Number(plan.zone?.lower), zHi = Number(plan.zone?.upper);
+  const hasZone = Number.isFinite(zLo) && Number.isFinite(zHi) && zHi > zLo;
+  const distal = hasZone ? (dir === 1 ? zLo : zHi) : NaN;
+  const zw = hasZone ? (zHi - zLo) : 0;
+  const atr = atrSimple(bars || []);
+  const reach = zw > 0 ? zw : (atr > 0 ? atr : ctx.pip * 10);
+  const cands = [];
+  if (Number.isFinite(Number(plan.invalidLevel))) cands.push(Number(plan.invalidLevel));
+  if (Number.isFinite(distal)) cands.push(distal);
+  const sw = swingLevels(bars);
+  const gp = gapEdges(bars);
+  if (dir === 1) {
+    // swing low / tepi bawah gap yang berada di luar (bawah) distal demand, maksimal 1 lebar zona
+    for (const v of [...sw.lows, ...gp.bullLower]) if (Number.isFinite(v) && Number.isFinite(distal) && v <= distal && v >= distal - reach) cands.push(v);
+    // gap yang overlap zona: tepi bawahnya di dalam zona juga kandidat invalidasi
+    for (const v of gp.bullLower) if (Number.isFinite(v) && hasZone && v > distal && v <= zHi) cands.push(v);
+    const valid = cands.filter(v => v < plan.entry);
+    return valid.length ? Math.min(...valid) : NaN;
+  }
+  for (const v of [...sw.highs, ...gp.bearUpper]) if (Number.isFinite(v) && Number.isFinite(distal) && v >= distal && v <= distal + reach) cands.push(v);
+  for (const v of gp.bearUpper) if (Number.isFinite(v) && hasZone && v < distal && v >= zLo) cands.push(v);
+  const valid = cands.filter(v => v > plan.entry);
+  return valid.length ? Math.max(...valid) : NaN;
+}
+function applySlTpRules(plan, ctx, bars, styleName) {
+  if (!plan || !Number.isFinite(plan.entry) || !Number.isFinite(plan.sl) || !(ctx.pip > 0)) return null;
+  const rule = SL_TP_RULES[styleName] || SL_TP_RULES.Scalping;
+  const dir = plan.dir === 1 ? 1 : -1;
+  const b = slBounds(plan.entry, ctx, styleName);
   const beforeDist = Math.abs(plan.entry - plan.sl);
-  let dist = beforeDist, clamped = false;
-  if (dist > b.max) { dist = b.max; clamped = true; }
-  else if (dist < b.min) { dist = b.min; clamped = true; }
+  const inv = deriveInvalidation(plan, ctx, bars);
+  const atr = atrSimple(bars || []);
+  const zoneWidth = Number(plan.zone?.upper) - Number(plan.zone?.lower);
+  const buffer = atr > 0 ? 0.1 * atr : 0.1 * (zoneWidth > 0 ? zoneWidth : ctx.pip * 10);
+  const invDist = Number.isFinite(inv) ? Math.abs(plan.entry - inv) + buffer : 0;
+  // SL tidak boleh lebih rapat dari invalidasi struktur, dan tidak boleh di bawah batas minimal
+  const dist = Math.max(beforeDist, invDist, b.min);
+  const needPip = Math.round(dist / ctx.pip);
+  const maxPip = Math.round(b.max / ctx.pip);
+  const invFmt = Number.isFinite(inv) ? Number(ctx.f(inv)) : null;
+  if (dist > b.max) {
+    return { reject: true, clamped: false, before: Math.round(beforeDist / ctx.pip), need: needPip, max: maxPip, invalid: invFmt };
+  }
+  const clamped = Math.abs(dist - beforeDist) > 1e-9;
   plan.sl = plan.entry - dir * dist;
-  // TP dihitung ulang dari SL akhir dengan kelipatan R yang sama untuk semua pair
-  plan.tps = [SCALP_TP_R[0], SCALP_TP_R[1], SCALP_TP_R[2]].map(m => plan.entry + dir * dist * m);
-  plan.tp4 = plan.entry + dir * dist * SCALP_TP_R[3];
-  plan.tp5 = plan.entry + dir * dist * SCALP_TP_R[4];
-  plan.rr = 1;
-  plan.tpMode = 'RISK_R';
-  return { before: Math.round(beforeDist / ctx.pip), after: Math.round(dist / ctx.pip), clamped };
+  if (Array.isArray(rule.tps)) {
+    plan.tps = rule.tps.slice(0, 3).map(m => plan.entry + dir * dist * m);
+    plan.tp4 = rule.tps[3] != null ? plan.entry + dir * dist * rule.tps[3] : undefined;
+    plan.tp5 = rule.tps[4] != null ? plan.entry + dir * dist * rule.tps[4] : undefined;
+    plan.rr = rule.tps[0];
+    plan.tpMode = 'RISK_R';
+  }
+  plan.riskPips = Math.round(dist / ctx.pip);
+  if (Number.isFinite(inv)) plan.invalidLevel = inv;
+  return { before: Math.round(beforeDist / ctx.pip), after: needPip, clamped, invalid: invFmt };
 }
 function tpListTxt(tp, id) {
   const v = (tp || []).filter(x => x != null);
@@ -687,7 +760,6 @@ function tpListTxt(tp, id) {
   return id ? `${head.join(', ')}, serta ${last}` : `${head.join(', ')}, and ${last}`;
 }
 
-// Layout reasoning manual SAMA PERSIS dengan vision: header + bullet per-TF + [Setup]
 function mtfLayoutReason(f, en, perTfLines, setupText) {
   const head = `[${f.symbol} · ${en ? 'Multi-TF Analysis' : 'Analisa Multi-TF'} · ${f.style}]`;
   const bullets = (perTfLines || []).map(t => `• ${t}`).join('\n');
@@ -700,9 +772,10 @@ function mtfFallbackReason(f, en) {
     setup = `${f.symbol}: ${f.standbyReason || (en ? 'Waiting for a valid setup.' : 'Menunggu setup valid.')}`;
   } else {
     const orderWord = f.orderType === 'MARKET' ? 'MARKET (NOW)' : 'LIMIT';
+    const invTxt = f.invalid != null ? (en ? ` Invalidation ${f.invalid}.` : ` Invalidasi ${f.invalid}.`) : '';
     setup = en
-      ? `${f.symbol}: final decision ${f.signal} ${orderWord} @ ${f.entry}, SL ${f.sl}, targets ${tpListTxt(f.tp, false)}.`
-      : `${f.symbol}: keputusan final ${f.signal} ${orderWord} @ ${f.entry}, SL ${f.sl}, target ${tpListTxt(f.tp, true)}.`;
+      ? `${f.symbol}: final decision ${f.signal} ${orderWord} @ ${f.entry}, SL ${f.sl}, targets ${tpListTxt(f.tp, false)}.${invTxt}`
+      : `${f.symbol}: keputusan final ${f.signal} ${orderWord} @ ${f.entry}, SL ${f.sl}, target ${tpListTxt(f.tp, true)}.${invTxt}`;
   }
   return mtfLayoutReason(f, en, lines, setup);
 }
@@ -851,9 +924,11 @@ Jika role = "nearest": jelaskan bahwa ini sinyal zona terdekat karena belum ada 
 Jika field oco ada: jelaskan dua limit (legs) beserta angkanya, dan bahwa jika salah satu terisi, yang lain dibatalkan.
 Jika tpMode ada: sebutkan bahwa TP mengikuti band risk (riskPips) beserta rasio TP-nya. Jika tpMode = "CRT", sebutkan TP3 menuju sisi range berlawanan.
 Jika field crtHigh dan crtLow ada (Intraday/Swing): sebutkan CRT High dan CRT Low serta area WNS SELL dan WNS BUY persis angkanya, walau status STANDBY.
+Jika field invalid ada: sebutkan bahwa SL berada di luar level invalidasi struktur (swing/gap/distal zona) pada angka itu.
 Jika status = "RUNNING" atau "PENDING": sebutkan arah, bias HTF (bias), zona POI, serta angka persis entry, SL, dan TP. Jika confirmed = false, sebutkan bahwa konfirmasi M1 belum ada.
 Jika status = "STANDBY": sebutkan alasan dari standbyReason, checklist yang OK dan yang BELUM, zona dari watch (jika ada), dan syarat dari syarat.
 Pakai "saya" atau "kita". JANGAN pakai daftar/bullet atau tanda bintang (*). WAJIB tulis 4 sampai 6 kalimat lengkap.
+Tulis "id" dalam Bahasa Indonesia dan "en" dalam Bahasa Inggris natural dengan isi/angka yang sama persis.
 Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}`;
 
 const SYS_BOT_EA = `Kamu adalah mentor trading yang menjelaskan keputusan bot scalper bergaya EA (aturan pasti berbasis EMA dan ATR) dengan bahasa santai dan mengalir.
@@ -865,6 +940,7 @@ Jika STANDBY: sebutkan persis syarat mana yang BELUM terpenuhi dari "checklist" 
 Jika RUNNING/PENDING: sebutkan arah, entry, SL, dan TP persis dari JSON. Jelaskan bahwa SL berbasis ATR dan TP hanya satu target (tp1, sama dengan tp2 dan tp3) dengan rasio 1:1,5 dari jarak SL.
 Jangan menyebut zona Supply/Demand, Order Block, atau CHoCH karena bot ini tidak memakainya.
 Pakai kata "saya" atau "kita".
+Tulis "id" dalam Bahasa Indonesia dan "en" dalam Bahasa Inggris natural dengan isi/angka yang sama persis.
 Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}`;
 
 const SYS_BOT = `Kamu adalah mentor trading senior spesialis SMC (Market Structure, Order Block, FVG, Supply & Demand) yang sedang menjelaskan analisa bot scalper ke muridnya dengan gaya bercerita (story telling) yang santai, dinamis, dan mengalir.
@@ -877,6 +953,7 @@ Berikan skenario dinamis: jika harga berbalik (reversal) apa rencananya, jika la
 Jika bot STANDBY: jelaskan dengan santai apa yang sedang ditunggu berdasarkan "checklist" dan "standbyReason", serta zona dari "watch".
 Jika bot RUNNING/PENDING: jelaskan arah, tier, trigger, entry, SL, dan TP persis dari JSON. Jika tier diawali "ICT", tegaskan bahwa ini setup POI ICT M15 dengan eksekusi limit M5.
 Gunakan kata "saya" atau "kita".
+Tulis "id" dalam Bahasa Indonesia dan "en" dalam Bahasa Inggris natural dengan isi/angka yang sama persis.
 Balas HANYA JSON valid tanpa kode blok: {"id":"...","en":"..."}`;
 
 const NUM_RE = /\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?/g;
@@ -1100,15 +1177,17 @@ async function getStoryFast(facts, cacheKey, ttl, budgetMs) {
   return { id: fallbackStory(facts, 'id'), en: fallbackStory(facts, 'en'), ai: false, aiError: 'AI masih berjalan', pending: true };
 }
 
-// ── AI REASONING MANUAL MTF (format sama seperti vision) ──
+// ── AI REASONING MANUAL MTF (format vision, dual bahasa) ──
 const SYS_MANUAL_MTF = `Kamu analis trading spesialis SMC (Market Structure, Order Block, FVG, Supply & Demand). Kamu menjelaskan hasil scan multi-timeframe sistem secara faktual dan santai, seperti analis yang membaca beberapa chart sekaligus.
 ATURAN MUTLAK ANTI-HALUSINASI:
 DILARANG mengarang atau mengubah angka harga yang TIDAK ADA di JSON input. Salin angka persis dari JSON.
 DILARANG mengubah tipe order: orderType "MARKET" = eksekusi sekarang, "LIMIT" = pending limit.
 Untuk SETIAP item di array "steps" (urutan TF tertinggi ke terendah), tulis maksimal 2 kalimat pendek: struktur tren TF tersebut + zona S&D/OB/FVG terdekat dan posisi harga terhadap zona itu. Awali tiap item dengan nama TF-nya, contoh "M15: ...".
 Lalu tulis ringkasan setup 2-3 kalimat diawali nama pair: keputusan final (arah + tipe order + entry + SL + TP persis dari JSON) dan alasan konfluensi utama dari steps.
+Jika field "invalid" ada: sebutkan bahwa SL ditempatkan di luar level invalidasi struktur (swing high/low, tepi gap, atau distal zona) pada angka itu.
 Jika status "STANDBY": ringkasan menjelaskan apa yang ditunggu berdasarkan standbyReason dan steps, tanpa menyebut entry/SL/TP.
 Pakai "saya" atau "kita". Jangan pakai bullet atau tanda bintang di dalam string.
+WAJIB dual bahasa: perTfId & id dalam Bahasa Indonesia; perTfEn & en dalam Bahasa Inggris natural, isi dan angka sama persis.
 Balas HANYA JSON valid tanpa kode blok: {"perTfId":["M15: ...","M5: ..."],"perTfEn":["M15: ...","M5: ..."],"id":"...","en":"..."}`;
 
 async function getMtfStory(facts, cacheKey, ttl = MANUAL_STORY_TTL_MS) {
@@ -1168,12 +1247,30 @@ async function getMtfStoryFast(facts, cacheKey, ttl, budgetMs) {
   const got = await Promise.race([p, budget]);
   clearTimeout(timer);
   if (got) return got;
-  // Budget habis: tetap layout vision, bukan paragraf lama.
   return {
     id: facts.reasonId || mtfFallbackReason(facts, false),
     en: facts.reasonEn || mtfFallbackReason(facts, true),
     ai: false, aiError: 'AI masih berjalan', pending: true,
   };
+}
+
+// ── DUAL BAHASA: fallback translate bila versi EN tidak tersedia ──
+const SYS_TRANSLATE = `Terjemahkan teks analisa trading ke Bahasa Inggris yang natural dan profesional.
+PERTAHANKAN semua angka, nama pair, simbol, dan struktur baris (bullet "•", header "[...]", blok "[Setup]", nama TF).
+Jangan menambah atau mengurangi informasi.
+Balas HANYA JSON valid: {"id":"<teks asli apa adanya>","en":"<terjemahan Inggris>"}`;
+async function ensureEnglishReason(sig, lang) {
+  if (!sig || !sig.reasons) return sig;
+  if (sig.reasons.en && sig.reasons.en !== sig.reasons.id) {
+    sig.reason = lang === 'en' ? sig.reasons.en : sig.reasons.id;
+    return sig;
+  }
+  try {
+    const { json } = await qwenJson(SYS_TRANSLATE, { text: sig.reasons.id }, 900, 6000, QWEN_MANUAL_MODELS, QWEN_MANUAL_KEYS);
+    if (json && typeof json.en === 'string' && json.en.trim().length > 20) sig.reasons.en = json.en.trim();
+  } catch (e) { console.warn('ensureEnglishReason:', e.message); }
+  sig.reason = lang === 'en' ? sig.reasons.en : sig.reasons.id;
+  return sig;
 }
 
 const SYS_GATE_MANUAL = `Kamu adalah filter veto untuk kandidat setup MANUAL SMC.
@@ -1213,21 +1310,21 @@ async function aiGateManual(input) {
   return fallback;
 }
 
-// ── VISION ──
+// ── VISION (dual bahasa) ──
 const VISION_BASE = `Kamu adalah analis trading spesialis SUPPLY & DEMAND (RBR/DBR/RBD/DBD), Order Block, dan Market Structure.
 ATURAN MUTLAK:
-Analisis SETIAP GAMBAR di array "perImageAnalyses" (maks 2 kalimat pendek per gambar: struktur tren + zona S&D/OB terdekat).
+Analisis SETIAP GAMBAR di array "perImageAnalyses" (Bahasa Indonesia, maks 2 kalimat pendek per gambar: struktur tren + zona S&D/OB terdekat) dan "perImageAnalysesEn" (versi Inggris natural, isi sama).
 Top-down: struktur tren dari TF tertinggi menentukan arah utama, zona S&D dari TF menengah, Order Block dari TF terendah.
 Pilih SATU zona S&D/OB terbaik yang searah struktur tren dan terdekat dengan harga sekarang.
 WAJIB MENGHASILKAN SIGNAL BUY atau SELL. Jawab "NONE" HANYA jika gambar bukan chart atau tidak terbaca.
 Entry: LIMIT di proximal atau 50% body OB jika harga belum menyentuh zona. MARKET hanya jika harga sudah berada di dalam zona OB dan ada penolakan (wick / engulfing / CHoCH mikro).
-SL di luar distal zona + buffer kecil. BUY: sl < entry. SELL: sl > entry.
+SL di luar distal zona + buffer kecil (di luar swing low/high atau tepi gap yang menjadi invalidasi). BUY: sl < entry. SELL: sl > entry.
 Semua level (entry, sl, tp, zoneLow, zoneHigh) WAJIB dibaca persis dari skala sumbu kanan chart.
-reason maksimal 3 kalimat diawali nama pair, sebutkan angka persis seperti di field JSON.
+"reason" maksimal 3 kalimat Bahasa Indonesia diawali nama pair; "reasonEn" versi Inggris natural dengan angka yang sama persis.
 PAIR: salin NAMA PAIR persis seperti tertulis di judul/header chart, lalu ubah ke format tanpa spasi/garis miring (contoh: judul 'XXX / YYY' -> XXXYYY). Jangan memakai contoh pair lain dan jangan menebak dari harga atau pengetahuanmu. Jika tidak terbaca, isi pair dengan "".
 DESIMAL: hitung jumlah digit desimal dari label harga pada sumbu harga chart yang sedang dianalisa, lalu isi "decimals". Semua harga harus memakai desimal itu.
 Balas HANYA JSON valid tanpa kode blok:
-{"signal":"BUY|SELL","orderType":"MARKET|LIMIT","entry":0,"sl":0,"tp1":0,"tp2":0,"tp3":0,"setup":"","confidence":"HIGH|MEDIUM|LOW","risk":"LOW|MEDIUM|HIGH","perImageAnalyses":["Gambar 1: ..."],"reason":"PAIR: ...","topDown":"...","zone":"Demand","pair":"PEPEUSDT","pairRaw":"PEPE / TetherUS","decimals":0,"zoneLow":0,"zoneHigh":0}`;
+{"signal":"BUY|SELL","orderType":"MARKET|LIMIT","entry":0,"sl":0,"tp1":0,"tp2":0,"tp3":0,"setup":"","confidence":"HIGH|MEDIUM|LOW","risk":"LOW|MEDIUM|HIGH","perImageAnalyses":["Gambar 1: ..."],"perImageAnalysesEn":["Image 1: ..."],"reason":"PAIR: ...","reasonEn":"PAIR: ...","topDown":"...","zone":"Demand","pair":"PEPEUSDT","pairRaw":"PEPE / TetherUS","decimals":0,"zoneLow":0,"zoneHigh":0}`;
 function buildVisionSystem(style) {
   const map = {
     'Scalping': 'STYLE: SCALPING S&D/OB (M15 Bias & S&D -> M5 OB -> M1 Konfirmasi). Cari zona S&D/OB terdekat searah struktur M15.',
@@ -1293,14 +1390,12 @@ function buildVisionSignal(j, style, lang, imgCount) {
   if (!(risk > 0)) risk = pip * 10;
   const sl = f(entry - dir * risk);
 
-  // TP: pakai angka AI HANYA jika valid, searah, berurutan, dan sesuai skala chart.
   const aiTps = [j.tp1, j.tp2, j.tp3].map(Number);
   const sideOk = aiTps.every(v => Number.isFinite(v) && v > 0 && (dir === 1 ? v > entry : v < entry));
   const orderOk = dir === 1 ? (aiTps[0] < aiTps[1] && aiTps[1] < aiTps[2]) : (aiTps[0] > aiTps[1] && aiTps[1] > aiTps[2]);
   const scaleOk = aiTps.every(v => Math.abs(v - entry) / entry < 0.05);
   const tpsFromAi = sideOk && orderOk && scaleOk;
   const [tp1, tp2, tp3] = tpsFromAi ? aiTps.map(f) : [1.5, 2.25, 3].map(k => f(entry + dir * risk * k));
-  // TP4/TP5 selalu dikirim backend dan selalu searah sinyal.
   const tp4 = f(entry + dir * risk * 4);
   const tp5 = f(entry + dir * risk * 5);
 
@@ -1310,15 +1405,20 @@ function buildVisionSignal(j, style, lang, imgCount) {
   zLo = f(zLo); zHi = f(zHi);
   const zoneName = String(j.zone || (dir === 1 ? 'Demand' : 'Supply')).replace(/[0-9.,\s-–]+$/g, '').trim() || (dir === 1 ? 'Demand' : 'Supply');
   const fix = t => fmtPriceText(t, entry, dec);
-  const perImg = Array.isArray(j.perImageAnalyses) && j.perImageAnalyses.length ? j.perImageAnalyses.map(item => `• ${fix(String(item).trim())}`).join('\n') : '';
-  let summary = fix(String(j.reason || '').trim()) || 'Analisis AI dari chart.';
-  if (!summary.toUpperCase().includes(sym)) summary = `${sym}: ${summary}`;
+
+  const perImgId = Array.isArray(j.perImageAnalyses) && j.perImageAnalyses.length ? j.perImageAnalyses.map(item => `• ${fix(String(item).trim())}`).join('\n') : '';
+  const perImgEn = Array.isArray(j.perImageAnalysesEn) && j.perImageAnalysesEn.length ? j.perImageAnalysesEn.map(item => `• ${fix(String(item).trim())}`).join('\n') : perImgId;
+  let sumId = fix(String(j.reason || '').trim()) || 'Analisis AI dari chart.';
+  let sumEn = fix(String(j.reasonEn || '').trim()) || sumId;
+  if (!sumId.toUpperCase().includes(sym)) sumId = `${sym}: ${sumId}`;
+  if (!sumEn.toUpperCase().includes(sym)) sumEn = `${sym}: ${sumEn}`;
   if (!tpsFromAi) {
-    summary += lang === 'en'
-      ? ` Final targets: TP1 ${tp1}, TP2 ${tp2}, TP3 ${tp3}.`
-      : ` Target final: TP1 ${tp1}, TP2 ${tp2}, TP3 ${tp3}.`;
+    sumId += ` Target final: TP1 ${tp1}, TP2 ${tp2}, TP3 ${tp3}.`;
+    sumEn += ` Final targets: TP1 ${tp1}, TP2 ${tp2}, TP3 ${tp3}.`;
   }
-  const fullReason = perImg ? `[${sym} · Analisa ${imgCount} Gambar]\n${perImg}\n\n[Setup]\n${summary}` : summary;
+  const fullId = perImgId ? `[${sym} · Analisa ${imgCount} Gambar]\n${perImgId}\n\n[Setup]\n${sumId}` : sumId;
+  const fullEn = perImgEn ? `[${sym} · ${imgCount}-Image Analysis]\n${perImgEn}\n\n[Setup]\n${sumEn}` : sumEn;
+
   const now = Date.now();
   const pips = v => Number((Math.abs(v - entry) / pip).toFixed(1));
   const rr = Number((Math.abs(tp3 - entry) / risk).toFixed(2));
@@ -1330,7 +1430,8 @@ function buildVisionSignal(j, style, lang, imgCount) {
     slPips: pips(sl), tp1Pips: pips(tp1), tp2Pips: pips(tp2), tp3Pips: pips(tp3), tp4Pips: pips(tp4), tp5Pips: pips(tp5),
     setup: fix(String(j.setup || `Vision ${style}`)),
     confidence: lvl(j.confidence, ['HIGH', 'MEDIUM', 'LOW'], 'MEDIUM'), risk: lvl(j.risk, ['LOW', 'MEDIUM', 'HIGH'], 'MEDIUM'),
-    reason: fullReason, reasons: { id: fullReason, en: fullReason },
+    reason: lang === 'en' ? fullEn : fullId,
+    reasons: { id: fullId, en: fullEn },
     chartContext: `${sym} ${sig} ${isLimit ? 'LIMIT' : 'MARKET'} ${entry.toFixed(dec)}`,
     zone: { min: zLo, max: zHi, label: `${zoneName} ${zLo.toFixed(dec)}–${zHi.toFixed(dec)}` },
     zoneLabel: `${zoneName} ${zLo.toFixed(dec)}–${zHi.toFixed(dec)}`, zoneNote: '',
@@ -1344,11 +1445,11 @@ async function runVisionAnalysis(images, style, lang) {
   const imgs = images.filter(s => typeof s === 'string' && /^data:image\/(png|jpe?g|webp);base64,/i.test(s));
   if (!imgs.length) return { ok: false, reason: msg(lang, 'badImage') };
   const userContent = [
-    { type: 'text', text: `Jumlah gambar: ${imgs.length}. Style: ${style}. Analisa tiap gambar.` },
+    { type: 'text', text: `Jumlah gambar: ${imgs.length}. Style: ${style}. Analisa tiap gambar. Wajib isi reasonEn dan perImageAnalysesEn (Bahasa Inggris).` },
     ...imgs.flatMap((url, i) => [{ type: 'text', text: `Gambar ${i + 1}/${imgs.length}:` }, { type: 'image_url', image_url: { url } }]),
   ];
   const deadline = Date.now() + VISION_DEADLINE_MS;
-  const FORCE_TXT = { type: 'text', text: 'PENTING: jawaban NONE tidak diterima. Pilih zona S&D/OB terdekat dari harga, lalu berikan BUY atau SELL lengkap dengan entry dan SL dari skala chart.' };
+  const FORCE_TXT = { type: 'text', text: 'PENTING: jawaban NONE tidak diterima. Pilih zona S&D/OB terdekat dari harga, lalu berikan BUY atau SELL lengkap dengan entry dan SL dari skala chart. Sertakan reasonEn dan perImageAnalysesEn.' };
   const callAI = (v, force = false) => {
     const left = deadline - Date.now();
     if (left < 8000) throw new Error('Timeout: layanan eksternal lama merespons');
@@ -1380,6 +1481,7 @@ async function runVisionAnalysis(images, style, lang) {
   }
   const bad = checkVisionSignal(parsed); if (bad) return { ok: false, reason: bad };
   const sigOut = buildVisionSignal(parsed, style, lang, imgs.length);
+  await ensureEnglishReason(sigOut, lang);
   sigOut.visionDebug = { model: AI_VISION_MODEL, images: imgs.length, promptTokens: usage.prompt_tokens ?? null };
   return { ok: true, signal: sigOut };
 }
@@ -1503,7 +1605,11 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
   if (keepPrev) {
     const last = data.m1 && data.m1.length ? data.m1[data.m1.length - 1] : null;
     const nextCloseAt = isAutoBot && last ? tsMs(last.t) + TF_MS.m1 : undefined;
-    return res.status(200).json({ ok: true, mode: isAutoBot ? 'bot' : 'candles', symbol, style: styleName, price, signal: { ...prev, sticky: true, nextCloseAt }, diag: { ...diag, sticky: true } });
+    const prevSig = { ...prev, sticky: true, nextCloseAt };
+    if (prevSig.reasons && (prevSig.reasons.id || prevSig.reasons.en)) {
+      prevSig.reason = lang === 'en' ? (prevSig.reasons.en || prevSig.reasons.id) : (prevSig.reasons.id || prevSig.reasons.en);
+    }
+    return res.status(200).json({ ok: true, mode: isAutoBot ? 'bot' : 'candles', symbol, style: styleName, price, signal: prevSig, diag: { ...diag, sticky: true } });
   }
   if (out.signal.status !== 'STANDBY') {
     out.signal.createdAt = Date.now();
@@ -1517,7 +1623,6 @@ async function handleCandles(body, lang, res, { email, isAutoBot }) {
     ? `${symbol}|${styleName}|${f.status}|${f.signal || ''}|${f.trigger || ''}|${f.bias || ''}|${f.tier || ''}`
     : `M|${symbol}|${styleName}|${f.status}|${f.signal || ''}|${f.entry || ''}|${String(f.standbyReason || '').slice(0, 60)}`;
 
-  // Manual MTF: reasoning format vision (per-TF + [Setup]), tidak lewat story lama.
   const isMtf = !isAutoBot && out.signal.reasonFormat === 'mtf';
   const story = isMtf
     ? await getMtfStoryFast(f, `MTF|${cacheKey}`, MANUAL_STORY_TTL_MS, BOT_CFG.storyBudgetManualMs)
