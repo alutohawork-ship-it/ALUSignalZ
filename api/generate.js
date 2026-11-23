@@ -512,7 +512,7 @@ async function runDocManual(ctx, d, styleName) {
     return standbyOut(facts, why, checks, regimeTxt);
   }
   let slNote = null;
-  if (styleName === 'Scalping' && ctx.symbol === 'XAUUSD') slNote = clampScalpSl(plan, ctx);
+  if (styleName === 'Scalping' && (ctx.symbol === 'XAUUSD' || ctx.symbol === 'BTCUSD')) slNote = clampScalpSl(plan, ctx);
   if (slNote && slNote.clamped) plan.setup = `${plan.setup} · SL ${slNote.before}→${slNote.after} pip`;
   plan.setup = `${plan.setup}${gate.ai ? ' · AI AMBIL' : ''}`;
   const sig = toSignal(plan, ctx, {
@@ -560,25 +560,30 @@ function zoneSideOk(plan) {
 // SL dipersempit ke batas itu; TP tetap dari plan asal, sehingga RR ikut naik.
 const SCALP_GOLD_MAX_SL_PIPS = 50;
 const SCALP_GOLD_MIN_SL_PIPS = 25;   // SL minimal 25 pip (bisa dinaikkan ke 30)
+// Batas SL Scalping: XAUUSD 25-50 pip; BTCUSD 0.04%-0.12% dari harga entry (bisa diubah di sini).
+const SCALP_BTC_MIN_SL_PCT = 0.0004;
+const SCALP_BTC_MAX_SL_PCT = 0.0012;
+const SCALP_TP_R = [1, 1.5, 2, 3, 5];   // TP Scalping manual: 1:1, 1:1.5, 1:2, 1:3, 1:5 (semua pair)
+function scalpSlBounds(entry, ctx) {
+  if (ctx.symbol === 'XAUUSD') return { min: SCALP_GOLD_MIN_SL_PIPS * ctx.pip, max: SCALP_GOLD_MAX_SL_PIPS * ctx.pip };
+  return { min: entry * SCALP_BTC_MIN_SL_PCT, max: entry * SCALP_BTC_MAX_SL_PCT };
+}
 function clampScalpSl(plan, ctx) {
   if (!plan || !Number.isFinite(plan.entry) || !Number.isFinite(plan.sl) || !(ctx.pip > 0)) return null;
   const dir = plan.dir === 1 ? 1 : -1;
-  const before = Math.abs(plan.entry - plan.sl) / ctx.pip;
-  let clamped = false;
-  if (before > SCALP_GOLD_MAX_SL_PIPS) {
-    plan.sl = plan.entry - dir * SCALP_GOLD_MAX_SL_PIPS * ctx.pip;
-    clamped = true;
-  } else if (before < SCALP_GOLD_MIN_SL_PIPS) {
-    // SL terlalu rapat: dilebarkan ke batas minimum
-    plan.sl = plan.entry - dir * SCALP_GOLD_MIN_SL_PIPS * ctx.pip;
-    clamped = true;
-  }
-  // TP Scalping selalu dihitung dari SL akhir: TP1 1R, TP2 1.5R, TP3 2R (tidak mengikuti SL asal)
-  const risk = Math.abs(plan.entry - plan.sl);
-  plan.tps = [1, 1.5, 2].map(m => plan.entry + dir * risk * m);
+  const b = scalpSlBounds(plan.entry, ctx);
+  const beforeDist = Math.abs(plan.entry - plan.sl);
+  let dist = beforeDist, clamped = false;
+  if (dist > b.max) { dist = b.max; clamped = true; }
+  else if (dist < b.min) { dist = b.min; clamped = true; }
+  plan.sl = plan.entry - dir * dist;
+  // TP dihitung dari SL akhir dengan kelipatan R yang sama untuk semua pair
+  plan.tps = [SCALP_TP_R[0], SCALP_TP_R[1], SCALP_TP_R[2]].map(m => plan.entry + dir * dist * m);
+  plan.tp4 = plan.entry + dir * dist * SCALP_TP_R[3];
+  plan.tp5 = plan.entry + dir * dist * SCALP_TP_R[4];
   plan.rr = 1;
   plan.tpMode = 'RISK_R';
-  return { before: Math.round(before), after: Math.round(risk / ctx.pip), clamped };
+  return { before: Math.round(beforeDist / ctx.pip), after: Math.round(dist / ctx.pip), clamped };
 }
 
 function runManual(ctx, d, styleName) {
