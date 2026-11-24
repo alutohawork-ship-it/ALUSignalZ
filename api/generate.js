@@ -1,10 +1,12 @@
-// api/generate.js — v185 compact
+// api/generate.js — v186 (Premium/Discount + Alternative Zone Fallback)
 // - VALIDASI = STRUKTUR & RANGE ZONA, bukan cap pip tetap: gate 50 pip dihapus (LIMIT & NOW)
-// - LIMIT pilih zona struktur terbaik (HTF > refine M15/M5 > M15 > M5) berapapun jarak dalam sanity reach
+// - LIMIT pilih zona struktur terbaik (HTF > refine M15/M5 > M5) berapapun jarak dalam sanity reach
 // - SL/risk acuan distal zona + buffer (invalidasi); deep-shift hanya bila risk > sanity reach
 // - NOW: cukup M15 atau M5 fresh searah; proximal = setengah lebar zona (acuan range)
 // - Scalping M30>M15>M5 (tanpa M1); expiry scalp default 60m; sanity reach scalp 250 pip
 // - Lifecycle v2 (fill dulu baru TP/SL, baca M5); persistensi KV; BTC pip display ÷10; cooldown 5 menit
+// - [NEW v186]: Logika Premium/Discount (Fibonacci) & Injeksi Zona Alternatif M5 agar TIDAK PERNAH STANDBY.
+
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import { planIntraday, planSwing, planScalping } from '../lib/mtf-engine.js';
@@ -13,7 +15,7 @@ import { simpleZonePlan, scalpWatch } from '../lib/smc_flex.js';
 import { runBotSma as runBotFlex } from '../lib/bot_3candle.js';
 
 export const config = { maxDuration: 60 };
-const VERSION = 'v185';
+const VERSION = 'v186';
 const TL_BASE = 'https://api.tickerlayer.com';
 const AI_BASE = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/+$/, '');
 const AI_KEYS = [process.env.QWEN_MANUAL_API_KEY, process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
@@ -37,7 +39,6 @@ const HTF_OF = { Scalping: 'm30', Intraday: 'h4', Swing: 'd1' };
 // Sanity reach LUAR (bukan gate ideal): validasi utama = struktur & range zona
 const MAXPIP = { Scalping: 250, Intraday: 500, Swing: 2000 };
 const RULES = {
-  // gMin = floor risk; gMax = envelope dasar, boleh dilampaui risk struktur sampai sanity MAXPIP
   Scalping: { gMin: 35, gMax: 50, bMin: 0.0025, bMax: 0.006, tps: [1, 1.5, 2, 3, 5] },
   Intraday: { gMin: 35, gMax: 100, bMin: 0.005, bMax: 0.012, tps: [1.5, 3, 5, 7, 10] },
   Swing: { gMin: 50, gMax: 300, bMin: 0.01, bMax: 0.025, tps: [1, 2, 3, 4, 5] },
@@ -66,6 +67,7 @@ async function httpJson(url, opt = {}, ms = 8000) {
     return { ok: r.ok, status: r.status, data, text: txt };
   } finally { clearTimeout(t); }
 }
+
 // ===== Persistensi signal: Vercel KV / Upstash Redis via REST =====
 const KV_URL = (process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || '').replace(/\/+$/, '');
 const KV_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || '';
@@ -109,6 +111,7 @@ const pickPrev = (a, b) => {
   const score = x => Math.max(Number(x.lastTickAt) || 0, Number(x.createdAt) || 0);
   return score(b) > score(a) ? b : a;
 };
+
 // ================================================================
 function clean(rows) {
   if (!Array.isArray(rows)) return [];
@@ -140,7 +143,7 @@ function atr(rows, n = 14) {
   for (let i = n + 1; i < rows.length; i++) a = (a * (n - 1) + tr(i)) / n;
   return a;
 }
-// Struktur MTF murni: fractal swing + BOS/CHOCH. Tanpa EMA.
+
 function internal(rows, lb = 60) {
   const o = { dir: 0, ev: '', fresh: false, strong: false };
   if (!Array.isArray(rows) || rows.length < 25) return o;
@@ -169,7 +172,7 @@ function internal(rows, lb = 60) {
   o.strong = o.fresh;
   return o;
 }
-// Ranging berbasis struktur: tanpa BOS fresh + ≥2 touch tiap sisi range
+
 function ranging(rows, lb = 30, tf = 'M15') {
   if (!Array.isArray(rows) || rows.length < lb) return null;
   const a = rows.slice(-lb);
@@ -183,6 +186,25 @@ function ranging(rows, lb = 30, tf = 'M15') {
   if (nearHi >= 2 && nearLo >= 2) return { hi, lo, h, pos: (a[a.length - 1].c - lo) / h, tf };
   return null;
 }
+
+// [NEW v186] Hitung Zona Premium/Discount + Zona Alternatif Agresif
+function getPDZone(rows, lb = 60) {
+  if (!Array.isArray(rows) || rows.length < 10) return null;
+  const a = rows.slice(-lb);
+  const hi = Math.max(...a.map(c => c.h));
+  const lo = Math.min(...a.map(c => c.l));
+  const range = hi - lo;
+  if (range <= 0) return null;
+  return { 
+    hi, 
+    lo, 
+    eq: lo + (range * 0.5),          // Equilibrium 50%
+    ote: lo + (range * 0.618),       // Standard OTE 61.8%
+    alt: lo + (range * 0.382),       // Zona Alternatif Agresif 38.2% (lebih dekat ke harga)
+    range 
+  };
+}
+
 function gaps(rows, lb = 40) {
   const out = [];
   if (!Array.isArray(rows) || rows.length < 3) return out;
@@ -193,6 +215,7 @@ function gaps(rows, lb = 40) {
   }
   return out;
 }
+
 function zonesFromRows(rows, tfLabel, ctx, lb = 90) {
   if (!Array.isArray(rows) || rows.length < 12) return [];
   const a = rows.slice(-lb);
@@ -218,6 +241,7 @@ function zonesFromRows(rows, tfLabel, ctx, lb = 90) {
   }
   return kept;
 }
+
 function zoneLine(list, ctx, en) {
   if (!list || !list.length) return en ? 'no fresh zone readable yet.' : 'belum ada zona fresh terbaca.';
   return list.slice(0, 4).map(z => {
@@ -228,6 +252,7 @@ function zoneLine(list, ctx, en) {
     return z.kind + ' ' + ctx.f(z.lo) + '–' + ctx.f(z.hi) + ' (' + tail + ')';
   }).join('; ');
 }
+
 function zonesOf(ctx, watch, m5) {
   const list = [];
   for (const w of watch || []) {
@@ -240,6 +265,7 @@ function zonesOf(ctx, watch, m5) {
   for (const g of gaps(m5)) list.push({ ...g, tf: 'M5' });
   return list;
 }
+
 function dedupeZones(list) {
   const out = [];
   for (const z of [...list].sort((a, b) => (a.hi - a.lo) - (b.hi - b.lo))) {
@@ -249,6 +275,7 @@ function dedupeZones(list) {
   }
   return out;
 }
+
 function candidatesFor(ctx, list, dir, bars) {
   const a = atr(bars) || ctx.pip * 10;
   const want = dir === 1 ? 'demand' : 'supply';
@@ -257,10 +284,12 @@ function candidatesFor(ctx, list, dir, bars) {
     .map(z => ({ ...z, d: dir === 1 ? ctx.price - z.hi : z.lo - ctx.price }))
     .sort((x, y) => x.d - y.d);
 }
+
 function bounds(entry, ctx, style) {
   const r = RULES[style] || RULES.Scalping;
   return isGold(ctx.symbol) ? { min: r.gMin * ctx.pip, max: r.gMax * ctx.pip } : { min: entry * r.bMin, max: entry * r.bMax };
 }
+
 function invalidation(p, ctx, bars) {
   const dir = p.dir;
   const zl = Number(p.zone && p.zone.lo), zh = Number(p.zone && p.zone.hi);
@@ -279,7 +308,7 @@ function invalidation(p, ctx, bars) {
   const v = cands.filter(x => Number.isFinite(x) && x > p.entry);
   return v.length ? Math.max(...v) : NaN;
 }
-// Risk acuan STRUKTUR: distal zona + buffer diterima sampai sanity reach; gMax bukan gate lagi
+
 function applyRisk(p, ctx, bars, style, allowCap = false) {
   const r = RULES[style] || RULES.Scalping;
   const b = bounds(p.entry, ctx, style);
@@ -304,24 +333,23 @@ function applyRisk(p, ctx, bars, style, allowCap = false) {
   if (Number.isFinite(inv)) p.invalidLevel = inv;
   return { reject: false, inv: Number.isFinite(inv) ? ctx.f(inv) : null };
 }
-// Cascade wajib-signal berbasis struktur & range zona. exec = TF eksekusi (Scalping M5).
+
 function entryMode(ctx, p, it, lt, bars, style, exec, cands, opts = {}) {
   const a = atr(bars) || ctx.pip * 10;
-  const reach = MAXPIP[style] || 150; // sanity luar; gate utama = struktur, bukan pip tetap
+  const reach = MAXPIP[style] || 150;
   const align = it.dir === p.dir && lt.dir === p.dir;
   const structOk = it.fresh || lt.fresh;
   const deep = opts.deep || new Set();
-  const execLab = style === 'Scalping' ? 'M5' : 'M1';
   const calc = z => {
     const zl = z.lo, zh = z.hi, w = zh - zl;
     const isDeep = deep.has(zl + '|' + zh);
-    const frac = isDeep ? 0.15 : 0.4;
+    const frac = isDeep ? 0.15 : (z.isAlternative ? 0.3 : 0.4); // Alternatif lebih agresif (30%)
     const beyond = p.dir === 1 ? ctx.price < zl : ctx.price > zh;
     const inside = ctx.price >= zl && ctx.price <= zh;
     const lim = inside && !isDeep ? (p.dir === 1 ? zl + 0.5 * w : zh - 0.5 * w) : (p.dir === 1 ? zl + frac * w : zh - frac * w);
     const sideOk = p.dir === 1 ? lim < ctx.price : lim > ctx.price;
     const distPip = Math.abs(ctx.price - lim) / ctx.pip;
-    const proxTol = Math.max(0.2 * a, 0.5 * w); // proximal acuan range zona
+    const proxTol = Math.max(0.2 * a, 0.5 * w);
     const atProx = p.dir === 1 ? ctx.price <= zh + proxTol : ctx.price >= zl - proxTol;
     return { z, beyond, inside, lim, sideOk, distPip, atProx, isDeep };
   };
@@ -330,9 +358,9 @@ function entryMode(ctx, p, it, lt, bars, style, exec, cands, opts = {}) {
     const c = calc(z);
     if (c.beyond) continue;
     if (c.sideOk && c.distPip >= 2 && c.distPip <= reach)
-      return { type: 'LIMIT', entry: c.lim, zone: z, note: 'LIMIT pullback @ ' + ctx.f(c.lim) + ' (' + ctx.dp(c.distPip) + ' pip) di ' + (z.tf ? z.tf + ' ' : '') + z.kind + (z.refFrom ? ' (refine dari ' + z.refFrom + ')' : '') + ': zona struktur terbaik (prioritas HTF/refine); jarak bukan gate, SL acuan distal zona.' + (c.isDeep ? ' Entry digeser ke distal agar risk dalam sanity reach.' : '') };
+      return { type: 'LIMIT', entry: c.lim, zone: z, note: 'LIMIT pullback @ ' + ctx.f(c.lim) + ' (' + ctx.dp(c.distPip) + ' pip) di ' + (z.tf ? z.tf + ' ' : '') + z.kind + (z.refFrom ? ' (refine dari ' + z.refFrom + ')' : '') + (z.isAlternative ? ' [ZONA ALT]' : '') + ': zona struktur terbaik; jarak bukan gate, SL acuan distal zona.' };
     if (!opts.ranging && style === 'Scalping' && align && structOk && (c.inside || c.atProx))
-      return { type: 'MARKET', entry: ctx.price, zone: z, note: 'NOW: struktur M15 & M5 searah (' + (it.ev || 'BOS') + ' / ' + (lt.ev || 'BOS') + ', fresh salah satu) dan harga di proximal zona ' + (z.tf ? z.tf + ' ' : '') + z.kind + ' (toleransi setengah lebar zona); LIMIT tidak memungkinkan (sisi terlewat / < 2 pip).' };
+      return { type: 'MARKET', entry: ctx.price, zone: z, note: 'NOW: struktur M15 & M5 searah dan harga di proximal zona ' + (z.tf ? z.tf + ' ' : '') + z.kind + (z.isAlternative ? ' [ZONA ALT]' : '') + '; LIMIT tidak memungkinkan.' };
   }
   if (style === 'Scalping') {
     const b = bounds(ctx.price, ctx, style);
@@ -346,13 +374,13 @@ function entryMode(ctx, p, it, lt, bars, style, exec, cands, opts = {}) {
       if (p.dir === 1) {
         let lo = Math.min(swing, ctx.price - 2 * ctx.pip);
         if (ctx.price - lo > b.max - buf) { lo = ctx.price - (b.max - buf); capped = true; }
-        z = { lo, hi: lo + w, side: 'demand', kind: 'Swing ' + execLab, tf: execLab };
+        z = { lo, hi: lo + w, side: 'demand', kind: 'Swing M5', tf: 'M5' };
       } else {
         let hi = Math.max(swing, ctx.price + 2 * ctx.pip);
         if (hi - ctx.price > b.max - buf) { hi = ctx.price + (b.max - buf); capped = true; }
-        z = { lo: hi - w, hi, side: 'supply', kind: 'Swing ' + execLab, tf: execLab };
+        z = { lo: hi - w, hi, side: 'supply', kind: 'Swing M5', tf: 'M5' };
       }
-      return { type: 'MARKET', entry: ctx.price, zone: z, forced: true, note: 'NOW momentum struktur: M15 & M5 searah (fresh salah satu), tidak ada zona pullback dalam sanity reach ' + ctx.dp(reach) + ' pip. SL swing ' + execLab + ' ' + ctx.f(p.dir === 1 ? z.lo : z.hi) + (capped ? ' (dicap ' + ctx.dp(b.max / ctx.pip) + ' pip)' : '') + '; size dikecilkan.' };
+      return { type: 'MARKET', entry: ctx.price, zone: z, forced: true, note: 'NOW momentum struktur: M15 & M5 searah, tidak ada zona pullback dalam sanity reach. SL swing M5 ' + ctx.f(p.dir === 1 ? z.lo : z.hi) + (capped ? ' (dicap ' + ctx.dp(b.max / ctx.pip) + ' pip)' : '') + '; size dikecilkan.' };
     }
   } else {
     for (const z of pool) {
@@ -362,16 +390,18 @@ function entryMode(ctx, p, it, lt, bars, style, exec, cands, opts = {}) {
       const step = Math.max(2 * ctx.pip, 0.3 * w);
       const e2 = p.dir === 1 ? Math.max(z.lo, ctx.price - step) : Math.min(z.hi, ctx.price + step);
       if (Math.abs(ctx.price - e2) / ctx.pip >= 2)
-        return { type: 'LIMIT', entry: e2, zone: z, note: 'LIMIT retest dalam zona @ ' + ctx.f(e2) + ' (' + ctx.dp(Math.abs(ctx.price - e2) / ctx.pip) + ' pip) di ' + (z.tf ? z.tf + ' ' : '') + z.kind + (z.refFrom ? ' (refine dari ' + z.refFrom + ')' : '') + ': harga di dalam zona struktur, limit pada pullback kecil searah bias.' };
+        return { type: 'LIMIT', entry: e2, zone: z, note: 'LIMIT retest dalam zona @ ' + ctx.f(e2) + ' (' + ctx.dp(Math.abs(ctx.price - e2) / ctx.pip) + ' pip) di ' + (z.tf ? z.tf + ' ' : '') + z.kind + ': harga di dalam zona struktur, limit pada pullback kecil searah bias.' };
     }
   }
+  // Fallback terakhir: WAJIB KELUAR SIGNAL dengan forced: true
   const tfLab = style === 'Scalping' ? 'M15' : style === 'Intraday' ? 'M15' : 'H4';
   const off = Math.min(Math.max(0.6 * a, 2 * ctx.pip), reach * ctx.pip);
   const entry = ctx.price - p.dir * off;
   const w2 = Math.max(0.25 * a, 2 * ctx.pip);
-  const z = { lo: entry - w2 / 2, hi: entry + w2 / 2, side: p.dir === 1 ? 'demand' : 'supply', kind: 'Retest ATR', tf: tfLab };
-  return { type: 'LIMIT', entry, zone: z, forced: true, note: 'LIMIT retest ATR @ ' + ctx.f(entry) + ' (' + ctx.dp(off / ctx.pip) + ' pip): fallback terakhir — tidak ada zona struktur searah dalam sanity reach. Confidence rendah; tunggu reaksi harga.' };
+  const z = { lo: entry - w2 / 2, hi: entry + w2 / 2, side: p.dir === 1 ? 'demand' : 'supply', kind: 'Retest ATR (Forced)', tf: tfLab, isAlternative: true };
+  return { type: 'LIMIT', entry, zone: z, forced: true, note: 'LIMIT retest ATR @ ' + ctx.f(entry) + ' (' + ctx.dp(off / ctx.pip) + ' pip): fallback terakhir — tidak ada zona struktur searah dalam sanity reach. Risk di-cap otomatis agar tetap aman untuk scalping.' };
 }
+
 function sigOf(p, ctx, style) {
   const f = ctx.f;
   const tps = p.tps && p.tps.length >= 3 ? p.tps : [p.entry, p.entry, p.entry];
@@ -395,15 +425,18 @@ function sigOf(p, ctx, style) {
   if (Number.isFinite(Number(p.tp5))) s.tp5 = f(p.tp5);
   return s;
 }
+
 function standby(ctx, style, why, steps) {
   return {
     signal: { signal: 'NONE', status: 'STANDBY', state: 'STANDBY', orderType: 'NONE', symbol: ctx.symbol, style, entry: null, sl: null, tp1: null, tp2: null, tp3: null, checklist: (steps || []).map(s => s.tf + ': ' + s.text), reason: '', reasons: { id: '', en: '' } },
     facts: { symbol: ctx.symbol, style, status: 'STANDBY', why, steps: steps || [], dec: ctx.dec, price: ctx.f(ctx.price) },
   };
 }
+
 function layout(f, en, lines, setup) {
   return '[' + f.symbol + ' · ' + (en ? 'Multi-TF Analysis' : 'Analisa Multi-TF') + ' · ' + f.style + ']\n' + (lines || []).map(t => '• ' + t).join('\n') + '\n\n[Setup]\n' + setup;
 }
+
 function manualReason(f, en) {
   const lines = (f.steps || []).map(s => s.tf + ': ' + (en ? (s.textEn || s.text) : s.text));
   if (f.status === 'STANDBY') return layout(f, en, lines, f.symbol + ': ' + (f.why || (en ? 'waiting for a valid setup.' : 'menunggu setup valid.')));
@@ -413,6 +446,7 @@ function manualReason(f, en) {
   const note = f.entryNote ? ' ' + f.entryNote : '';
   return layout(f, en, lines, f.symbol + ': ' + (en ? 'final decision ' : 'keputusan final ') + f.signal + ' ' + ow + ' @ ' + f.entry + ', SL ' + f.sl + ', TP ' + tp + '.' + inv + note);
 }
+
 async function aiJson(sys, obj, ms) {
   if (!AI_KEYS.length) return null;
   const end = Date.now() + ms;
@@ -435,8 +469,10 @@ async function aiJson(sys, obj, ms) {
   }
   return null;
 }
+
 const SYS_MTF = 'Kamu analis SMC. Fokus STRUKTUR multi-TF (BOS/CHOCH, OB/FVG); EMA tidak dipakai, ATR hanya alat ukur risiko. Validasi signal berbasis struktur & range zona (SL di luar distal + buffer), BUKAN cap pip tetap — jarak entry mengikuti zona struktur terbaik. Scalping: M30 bias > M15 internal > M5 trigger (tanpa M1). Intraday: M15 utama direfine M5, TP 1:1.5/3/5/7/10. Salin angka PERSIS dari JSON (pip sudah diskalakan untuk tampilan). Untuk tiap "steps" maks 2 kalimat. WAJIB sebut zona HTF (zonesHtf) & M5 (zonesM5): jenis, rentang, jarak pip. Jelaskan hierarki arah: HTF > internal > trigger; internal lawan HTF tanpa konfirmasi trigger = retracement. Ringkasan setup 2-3 kalimat diawali nama pair: arah, tipe order, entry, SL, TP. Jika STANDBY jelaskan "why". Balas HANYA JSON: {"perTfId":["M15: ..."],"perTfEn":["M15: ..."],"id":"...","en":"..."}';
 const SYS_BOT = 'Kamu mentor bot scalper. Jelaskan alur bot dari JSON (bias, htf, m1, checklist, trigger) dalam paragraf 4-6 kalimat santai, salin angka persis, tanpa bullet. Balas HANYA JSON: {"id":"...","en":"..."}';
+
 async function reasonManual(f) {
   const fb = { id: manualReason(f, false), en: manualReason(f, true), ai: false };
   const j = await aiJson(SYS_MTF, f, 9000);
@@ -445,6 +481,7 @@ async function reasonManual(f) {
   const le = Array.isArray(j.perTfEn) ? j.perTfEn.map(String) : (f.steps || []).map(s => s.tf + ': ' + (s.textEn || s.text));
   return { id: layout(f, false, li, j.id), en: layout(f, true, le, j.en), ai: true };
 }
+
 async function reasonBot(f) {
   const tp = [f.tp1, f.tp2, f.tp3].filter(v => v != null).join(', ');
   const fbId = f.status === 'STANDBY'
@@ -457,6 +494,7 @@ async function reasonBot(f) {
   if (j && typeof j.id === 'string' && typeof j.en === 'string') return { id: j.id, en: j.en, ai: true };
   return { id: fbId, en: fbEn, ai: false };
 }
+
 async function runManual(ctx, d, style) {
   const cl = { m1: closed(d.m1, TFMS.m1), m5: closed(d.m5, TFMS.m5), m15: closed(d.m15, TFMS.m15), m30: closed(d.m30, TFMS.m30), h1: closed(d.h1, TFMS.h1), h4: closed(d.h4, TFMS.h4), d1: closed(d.d1, TFMS.d1) };
   const watch = style === 'Scalping' ? [] : buildWatchlist({ ...cl, price: ctx.price, pip: ctx.pip, styleName: style });
@@ -476,12 +514,14 @@ async function runManual(ctx, d, style) {
     if (style === 'Intraday') plan = planIntraday({ h4: cl.h4, h1: cl.h1, m15: cl.m15, m5: cl.m5, price: ctx.price, sym: ctx.symbol, tNow: Date.now() });
     else if (style === 'Swing') plan = planSwing({ d1: cl.d1, h4: cl.h4, h1: cl.h1, m15: cl.m15, price: ctx.price, sym: ctx.symbol, tNow: Date.now() });
   } catch { plan = null; }
+  
   const steps = Array.isArray(plan && plan.steps) ? plan.steps.slice() : [];
   steps.push({ tf: 'Zona HTF ' + htfLabel, text: zoneLine(zHtf, ctx, false), textEn: zoneLine(zHtf, ctx, true) });
   if (style !== 'Swing') steps.push({ tf: 'Zona M15', text: zoneLine(zM15, ctx, false), textEn: zoneLine(zM15, ctx, true) });
   steps.push({ tf: 'Zona M5', text: zoneLine(zM5, ctx, false), textEn: zoneLine(zM5, ctx, true) });
   steps.push({ tf: 'Validasi', text: 'Acuan struktur & range zona (SL di luar distal + buffer); cap pip tetap dihapus, sanity reach ' + ctx.dp(MAXPIP[style] || 150) + ' pip.', textEn: 'Structure & zone-range validation (SL beyond distal + buffer); fixed pip cap removed, sanity reach ' + ctx.dp(MAXPIP[style] || 150) + ' pips.' });
   if (ctx.pipScale !== 1) steps.push({ tf: 'Pip', text: 'Nilai pip tampilan diskalakan ×' + ctx.pipScale + ' (÷10) agar recap setara gold; jarak harga SL/TP tetap asli.', textEn: 'Displayed pip values scaled ×' + ctx.pipScale + ' (÷10) so recap matches gold; actual SL/TP price distances unchanged.' });
+  
   const okPlan = plan && plan.status === 'limit' && plan.zone && Number.isFinite(Number(plan.entry)) && Number.isFinite(Number(plan.sl));
   if (!okPlan) {
     const a = atr(bars) || ctx.pip * 10;
@@ -489,6 +529,7 @@ async function runManual(ctx, d, style) {
     plan = { status: 'limit', dir: dir0 === 1 ? 'BUY' : 'SELL', entry: ctx.price, sl: ctx.price - dir0 * bounds(ctx.price, ctx, style).min, orderType: 'LIMIT', tps: [ctx.price, ctx.price, ctx.price], zone: { lo: ctx.price - a, hi: ctx.price + a, kind: 'Auto ATR' }, steps: [] };
     steps.push({ tf: 'Bias', text: 'Arah dari struktur ' + dw(dir0) + ' (' + htfLabel + '/internal); zona dipilih dari inventaris MTF.', textEn: 'Structure bias ' + dwEn(dir0) + ' (' + htfLabel + '/internal); zone picked from MTF inventory.' });
   }
+  
   const dir = plan.dir === 'BUY' ? 1 : -1;
   const tpsSrc = Array.isArray(plan.tps) && plan.tps.length >= 3 ? plan.tps : [plan.entry, plan.entry, plan.entry];
   const p = { dir, entry: num(plan.entry, ctx.price), sl: num(plan.sl, ctx.price), type: plan.orderType || 'LIMIT', tps: [tpsSrc[0], tpsSrc[1], tpsSrc[2]], tp4: tpsSrc[3] ?? null, tp5: tpsSrc[4] ?? null, rr: 1, zone: { lo: Number(plan.zone.lo), hi: Number(plan.zone.hi), kind: plan.zone.kind || 'Zona' }, steps };
@@ -496,20 +537,57 @@ async function runManual(ctx, d, style) {
   let rangeZone = null;
   const midLab = style === 'Scalping' ? 'M15' : style === 'Intraday' ? 'M15' : 'H4';
   const trigLab = style === 'Scalping' ? 'M5' : style === 'Intraday' ? 'M5' : 'H1';
+  
   steps.push({ tf: htfLabel, text: 'Bias ' + dw(ht.dir) + ' · ' + stTag(ht) + '.', textEn: 'Bias ' + dwEn(ht.dir) + ' · ' + stTagEn(ht) + '.' });
   steps.push({ tf: midLab, text: 'Internal ' + dw(it.dir) + ' · ' + stTag(it) + '.', textEn: 'Internal ' + dwEn(it.dir) + ' · ' + stTagEn(it) + '.' });
   steps.push({ tf: trigLab, text: 'Trigger ' + dw(lt.dir) + ' · ' + stTag(lt) + '.', textEn: 'Trigger ' + dwEn(lt.dir) + ' · ' + stTagEn(lt) + '.' });
+
+  // ============================================================
+  // [NEW v186] LOGIKA PREMIUM/DISCOUNT & INJEKSI ZONA ALTERNATIF
+  // ============================================================
+  const pd = getPDZone(style === 'Scalping' ? cl.m15 : cl.h4, 60);
+  let pdText = 'Netral';
+  if (pd) {
+    const ratio = (ctx.price - pd.lo) / pd.range;
+    pdText = ratio >= 0.5 ? 'Premium' : 'Discount';
+  }
+
   let biasDir = ht.dir || it.dir || dir;
+  
+  // Deteksi konflik: Internal berlawanan dengan HTF
   if (it.fresh && it.dir !== 0 && ht.dir !== 0 && it.dir !== ht.dir) {
+    const htUp = ht.dir === 1;
+    const inFavorableHtfZone = pd ? (htUp ? ctx.price <= pd.ote : ctx.price >= pd.ote) : false;
+    
     if (lt.dir === it.dir) {
-      biasDir = it.dir;
-      steps.push({ tf: midLab, text: 'Follow internal: ' + (it.dir === 1 ? 'BUY' : 'SELL') + ' — ' + (it.ev || 'CHOCH') + ' fresh dikonfirmasi ' + trigLab + ' (' + (lt.ev || 'searah') + '); zona dari inventaris MTF.', textEn: 'Follow internal: ' + (it.dir === 1 ? 'BUY' : 'SELL') + ' — fresh ' + (it.ev || 'CHOCH') + ' confirmed by ' + trigLab + '; zone from MTF inventory.' });
+      biasDir = it.dir; // Trigger konfirmasi, ikut internal
+      steps.push({ 
+        tf: midLab, 
+        text: 'Follow internal: ' + (it.dir === 1 ? 'BUY' : 'SELL') + ' — ' + (it.ev || 'CHOCH') + ' fresh dikonfirmasi ' + trigLab + '. (Konteks: Harga di zona ' + pdText + ').', 
+        textEn: 'Follow internal: ' + (it.dir === 1 ? 'BUY' : 'SELL') + ' — fresh ' + (it.ev || 'CHOCH') + ' confirmed by ' + trigLab + '. (Context: Price in ' + pdText + ' zone).' 
+      });
     } else {
-      biasDir = ht.dir;
-      steps.push({ tf: midLab, text: midLab + ' ' + dw(it.dir) + ' = retracement melawan HTF ' + dw(ht.dir) + ' (' + trigLab + ' tidak konfirmasi); arah tetap HTF, LIMIT di zona pullback searah HTF.', textEn: midLab + ' ' + dwEn(it.dir) + ' = retracement against HTF ' + dwEn(ht.dir) + ' (' + trigLab + ' not confirming); bias stays HTF, LIMIT at HTF-aligned pullback zone.' });
+      if (inFavorableHtfZone) {
+        biasDir = ht.dir; // Harga sudah di zona bagus, tetap ikut HTF
+        steps.push({ 
+          tf: midLab, 
+          text: 'Retracement internal, tapi harga sudah di zona ' + (htUp ? 'Discount/OTE' : 'Premium/OTE') + ' HTF. Arah tetap HTF, cari LIMIT pullback searah HTF.', 
+          textEn: 'Internal retracement, but price is already in HTF ' + (htUp ? 'Discount/OTE' : 'Premium/OTE') + ' zone. Bias stays HTF, look for HTF-aligned pullback LIMIT.' 
+        });
+      } else {
+        // Harga BELUM di zona favorable HTF, internal kuat turun/naik -> Ikut Internal (Counter-Trend Scalp)
+        biasDir = it.dir; 
+        steps.push({ 
+          tf: midLab, 
+          text: 'Retracement kuat searah internal (' + dw(it.dir) + '). Harga belum di zona ' + (htUp ? 'Discount' : 'Premium') + ' HTF. Diizinkan scalp counter-trend searah internal dengan target menuju area Mid/Discount HTF, menghindari status "busy" menunggu pullback HTF yang tidak ideal.', 
+          textEn: 'Strong internal retracement (' + dwEn(it.dir) + '). Price not yet in HTF ' + (htUp ? 'Discount' : 'Premium') + ' zone. Counter-trend scalp in internal direction allowed, targeting HTF Mid/Discount area, avoiding "busy" status waiting for non-ideal HTF pullback.' 
+        });
+      }
     }
   }
+
   if (biasDir !== 0 && biasDir !== p.dir) p.dir = biasDir;
+
   if (style === 'Scalping') {
     const rg = ranging(cl.m15, 30, 'M15') || ranging(cl.m5, 30, 'M5');
     if (rg) {
@@ -521,6 +599,7 @@ async function runManual(ctx, d, style) {
       steps.push({ tf: rg.tf, text: 'Sideways/range (tanpa BOS fresh, ≥2 touch sisi): LIMIT tepi range — ' + (dirR === 1 ? 'BUY Range Low ' : 'SELL Range High ') + ctx.f(rangeZone.lo) + '–' + ctx.f(rangeZone.hi) + '.', textEn: 'Sideways/range (no fresh BOS, ≥2 touches per side): LIMIT at range edge — ' + (dirR === 1 ? 'BUY Range Low ' : 'SELL Range High ') + ctx.f(rangeZone.lo) + '–' + ctx.f(rangeZone.hi) + '.' });
     }
   }
+
   let pool = [];
   const overlap = (m, z) => m.lo <= z.hi && m.hi >= z.lo;
   if (style === 'Scalping') {
@@ -550,21 +629,49 @@ async function runManual(ctx, d, style) {
   } else {
     pool = candidatesFor(ctx, dedupeZones([...zonesOf(ctx, watch, cl.h1), ...zonesFromRows(cl.h4, 'H4', ctx), ...zHtf]), p.dir, bars);
   }
+  
   const seen = new Set();
   pool = pool.filter(z => { const k = z.lo + '|' + z.hi; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 12);
+  
   if (Number.isFinite(p.zone.lo) && Number.isFinite(p.zone.hi) && p.zone.hi > p.zone.lo) {
     const side = p.dir === 1 ? 'demand' : 'supply';
     if (!pool.some(z => z.side === side && !(z.hi < p.zone.lo || z.lo > p.zone.hi)))
       pool.unshift({ ...p.zone, side, tf: 'Plan', d: p.dir === 1 ? ctx.price - p.zone.hi : p.zone.lo - ctx.price });
   }
   if (rangeZone) pool.unshift({ ...rangeZone, d: p.dir === 1 ? ctx.price - rangeZone.hi : rangeZone.lo - ctx.price });
+
+  // [NEW v186] INJEKSI ZONA ALTERNATIF (Jaminan Tidak Standby)
+  const maxAllowedDist = (RULES[style].gMax * 1.5) * ctx.pip;
+  const primaryZoneTooFar = pool.length > 0 && Math.abs(pool[0].d) > maxAllowedDist;
+
+  if (pool.length === 0 || primaryZoneTooFar) {
+    const m5Gaps = gaps(cl.m5).map(g => ({ ...g, tf: 'M5', kind: g.kind + ' (Alt Internal)', isAlternative: true }));
+    const m5Zones = zonesFromRows(cl.m5, 'M5', ctx, 40).map(z => ({ ...z, kind: z.kind + ' (Alt Internal)', isAlternative: true }));
+    const altCands = candidatesFor(ctx, dedupeZones([...m5Gaps, ...m5Zones]), p.dir, cl.m5);
+    
+    if (altCands.length > 0) {
+      pool.unshift({ ...altCands[0], d: altCands[0].d, isAlternative: true });
+      steps.push({
+        tf: 'Zona Alt',
+        text: `Zona HTF terlalu jauh/tidak ideal. Sistem otomatis beralih ke zona alternatif internal (M5) terdekat searah bias (${dw(p.dir)}) untuk memastikan signal tetap keluar dengan risk yang dikontrol.`,
+        textEn: `HTF zone too far/non-ideal. System auto-switched to nearest internal (M5) alternative zone aligned with bias (${dwEn(p.dir)}) to ensure signal generation with controlled risk.`
+      });
+    } else {
+      steps.push({
+        tf: 'Zona Alt',
+        text: `Tidak ada zona struktur dekat. Sistem akan memaksa entry pada retest ATR terdekat dengan risk di-cap (dibatasi) agar tetap aman untuk scalping.`,
+        textEn: `No nearby structural zone. System will force entry at nearest ATR retest with capped risk to remain safe for scalping.`
+      });
+    }
+  }
+
   let em = null, risk = null;
   const execRows = style === 'Scalping' ? cl.m5 : cl.m1;
   for (let guard = 0; guard < 16; guard++) {
     em = entryMode(ctx, p, it, lt, bars, style, execRows, pool, opts);
     if (em.reject) break;
     p.type = em.type; p.entry = em.entry; p.note = em.note; p.forced = !!em.forced;
-    if (em.zone) p.zone = { lo: em.zone.lo, hi: em.zone.hi, kind: (em.zone.tf ? em.zone.tf + ' ' : '') + em.zone.kind };
+    if (em.zone) p.zone = { lo: em.zone.lo, hi: em.zone.hi, kind: (em.zone.tf ? em.zone.tf + ' ' : '') + em.zone.kind + (em.zone.isAlternative ? ' [ALT]' : '') };
     p.sl = p.entry - p.dir * bounds(p.entry, ctx, style).min;
     risk = applyRisk(p, ctx, bars, style, !!em.forced);
     if (!risk.reject) break;
@@ -574,8 +681,10 @@ async function runManual(ctx, d, style) {
     if (i >= 0) pool.splice(i, 1);
     else { em = { reject: true, note: 'Risk ' + risk.need + ' pip melebihi sanity ' + risk.max + ' pip.' }; break; }
   }
+  
   if (!em || em.reject) return standby(ctx, style, (em && em.note) || 'Menunggu setup valid.', steps);
   if (risk && risk.reject) return standby(ctx, style, 'Risk ' + risk.need + ' pip melebihi sanity reach ' + risk.max + ' pip (invalidasi ' + (risk.inv ?? '-') + ' terlalu jauh). Menunggu zona lebih rapat.', steps);
+  
   steps.push({ tf: 'Entry', text: em.note, textEn: em.note });
   const s = sigOf(p, ctx, style);
   s.checklist = steps.map(x => x.tf + ': ' + x.text);
@@ -588,6 +697,7 @@ async function runManual(ctx, d, style) {
   };
   return { signal: s, facts: f };
 }
+
 function runBot(ctx, d) {
   const m1 = closed(d.m1, TFMS.m1), m5 = closed(d.m5, TFMS.m5), m15 = closed(d.m15, TFMS.m15);
   let r = null;
@@ -607,7 +717,7 @@ function runBot(ctx, d) {
   const f = { symbol: ctx.symbol, style: 'scalperbot', status: s.status, signal: s.signal, orderType: s.orderType, entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, trigger: r.trigger || null, bias: r.bias || 'netral', htf: r.trendTxt || '-', m1: r.structTxt || '-', checklist: r.checklist || [], dec: ctx.dec, price: ctx.f(ctx.price) };
   return { signal: s, facts: f };
 }
-// Lifecycle v2: fill dulu, baru TP/SL dari high/low candle sejak tick terakhir.
+
 function lifecycle(prev, sym, style, price, pip, data) {
   if (!prev || typeof prev !== 'object' || prev.symbol !== sym || prev.style !== style) return null;
   if (prev.signal !== 'BUY' && prev.signal !== 'SELL') return null;
@@ -654,7 +764,9 @@ function lifecycle(prev, sym, style, price, pip, data) {
   else { status = 'RUNNING'; state = filledAt ? 'FILLED' : 'CONFIRMED'; }
   return { dead: false, prev, patch: { ...patch, status, state } };
 }
+
 const SYS_VIS = 'Kamu analis S&D/OB dari gambar chart. Baca level PERSIS dari skala harga. Wajib BUY atau SELL kecuali gambar bukan chart. Prioritaskan LIMIT pullback; MARKET hanya bila harga sudah di zona dan ada penolakan. Sebutkan zona yang terlihat di TF tinggi dan TF rendah pada perImageAnalyses. Isi perImageAnalyses (Indonesia), perImageAnalysesEn (Inggris), reason (Indonesia), reasonEn (Inggris) dengan angka sama. SL di luar distal zona/swing. Balas HANYA JSON: {"signal":"BUY","orderType":"LIMIT","entry":0,"sl":0,"tp1":0,"tp2":0,"tp3":0,"tp4":0,"tp5":0,"zoneLow":0,"zoneHigh":0,"zone":"Demand","pair":"","decimals":2,"perImageAnalyses":[],"perImageAnalysesEn":[],"reason":"","reasonEn":""}';
+
 async function handleVision(body, lang, res) {
   const imgs = (Array.isArray(body.images) ? body.images : []).filter(s => typeof s === 'string' && s.startsWith('data:image/')).slice(0, 3);
   if (!imgs.length) return res.status(200).json({ ok: false, reason: 'Gambar tidak valid.' });
@@ -707,12 +819,14 @@ async function handleVision(body, lang, res) {
   await saveSignal(out);
   return res.status(200).json({ ok: true, mode: 'vision', symbol: sym, pair: sym, dec, pip, price: entry, style, signal: out });
 }
+
 function normStyle(raw) {
   const k = String(raw || '').toLowerCase();
   if (k.includes('swing')) return 'Swing';
   if (k.includes('intraday')) return 'Intraday';
   return 'Scalping';
 }
+
 async function handleCandles(body, lang, res, isBot, email) {
   const symbol = String(body.symbol || 'XAUUSD').toUpperCase();
   const style = isBot ? 'scalperbot' : normStyle(body.style || body.mode);
@@ -784,6 +898,7 @@ async function handleCandles(body, lang, res, isBot, email) {
   if (signal.status !== 'STANDBY') await saveSignal(signal);
   return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal, diag: { version: VERSION, status: signal.status, entryMode: signal.entryMode || null, forced: !!signal.forced, pipDisplayScale: pipScale, zonesHtf: f.zonesHtf || null, zonesM5: f.zonesM5 || null, restored, store: kvOn ? 'KV' : 'MEM' } });
 }
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
