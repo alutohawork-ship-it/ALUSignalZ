@@ -1,10 +1,9 @@
-// api/generate.js — v185 compact
-// - VALIDASI = STRUKTUR & RANGE ZONA, bukan cap pip tetap: gate 50 pip dihapus (LIMIT & NOW)
-// - LIMIT pilih zona struktur terbaik (HTF > refine M15/M5 > M15 > M5) berapapun jarak dalam sanity reach
-// - SL/risk acuan distal zona + buffer (invalidasi); deep-shift hanya bila risk > sanity reach
-// - NOW: cukup M15 atau M5 fresh searah; proximal = setengah lebar zona (acuan range)
-// - Scalping M30>M15>M5 (tanpa M1); expiry scalp default 60m; sanity reach scalp 250 pip
-// - Lifecycle v2 (fill dulu baru TP/SL, baca M5); persistensi KV; BTC pip display ÷10; cooldown 5 menit
+// api/generate.js — v186 compact
+// - FIX blink: lifecycle seen-extremes (candle overlap hanya pakai extreme sejak signal dibuat) → tidak ada SL/BE palsu dari dip pra-entry
+// - SL/BE/TP5 dikembalikan sekali sebagai signal final sticky+finished (frontend tampil hasil, bukan hilang)
+// - Validasi struktur & range zona (cap 50 pip dihapus); sanity reach scalp 250; expiry scalp 60m
+// - Scalping M30>M15>M5; Intraday M15>M5 TP 1.5/3/5/7/10; Swing LIMIT; cooldown 5 menit
+// - Persistensi KV; BTC pip display ÷10; lifecycle fill dulu baru TP/SL
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
 import { planIntraday, planSwing, planScalping } from '../lib/mtf-engine.js';
@@ -13,7 +12,7 @@ import { simpleZonePlan, scalpWatch } from '../lib/smc_flex.js';
 import { runBotSma as runBotFlex } from '../lib/bot_3candle.js';
 
 export const config = { maxDuration: 60 };
-const VERSION = 'v185';
+const VERSION = 'v186';
 const TL_BASE = 'https://api.tickerlayer.com';
 const AI_BASE = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/+$/, '');
 const AI_KEYS = [process.env.QWEN_MANUAL_API_KEY, process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
@@ -34,10 +33,8 @@ const NEED = { Scalping: ['m5', 'm15', 'm30'], Intraday: ['m5', 'm15', 'h1', 'h4
 const MINB = { m1: 60, m5: 40, m15: 40, m30: 35, h1: 35, h4: 25, d1: 20 };
 const EXPMS = { Scalping: (Number(process.env.EXP_SCALP_MIN) || 60) * 6e4, Intraday: (Number(process.env.EXP_INTRADAY_MIN) || 480) * 6e4, Swing: (Number(process.env.EXP_SWING_MIN) || 5760) * 6e4 };
 const HTF_OF = { Scalping: 'm30', Intraday: 'h4', Swing: 'd1' };
-// Sanity reach LUAR (bukan gate ideal): validasi utama = struktur & range zona
 const MAXPIP = { Scalping: 250, Intraday: 500, Swing: 2000 };
 const RULES = {
-  // gMin = floor risk; gMax = envelope dasar, boleh dilampaui risk struktur sampai sanity MAXPIP
   Scalping: { gMin: 35, gMax: 50, bMin: 0.0025, bMax: 0.006, tps: [1, 1.5, 2, 3, 5] },
   Intraday: { gMin: 35, gMax: 100, bMin: 0.005, bMax: 0.012, tps: [1.5, 3, 5, 7, 10] },
   Swing: { gMin: 50, gMax: 300, bMin: 0.01, bMax: 0.025, tps: [1, 2, 3, 4, 5] },
@@ -307,7 +304,7 @@ function applyRisk(p, ctx, bars, style, allowCap = false) {
 // Cascade wajib-signal berbasis struktur & range zona. exec = TF eksekusi (Scalping M5).
 function entryMode(ctx, p, it, lt, bars, style, exec, cands, opts = {}) {
   const a = atr(bars) || ctx.pip * 10;
-  const reach = MAXPIP[style] || 150; // sanity luar; gate utama = struktur, bukan pip tetap
+  const reach = MAXPIP[style] || 150;
   const align = it.dir === p.dir && lt.dir === p.dir;
   const structOk = it.fresh || lt.fresh;
   const deep = opts.deep || new Set();
@@ -321,7 +318,7 @@ function entryMode(ctx, p, it, lt, bars, style, exec, cands, opts = {}) {
     const lim = inside && !isDeep ? (p.dir === 1 ? zl + 0.5 * w : zh - 0.5 * w) : (p.dir === 1 ? zl + frac * w : zh - frac * w);
     const sideOk = p.dir === 1 ? lim < ctx.price : lim > ctx.price;
     const distPip = Math.abs(ctx.price - lim) / ctx.pip;
-    const proxTol = Math.max(0.2 * a, 0.5 * w); // proximal acuan range zona
+    const proxTol = Math.max(0.2 * a, 0.5 * w);
     const atProx = p.dir === 1 ? ctx.price <= zh + proxTol : ctx.price >= zl - proxTol;
     return { z, beyond, inside, lim, sideOk, distPip, atProx, isDeep };
   };
@@ -385,6 +382,7 @@ function sigOf(p, ctx, style) {
     pipDisplayScale: ctx.pipScale ?? 1,
     tpMode: 'RISK_R', setup: 'Manual ' + style, confidence: p.forced ? 'LOW' : 'MEDIUM', risk: p.forced ? 'HIGH' : 'MEDIUM', forced: !!p.forced,
     symbol: ctx.symbol, style, role: 'main', createdAt: Date.now(), lastTickAt: Date.now(),
+    seenLow: ctx.price, seenHigh: ctx.price,
     filledAt: p.type === 'MARKET' ? Date.now() : null,
     expiresAt: Date.now() + (EXPMS[style] || 18e5),
     entryMode: p.type === 'MARKET' ? 'NOW' : 'PULLBACK', entryNote: p.note || null,
@@ -607,11 +605,12 @@ function runBot(ctx, d) {
   const f = { symbol: ctx.symbol, style: 'scalperbot', status: s.status, signal: s.signal, orderType: s.orderType, entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, trigger: r.trigger || null, bias: r.bias || 'netral', htf: r.trendTxt || '-', m1: r.structTxt || '-', checklist: r.checklist || [], dec: ctx.dec, price: ctx.f(ctx.price) };
   return { signal: s, facts: f };
 }
-// Lifecycle v2: fill dulu, baru TP/SL dari high/low candle sejak tick terakhir.
+// Lifecycle v3 (seen-extremes): candle overlap hanya pakai extreme sejak signal dibuat → tidak ada SL/BE palsu.
+// Candle open setelah start pakai range penuh (spike catch-up). Live price selalu dievaluasi.
 function lifecycle(prev, sym, style, price, pip, data) {
   if (!prev || typeof prev !== 'object' || prev.symbol !== sym || prev.style !== style) return null;
   if (prev.signal !== 'BUY' && prev.signal !== 'SELL') return null;
-  if (prev.status === 'TP5_HIT' || prev.finished) return null;
+  if (prev.finished || prev.status === 'TP5_HIT' || prev.status === 'SL_HIT' || prev.status === 'BE_HIT') return null;
   const exp = Number(prev.expiresAt);
   if (!Number.isFinite(exp) || Date.now() > exp) return { dead: true, out: 'EXPIRED', prev };
   const dir = prev.signal === 'BUY' ? 1 : -1;
@@ -622,32 +621,41 @@ function lifecycle(prev, sym, style, price, pip, data) {
   const ms = TFMS[tfKey] || 3e5;
   const rows = clean((data && data[tfKey]) || []);
   const start = Number(prev.lastTickAt) || Number(prev.createdAt) || Date.now();
-  let win = rows.filter(c => tsMs(c.t) + ms > start && tsMs(c.t) <= Date.now());
-  if (!win.length) win = [{ t: Date.now(), h: price, l: price, c: price }];
+  let seenLo = Number.isFinite(Number(prev.seenLow)) ? Number(prev.seenLow) : price;
+  let seenHi = Number.isFinite(Number(prev.seenHigh)) ? Number(prev.seenHigh) : price;
+  seenLo = Math.min(seenLo, price); seenHi = Math.max(seenHi, price);
   let filled = prev.status !== 'PENDING' || Number(prev.filledAt) > 0;
   let filledAt = Number(prev.filledAt) || 0;
   const hits = new Set(Array.isArray(prev.tpHits) ? prev.tpHits : []);
   let be = !!prev.be || hits.has(1);
   let dead = null;
-  for (const c of win) {
+  const step = (lo, hi) => {
+    if (dead) return;
     if (!filled) {
-      if (dir === 1 ? c.l <= e : c.h >= e) { filled = true; filledAt = tsMs(c.t); }
-      else continue;
+      if (dir === 1 ? lo <= e : hi >= e) { filled = true; filledAt = Date.now(); }
+      else return;
     }
     const slEff = be ? e : sl;
-    const slTouch = dir === 1 ? c.l <= slEff : c.h >= slEff;
-    if (slTouch) { dead = { out: be ? 'BE' : 'SL' }; break; }
+    if (dir === 1 ? lo <= slEff : hi >= slEff) { dead = { out: be ? 'BE' : 'SL' }; return; }
     for (let i = 0; i < 5; i++) {
       const v = t[i];
-      if (Number.isFinite(v) && !hits.has(i + 1) && (dir === 1 ? c.h >= v : c.l <= v)) hits.add(i + 1);
+      if (Number.isFinite(v) && !hits.has(i + 1) && (dir === 1 ? hi >= v : lo <= v)) hits.add(i + 1);
     }
     if (hits.has(1)) be = true;
-    if (hits.has(5)) { dead = { out: 'TP5' }; break; }
+    if (hits.has(5)) dead = { out: 'TP5' };
+  };
+  for (const c of rows) {
+    const ct = tsMs(c.t);
+    if (ct + ms <= start) continue; // candle selesai sebelum start
+    if (ct >= start) step(c.l, c.h); // candle open setelah start: range penuh aman
+    else step(seenLo, seenHi);      // candle overlap: hanya extreme terobservasi sejak start
+    if (dead) break;
   }
+  if (!dead) step(price, price); // tick live
   const maxHit = hits.size ? Math.max(...hits) : 0;
-  const patch = { tpHits: [...hits].sort((a, b) => a - b), tpHitCount: hits.size, maxTpHit: maxHit, be, slBe: be ? e : null, filledAt: filledAt || null, lastTickAt: Date.now() };
+  const patch = { tpHits: [...hits].sort((a, b) => a - b), tpHitCount: hits.size, maxTpHit: maxHit, be, slBe: be ? e : null, filledAt: filledAt || null, lastTickAt: Date.now(), seenLow: seenLo, seenHigh: seenHi };
   if (dead && dead.out === 'TP5') return { dead: true, out: 'TP5', prev, patch: { ...patch, status: 'TP5_HIT', state: 'TP5', finished: true } };
-  if (dead) return { dead: true, out: dead.out, prev, patch };
+  if (dead) return { dead: true, out: dead.out, prev, patch: { ...patch, status: dead.out === 'SL' ? 'SL_HIT' : 'BE_HIT', state: dead.out, finished: true } };
   let status, state;
   if (!filled) { status = 'PENDING'; state = 'LIMIT_PLACED'; }
   else if (maxHit >= 1) { status = 'TP' + maxHit + '_HIT'; state = 'TP' + maxHit; }
@@ -699,6 +707,7 @@ async function handleVision(body, lang, res) {
     symbol: sym, pair: sym, dec, pip, style, entry, sl, tp1: t1, tp2: t2, tp3: t3, tp4: t4, tp5: t5,
     riskPips: Math.round((risk / pip) * pipScaleOf(sym)), pipDisplayScale: pipScaleOf(sym),
     tpHits: [], tpHitCount: 0, maxTpHit: 0, be: false, slBe: null,
+    seenLow: entry, seenHigh: entry,
     zone: { min: zl, max: zh, label: (j.zone || 'Zona') + ' ' + zl + '–' + zh },
     reason: lang === 'en' ? ren : rid, reasons: { id: rid, en: ren }, reasonSource: 'AI', aiReasoning: true,
     createdAt: Date.now(), lastTickAt: Date.now(), filledAt: isLimit ? null : Date.now(),
@@ -751,10 +760,11 @@ async function handleCandles(body, lang, res, isBot, email) {
     await saveOutcome(key, { dir: life.prev.signal, out: life.out, t: Date.now() });
     await dropSignal(symbol, style);
   }
-  if (life && life.dead && life.out === 'TP5') {
+  // SL/BE/TP5: kirim sekali signal final sticky+finished supaya frontend tampil hasil (tidak berkedip hilang)
+  if (life && life.dead && (life.out === 'TP5' || life.out === 'SL' || life.out === 'BE')) {
     const fin = { ...life.prev, ...life.patch, sticky: true, finished: true };
     if (fin.reasons) fin.reason = lang === 'en' ? (fin.reasons.en || fin.reasons.id) : (fin.reasons.id || fin.reasons.en);
-    return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal: fin, diag: { version: VERSION, lifecycle: 'TP5', finished: true, store: kvOn ? 'KV' : 'MEM' } });
+    return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal: fin, diag: { version: VERSION, lifecycle: life.out, finished: true, store: kvOn ? 'KV' : 'MEM' } });
   }
   if (life && !life.dead) {
     const managed = { ...life.prev, ...life.patch, sticky: true };
