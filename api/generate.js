@@ -1,11 +1,12 @@
-// api/generate.js — v186 (Premium/Discount + Alternative Zone Fallback)
+// api/generate.js — v187 (Range Zone Diperlebar + Filter Longgar + Fib Alt Fallback)
 // - VALIDASI = STRUKTUR & RANGE ZONA, bukan cap pip tetap: gate 50 pip dihapus (LIMIT & NOW)
 // - LIMIT pilih zona struktur terbaik (HTF > refine M15/M5 > M5) berapapun jarak dalam sanity reach
 // - SL/risk acuan distal zona + buffer (invalidasi); deep-shift hanya bila risk > sanity reach
 // - NOW: cukup M15 atau M5 fresh searah; proximal = setengah lebar zona (acuan range)
-// - Scalping M30>M15>M5 (tanpa M1); expiry scalp default 60m; sanity reach scalp 250 pip
+// - Scalping M30>M15>M5 (tanpa M1); expiry scalp default 60m; sanity reach scalp 400 pip
 // - Lifecycle v2 (fill dulu baru TP/SL, baca M5); persistensi KV; BTC pip display ÷10; cooldown 5 menit
-// - [NEW v186]: Logika Premium/Discount (Fibonacci) & Injeksi Zona Alternatif M5 agar TIDAK PERNAH STANDBY.
+// - [v186]: Logika Premium/Discount (Fibonacci) & Injeksi Zona Alternatif M5 agar TIDAK PERNAH STANDBY.
+// - [v187]: Range zone diperlebar 2x, filter kandidat 0.2→0.8 ATR, fallback Fib 0.382, cap zona alt 1.5x.
 
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
@@ -15,7 +16,7 @@ import { simpleZonePlan, scalpWatch } from '../lib/smc_flex.js';
 import { runBotSma as runBotFlex } from '../lib/bot_3candle.js';
 
 export const config = { maxDuration: 60 };
-const VERSION = 'v186';
+const VERSION = 'v187';
 const TL_BASE = 'https://api.tickerlayer.com';
 const AI_BASE = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/+$/, '');
 const AI_KEYS = [process.env.QWEN_MANUAL_API_KEY, process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
@@ -36,12 +37,13 @@ const NEED = { Scalping: ['m5', 'm15', 'm30'], Intraday: ['m5', 'm15', 'h1', 'h4
 const MINB = { m1: 60, m5: 40, m15: 40, m30: 35, h1: 35, h4: 25, d1: 20 };
 const EXPMS = { Scalping: (Number(process.env.EXP_SCALP_MIN) || 60) * 6e4, Intraday: (Number(process.env.EXP_INTRADAY_MIN) || 480) * 6e4, Swing: (Number(process.env.EXP_SWING_MIN) || 5760) * 6e4 };
 const HTF_OF = { Scalping: 'm30', Intraday: 'h4', Swing: 'd1' };
-// Sanity reach LUAR (bukan gate ideal): validasi utama = struktur & range zona
-const MAXPIP = { Scalping: 250, Intraday: 500, Swing: 2000 };
+// [v187] Sanity reach diperlebar 2x agar zona jauh tidak langsung ditolak
+const MAXPIP = { Scalping: 400, Intraday: 700, Swing: 2500 };
 const RULES = {
-  Scalping: { gMin: 35, gMax: 50, bMin: 0.0025, bMax: 0.006, tps: [1, 1.5, 2, 3, 5] },
-  Intraday: { gMin: 35, gMax: 100, bMin: 0.005, bMax: 0.012, tps: [1.5, 3, 5, 7, 10] },
-  Swing: { gMin: 50, gMax: 300, bMin: 0.01, bMax: 0.025, tps: [1, 2, 3, 4, 5] },
+  // [v187] gMax & bMax diperlebar agar zona alternatif lebar tetap bisa di-cap
+  Scalping: { gMin: 35, gMax: 80, bMin: 0.0025, bMax: 0.010, tps: [1, 1.5, 2, 3, 5] },
+  Intraday: { gMin: 35, gMax: 140, bMin: 0.005, bMax: 0.016, tps: [1.5, 3, 5, 7, 10] },
+  Swing: { gMin: 50, gMax: 400, bMin: 0.01, bMax: 0.035, tps: [1, 2, 3, 4, 5] },
 };
 const COOLDOWN = 3e5;
 const cache = new Map();
@@ -68,7 +70,6 @@ async function httpJson(url, opt = {}, ms = 8000) {
   } finally { clearTimeout(t); }
 }
 
-// ===== Persistensi signal: Vercel KV / Upstash Redis via REST =====
 const KV_URL = (process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || '').replace(/\/+$/, '');
 const KV_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || '';
 const kvOn = !!(KV_URL && KV_TOKEN);
@@ -112,7 +113,6 @@ const pickPrev = (a, b) => {
   return score(b) > score(a) ? b : a;
 };
 
-// ================================================================
 function clean(rows) {
   if (!Array.isArray(rows)) return [];
   return rows.map(c => ({ t: Number(c.t ?? c.time), o: Number(c.o ?? c.open), h: Number(c.h ?? c.high), l: Number(c.l ?? c.low), c: Number(c.c ?? c.close) }))
@@ -187,7 +187,6 @@ function ranging(rows, lb = 30, tf = 'M15') {
   return null;
 }
 
-// [NEW v186] Hitung Zona Premium/Discount + Zona Alternatif Agresif
 function getPDZone(rows, lb = 60) {
   if (!Array.isArray(rows) || rows.length < 10) return null;
   const a = rows.slice(-lb);
@@ -198,9 +197,9 @@ function getPDZone(rows, lb = 60) {
   return { 
     hi, 
     lo, 
-    eq: lo + (range * 0.5),          // Equilibrium 50%
-    ote: lo + (range * 0.618),       // Standard OTE 61.8%
-    alt: lo + (range * 0.382),       // Zona Alternatif Agresif 38.2% (lebih dekat ke harga)
+    eq: lo + (range * 0.5),
+    ote: lo + (range * 0.618),
+    alt: lo + (range * 0.382),
     range 
   };
 }
@@ -276,11 +275,13 @@ function dedupeZones(list) {
   return out;
 }
 
+// [v187] Filter kandidat diperlonggar: 0.2 ATR → 0.8 ATR
 function candidatesFor(ctx, list, dir, bars) {
   const a = atr(bars) || ctx.pip * 10;
   const want = dir === 1 ? 'demand' : 'supply';
+  const tol = 0.8 * a;
   return list.filter(z => z.side === want)
-    .filter(z => (dir === 1 ? z.lo <= ctx.price + 0.2 * a : z.hi >= ctx.price - 0.2 * a))
+    .filter(z => (dir === 1 ? z.lo <= ctx.price + tol : z.hi >= ctx.price - tol))
     .map(z => ({ ...z, d: dir === 1 ? ctx.price - z.hi : z.lo - ctx.price }))
     .sort((x, y) => x.d - y.d);
 }
@@ -309,6 +310,7 @@ function invalidation(p, ctx, bars) {
   return v.length ? Math.max(...v) : NaN;
 }
 
+// [v187] applyRisk: cap dinaikkan 1.5x untuk zona alternatif
 function applyRisk(p, ctx, bars, style, allowCap = false) {
   const r = RULES[style] || RULES.Scalping;
   const b = bounds(p.entry, ctx, style);
@@ -316,7 +318,8 @@ function applyRisk(p, ctx, bars, style, allowCap = false) {
   const buf = 0.1 * (atr(bars) || ctx.pip * 10);
   const sanity = (MAXPIP[style] || 150) * ctx.pip;
   const structNeed = Number.isFinite(inv) ? Math.abs(p.entry - inv) + buf : 0;
-  const cap = Math.max(b.max, Math.min(sanity, structNeed || b.max));
+  const altBoost = (p.zone && p.zone.isAlternative) ? 1.5 : 1;
+  const cap = Math.max(b.max * altBoost, Math.min(sanity, structNeed || b.max * altBoost));
   let need = Math.max(Math.abs(p.entry - p.sl), structNeed, b.min);
   if (need > cap) {
     if (!allowCap) return { reject: true, need: ctx.dp(need / ctx.pip), max: ctx.dp(cap / ctx.pip), inv: Number.isFinite(inv) ? ctx.f(inv) : null };
@@ -343,7 +346,7 @@ function entryMode(ctx, p, it, lt, bars, style, exec, cands, opts = {}) {
   const calc = z => {
     const zl = z.lo, zh = z.hi, w = zh - zl;
     const isDeep = deep.has(zl + '|' + zh);
-    const frac = isDeep ? 0.15 : (z.isAlternative ? 0.3 : 0.4); // Alternatif lebih agresif (30%)
+    const frac = isDeep ? 0.15 : (z.isAlternative ? 0.3 : 0.4);
     const beyond = p.dir === 1 ? ctx.price < zl : ctx.price > zh;
     const inside = ctx.price >= zl && ctx.price <= zh;
     const lim = inside && !isDeep ? (p.dir === 1 ? zl + 0.5 * w : zh - 0.5 * w) : (p.dir === 1 ? zl + frac * w : zh - frac * w);
@@ -393,9 +396,9 @@ function entryMode(ctx, p, it, lt, bars, style, exec, cands, opts = {}) {
         return { type: 'LIMIT', entry: e2, zone: z, note: 'LIMIT retest dalam zona @ ' + ctx.f(e2) + ' (' + ctx.dp(Math.abs(ctx.price - e2) / ctx.pip) + ' pip) di ' + (z.tf ? z.tf + ' ' : '') + z.kind + ': harga di dalam zona struktur, limit pada pullback kecil searah bias.' };
     }
   }
-  // Fallback terakhir: WAJIB KELUAR SIGNAL dengan forced: true
+  // [v187] Fallback terakhir: off diperlebar 0.6→1.0 ATR
   const tfLab = style === 'Scalping' ? 'M15' : style === 'Intraday' ? 'M15' : 'H4';
-  const off = Math.min(Math.max(0.6 * a, 2 * ctx.pip), reach * ctx.pip);
+  const off = Math.min(Math.max(1.0 * a, 3 * ctx.pip), reach * ctx.pip);
   const entry = ctx.price - p.dir * off;
   const w2 = Math.max(0.25 * a, 2 * ctx.pip);
   const z = { lo: entry - w2 / 2, hi: entry + w2 / 2, side: p.dir === 1 ? 'demand' : 'supply', kind: 'Retest ATR (Forced)', tf: tfLab, isAlternative: true };
@@ -542,9 +545,6 @@ async function runManual(ctx, d, style) {
   steps.push({ tf: midLab, text: 'Internal ' + dw(it.dir) + ' · ' + stTag(it) + '.', textEn: 'Internal ' + dwEn(it.dir) + ' · ' + stTagEn(it) + '.' });
   steps.push({ tf: trigLab, text: 'Trigger ' + dw(lt.dir) + ' · ' + stTag(lt) + '.', textEn: 'Trigger ' + dwEn(lt.dir) + ' · ' + stTagEn(lt) + '.' });
 
-  // ============================================================
-  // [NEW v186] LOGIKA PREMIUM/DISCOUNT & INJEKSI ZONA ALTERNATIF
-  // ============================================================
   const pd = getPDZone(style === 'Scalping' ? cl.m15 : cl.h4, 60);
   let pdText = 'Netral';
   if (pd) {
@@ -554,13 +554,12 @@ async function runManual(ctx, d, style) {
 
   let biasDir = ht.dir || it.dir || dir;
   
-  // Deteksi konflik: Internal berlawanan dengan HTF
   if (it.fresh && it.dir !== 0 && ht.dir !== 0 && it.dir !== ht.dir) {
     const htUp = ht.dir === 1;
     const inFavorableHtfZone = pd ? (htUp ? ctx.price <= pd.ote : ctx.price >= pd.ote) : false;
     
     if (lt.dir === it.dir) {
-      biasDir = it.dir; // Trigger konfirmasi, ikut internal
+      biasDir = it.dir;
       steps.push({ 
         tf: midLab, 
         text: 'Follow internal: ' + (it.dir === 1 ? 'BUY' : 'SELL') + ' — ' + (it.ev || 'CHOCH') + ' fresh dikonfirmasi ' + trigLab + '. (Konteks: Harga di zona ' + pdText + ').', 
@@ -568,19 +567,18 @@ async function runManual(ctx, d, style) {
       });
     } else {
       if (inFavorableHtfZone) {
-        biasDir = ht.dir; // Harga sudah di zona bagus, tetap ikut HTF
+        biasDir = ht.dir;
         steps.push({ 
           tf: midLab, 
           text: 'Retracement internal, tapi harga sudah di zona ' + (htUp ? 'Discount/OTE' : 'Premium/OTE') + ' HTF. Arah tetap HTF, cari LIMIT pullback searah HTF.', 
           textEn: 'Internal retracement, but price is already in HTF ' + (htUp ? 'Discount/OTE' : 'Premium/OTE') + ' zone. Bias stays HTF, look for HTF-aligned pullback LIMIT.' 
         });
       } else {
-        // Harga BELUM di zona favorable HTF, internal kuat turun/naik -> Ikut Internal (Counter-Trend Scalp)
         biasDir = it.dir; 
         steps.push({ 
           tf: midLab, 
-          text: 'Retracement kuat searah internal (' + dw(it.dir) + '). Harga belum di zona ' + (htUp ? 'Discount' : 'Premium') + ' HTF. Diizinkan scalp counter-trend searah internal dengan target menuju area Mid/Discount HTF, menghindari status "busy" menunggu pullback HTF yang tidak ideal.', 
-          textEn: 'Strong internal retracement (' + dwEn(it.dir) + '). Price not yet in HTF ' + (htUp ? 'Discount' : 'Premium') + ' zone. Counter-trend scalp in internal direction allowed, targeting HTF Mid/Discount area, avoiding "busy" status waiting for non-ideal HTF pullback.' 
+          text: 'Retracement kuat searah internal (' + dw(it.dir) + '). Harga belum di zona ' + (htUp ? 'Discount' : 'Premium') + ' HTF. Diizinkan scalp counter-trend searah internal dengan target menuju area Mid/Discount HTF.', 
+          textEn: 'Strong internal retracement (' + dwEn(it.dir) + '). Price not yet in HTF ' + (htUp ? 'Discount' : 'Premium') + ' zone. Counter-trend scalp in internal direction allowed, targeting HTF Mid/Discount area.' 
         });
       }
     }
@@ -640,27 +638,39 @@ async function runManual(ctx, d, style) {
   }
   if (rangeZone) pool.unshift({ ...rangeZone, d: p.dir === 1 ? ctx.price - rangeZone.hi : rangeZone.lo - ctx.price });
 
-  // [NEW v186] INJEKSI ZONA ALTERNATIF (Jaminan Tidak Standby)
-  const maxAllowedDist = (RULES[style].gMax * 1.5) * ctx.pip;
+  // [v187] INJEKSI ZONA ALTERNATIF DIPERLENGGAR — ambang 3x gMax + fallback Fib 0.382
+  const maxAllowedDist = (RULES[style].gMax * 3) * ctx.pip;
   const primaryZoneTooFar = pool.length > 0 && Math.abs(pool[0].d) > maxAllowedDist;
 
   if (pool.length === 0 || primaryZoneTooFar) {
-    const m5Gaps = gaps(cl.m5).map(g => ({ ...g, tf: 'M5', kind: g.kind + ' (Alt Internal)', isAlternative: true }));
-    const m5Zones = zonesFromRows(cl.m5, 'M5', ctx, 40).map(z => ({ ...z, kind: z.kind + ' (Alt Internal)', isAlternative: true }));
+    const m5Gaps = gaps(cl.m5).map(g => ({ ...g, tf: 'M5', kind: g.kind + ' (Alt)', isAlternative: true }));
+    const m5Zones = zonesFromRows(cl.m5, 'M5', ctx, 40).map(z => ({ ...z, kind: z.kind + ' (Alt)', isAlternative: true }));
     const altCands = candidatesFor(ctx, dedupeZones([...m5Gaps, ...m5Zones]), p.dir, cl.m5);
-    
+
     if (altCands.length > 0) {
       pool.unshift({ ...altCands[0], d: altCands[0].d, isAlternative: true });
       steps.push({
         tf: 'Zona Alt',
-        text: `Zona HTF terlalu jauh/tidak ideal. Sistem otomatis beralih ke zona alternatif internal (M5) terdekat searah bias (${dw(p.dir)}) untuk memastikan signal tetap keluar dengan risk yang dikontrol.`,
-        textEn: `HTF zone too far/non-ideal. System auto-switched to nearest internal (M5) alternative zone aligned with bias (${dwEn(p.dir)}) to ensure signal generation with controlled risk.`
+        text: `Zona utama terlalu jauh. Beralih ke zona alternatif M5 terdekat searah bias (${dw(p.dir)}).`,
+        textEn: `Primary zone too far. Switched to nearest M5 alternative zone aligned with bias (${dwEn(p.dir)}).`
+      });
+    } else if (pd) {
+      const fibLevel = p.dir === 1 ? pd.alt : (pd.hi - (pd.range * 0.382));
+      const w = Math.max(0.3 * (atr(cl.m5) || ctx.pip * 10), ctx.pip * 5);
+      const fibZone = p.dir === 1
+        ? { lo: fibLevel - w / 2, hi: fibLevel + w / 2, side: 'demand', kind: 'Fib 0.382 Alt', tf: 'M15', isAlternative: true }
+        : { lo: fibLevel - w / 2, hi: fibLevel + w / 2, side: 'supply', kind: 'Fib 0.382 Alt', tf: 'M15', isAlternative: true };
+      pool.unshift({ ...fibZone, d: p.dir === 1 ? ctx.price - fibZone.hi : fibZone.lo - ctx.price });
+      steps.push({
+        tf: 'Zona Alt',
+        text: `Tidak ada OB/FVG M5 dekat. Sistem membuat zona alternatif di level Fibonacci 0.382 (${ctx.f(fibLevel)}) searah bias (${dw(p.dir)}) agar signal tetap keluar.`,
+        textEn: `No nearby M5 OB/FVG. System created alternative zone at Fib 0.382 (${ctx.f(fibLevel)}) aligned with bias (${dwEn(p.dir)}) to ensure signal output.`
       });
     } else {
       steps.push({
         tf: 'Zona Alt',
-        text: `Tidak ada zona struktur dekat. Sistem akan memaksa entry pada retest ATR terdekat dengan risk di-cap (dibatasi) agar tetap aman untuk scalping.`,
-        textEn: `No nearby structural zone. System will force entry at nearest ATR retest with capped risk to remain safe for scalping.`
+        text: `Fallback ATR retest dengan risk di-cap.`,
+        textEn: `ATR retest fallback with capped risk.`
       });
     }
   }
@@ -901,7 +911,7 @@ async function handleCandles(body, lang, res, isBot, email) {
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods': 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-user-email');
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method === 'GET') return res.status(200).json({ ok: true, version: VERSION, store: kvOn ? 'KV' : 'MEM', note: 'generate alive' });
