@@ -7,6 +7,7 @@
 // - Lifecycle v2 (fill dulu baru TP/SL, baca M5); persistensi KV; BTC pip display ÷10; cooldown 5 menit
 // - [v186]: Logika Premium/Discount (Fibonacci) & Injeksi Zona Alternatif M5 agar TIDAK PERNAH STANDBY.
 // - [v187]: Range zone diperlebar 2x, filter kandidat 0.2→0.8 ATR, fallback Fib 0.382, cap zona alt 1.5x.
+// - [v187-fix]: Perbaikan syntax setHeader yang menyebabkan HTTP 500.
 
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
@@ -911,7 +912,7 @@ async function handleCandles(body, lang, res, isBot, email) {
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods': 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-user-email');
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method === 'GET') return res.status(200).json({ ok: true, version: VERSION, store: kvOn ? 'KV' : 'MEM', note: 'generate alive' });
@@ -930,7 +931,13 @@ export default async function handler(req, res) {
     if (isVis) return await handleVision(body, lang, res);
     return await handleCandles(body, lang, res, isBot, email);
   } catch (err) {
-    console.error('fatal', err);
-    if (!res.headersSent) return res.status(200).json({ ok: false, reason: 'Server error: ' + (err?.message || 'unknown'), version: VERSION });
+    console.error('[generate] fatal error:', err?.message, err?.stack);
+    if (!res.headersSent) {
+      return res.status(200).json({ 
+        ok: false, 
+        reason: 'Server error: ' + (err?.message || 'unknown'), 
+        version: VERSION 
+      });
+    }
   }
 }
