@@ -1,8 +1,7 @@
-// api/generate.js — v181 compact
-// - Lifecycle v2: fill dulu baru TP/SL; deteksi sentuh via high/low candle sejak tick terakhir (spike saat browser ditutup tetap tercatat)
-// - Pending LIMIT TIDAK dibatalkan karena jarak (TOO_FAR dihapus); hidup sampai expiry/SL/TP5
-// - Intraday: zona M15 utama > refine M5; TP 1:1.5/3/5/7/10; selalu LIMIT
-// - Scalping: ranging/sideways → LIMIT di tepi range (Range Low/High); cascade LIMIT/NOW tetap
+// api/generate.js — v182 compact
+// - BTCUSD: nilai pip TAMPILAN diskalakan ÷10 (186→19, 1100→110) agar recap setara gold; harga & risiko internal TETAP
+// - Lifecycle v2: fill dulu baru TP/SL; deteksi via high/low candle sejak tick terakhir; pending tidak dibatalkan karena jarak
+// - Intraday: zona M15 utama > refine M5; TP 1:1.5/3/5/7/10; selalu LIMIT. Swing selalu LIMIT. Scalping cascade + ranging edge
 // - Cooldown: reason "kembali lagi setelah 5 menit" + sisa menit
 // - PERSISTENSI: Vercel KV / Upstash REST + fallback prevSignal localStorage
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
@@ -13,7 +12,7 @@ import { simpleZonePlan, scalpWatch } from '../lib/smc_flex.js';
 import { runBotSma as runBotFlex } from '../lib/bot_3candle.js';
 
 export const config = { maxDuration: 60 };
-const VERSION = 'v181';
+const VERSION = 'v182';
 const TL_BASE = 'https://api.tickerlayer.com';
 const AI_BASE = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/+$/, '');
 const AI_KEYS = [process.env.QWEN_MANUAL_API_KEY, process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
@@ -23,7 +22,10 @@ const VIS_KEY = process.env.OPENAI_API_KEY || AI_KEYS[0] || '';
 const TL_KEYS = ['TICKERLAYER_API_KEY', ...Array.from({ length: 19 }, (_, i) => 'TICKERLAYER_API_KEY_' + (i + 1))].map(n => process.env[n] || '').filter(Boolean);
 const DEC = { XAUUSD: 2, XAGUSD: 3, BTCUSD: 2, ETHUSD: 2, SOLUSD: 2, XRPUSD: 4, BNBUSD: 2, DXY: 2, US30: 2, NAS100: 2, SPX500: 2, GER40: 2, UK100: 2, JPN225: 0, EURUSD: 5, GBPUSD: 5, USDJPY: 3, AUDUSD: 5, USDCAD: 5, USDCHF: 5, NZDUSD: 5 };
 const PIP = { XAUUSD: 0.1, BTCUSD: 1, DXY: 0.01, US30: 1, NAS100: 1 };
+// Skala TAMPILAN pip saja (recap setara gold). Tidak mengubah harga/SL/TP/perhitungan internal.
+const PIP_DISPLAY = { BTCUSD: 0.1 };
 const pipOf = (s, d) => PIP[s] ?? Math.pow(10, -(d - 1));
+const pipScaleOf = s => PIP_DISPLAY[s] ?? 1;
 const isGold = s => s === 'XAUUSD' || s === 'XAUUSDX';
 const TFMS = { m1: 6e4, m5: 3e5, m15: 9e5, m30: 18e5, h1: 36e5, h4: 144e5, d1: 864e5 };
 const TFIV = { m1: '1m', m5: '5m', m15: '15m', m30: '30m', h1: '1h', h4: '4h', d1: '1d' };
@@ -226,7 +228,7 @@ function zoneLine(list, ctx, en) {
   if (!list || !list.length) return en ? 'no fresh zone readable yet.' : 'belum ada zona fresh terbaca.';
   return list.slice(0, 4).map(z => {
     const inside = ctx.price >= z.lo && ctx.price <= z.hi;
-    const d = Math.round((z.lo >= ctx.price ? z.lo - ctx.price : ctx.price - z.hi) / ctx.pip);
+    const d = ctx.dp((z.lo >= ctx.price ? z.lo - ctx.price : ctx.price - z.hi) / ctx.pip);
     const pos = inside ? (en ? 'price inside' : 'harga di dalam') : (z.lo >= ctx.price ? (en ? 'above' : 'di atas') : (en ? 'below' : 'di bawah'));
     const tail = inside ? pos : d + ' pip ' + pos;
     return z.kind + ' ' + ctx.f(z.lo) + '–' + ctx.f(z.hi) + ' (' + tail + ')';
@@ -290,7 +292,7 @@ function applyRisk(p, ctx, bars, style, allowCap = false) {
   const buf = 0.1 * (atr(bars) || ctx.pip * 10);
   let need = Math.max(Math.abs(p.entry - p.sl), Number.isFinite(inv) ? Math.abs(p.entry - inv) + buf : 0, b.min);
   if (need > b.max) {
-    if (!allowCap) return { reject: true, need: Math.round(need / ctx.pip), max: Math.round(b.max / ctx.pip), inv: Number.isFinite(inv) ? ctx.f(inv) : null };
+    if (!allowCap) return { reject: true, need: ctx.dp(need / ctx.pip), max: ctx.dp(b.max / ctx.pip), inv: Number.isFinite(inv) ? ctx.f(inv) : null };
     need = b.max;
   }
   p.sl = p.entry - p.dir * need;
@@ -300,7 +302,7 @@ function applyRisk(p, ctx, bars, style, allowCap = false) {
     p.tp5 = r.tps[4] != null ? p.entry + p.dir * need * r.tps[4] : null;
     p.rr = r.tps[0];
   }
-  p.riskPips = Math.round(need / ctx.pip);
+  p.riskPips = ctx.dp(need / ctx.pip); // nilai tampilan (BTC ÷10); jarak harga SL/TP tetap asli
   if (Number.isFinite(inv)) p.invalidLevel = inv;
   return { reject: false, inv: Number.isFinite(inv) ? ctx.f(inv) : null };
 }
@@ -325,7 +327,7 @@ function entryMode(ctx, p, it, lt, bars, style, m1, cands, opts = {}) {
     if (c.beyond) continue;
     const cap = String(z.kind || '').startsWith('Range') ? (MAXPIP[style] || 150) : maxPip;
     if (c.sideOk && c.distPip >= 2 && c.distPip <= cap)
-      return { type: 'LIMIT', entry: c.lim, zone: z, note: 'LIMIT pullback @ ' + ctx.f(c.lim) + ' (' + Math.round(c.distPip) + ' pip) di ' + (z.tf ? z.tf + ' ' : '') + z.kind + (z.refFrom ? ' (refine M5 dari ' + z.refFrom + ')' : '') + ': zona valid, sisi order benar, jarak layak — limit diprioritaskan.' };
+      return { type: 'LIMIT', entry: c.lim, zone: z, note: 'LIMIT pullback @ ' + ctx.f(c.lim) + ' (' + ctx.dp(c.distPip) + ' pip) di ' + (z.tf ? z.tf + ' ' : '') + z.kind + (z.refFrom ? ' (refine M5 dari ' + z.refFrom + ')' : '') + ': zona valid, sisi order benar, jarak layak — limit diprioritaskan.' };
     if (!opts.ranging && style === 'Scalping' && align && (c.inside || c.atProx))
       return { type: 'MARKET', entry: ctx.price, zone: z, note: 'NOW: LIMIT tidak memungkinkan (sisi limit terlewat / jarak < 2 pip) di ' + (z.tf ? z.tf + ' ' : '') + z.kind + ' sementara internal M5 & M1 searah dan harga di area proximal zona.' };
   }
@@ -347,7 +349,7 @@ function entryMode(ctx, p, it, lt, bars, style, m1, cands, opts = {}) {
         if (hi - ctx.price > b.max - buf) { hi = ctx.price + (b.max - buf); capped = true; }
         z = { lo: hi - w, hi, side: 'supply', kind: 'Swing M1', tf: 'M1' };
       }
-      return { type: 'MARKET', entry: ctx.price, zone: z, forced: true, note: 'NOW momentum: tidak ada zona pullback layak dalam ' + maxPip + ' pip, tapi internal M5 (' + (it.ev || 'mom') + ') & M1 (' + (lt.ev || 'mom') + ') searah. SL swing M1 ' + ctx.f(p.dir === 1 ? z.lo : z.hi) + (capped ? ' (dicap ' + Math.round(b.max / ctx.pip) + ' pip)' : '') + '; risiko lebih tinggi, size dikecilkan.' };
+      return { type: 'MARKET', entry: ctx.price, zone: z, forced: true, note: 'NOW momentum: tidak ada zona pullback layak dalam ' + ctx.dp(maxPip) + ' pip, tapi internal M5 (' + (it.ev || 'mom') + ') & M1 (' + (lt.ev || 'mom') + ') searah. SL swing M1 ' + ctx.f(p.dir === 1 ? z.lo : z.hi) + (capped ? ' (dicap ' + ctx.dp(b.max / ctx.pip) + ' pip)' : '') + '; risiko lebih tinggi, size dikecilkan.' };
     }
     let far = null;
     for (const z of pool) {
@@ -355,7 +357,7 @@ function entryMode(ctx, p, it, lt, bars, style, m1, cands, opts = {}) {
       if (c.beyond || !c.sideOk || c.distPip < 2 || c.distPip > (MAXPIP[style] || 150)) continue;
       if (!far || c.distPip < far.distPip) far = c;
     }
-    if (far) return { type: 'LIMIT', entry: far.lim, zone: far.z, note: 'LIMIT pullback dalam @ ' + ctx.f(far.lim) + ' (' + Math.round(far.distPip) + ' pip > ideal ' + maxPip + ' pip) di ' + (far.z.tf ? far.z.tf + ' ' : '') + far.z.kind + ': belum ada zona lebih dekat; order dipasang menunggu retest, batalkan bila struktur berbalik.' };
+    if (far) return { type: 'LIMIT', entry: far.lim, zone: far.z, note: 'LIMIT pullback dalam @ ' + ctx.f(far.lim) + ' (' + ctx.dp(far.distPip) + ' pip > ideal ' + ctx.dp(maxPip) + ' pip) di ' + (far.z.tf ? far.z.tf + ' ' : '') + far.z.kind + ': belum ada zona lebih dekat; order dipasang menunggu retest, batalkan bila struktur berbalik.' };
   } else {
     for (const z of pool) {
       const c = calc(z);
@@ -364,7 +366,7 @@ function entryMode(ctx, p, it, lt, bars, style, m1, cands, opts = {}) {
       const step = Math.max(2 * ctx.pip, 0.3 * w);
       const e2 = p.dir === 1 ? Math.max(z.lo, ctx.price - step) : Math.min(z.hi, ctx.price + step);
       if (Math.abs(ctx.price - e2) / ctx.pip >= 2)
-        return { type: 'LIMIT', entry: e2, zone: z, note: 'LIMIT retest dalam zona @ ' + ctx.f(e2) + ' (' + Math.round(Math.abs(ctx.price - e2) / ctx.pip) + ' pip) di ' + (z.tf ? z.tf + ' ' : '') + z.kind + (z.refFrom ? ' (refine M5 dari ' + z.refFrom + ')' : '') + ': harga sudah di dalam zona, order limit dipasang pada pullback kecil searah bias.' };
+        return { type: 'LIMIT', entry: e2, zone: z, note: 'LIMIT retest dalam zona @ ' + ctx.f(e2) + ' (' + ctx.dp(Math.abs(ctx.price - e2) / ctx.pip) + ' pip) di ' + (z.tf ? z.tf + ' ' : '') + z.kind + (z.refFrom ? ' (refine M5 dari ' + z.refFrom + ')' : '') + ': harga sudah di dalam zona, order limit dipasang pada pullback kecil searah bias.' };
     }
   }
   const tfLab = style === 'Scalping' ? 'M5' : style === 'Intraday' ? 'M15' : 'H4';
@@ -372,7 +374,7 @@ function entryMode(ctx, p, it, lt, bars, style, m1, cands, opts = {}) {
   const entry = ctx.price - p.dir * off;
   const w2 = Math.max(0.25 * a, 2 * ctx.pip);
   const z = { lo: entry - w2 / 2, hi: entry + w2 / 2, side: p.dir === 1 ? 'demand' : 'supply', kind: 'Retest ATR', tf: tfLab };
-  return { type: 'LIMIT', entry, zone: z, forced: true, note: 'LIMIT retest ATR @ ' + ctx.f(entry) + ' (' + Math.round(off / ctx.pip) + ' pip): tidak ada zona segar searah dalam jangkauan; zona sintetis 0.6×ATR ' + tfLab + ', SL minimum ' + Math.round(bounds(entry, ctx, style).min / ctx.pip) + ' pip. Confidence rendah — tunggu reaksi harga di zona.' };
+  return { type: 'LIMIT', entry, zone: z, forced: true, note: 'LIMIT retest ATR @ ' + ctx.f(entry) + ' (' + ctx.dp(off / ctx.pip) + ' pip): tidak ada zona segar searah dalam jangkauan; zona sintetis 0.6×ATR ' + tfLab + ', SL minimum ' + ctx.dp(bounds(entry, ctx, style).min / ctx.pip) + ' pip. Confidence rendah — tunggu reaksi harga di zona.' };
 }
 function sigOf(p, ctx, style) {
   const f = ctx.f;
@@ -384,6 +386,7 @@ function sigOf(p, ctx, style) {
     invalidLevel: Number.isFinite(Number(p.invalidLevel)) ? f(p.invalidLevel) : null,
     zone: p.zone ? { min: f(p.zone.lo), max: f(p.zone.hi), label: p.zone.kind } : null,
     zoneLabel: p.zone ? p.zone.kind : '', rr: Number(num(p.rr, 1).toFixed(2)), riskPips: p.riskPips ?? null,
+    pipDisplayScale: ctx.pipScale ?? 1,
     tpMode: 'RISK_R', setup: 'Manual ' + style, confidence: p.forced ? 'LOW' : 'MEDIUM', risk: p.forced ? 'HIGH' : 'MEDIUM', forced: !!p.forced,
     symbol: ctx.symbol, style, role: 'main', createdAt: Date.now(), lastTickAt: Date.now(),
     filledAt: p.type === 'MARKET' ? Date.now() : null,
@@ -436,7 +439,7 @@ async function aiJson(sys, obj, ms) {
   }
   return null;
 }
-const SYS_MTF = 'Kamu analis SMC. Jelaskan hasil scan multi-TF secara faktual, salin angka PERSIS dari JSON. Untuk tiap item "steps" tulis maks 2 kalimat. WAJIB sebutkan zona HTF (zonesHtf) dan M5 (zonesM5): jenis, rentang, jarak pip. Intraday: zona M15 utama direfine M5 untuk eksekusi, TP 1:1.5/3/5/7/10. Scalping ranging: LIMIT di tepi range. Jelaskan alasan entry dari entryNote (semua style wajib setup; Intraday/Swing selalu LIMIT). Ringkasan setup 2-3 kalimat diawali nama pair: arah, tipe order, entry, SL, TP. Jika STANDBY jelaskan "why". Balas HANYA JSON: {"perTfId":["M15: ..."],"perTfEn":["M15: ..."],"id":"...","en":"..."}';
+const SYS_MTF = 'Kamu analis SMC. Jelaskan hasil scan multi-TF secara faktual, salin angka PERSIS dari JSON (angka pip sudah diskalakan untuk tampilan — jangan dihitung ulang). Untuk tiap item "steps" tulis maks 2 kalimat. WAJIB sebutkan zona HTF (zonesHtf) dan M5 (zonesM5): jenis, rentang, jarak pip. Intraday: zona M15 utama direfine M5 untuk eksekusi, TP 1:1.5/3/5/7/10. Scalping ranging: LIMIT di tepi range. Jelaskan alasan entry dari entryNote (semua style wajib setup; Intraday/Swing selalu LIMIT). Ringkasan setup 2-3 kalimat diawali nama pair: arah, tipe order, entry, SL, TP. Jika STANDBY jelaskan "why". Balas HANYA JSON: {"perTfId":["M15: ..."],"perTfEn":["M15: ..."],"id":"...","en":"..."}';
 const SYS_BOT = 'Kamu mentor bot scalper. Jelaskan alur bot dari JSON (bias, htf, m1, checklist, trigger) dalam paragraf 4-6 kalimat santai, salin angka persis, tanpa bullet. Balas HANYA JSON: {"id":"...","en":"..."}';
 async function reasonManual(f) {
   const fb = { id: manualReason(f, false), en: manualReason(f, true), ai: false };
@@ -480,6 +483,7 @@ async function runManual(ctx, d, style) {
   steps.push({ tf: 'Zona HTF ' + htfLabel, text: zoneLine(zHtf, ctx, false), textEn: zoneLine(zHtf, ctx, true) });
   steps.push({ tf: 'Zona M5', text: zoneLine(zM5, ctx, false), textEn: zoneLine(zM5, ctx, true) });
   if (style === 'Intraday') steps.push({ tf: 'Zona M15', text: zoneLine(zM15, ctx, false), textEn: zoneLine(zM15, ctx, true) });
+  if (ctx.pipScale !== 1) steps.push({ tf: 'Pip', text: 'Nilai pip tampilan diskalakan ×' + ctx.pipScale + ' (÷10) agar recap setara gold; jarak harga SL/TP tetap asli.', textEn: 'Displayed pip values scaled ×' + ctx.pipScale + ' (÷10) so recap matches gold; actual SL/TP price distances unchanged.' });
   const okPlan = plan && plan.status === 'limit' && plan.zone && Number.isFinite(Number(plan.entry)) && Number.isFinite(Number(plan.sl));
   if (!okPlan) {
     let lz = null;
@@ -598,7 +602,6 @@ function runBot(ctx, d) {
   return { signal: s, facts: f };
 }
 // Lifecycle v2: fill dulu, baru TP/SL dari high/low candle sejak tick terakhir.
-// Pending tidak dibunuh karena jarak; spike saat browser tertutup tetap tercatat.
 function lifecycle(prev, sym, style, price, pip, data) {
   if (!prev || typeof prev !== 'object' || prev.symbol !== sym || prev.style !== style) return null;
   if (prev.signal !== 'BUY' && prev.signal !== 'SELL') return null;
@@ -623,7 +626,7 @@ function lifecycle(prev, sym, style, price, pip, data) {
   for (const c of win) {
     if (!filled) {
       if (dir === 1 ? c.l <= e : c.h >= e) { filled = true; filledAt = tsMs(c.t); }
-      else continue; // belum fill → TIDAK boleh hit TP/SL
+      else continue;
     }
     const slEff = be ? e : sl;
     const slTouch = dir === 1 ? c.l <= slEff : c.h >= slEff;
@@ -688,6 +691,7 @@ async function handleVision(body, lang, res) {
     signal: sg, orderType: isLimit ? 'LIMIT' : 'MARKET', fill: isLimit ? 'LIMIT' : 'NOW', status: isLimit ? 'PENDING' : 'RUNNING',
     entryMode: isLimit ? 'PULLBACK' : 'NOW',
     symbol: sym, pair: sym, dec, pip, style, entry, sl, tp1: t1, tp2: t2, tp3: t3, tp4: t4, tp5: t5,
+    riskPips: Math.round((risk / pip) * pipScaleOf(sym)), pipDisplayScale: pipScaleOf(sym),
     tpHits: [], tpHitCount: 0, maxTpHit: 0, be: false, slBe: null,
     zone: { min: zl, max: zh, label: (j.zone || 'Zona') + ' ' + zl + '–' + zh },
     reason: lang === 'en' ? ren : rid, reasons: { id: rid, en: ren }, reasonSource: 'AI', aiReasoning: true,
@@ -709,7 +713,8 @@ async function handleCandles(body, lang, res, isBot, email) {
   const price = Number(body.price ?? body.livePrice ?? 0);
   if (!(price > 0)) return res.status(200).json({ ok: false, reason: 'Harga live belum tersedia.' });
   const dec = DEC[symbol] ?? 2;
-  const ctx = { symbol, dec, price, pip: pipOf(symbol, dec), f: v => Number(num(v, price).toFixed(dec)) };
+  const pipScale = pipScaleOf(symbol);
+  const ctx = { symbol, dec, price, pip: pipOf(symbol, dec), pipScale, dp: v => Math.round(num(v) * pipScale), f: v => Number(num(v, price).toFixed(dec)) };
   const tfs = ['m1', 'm5', 'm15', 'h1', 'h4', 'd1'];
   const data = {};
   for (const tf of tfs) {
@@ -771,7 +776,7 @@ async function handleCandles(body, lang, res, isBot, email) {
   }
   const signal = { ...out.signal, reason: lang === 'en' ? story.v.en : story.v.id, reasons: { id: story.v.id, en: story.v.en }, reasonSource: story.v.ai ? 'AI' : 'RULES', aiReasoning: !!story.v.ai };
   if (signal.status !== 'STANDBY') await saveSignal(signal);
-  return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal, diag: { version: VERSION, status: signal.status, entryMode: signal.entryMode || null, forced: !!signal.forced, zonesHtf: f.zonesHtf || null, zonesM5: f.zonesM5 || null, restored, store: kvOn ? 'KV' : 'MEM' } });
+  return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal, diag: { version: VERSION, status: signal.status, entryMode: signal.entryMode || null, forced: !!signal.forced, pipDisplayScale: pipScale, zonesHtf: f.zonesHtf || null, zonesM5: f.zonesM5 || null, restored, store: kvOn ? 'KV' : 'MEM' } });
 }
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
