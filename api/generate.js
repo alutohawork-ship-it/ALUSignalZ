@@ -1,9 +1,8 @@
-// api/generate.js — v196 (Vision Philosophy + Wajib Signal + Quality Zone Selection)
-// - [v196] WAJIB signal BUY/SELL seperti Vision — TIDAK ada STANDBY kecuali data candle kosong
-// - [v196] Pilih zona TERBAIK berdasarkan quality score (width + confluence + freshness + proximity)
-// - [v196] LIMIT di tepi zona + SL di luar distal — persis filosofi Vision
-// - [v196] Confidence ditentukan kualitas zona, bukan forced flag
-// - [v196] Reasoning gaya Vision: singkat, fokus zona, wajib BUY/SELL
+// api/generate.js — v197 (Scalping SL = Swing Terakhir + Min 50 pip + Max 100 pip)
+// - [v197] Scalping SL min 50 pip, max 100 pip (sama seperti Intraday)
+// - [v197] SL SELALU di swing terakhir + buffer — bukan di distal zona tipis
+// - [v197] Zona min width 20 pip — hindari zona FOMO tipis
+// - [v197] Tidak ada cap ketat yang menghalangi signal
 
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
@@ -13,7 +12,7 @@ import { simpleZonePlan, scalpWatch } from '../lib/smc_flex.js';
 import { runBotSma as runBotFlex } from '../lib/bot_3candle.js';
 
 export const config = { maxDuration: 60 };
-const VERSION = 'v196';
+const VERSION = 'v197';
 const TL_BASE = 'https://api.tickerlayer.com';
 const AI_BASE = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/+$/, '');
 const AI_KEYS = [process.env.QWEN_MANUAL_API_KEY, process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
@@ -34,14 +33,19 @@ const NEED = { Scalping: ['m5', 'm15', 'm30'], Intraday: ['m5', 'm15', 'h1', 'h4
 const MINB = { m1: 60, m5: 40, m15: 40, m30: 35, h1: 35, h4: 25, d1: 20 };
 const EXPMS = { Scalping: (Number(process.env.EXP_SCALP_MIN) || 60) * 6e4, Intraday: (Number(process.env.EXP_INTRADAY_MIN) || 480) * 6e4, Swing: (Number(process.env.EXP_SWING_MIN) || 5760) * 6e4 };
 const HTF_OF = { Scalping: 'm30', Intraday: 'h4', Swing: 'd1' };
-const MAXPIP = { Scalping: 400, Intraday: 700, Swing: 2500 };
-const PROX = { Scalping: 40, Intraday: 80, Swing: 200 };
+const MAXPIP = { Scalping: 500, Intraday: 700, Swing: 2500 };
+const PROX = { Scalping: 50, Intraday: 80, Swing: 200 };
+
+// [v197] Scalping SL min 50 pip, max 100 pip — sama seperti Intraday
 const RULES = {
-  Scalping: { gMin: 35, gMax: 60, bMin: 0.0035, bMax: 0.008, tps: [1, 1.5, 2, 3, 5] },
+  Scalping: { gMin: 50, gMax: 100, bMin: 0.005, bMax: 0.012, tps: [1, 1.5, 2, 3, 5] },
   Intraday: { gMin: 50, gMax: 120, bMin: 0.005, bMax: 0.014, tps: [1, 1.5, 2, 3, 5] },
   Swing:    { gMin: 100, gMax: 300, bMin: 0.01,  bMax: 0.025, tps: [1, 1.5, 2, 3, 5] },
 };
-const MIN_ZONE_WIDTH = { Scalping: 15, Intraday: 20, Swing: 30 };
+
+// [v197] Zona min width 20 pip — hindari zona FOMO tipis
+const MIN_ZONE_WIDTH = { Scalping: 20, Intraday: 20, Swing: 30 };
+
 const COOLDOWN = 3e5;
 const cache = new Map();
 const outcomes = new Map();
@@ -232,7 +236,7 @@ function zonesFromRows(rows, tfLabel, ctx, lb = 90, style = 'Scalping') {
   if (!Array.isArray(rows) || rows.length < 12) return [];
   const a = rows.slice(-lb);
   const at = atr(a) || ctx.pip * 10;
-  const minWidth = (MIN_ZONE_WIDTH[style] || 15) * ctx.pip;
+  const minWidth = (MIN_ZONE_WIDTH[style] || 20) * ctx.pip;
   const raw = gaps(a, 60).map(g => ({ ...g, tf: tfLabel }));
   for (let i = 1; i < a.length - 1; i++) {
     const nx = a[i + 1];
@@ -261,7 +265,7 @@ function zoneLine(list, ctx, en, maxPip) {
   const near = list.filter(z => {
     const inside = ctx.price >= z.lo && ctx.price <= z.hi;
     const d = (z.lo >= ctx.price ? z.lo - ctx.price : ctx.price - z.hi) / ctx.pip;
-    return inside || d <= (maxPip || 40);
+    return inside || d <= (maxPip || 50);
   }).slice(0, 3);
   if (!near.length) return en ? 'no zone within proximity.' : 'tidak ada zona dalam proksimitas.';
   return near.map(z => {
@@ -311,6 +315,7 @@ function bounds(entry, ctx, style) {
   return isGold(ctx.symbol) ? { min: r.gMin * ctx.pip, max: r.gMax * ctx.pip } : { min: entry * r.bMin, max: entry * r.bMax };
 }
 
+// [v197] invalidation: cari swing terakhir, bukan hanya distal zona
 function invalidation(p, ctx, bars) {
   const dir = p.dir;
   const zl = Number(p.zone && p.zone.lo), zh = Number(p.zone && p.zone.hi);
@@ -318,6 +323,14 @@ function invalidation(p, ctx, bars) {
   const cands = [];
   if (Number.isFinite(distal)) cands.push(distal);
   if (Number.isFinite(Number(p.invalidLevel))) cands.push(Number(p.invalidLevel));
+  
+  // [v197] Cari swing terakhir dari bars
+  if (Array.isArray(bars) && bars.length >= 10) {
+    const n = bars.slice(-15);
+    const swing = dir === 1 ? Math.min(...n.map(c => c.l)) : Math.max(...n.map(c => c.h));
+    if (Number.isFinite(swing)) cands.push(swing);
+  }
+  
   const a = atr(bars) || ctx.pip * 10;
   const reach = (zh - zl) > 0 ? (zh - zl) : a;
   if (dir === 1) {
@@ -330,11 +343,12 @@ function invalidation(p, ctx, bars) {
   return v.length ? Math.max(...v) : NaN;
 }
 
+// [v197] applyRisk: SL di swing terakhir, min 50 pip, max 100 pip untuk Scalping
 function applyRisk(p, ctx, bars, style, allowCap = true) {
   const r = RULES[style] || RULES.Scalping;
   const b = bounds(p.entry, ctx, style);
   const inv = invalidation(p, ctx, bars);
-  const buf = 0.05 * (atr(bars) || ctx.pip * 10);
+  const buf = 0.1 * (atr(bars) || ctx.pip * 10); // Buffer lebih besar
   const structNeed = Number.isFinite(inv) ? Math.abs(p.entry - inv) + buf : 0;
   const cap = b.max;
   let need = Math.max(structNeed, b.min);
@@ -350,44 +364,37 @@ function applyRisk(p, ctx, bars, style, allowCap = true) {
   return { reject: false, inv: Number.isFinite(inv) ? ctx.f(inv) : null };
 }
 
-// [v196] Quality Score untuk zona — Vision-style: pilih zona TERBAIK, bukan asal
-// Skor 0-100: width ideal + confluence HTF/MTF/LTF + freshness + proximity
 function scoreZone(z, ht, it, lt, ctx, style) {
   let score = 0;
   const width = (z.hi - z.lo) / ctx.pip;
-  const minW = MIN_ZONE_WIDTH[style] || 15;
-  // Width ideal: 15-40 pip untuk scalping (bukan terlalu tipis, bukan terlalu lebar)
-  if (width >= minW && width <= minW * 3) score += 25;
+  const minW = MIN_ZONE_WIDTH[style] || 20;
+  if (width >= minW && width <= minW * 4) score += 25;
   else if (width >= minW) score += 15;
   else score += 5;
-  // Confluence: zona yang overlap dengan zona TF lain
   if (z.tf === HTF_OF[style].toUpperCase()) score += 20;
   else if (z.tf === 'M15') score += 15;
   else if (z.tf === 'M5') score += 10;
-  // Struktur searah
   const dir = z.side === 'demand' ? 1 : -1;
   if (ht.dir === dir) score += 15;
   if (it.dir === dir) score += 10;
   if (lt.dir === dir) score += 5;
   if (it.fresh && it.dir === dir) score += 8;
   if (lt.fresh && lt.dir === dir) score += 5;
-  // Proximity: zona dekat lebih baik
   const inside = ctx.price >= z.lo && ctx.price <= z.hi;
   const d = inside ? 0 : (dir === 1 ? ctx.price - z.hi : z.lo - ctx.price) / ctx.pip;
   if (inside) score += 15;
   else if (d <= 10) score += 12;
   else if (d <= 20) score += 8;
-  else if (d <= 40) score += 4;
+  else if (d <= 50) score += 4;
   return { score, width, d, inside };
 }
 
-// [v196] Pilih zona TERBAIK dari semua kandidat — seperti Vision yang lihat chart langsung
 function chooseBestZone(ctx, ht, it, lt, allZones, style) {
-  const prox = PROX[style] || 40;
+  const prox = PROX[style] || 50;
   const candidates = allZones.filter(z => {
     const inside = ctx.price >= z.lo && ctx.price <= z.hi;
     const d = (z.lo >= ctx.price ? z.lo - ctx.price : ctx.price - z.hi) / ctx.pip;
-    return inside || d <= prox * 2; // Boleh lebih jauh untuk cari zona terbaik
+    return inside || d <= prox * 2;
   });
   if (!candidates.length) return null;
   const scored = candidates.map(z => {
@@ -397,14 +404,13 @@ function chooseBestZone(ctx, ht, it, lt, allZones, style) {
   return scored[0];
 }
 
-// [v196] WAJIB signal: jika tidak ada zona, buat dari swing terdekat (bukan STANDBY)
 function synthesizeZone(ctx, ht, it, lt, style, execRows) {
   const dir = ht.dir || it.dir || lt.dir || 1;
   const a = atr(execRows) || ctx.pip * 10;
-  const n = Array.isArray(execRows) && execRows.length >= 6 ? execRows.slice(-10) : [];
+  const n = Array.isArray(execRows) && execRows.length >= 6 ? execRows.slice(-15) : [];
   if (n.length < 4) return null;
   const swing = dir === 1 ? Math.min(...n.map(c => c.l)) : Math.max(...n.map(c => c.h));
-  const w = Math.max(0.3 * a, ctx.pip * 8);
+  const w = Math.max(0.3 * a, ctx.pip * 15);
   const z = dir === 1
     ? { lo: swing, hi: swing + w, side: 'demand', kind: 'Swing Low', tf: style === 'Scalping' ? 'M5' : 'M15', isSynthetic: true }
     : { lo: swing - w, hi: swing, side: 'supply', kind: 'Swing High', tf: style === 'Scalping' ? 'M5' : 'M15', isSynthetic: true };
@@ -413,7 +419,7 @@ function synthesizeZone(ctx, ht, it, lt, style, execRows) {
 
 function entryMode(ctx, p, it, lt, bars, style, exec, cands, opts = {}) {
   const a = atr(bars) || ctx.pip * 10;
-  const prox = PROX[style] || 40;
+  const prox = PROX[style] || 50;
   const align = it.dir === p.dir && lt.dir === p.dir;
   const structOk = it.fresh || lt.fresh;
   const deep = opts.deep || new Set();
@@ -439,14 +445,13 @@ function entryMode(ctx, p, it, lt, bars, style, exec, cands, opts = {}) {
     if (c.sideOk && c.distPip <= prox)
       return { type: c.distPip < 2 ? 'MARKET' : 'LIMIT', entry: c.distPip < 2 ? ctx.price : c.lim, zone: z, note: (c.distPip < 2 ? 'NOW' : 'LIMIT') + ' di tepi zona ' + (z.tf ? z.tf + ' ' : '') + z.kind + ' @ ' + ctx.f(c.distPip < 2 ? ctx.price : c.lim) + ' (' + ctx.dp(c.distPip) + ' pip dari harga).' };
   }
-  // [v196] WAJIB signal: buat zona sintetis dari swing terdekat — TIDAK STANDBY
   const b = bounds(ctx.price, ctx, style);
   const a1 = atr(exec) || ctx.pip * 10;
-  const n = Array.isArray(exec) && exec.length >= 6 ? exec.slice(-10) : bars.slice(-10);
+  const n = Array.isArray(exec) && exec.length >= 6 ? exec.slice(-15) : bars.slice(-15);
   const swing = p.dir === 1 ? Math.min(...n.map(c => c.l)) : Math.max(...n.map(c => c.h));
-  const off = Math.max(2 * ctx.pip, Math.min(Math.abs(ctx.price - swing), 8 * ctx.pip));
+  const off = Math.max(2 * ctx.pip, Math.min(Math.abs(ctx.price - swing), 10 * ctx.pip));
   const entry = ctx.price - p.dir * off;
-  const w2 = Math.max(0.3 * a1, 8 * ctx.pip);
+  const w2 = Math.max(0.3 * a1, 10 * ctx.pip);
   const z = { lo: p.dir === 1 ? entry - w2 : entry, hi: p.dir === 1 ? entry : entry + w2, side: p.dir === 1 ? 'demand' : 'supply', kind: 'Swing ' + (style === 'Scalping' ? 'M5' : 'M15'), tf: style === 'Scalping' ? 'M5' : 'M15', isSynthetic: true };
   return { type: 'LIMIT', entry, zone: z, forced: true, note: 'LIMIT @ ' + ctx.f(entry) + ' (' + ctx.dp(off / ctx.pip) + ' pip): zona sintetis dari swing terdekat. SL ' + ctx.dp(b.max / ctx.pip) + ' pip di luar swing.' };
 }
@@ -455,7 +460,6 @@ function sigOf(p, ctx, style) {
   const f = ctx.f;
   const riskUsed = p.riskPips ? p.riskPips * ctx.pip : (Math.abs(p.entry - p.sl) || bounds(p.entry, ctx, style).min);
   const tps = buildTPs(p.entry, p.dir, riskUsed, TP_MULTIPLIERS);
-  // [v196] Confidence dari quality score, bukan forced flag
   const q = p.zoneQuality || 0;
   const conf = q >= 70 ? 'HIGH' : q >= 50 ? 'MEDIUM' : q >= 30 ? 'LOW' : 'LOW';
   const riskLvl = q >= 70 ? 'LOW' : q >= 50 ? 'MEDIUM' : 'HIGH';
@@ -547,7 +551,6 @@ async function aiJson(sys, obj, ms) {
   return null;
 }
 
-// [v196] PROMPT Manual disamakan dengan Vision: WAJIB BUY/SELL, fokus zona, singkat
 const SYS_MTF = `Kamu analis trading profesional dengan gaya Vision: WAJIB memberi arah BUY atau SELL, tidak pernah netral.
 
 DATA: struktur M30/M15/M5, zona terdekat (sudah difilter berkualitas), posisi premium/discount, setup final.
@@ -586,7 +589,7 @@ async function reasonBot(f) {
 async function runManual(ctx, d, style) {
   const cl = { m1: closed(d.m1, TFMS.m1), m5: closed(d.m5, TFMS.m5), m15: closed(d.m15, TFMS.m15), m30: closed(d.m30, TFMS.m30), h1: closed(d.h1, TFMS.h1), h4: closed(d.h4, TFMS.h4), d1: closed(d.d1, TFMS.d1) };
   let watch = [];
-  try { if (style !== 'Scalping' && typeof buildWatchlist === 'function') watch = buildWatchlist({ ...cl, price: ctx.price, pip: ctx.pip, styleName: style }); } catch (e) { console.log('[v196] buildWatchlist error:', e.message); watch = []; }
+  try { if (style !== 'Scalping' && typeof buildWatchlist === 'function') watch = buildWatchlist({ ...cl, price: ctx.price, pip: ctx.pip, styleName: style }); } catch (e) { console.log('[v197] buildWatchlist error:', e.message); watch = []; }
   const htfKey = HTF_OF[style] || 'm30';
   const htfLabel = htfKey.toUpperCase();
   const zHtf = zonesFromRows(cl[htfKey], htfLabel, ctx, 90, style);
@@ -600,17 +603,15 @@ async function runManual(ctx, d, style) {
   let plan = null;
   try { if (style === 'Intraday') plan = planIntraday({ h4: cl.h4, h1: cl.h1, m15: cl.m15, m5: cl.m5, price: ctx.price, sym: ctx.symbol, tNow: Date.now() }); else if (style === 'Swing') plan = planSwing({ d1: cl.d1, h4: cl.h4, h1: cl.h1, m15: cl.m15, price: ctx.price, sym: ctx.symbol, tNow: Date.now() }); } catch { plan = null; }
   const steps = Array.isArray(plan && plan.steps) ? plan.steps.slice() : [];
-  const prox = PROX[style] || 40;
+  const prox = PROX[style] || 50;
 
   const allZones = dedupeZones([...zHtf, ...zM15, ...zM5, ...gaps(cl.m5).map(g => ({ ...g, tf: 'M5' }))]);
   const nearZones = allZones.filter(z => { const inside = ctx.price >= z.lo && ctx.price <= z.hi; const d = (z.lo >= ctx.price ? z.lo - ctx.price : ctx.price - z.hi) / ctx.pip; return inside || d <= prox; });
 
-  // [v196] Pilih zona TERBAIK berdasarkan quality score — seperti Vision
   const best = chooseBestZone(ctx, ht, it, lt, allZones, style);
   const pd = getPDZone(style === 'Scalping' ? cl.m15 : cl.h4, 60);
   const state = structureState(ht, it, lt, ctx.price, pd);
 
-  // [v196] WAJIB signal: jika tidak ada zona, buat sintetis
   let chosen = best;
   if (!chosen) {
     const execRows = style === 'Scalping' ? cl.m5 : cl.m15;
@@ -631,7 +632,7 @@ async function runManual(ctx, d, style) {
   steps.push({ tf: 'M5', text: dw(lt.dir) + ' (' + (lt.ev || 'BOS') + (lt.fresh ? ', fresh' : ', stale') + ')', textEn: dwEn(lt.dir) + ' (' + (lt.ev || 'BOS') + (lt.fresh ? ', fresh' : ', stale') + ')' });
   steps.push({ tf: 'Zona dekat', text: zoneLine(nearZones, ctx, false, prox), textEn: zoneLine(nearZones, ctx, true, prox) });
   if (chosen) steps.push({ tf: 'Zona Terpilih', text: chosen.z.kind + ' ' + ctx.f(chosen.z.lo) + '–' + ctx.f(chosen.z.hi) + ' (skor ' + chosen.score + '/100, lebar ' + ctx.dp(chosen.width) + ' pip, ' + ctx.dp(chosen.d) + ' pip dari harga)', textEn: chosen.z.kind + ' ' + ctx.f(chosen.z.lo) + '–' + ctx.f(chosen.z.hi) + ' (score ' + chosen.score + '/100, width ' + ctx.dp(chosen.width) + ' pips, ' + ctx.dp(chosen.d) + ' pips from price)' });
-  steps.push({ tf: 'Validasi', text: 'SL min ' + ctx.dp(RULES[style].gMin) + ' pip, cap ' + ctx.dp(RULES[style].gMax) + ' pip. TP 1/1.5/2/3/5R. Zona min ' + MIN_ZONE_WIDTH[style] + ' pip. Wajib signal.', textEn: 'SL min ' + ctx.dp(RULES[style].gMin) + ' pips, cap ' + ctx.dp(RULES[style].gMax) + ' pips. TP 1/1.5/2/3/5R. Min zone width ' + MIN_ZONE_WIDTH[style] + ' pips. Signal mandatory.' });
+  steps.push({ tf: 'Validasi', text: 'SL min ' + ctx.dp(RULES[style].gMin) + ' pip, cap ' + ctx.dp(RULES[style].gMax) + ' pip. TP 1/1.5/2/3/5R. Zona min ' + MIN_ZONE_WIDTH[style] + ' pip. SL di swing terakhir.', textEn: 'SL min ' + ctx.dp(RULES[style].gMin) + ' pips, cap ' + ctx.dp(RULES[style].gMax) + ' pips. TP 1/1.5/2/3/5R. Min zone width ' + MIN_ZONE_WIDTH[style] + ' pips. SL at last swing.' });
 
   let pool = [];
   if (chosen) pool.push({ ...chosen.z, tf: chosen.z.tf || 'MTF', d: chosen.d });
@@ -654,12 +655,11 @@ async function runManual(ctx, d, style) {
     if (i >= 0) pool.splice(i, 1);
     else break;
   }
-  // [v196] WAJIB signal: jika semua gagal, pakai zona sintetis terakhir
   if (!em || em.reject) {
     const synth = synthesizeZone(ctx, ht, it, lt, style, execRows);
     if (synth) {
       p.dir = synth.dir; p.zone = { lo: synth.z.lo, hi: synth.z.hi, kind: synth.z.tf + ' ' + synth.z.kind + ' [SYNTH]' };
-      p.entry = ctx.price - synth.dir * Math.max(2 * ctx.pip, Math.min(synth.d * ctx.pip, 8 * ctx.pip));
+      p.entry = ctx.price - synth.dir * Math.max(2 * ctx.pip, Math.min(synth.d * ctx.pip, 10 * ctx.pip));
       p.type = 'LIMIT'; p.forced = true; p.zoneQuality = synth.score;
       p.note = 'LIMIT @ ' + ctx.f(p.entry) + ': zona sintetis dari swing terdekat (WAJIB signal).';
       risk = applyRisk(p, ctx, bars, style, true);
@@ -688,6 +688,6 @@ async function handleVision(body, lang, res) { const imgs = (Array.isArray(body.
 
 function normStyle(raw) { const k = String(raw || '').toLowerCase(); if (k.includes('swing')) return 'Swing'; if (k.includes('intraday')) return 'Intraday'; return 'Scalping'; }
 
-async function handleCandles(body, lang, res, isBot, email) { const symbol = String(body.symbol || 'XAUUSD').toUpperCase(); const style = isBot ? 'scalperbot' : normStyle(body.style || body.mode); const price = Number(body.price ?? body.livePrice ?? 0); if (!(price > 0)) return res.status(200).json({ ok: false, reason: 'Harga live belum tersedia.' }); const dec = DEC[symbol] ?? 2; const pipScale = pipScaleOf(symbol); const ctx = { symbol, dec, price, pip: pipOf(symbol, dec), pipScale, dp: v => Math.round(num(v) * pipScale), f: v => Number(num(v, price).toFixed(dec)) }; const tfs = ['m1', 'm5', 'm15', 'm30', 'h1', 'h4', 'd1']; const data = {}; for (const tf of tfs) { const inc = clean((body.candles || {})[tf] ?? body[tf]); if (inc.length) { data[tf] = inc; cache.set(symbol + tf, { t: Date.now(), rows: inc }); } else data[tf] = []; } const need = isBot ? ['m1', 'm5', 'm15'] : (NEED[style] || NEED.Scalping); await Promise.all(need.map(async tf => { if (data[tf].length >= (MINB[tf] || 25)) return; const rows = await tlRows(symbol, TFIV[tf], 200); if (rows.length) { data[tf] = rows; cache.set(symbol + tf, { t: Date.now(), rows }); return; } const c = cache.get(symbol + tf); if (c && Date.now() - c.t < 12e4) data[tf] = c.rows; })); if (!data.m5.length && !data.m15.length && !data.m1.length) return res.status(200).json({ ok: false, reason: 'Data candle belum cukup.' }); let out; try { out = isBot ? runBot(ctx, data) : await runManual(ctx, data, style); } catch (e) { console.error('[v196] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message, []); } if (!out || !out.signal) out = standby(ctx, style, 'Menunggu setup valid.', []); const key = symbol + '|' + style; const clientPrev = (body.prevSignal && typeof body.prevSignal === 'object') ? body.prevSignal : null; const storePrev = await loadSignal(symbol, style); const prev = pickPrev(clientPrev, storePrev); const restored = !clientPrev && !!storePrev; const life = lifecycle(prev, symbol, style, price, ctx.pip, data); if (life && life.dead) { await saveOutcome(key, { dir: life.prev.signal, out: life.out, t: Date.now() }); await dropSignal(symbol, style); } if (life && life.dead && life.out === 'TP5') { const fin = { ...life.prev, ...life.patch, sticky: true, finished: true }; if (fin.reasons) fin.reason = lang === 'en' ? (fin.reasons.en || fin.reasons.id) : (fin.reasons.id || fin.reasons.en); return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal: fin, diag: { version: VERSION, lifecycle: 'TP5', finished: true, store: kvOn ? 'KV' : 'MEM' } }); } if (life && !life.dead) { const managed = { ...life.prev, ...life.patch, sticky: true }; const opp = out.signal.status !== 'STANDBY' && out.signal.signal !== managed.signal; if (!(body.forceNew && opp)) { await saveSignal(managed); if (managed.reasons) managed.reason = lang === 'en' ? (managed.reasons.en || managed.reasons.id) : (managed.reasons.id || managed.reasons.en); return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal: managed, diag: { version: VERSION, lifecycle: managed.state, tpHits: managed.tpHits, filled: !!managed.filledAt, sticky: true, restored, store: kvOn ? 'KV' : 'MEM' } }); } } if (isBot && out.signal.status !== 'STANDBY') { try { await markTrialBotUsed(email); } catch {} } const f = out.facts || { symbol, style, status: 'STANDBY', why: '', steps: [], dec, price: ctx.f(price) }; const ck = key + '|' + f.status + '|' + (f.signal || '') + '|' + (f.entry || '') + '|' + String(f.why || '').slice(0, 40); let story = stories.get(ck); if (!story || Date.now() - story.t > 12e4) { const r = isBot ? await reasonBot(f) : await reasonManual(f); story = { t: Date.now(), v: r }; stories.set(ck, story); if (stories.size > 200) stories.delete(stories.keys().next().value); } const signal = { ...out.signal, reason: lang === 'en' ? story.v.en : story.v.id, reasons: { id: story.v.id, en: story.v.en }, reasonSource: story.v.ai ? 'AI' : 'RULES', aiReasoning: !!story.v.ai }; if (signal.status !== 'STANDBY') await saveSignal(signal); return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal, diag: { version: VERSION, status: signal.status, entryMode: signal.entryMode || null, forced: !!signal.forced, pipDisplayScale: pipScale, zonesHtf: f.zonesHtf || null, zonesM5: f.zonesM5 || null, structureState: f.structureState || null, premiumDiscount: f.premiumDiscount || null, zoneQuality: f.zoneQuality || 0, restored, store: kvOn ? 'KV' : 'MEM' } }); }
+async function handleCandles(body, lang, res, isBot, email) { const symbol = String(body.symbol || 'XAUUSD').toUpperCase(); const style = isBot ? 'scalperbot' : normStyle(body.style || body.mode); const price = Number(body.price ?? body.livePrice ?? 0); if (!(price > 0)) return res.status(200).json({ ok: false, reason: 'Harga live belum tersedia.' }); const dec = DEC[symbol] ?? 2; const pipScale = pipScaleOf(symbol); const ctx = { symbol, dec, price, pip: pipOf(symbol, dec), pipScale, dp: v => Math.round(num(v) * pipScale), f: v => Number(num(v, price).toFixed(dec)) }; const tfs = ['m1', 'm5', 'm15', 'm30', 'h1', 'h4', 'd1']; const data = {}; for (const tf of tfs) { const inc = clean((body.candles || {})[tf] ?? body[tf]); if (inc.length) { data[tf] = inc; cache.set(symbol + tf, { t: Date.now(), rows: inc }); } else data[tf] = []; } const need = isBot ? ['m1', 'm5', 'm15'] : (NEED[style] || NEED.Scalping); await Promise.all(need.map(async tf => { if (data[tf].length >= (MINB[tf] || 25)) return; const rows = await tlRows(symbol, TFIV[tf], 200); if (rows.length) { data[tf] = rows; cache.set(symbol + tf, { t: Date.now(), rows }); return; } const c = cache.get(symbol + tf); if (c && Date.now() - c.t < 12e4) data[tf] = c.rows; })); if (!data.m5.length && !data.m15.length && !data.m1.length) return res.status(200).json({ ok: false, reason: 'Data candle belum cukup.' }); let out; try { out = isBot ? runBot(ctx, data) : await runManual(ctx, data, style); } catch (e) { console.error('[v197] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message, []); } if (!out || !out.signal) out = standby(ctx, style, 'Menunggu setup valid.', []); const key = symbol + '|' + style; const clientPrev = (body.prevSignal && typeof body.prevSignal === 'object') ? body.prevSignal : null; const storePrev = await loadSignal(symbol, style); const prev = pickPrev(clientPrev, storePrev); const restored = !clientPrev && !!storePrev; const life = lifecycle(prev, symbol, style, price, ctx.pip, data); if (life && life.dead) { await saveOutcome(key, { dir: life.prev.signal, out: life.out, t: Date.now() }); await dropSignal(symbol, style); } if (life && life.dead && life.out === 'TP5') { const fin = { ...life.prev, ...life.patch, sticky: true, finished: true }; if (fin.reasons) fin.reason = lang === 'en' ? (fin.reasons.en || fin.reasons.id) : (fin.reasons.id || fin.reasons.en); return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal: fin, diag: { version: VERSION, lifecycle: 'TP5', finished: true, store: kvOn ? 'KV' : 'MEM' } }); } if (life && !life.dead) { const managed = { ...life.prev, ...life.patch, sticky: true }; const opp = out.signal.status !== 'STANDBY' && out.signal.signal !== managed.signal; if (!(body.forceNew && opp)) { await saveSignal(managed); if (managed.reasons) managed.reason = lang === 'en' ? (managed.reasons.en || managed.reasons.id) : (managed.reasons.id || managed.reasons.en); return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal: managed, diag: { version: VERSION, lifecycle: managed.state, tpHits: managed.tpHits, filled: !!managed.filledAt, sticky: true, restored, store: kvOn ? 'KV' : 'MEM' } }); } } if (isBot && out.signal.status !== 'STANDBY') { try { await markTrialBotUsed(email); } catch {} } const f = out.facts || { symbol, style, status: 'STANDBY', why: '', steps: [], dec, price: ctx.f(price) }; const ck = key + '|' + f.status + '|' + (f.signal || '') + '|' + (f.entry || '') + '|' + String(f.why || '').slice(0, 40); let story = stories.get(ck); if (!story || Date.now() - story.t > 12e4) { const r = isBot ? await reasonBot(f) : await reasonManual(f); story = { t: Date.now(), v: r }; stories.set(ck, story); if (stories.size > 200) stories.delete(stories.keys().next().value); } const signal = { ...out.signal, reason: lang === 'en' ? story.v.en : story.v.id, reasons: { id: story.v.id, en: story.v.en }, reasonSource: story.v.ai ? 'AI' : 'RULES', aiReasoning: !!story.v.ai }; if (signal.status !== 'STANDBY') await saveSignal(signal); return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal, diag: { version: VERSION, status: signal.status, entryMode: signal.entryMode || null, forced: !!signal.forced, pipDisplayScale: pipScale, zonesHtf: f.zonesHtf || null, zonesM5: f.zonesM5 || null, structureState: f.structureState || null, premiumDiscount: f.premiumDiscount || null, zoneQuality: f.zoneQuality || 0, restored, store: kvOn ? 'KV' : 'MEM' } }); }
 
 export default async function handler(req, res) { res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS'); res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-user-email'); if (req.method === 'OPTIONS') return res.status(204).end(); if (req.method === 'GET') return res.status(200).json({ ok: true, version: VERSION, store: kvOn ? 'KV' : 'MEM', note: 'generate alive' }); if (req.method !== 'POST') return res.status(200).json({ ok: false, reason: 'Method not allowed' }); let body = {}; try { body = req.body || {}; if (typeof body === 'string') body = JSON.parse(body); if (body.probe) return res.status(200).json({ ok: true, version: VERSION, store: kvOn ? 'KV' : 'MEM' }); const lang = body.lang === 'en' ? 'en' : 'id'; const email = String(body.email || body.value || '').trim().toLowerCase(); const isBot = !!(body.auto || body.bot || body.mode === 'bot' || body.source === 'bot'); const isVis = body.symbol === 'VISION' || body.mode === 'vision' || (Array.isArray(body.images) && body.images.length); const acc = await checkAccess(email, isBot); if (!acc.ok) return res.status(200).json({ ok: false, reason: 'Akses: ' + acc.key }); if (isVis) return await handleVision(body, lang, res); return await handleCandles(body, lang, res, isBot, email); } catch (err) { console.error('[generate] fatal error:', err?.message, err?.stack); if (!res.headersSent) { return res.status(200).json({ ok: false, reason: 'Server error: ' + (err?.message || 'unknown'), version: VERSION }); } } }
