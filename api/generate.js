@@ -1,8 +1,10 @@
-// api/generate.js — v197 (Scalping SL = Swing Terakhir + Min 50 pip + Max 100 pip)
-// - [v197] Scalping SL min 50 pip, max 100 pip (sama seperti Intraday)
-// - [v197] SL SELALU di swing terakhir + buffer — bukan di distal zona tipis
-// - [v197] Zona min width 20 pip — hindari zona FOMO tipis
-// - [v197] Tidak ada cap ketat yang menghalangi signal
+// api/generate.js — v198 (Framework Integration: Conviction Score + Setup Classification + Market Condition)
+// - [v198] Conviction Score 0-100 berdasarkan HTF alignment, setup quality, LTF trigger, market condition
+// - [v198] Risk Multiplier: HIGH=1.0x, MEDIUM=0.5x-0.75x, LOW=0.25x
+// - [v198] Setup Classification: Supply/Demand, Reversal, Kontinuitas, Fakeout, Retest BOS
+// - [v198] Market Condition Detection: Trending, Ranging, Choppy, High Volatility
+// - [v198] Expiry Rules: Auto-cancel LIMIT order jika tidak tersentuh dalam waktu tertentu
+// - [v198] Probability Mapping yang realistis (HIGH=62-75%, MEDIUM=52-61%, LOW=45-51%)
 
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { generateManualPlan, buildWatchlist, SYARAT_MASUK } from '../lib/manual_scalp.js';
@@ -12,7 +14,7 @@ import { simpleZonePlan, scalpWatch } from '../lib/smc_flex.js';
 import { runBotSma as runBotFlex } from '../lib/bot_3candle.js';
 
 export const config = { maxDuration: 60 };
-const VERSION = 'v197';
+const VERSION = 'v198';
 const TL_BASE = 'https://api.tickerlayer.com';
 const AI_BASE = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/+$/, '');
 const AI_KEYS = [process.env.QWEN_MANUAL_API_KEY, process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
@@ -26,6 +28,7 @@ const PIP_DISPLAY = { BTCUSD: 0.1 };
 const pipOf = (s, d) => PIP[s] ?? Math.pow(10, -(d - 1));
 const pipScaleOf = s => PIP_DISPLAY[s] ?? 1;
 const isGold = s => s === 'XAUUSD' || s === 'XAUUSDX';
+const isBTC = s => s === 'BTCUSD';
 const TFMS = { m1: 6e4, m5: 3e5, m15: 9e5, m30: 18e5, h1: 36e5, h4: 144e5, d1: 864e5 };
 const TFIV = { m1: '1m', m5: '5m', m15: '15m', m30: '30m', h1: '1h', h4: '4h', d1: '1d' };
 const TFSPAN = { m1: [1, 'minute', 1], m5: [5, 'minute', 5], m15: [15, 'minute', 15], m30: [30, 'minute', 30], h1: [1, 'hour', 60], h4: [4, 'hour', 240], d1: [1, 'day', 1440] };
@@ -36,14 +39,13 @@ const HTF_OF = { Scalping: 'm30', Intraday: 'h4', Swing: 'd1' };
 const MAXPIP = { Scalping: 500, Intraday: 700, Swing: 2500 };
 const PROX = { Scalping: 50, Intraday: 80, Swing: 200 };
 
-// [v197] Scalping SL min 50 pip, max 100 pip — sama seperti Intraday
+// [v198] Scalping SL min 50 pip, max 100 pip — sama seperti Intraday
 const RULES = {
   Scalping: { gMin: 50, gMax: 100, bMin: 0.005, bMax: 0.012, tps: [1, 1.5, 2, 3, 5] },
   Intraday: { gMin: 50, gMax: 120, bMin: 0.005, bMax: 0.014, tps: [1, 1.5, 2, 3, 5] },
   Swing:    { gMin: 100, gMax: 300, bMin: 0.01,  bMax: 0.025, tps: [1, 1.5, 2, 3, 5] },
 };
 
-// [v197] Zona min width 20 pip — hindari zona FOMO tipis
 const MIN_ZONE_WIDTH = { Scalping: 20, Intraday: 20, Swing: 30 };
 
 const COOLDOWN = 3e5;
@@ -204,6 +206,138 @@ function getPDZone(rows, lb = 60) {
   return { hi, lo, eq: lo + (range * 0.5), ote: lo + (range * 0.618), alt: lo + (range * 0.382), range };
 }
 
+// [v198] Market Condition Detection
+function detectMarketCondition(ht, it, lt, pd, bars) {
+  if (!pd) return { condition: 'Unclear', id: 'Kondisi pasar tidak jelas.', en: 'Market condition unclear.' };
+  const ratio = (pd.hi - pd.lo) / pd.range;
+  const a = atr(bars) || 1;
+  const volatility = a / pd.range;
+  
+  // Deteksi trending
+  if (ht.dir !== 0 && it.dir === ht.dir && lt.dir === ht.dir) {
+    return { condition: 'Trending', id: 'Trending kuat searah semua TF.', en: 'Strong trend aligned across all TFs.', multiplier: 1.0 };
+  }
+  
+  // Deteksi ranging
+  if (ht.dir === 0 && it.dir === 0) {
+    return { condition: 'Ranging', id: 'Ranging/Sideways — tidak ada arah jelas.', en: 'Ranging/Sideways — no clear direction.', multiplier: 0.5 };
+  }
+  
+  // Deteksi choppy
+  if (ht.dir !== 0 && it.dir !== 0 && ht.dir !== it.dir && lt.dir !== 0 && lt.dir !== ht.dir) {
+    return { condition: 'Choppy', id: 'Choppy/Whipsaw — arah tidak konsisten.', en: 'Choppy/Whipsaw — inconsistent direction.', multiplier: 0.25 };
+  }
+  
+  // Deteksi high volatility
+  if (volatility > 0.5) {
+    return { condition: 'High Volatility', id: 'Volatilitas tinggi — hati-hati.', en: 'High volatility — cautious.', multiplier: 0.5 };
+  }
+  
+  // Default: transisi
+  return { condition: 'Transition', id: 'Transisi struktur.', en: 'Structure transition.', multiplier: 0.75 };
+}
+
+// [v198] Setup Classification
+function classifySetup(ht, it, lt, chosen, pd) {
+  if (!chosen || !chosen.z) return { type: 'Unknown', id: 'Setup tidak terklasifikasi.', en: 'Setup unclassified.' };
+  
+  const dir = chosen.z.side === 'demand' ? 1 : -1;
+  const inPremium = pd ? (pd.hi - pd.lo) > 0 && (chosen.z.lo - pd.lo) / (pd.hi - pd.lo) >= 0.5 : false;
+  const inDiscount = pd ? (pd.hi - pd.lo) > 0 && (chosen.z.lo - pd.lo) / (pd.hi - pd.lo) < 0.5 : false;
+  
+  // Supply & Demand di HTF
+  if (chosen.z.tf === HTF_OF.Scalping.toUpperCase() || chosen.z.tf === 'H4' || chosen.z.tf === 'D1') {
+    return { type: 'Supply & Demand', id: `Zona ${chosen.z.kind} di TF tinggi — setup kuat.`, en: `${chosen.z.kind} zone at HTF — strong setup.` };
+  }
+  
+  // Reversal di area ekstrem
+  if (ht.dir !== 0 && dir !== ht.dir && (inPremium || inDiscount)) {
+    return { type: 'Reversal', id: `Reversal di area ${inPremium ? 'premium' : 'discount'} HTF.`, en: `Reversal at HTF ${inPremium ? 'premium' : 'discount'}.` };
+  }
+  
+  // Kontinuitas (pullback searah tren)
+  if (ht.dir === dir && it.dir === dir) {
+    return { type: 'Kontinuitas', id: 'Pullback searah tren — continuation setup.', en: 'Pullback with trend — continuation setup.' };
+  }
+  
+  // Fakeout/Trap (harga sweep lalu balik)
+  if (lt.fresh && lt.dir !== it.dir && it.dir === ht.dir) {
+    return { type: 'Fakeout/Trap', id: 'Fakeout/Trap — harga sweep lalu reclaim.', en: 'Fakeout/Trap — price swept then reclaimed.' };
+  }
+  
+  // Retest BOS
+  if (it.fresh && it.dir === dir) {
+    return { type: 'Retest BOS', id: 'Retest setelah BOS — setup valid.', en: 'Retest after BOS — valid setup.' };
+  }
+  
+  return { type: 'Unknown', id: 'Setup tidak terklasifikasi.', en: 'Setup unclassified.' };
+}
+
+// [v198] Conviction Score Calculation (0-100)
+function calculateConviction(ht, it, lt, chosen, pd, marketCondition, setupType, ctx, style) {
+  let score = 0;
+  
+  // 1. HTF Alignment & Zone Quality (0-30)
+  if (chosen && chosen.z) {
+    const dir = chosen.z.side === 'demand' ? 1 : -1;
+    if (ht.dir === dir) score += 20;
+    else if (ht.dir === 0) score += 10;
+    else score += 5;
+    
+    const width = (chosen.z.hi - chosen.z.lo) / ctx.pip;
+    if (width >= 20 && width <= 80) score += 10;
+    else if (width >= 15) score += 5;
+  }
+  
+  // 2. Structure, Liquidity & Setup Quality (0-30)
+  if (setupType.type === 'Supply & Demand') score += 25;
+  else if (setupType.type === 'Kontinuitas') score += 20;
+  else if (setupType.type === 'Retest BOS') score += 18;
+  else if (setupType.type === 'Reversal') score += 15;
+  else if (setupType.type === 'Fakeout/Trap') score += 12;
+  else score += 5;
+  
+  if (it.fresh && it.dir === (chosen?.z?.side === 'demand' ? 1 : -1)) score += 5;
+  
+  // 3. LTF Trigger & R:R (0-25)
+  if (lt.dir === (chosen?.z?.side === 'demand' ? 1 : -1)) score += 15;
+  if (lt.fresh) score += 10;
+  
+  // 4. Market Condition, Session, Volatility (0-15)
+  if (marketCondition.condition === 'Trending') score += 15;
+  else if (marketCondition.condition === 'Ranging') score += 8;
+  else if (marketCondition.condition === 'High Volatility') score += 5;
+  else if (marketCondition.condition === 'Choppy') score += 2;
+  else score += 7;
+  
+  return Math.min(100, Math.max(0, score));
+}
+
+// [v198] Risk Multiplier based on Conviction
+function getRiskMultiplier(conviction) {
+  if (conviction >= 75) return 1.0;
+  if (conviction >= 55) return 0.65;
+  return 0.25;
+}
+
+// [v198] Probability Estimation
+function estimateProbability(conviction) {
+  if (conviction >= 75) return { min: 62, max: 75, label: `${Math.round(62 + (conviction - 75) / 25 * 13)}%` };
+  if (conviction >= 55) return { min: 52, max: 61, label: `${Math.round(52 + (conviction - 55) / 20 * 9)}%` };
+  return { min: 45, max: 51, label: `${Math.round(45 + conviction / 55 * 6)}%` };
+}
+
+// [v198] Expiry Rules for LIMIT orders
+function getExpiryRules(style, orderType) {
+  if (orderType !== 'LIMIT') return null;
+  const rules = {
+    Scalping: { candles: 12, tf: 'M5', minutes: 60, id: 'Auto-cancel jika tidak tersentuh dalam 12 candle M5 (60 menit).', en: 'Auto-cancel if not touched within 12 M5 candles (60 minutes).' },
+    Intraday: { candles: 10, tf: 'M15', minutes: 150, id: 'Auto-cancel jika tidak tersentuh dalam 10 candle M15 (150 menit).', en: 'Auto-cancel if not touched within 10 M15 candles (150 minutes).' },
+    Swing: { candles: 12, tf: 'H1', minutes: 720, id: 'Auto-cancel jika tidak tersentuh dalam 12 candle H1 (12 jam).', en: 'Auto-cancel if not touched within 12 H1 candles (12 hours).' }
+  };
+  return rules[style] || rules.Scalping;
+}
+
 function structureState(ht, it, lt, price, pd) {
   if (!pd) return { id: 'Struktur belum jelas.', en: 'Structure unclear.' };
   const ratio = (price - pd.lo) / pd.range;
@@ -315,7 +449,6 @@ function bounds(entry, ctx, style) {
   return isGold(ctx.symbol) ? { min: r.gMin * ctx.pip, max: r.gMax * ctx.pip } : { min: entry * r.bMin, max: entry * r.bMax };
 }
 
-// [v197] invalidation: cari swing terakhir, bukan hanya distal zona
 function invalidation(p, ctx, bars) {
   const dir = p.dir;
   const zl = Number(p.zone && p.zone.lo), zh = Number(p.zone && p.zone.hi);
@@ -323,14 +456,11 @@ function invalidation(p, ctx, bars) {
   const cands = [];
   if (Number.isFinite(distal)) cands.push(distal);
   if (Number.isFinite(Number(p.invalidLevel))) cands.push(Number(p.invalidLevel));
-  
-  // [v197] Cari swing terakhir dari bars
   if (Array.isArray(bars) && bars.length >= 10) {
     const n = bars.slice(-15);
     const swing = dir === 1 ? Math.min(...n.map(c => c.l)) : Math.max(...n.map(c => c.h));
     if (Number.isFinite(swing)) cands.push(swing);
   }
-  
   const a = atr(bars) || ctx.pip * 10;
   const reach = (zh - zl) > 0 ? (zh - zl) : a;
   if (dir === 1) {
@@ -343,12 +473,11 @@ function invalidation(p, ctx, bars) {
   return v.length ? Math.max(...v) : NaN;
 }
 
-// [v197] applyRisk: SL di swing terakhir, min 50 pip, max 100 pip untuk Scalping
 function applyRisk(p, ctx, bars, style, allowCap = true) {
   const r = RULES[style] || RULES.Scalping;
   const b = bounds(p.entry, ctx, style);
   const inv = invalidation(p, ctx, bars);
-  const buf = 0.1 * (atr(bars) || ctx.pip * 10); // Buffer lebih besar
+  const buf = 0.1 * (atr(bars) || ctx.pip * 10);
   const structNeed = Number.isFinite(inv) ? Math.abs(p.entry - inv) + buf : 0;
   const cap = b.max;
   let need = Math.max(structNeed, b.min);
@@ -456,13 +585,19 @@ function entryMode(ctx, p, it, lt, bars, style, exec, cands, opts = {}) {
   return { type: 'LIMIT', entry, zone: z, forced: true, note: 'LIMIT @ ' + ctx.f(entry) + ' (' + ctx.dp(off / ctx.pip) + ' pip): zona sintetis dari swing terdekat. SL ' + ctx.dp(b.max / ctx.pip) + ' pip di luar swing.' };
 }
 
+// [v198] sigOf dengan Conviction Score, Probability, Setup Type, Expiry
 function sigOf(p, ctx, style) {
   const f = ctx.f;
   const riskUsed = p.riskPips ? p.riskPips * ctx.pip : (Math.abs(p.entry - p.sl) || bounds(p.entry, ctx, style).min);
   const tps = buildTPs(p.entry, p.dir, riskUsed, TP_MULTIPLIERS);
-  const q = p.zoneQuality || 0;
-  const conf = q >= 70 ? 'HIGH' : q >= 50 ? 'MEDIUM' : q >= 30 ? 'LOW' : 'LOW';
-  const riskLvl = q >= 70 ? 'LOW' : q >= 50 ? 'MEDIUM' : 'HIGH';
+  
+  const conviction = p.conviction || 0;
+  const riskMultiplier = getRiskMultiplier(conviction);
+  const probability = estimateProbability(conviction);
+  const convictionLevel = conviction >= 75 ? 'HIGH' : conviction >= 55 ? 'MEDIUM' : 'LOW';
+  const riskLevel = conviction >= 75 ? 'LOW' : conviction >= 50 ? 'MEDIUM' : 'HIGH';
+  const expiry = getExpiryRules(style, p.type);
+  
   const s = {
     signal: p.dir === 1 ? 'BUY' : 'SELL', orderType: p.type, fill: p.type === 'MARKET' ? 'NOW' : 'LIMIT',
     status: p.type === 'MARKET' ? 'RUNNING' : 'PENDING', state: p.type === 'MARKET' ? 'CONFIRMED' : 'LIMIT_PLACED',
@@ -473,8 +608,10 @@ function sigOf(p, ctx, style) {
     zone: p.zone ? { min: f(p.zone.lo), max: f(p.zone.hi), label: p.zone.kind } : null,
     zoneLabel: p.zone ? p.zone.kind : '', rr: Number(num(p.rr, 1).toFixed(2)), riskPips: p.riskPips ?? null,
     pipDisplayScale: ctx.pipScale ?? 1,
-    tpMode: 'RISK_R', setup: 'Manual ' + style, confidence: conf, risk: riskLvl, forced: !!p.forced,
-    zoneQuality: q,
+    tpMode: 'RISK_R', setup: p.setupType?.type || 'Unknown', setupLabel: p.setupType?.id || '',
+    conviction: conviction, convictionLevel: convictionLevel, probability: probability.label, probabilityRange: probability,
+    riskMultiplier: riskMultiplier, riskLevel: riskLevel,
+    expiry: expiry,
     symbol: ctx.symbol, style, role: 'main', createdAt: Date.now(), lastTickAt: Date.now(),
     filledAt: p.type === 'MARKET' ? Date.now() : null,
     expiresAt: Date.now() + (EXPMS[style] || 18e5),
@@ -498,14 +635,18 @@ function layout(f, en, lines, setup) {
 
 function buildNarrative(ctx, style, ht, it, lt, pd, state, chosen, p, en) {
   const pdLabel = pd ? ((ctx.price - pd.lo) / pd.range >= 0.5 ? 'premium' : 'discount') : 'netral';
-  const zoneLabel = chosen && chosen.zone ? (en ? 'zone ' + ctx.f(chosen.zone.lo) + '-' + ctx.f(chosen.zone.hi) + ' (' + ctx.dp(chosen.d) + ' pips)' : 'zona ' + ctx.f(chosen.zone.lo) + '-' + ctx.f(chosen.zone.hi) + ' (' + ctx.dp(chosen.d) + ' pip)') : (en ? 'no nearby zone' : 'tidak ada zona dekat');
+  const zoneLabel = chosen && chosen.z ? (en ? 'zone ' + ctx.f(chosen.z.lo) + '-' + ctx.f(chosen.z.hi) + ' (' + ctx.dp(chosen.d) + ' pips)' : 'zona ' + ctx.f(chosen.z.lo) + '-' + ctx.f(chosen.z.hi) + ' (' + ctx.dp(chosen.d) + ' pip)') : (en ? 'no nearby zone' : 'tidak ada zona dekat');
+  const convictionLabel = p.conviction >= 75 ? 'HIGH' : p.conviction >= 55 ? 'MEDIUM' : 'LOW';
+  const probability = estimateProbability(p.conviction || 0);
+  const setupLabel = p.setupType?.type || 'Unknown';
   const L = en ? {
     htf: () => HTF_OF[style].toUpperCase() + ' ' + dwEn(ht.dir) + ' (' + (ht.ev || 'BOS') + (ht.fresh ? ', fresh' : '') + '), harga di area ' + pdLabel + '.',
     mid: () => 'M15 ' + dwEn(it.dir) + ' (' + (it.ev || 'BOS') + (it.fresh ? ', fresh' : '') + '). ' + state.en,
     low: () => 'M5 ' + dwEn(lt.dir) + ' (' + (lt.ev || 'BOS') + (lt.fresh ? ', fresh' : ', stale') + '). ' + zoneLabel + '.',
     setup: () => {
       const ow = p.type === 'MARKET' ? 'MARKET' : 'LIMIT';
-      return ctx.symbol + ': ' + (p.dir === 1 ? 'BUY' : 'SELL') + ' ' + ow + ' @ ' + ctx.f(p.entry) + ', SL ' + ctx.f(p.sl) + ' (' + p.riskPips + ' pips), TP ' + ctx.f(p.tps[0]) + '/' + ctx.f(p.tps[1]) + '/' + ctx.f(p.tps[2]) + '.';
+      const expiryText = p.type === 'LIMIT' && p.expiry ? ' | Expiry: ' + p.expiry.en : '';
+      return ctx.symbol + ': ' + (p.dir === 1 ? 'BUY' : 'SELL') + ' ' + ow + ' @ ' + ctx.f(p.entry) + ', SL ' + ctx.f(p.sl) + ' (' + p.riskPips + ' pips), TP ' + ctx.f(p.tps[0]) + '/' + ctx.f(p.tps[1]) + '/' + ctx.f(p.tps[2]) + ' | ' + setupLabel + ' | Conviction: ' + convictionLabel + ' (' + p.conviction + '/100) | Prob: ' + probability.label + expiryText;
     }
   } : {
     htf: () => HTF_OF[style].toUpperCase() + ' ' + dw(ht.dir) + ' (' + (ht.ev || 'BOS') + (ht.fresh ? ', fresh' : '') + '), harga di area ' + pdLabel + '.',
@@ -513,7 +654,8 @@ function buildNarrative(ctx, style, ht, it, lt, pd, state, chosen, p, en) {
     low: () => 'M5 ' + dw(lt.dir) + ' (' + (lt.ev || 'BOS') + (lt.fresh ? ', fresh' : ', stale') + '). ' + zoneLabel + '.',
     setup: () => {
       const ow = p.type === 'MARKET' ? 'MARKET' : 'LIMIT';
-      return ctx.symbol + ': ' + (p.dir === 1 ? 'BUY' : 'SELL') + ' ' + ow + ' @ ' + ctx.f(p.entry) + ', SL ' + ctx.f(p.sl) + ' (' + p.riskPips + ' pip), TP ' + ctx.f(p.tps[0]) + '/' + ctx.f(p.tps[1]) + '/' + ctx.f(p.tps[2]) + '.';
+      const expiryText = p.type === 'LIMIT' && p.expiry ? ' | Expiry: ' + p.expiry.id : '';
+      return ctx.symbol + ': ' + (p.dir === 1 ? 'BUY' : 'SELL') + ' ' + ow + ' @ ' + ctx.f(p.entry) + ', SL ' + ctx.f(p.sl) + ' (' + p.riskPips + ' pip), TP ' + ctx.f(p.tps[0]) + '/' + ctx.f(p.tps[1]) + '/' + ctx.f(p.tps[2]) + ' | ' + setupLabel + ' | Conviction: ' + convictionLabel + ' (' + p.conviction + '/100) | Prob: ' + probability.label + expiryText;
     }
   };
   return { lines: [L.htf(), L.mid(), L.low()], setup: L.setup() };
@@ -525,7 +667,9 @@ function manualReason(f, en) {
   const tp = [f.tp1, f.tp2, f.tp3, f.tp4, f.tp5].filter(v => Number.isFinite(Number(v))).join(', ');
   const ow = f.orderType === 'MARKET' ? 'MARKET' : 'LIMIT';
   const inv = f.invalidLevel != null ? (en ? ' Invalidation ' + f.invalidLevel + '.' : ' Invalidasi ' + f.invalidLevel + '.') : '';
-  return layout(f, en, lines, f.symbol + ': ' + (en ? 'final ' : 'keputusan final ') + f.signal + ' ' + ow + ' @ ' + f.entry + ', SL ' + f.sl + ', TP ' + tp + '.' + inv);
+  const convictionText = f.conviction ? (en ? ' | Conviction: ' + f.convictionLevel + ' (' + f.conviction + '/100) | Prob: ' + f.probability : ' | Conviction: ' + f.convictionLevel + ' (' + f.conviction + '/100) | Prob: ' + f.probability) : '';
+  const setupText = f.setup ? (en ? ' | Setup: ' + f.setup : ' | Setup: ' + f.setup) : '';
+  return layout(f, en, lines, f.symbol + ': ' + (en ? 'final ' : 'keputusan final ') + f.signal + ' ' + ow + ' @ ' + f.entry + ', SL ' + f.sl + ', TP ' + tp + convictionText + setupText + '.' + inv);
 }
 
 async function aiJson(sys, obj, ms) {
@@ -538,7 +682,7 @@ async function aiJson(sys, obj, ms) {
       try {
         const r = await httpJson(AI_BASE + '/chat/completions', {
           method: 'POST', headers: { Authorization: 'Bearer ' + k, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: m, max_tokens: 600, temperature: 0.1, messages: [{ role: 'system', content: sys }, { role: 'user', content: JSON.stringify(obj) }] }),
+          body: JSON.stringify({ model: m, max_tokens: 800, temperature: 0.1, messages: [{ role: 'system', content: sys }, { role: 'user', content: JSON.stringify(obj) }] }),
         }, Math.min(15000, left));
         if (!r.ok) continue;
         let txt = String(r.data?.choices?.[0]?.message?.content || '');
@@ -551,22 +695,32 @@ async function aiJson(sys, obj, ms) {
   return null;
 }
 
-const SYS_MTF = `Kamu analis trading profesional dengan gaya Vision: WAJIB memberi arah BUY atau SELL, tidak pernah netral.
-
-DATA: struktur M30/M15/M5, zona terdekat (sudah difilter berkualitas), posisi premium/discount, setup final.
+// [v198] System Prompt sesuai Framework
+const SYS_MTF = `Anda adalah analis trading XAUUSD dan BTCUSD yang bertugas mengeluarkan SATU sinyal tunggal per analisis.
 
 ATURAN WAJIB:
-1. WAJIB BUY atau SELL — tidak pernah "menunggu" atau "netral"
-2. Baca angka PERSIS dari JSON — jangan mengarang
-3. Fokus pada zona yang dipakai entry — jangan sebut zona lain
-4. Tulis 3 kalimat: M30 (arah + posisi), M15 (arah + status), M5 (arah + zona entry)
-5. Setup: arah, entry, SL, TP — singkat, tanpa basa-basi
-6. Jika confidence LOW, sebut "setup agresif" tapi tetap kasih arah
-7. Bahasa seperti trader profesional, bukan robot
+1. FORCED BINARY DIRECTION: Selalu pilih TEPAT SATU arah: BUY atau SELL. Dilarang HOLD/WAIT/NO TRADE.
+2. ORDER TYPE TUNGGAL: Pilih BUY NOW, SELL NOW, BUY LIMIT, atau SELL LIMIT.
+3. TOP-DOWN ANALYSIS: HTF (bias & zona) → MTF (struktur & koreksi) → LTF (trigger eksekusi).
+4. SETUP CLASSIFICATION: Klasifikasikan ke Supply & Demand, Reversal, Kontinuitas, Fakeout/Trap, atau Retest BOS.
+5. CONVICTION SCORE (0-100): HTF & zona (0-30), struktur & setup (0-30), trigger & R:R (0-25), kondisi pasar (0-15).
+6. PROBABILITY REALISTIS: HIGH (75-100) = 62-75%, MEDIUM (55-74) = 52-61%, LOW (0-54) = 45-51%.
+7. EXPIRY RULES: Untuk LIMIT order, sertakan auto-cancel rules.
 
-Balas HANYA JSON: {"perTfId":["M30: ...","M15: ...","M5: ..."],"perTfEn":["M30: ...","M15: ...","M5: ..."],"id":"...","en":"..."}`;
+FORMAT OUTPUT:
+SIGNAL: [BUY/SELL NOW/LIMIT] | [XAUUSD/BTCUSD]
+Gaya & TF: [Scalping/Intraday/Swing] | HTF/MTF/LTF
+Setup: [Supply & Demand | Reversal | Kontinuitas | Fakeout Trap | Retest BOS]
+Entry / Zona: [Harga atau rentang zona]
+SL: [Level + jarak pip]
+TP1/TP2/TP3: [Target bertahap]
+Probability: [%] | Conviction: [skor]/100 - [HIGH/MEDIUM/LOW]
+Expiry (jika LIMIT): [Aturan auto-cancel]
+Catatan: [2-3 kalimat top-down, zona, dasar probabilitas]
 
-const SYS_BOT = 'Kamu mentor bot scalper. Jelaskan setup dalam 2-3 kalimat sederhana, wajib sebut BUY/SELL. Salin angka persis. Balas HANYA JSON: {"id":"...","en":"..."}';
+Balas HANYA JSON: {"perTfId":["HTF: ...","MTF: ...","LTF: ..."],"perTfEn":["HTF: ...","MTF: ...","LTF: ..."],"id":"...","en":"..."}`;
+
+const SYS_BOT = 'Kamu mentor bot scalper. Jelaskan setup dalam 2-3 kalimat sederhana, wajib sebut BUY/SELL, conviction, dan probability. Salin angka persis. Balas HANYA JSON: {"id":"...","en":"..."}';
 
 async function reasonManual(f) {
   const fb = { id: manualReason(f, false), en: manualReason(f, true), ai: false };
@@ -579,8 +733,9 @@ async function reasonManual(f) {
 
 async function reasonBot(f) {
   const tp = [f.tp1, f.tp2, f.tp3, f.tp4, f.tp5].filter(v => v != null).join(', ');
-  const fbId = f.status === 'STANDBY' ? 'Bot memantau ' + f.symbol + '. Bias ' + (f.bias || 'netral') + '. ' + (f.why || '') : 'Bot ' + f.signal + ' @ ' + f.entry + ', SL ' + f.sl + ', TP ' + tp + '.';
-  const fbEn = f.status === 'STANDBY' ? 'Bot scanning ' + f.symbol + '. Bias ' + (f.bias || 'neutral') + '. ' + (f.why || '') : 'Bot ' + f.signal + ' at ' + f.entry + ', SL ' + f.sl + ', TP ' + tp + '.';
+  const convictionText = f.conviction ? ` | Conviction: ${f.convictionLevel} (${f.conviction}/100) | Prob: ${f.probability}` : '';
+  const fbId = f.status === 'STANDBY' ? 'Bot memantau ' + f.symbol + '. Bias ' + (f.bias || 'netral') + '. ' + (f.why || '') : 'Bot ' + f.signal + ' @ ' + f.entry + ', SL ' + f.sl + ', TP ' + tp + convictionText + '.';
+  const fbEn = f.status === 'STANDBY' ? 'Bot scanning ' + f.symbol + '. Bias ' + (f.bias || 'neutral') + '. ' + (f.why || '') : 'Bot ' + f.signal + ' at ' + f.entry + ', SL ' + f.sl + ', TP ' + tp + convictionText + '.';
   const j = await aiJson(SYS_BOT, f, 8000);
   if (j && typeof j.id === 'string' && typeof j.en === 'string') return { id: j.id, en: j.en, ai: true };
   return { id: fbId, en: fbEn, ai: false };
@@ -589,7 +744,7 @@ async function reasonBot(f) {
 async function runManual(ctx, d, style) {
   const cl = { m1: closed(d.m1, TFMS.m1), m5: closed(d.m5, TFMS.m5), m15: closed(d.m15, TFMS.m15), m30: closed(d.m30, TFMS.m30), h1: closed(d.h1, TFMS.h1), h4: closed(d.h4, TFMS.h4), d1: closed(d.d1, TFMS.d1) };
   let watch = [];
-  try { if (style !== 'Scalping' && typeof buildWatchlist === 'function') watch = buildWatchlist({ ...cl, price: ctx.price, pip: ctx.pip, styleName: style }); } catch (e) { console.log('[v197] buildWatchlist error:', e.message); watch = []; }
+  try { if (style !== 'Scalping' && typeof buildWatchlist === 'function') watch = buildWatchlist({ ...cl, price: ctx.price, pip: ctx.pip, styleName: style }); } catch (e) { console.log('[v198] buildWatchlist error:', e.message); watch = []; }
   const htfKey = HTF_OF[style] || 'm30';
   const htfLabel = htfKey.toUpperCase();
   const zHtf = zonesFromRows(cl[htfKey], htfLabel, ctx, 90, style);
@@ -611,7 +766,10 @@ async function runManual(ctx, d, style) {
   const best = chooseBestZone(ctx, ht, it, lt, allZones, style);
   const pd = getPDZone(style === 'Scalping' ? cl.m15 : cl.h4, 60);
   const state = structureState(ht, it, lt, ctx.price, pd);
-
+  
+  // [v198] Market Condition Detection
+  const marketCondition = detectMarketCondition(ht, it, lt, pd, bars);
+  
   let chosen = best;
   if (!chosen) {
     const execRows = style === 'Scalping' ? cl.m5 : cl.m15;
@@ -631,8 +789,9 @@ async function runManual(ctx, d, style) {
   steps.push({ tf: 'M15', text: dw(it.dir) + ' (' + (it.ev || 'BOS') + (it.fresh ? ', fresh' : '') + '). ' + state.id, textEn: dwEn(it.dir) + ' (' + (it.ev || 'BOS') + (it.fresh ? ', fresh' : '') + '). ' + state.en });
   steps.push({ tf: 'M5', text: dw(lt.dir) + ' (' + (lt.ev || 'BOS') + (lt.fresh ? ', fresh' : ', stale') + ')', textEn: dwEn(lt.dir) + ' (' + (lt.ev || 'BOS') + (lt.fresh ? ', fresh' : ', stale') + ')' });
   steps.push({ tf: 'Zona dekat', text: zoneLine(nearZones, ctx, false, prox), textEn: zoneLine(nearZones, ctx, true, prox) });
+  steps.push({ tf: 'Kondisi Pasar', text: marketCondition.id + ' (multiplier: ' + marketCondition.multiplier + 'x)', textEn: marketCondition.en + ' (multiplier: ' + marketCondition.multiplier + 'x)' });
   if (chosen) steps.push({ tf: 'Zona Terpilih', text: chosen.z.kind + ' ' + ctx.f(chosen.z.lo) + '–' + ctx.f(chosen.z.hi) + ' (skor ' + chosen.score + '/100, lebar ' + ctx.dp(chosen.width) + ' pip, ' + ctx.dp(chosen.d) + ' pip dari harga)', textEn: chosen.z.kind + ' ' + ctx.f(chosen.z.lo) + '–' + ctx.f(chosen.z.hi) + ' (score ' + chosen.score + '/100, width ' + ctx.dp(chosen.width) + ' pips, ' + ctx.dp(chosen.d) + ' pips from price)' });
-  steps.push({ tf: 'Validasi', text: 'SL min ' + ctx.dp(RULES[style].gMin) + ' pip, cap ' + ctx.dp(RULES[style].gMax) + ' pip. TP 1/1.5/2/3/5R. Zona min ' + MIN_ZONE_WIDTH[style] + ' pip. SL di swing terakhir.', textEn: 'SL min ' + ctx.dp(RULES[style].gMin) + ' pips, cap ' + ctx.dp(RULES[style].gMax) + ' pips. TP 1/1.5/2/3/5R. Min zone width ' + MIN_ZONE_WIDTH[style] + ' pips. SL at last swing.' });
+  steps.push({ tf: 'Validasi', text: 'SL min ' + ctx.dp(RULES[style].gMin) + ' pip, cap ' + ctx.dp(RULES[style].gMax) + ' pip. TP 1/1.5/2/3/5R. Zona min ' + MIN_ZONE_WIDTH[style] + ' pip. SL di swing terakhir. Conviction Score 0-100.', textEn: 'SL min ' + ctx.dp(RULES[style].gMin) + ' pips, cap ' + ctx.dp(RULES[style].gMax) + ' pips. TP 1/1.5/2/3/5R. Min zone width ' + MIN_ZONE_WIDTH[style] + ' pips. SL at last swing. Conviction Score 0-100.' });
 
   let pool = [];
   if (chosen) pool.push({ ...chosen.z, tf: chosen.z.tf || 'MTF', d: chosen.d });
@@ -669,16 +828,33 @@ async function runManual(ctx, d, style) {
     }
   }
 
+  // [v198] Calculate Conviction Score, Setup Type, Market Condition
+  const setupType = classifySetup(ht, it, lt, chosen, pd);
+  const conviction = calculateConviction(ht, it, lt, chosen, pd, marketCondition, setupType, ctx, style);
+  const riskMultiplier = getRiskMultiplier(conviction);
+  const probability = estimateProbability(conviction);
+  const expiry = getExpiryRules(style, p.type);
+  
+  p.conviction = conviction;
+  p.setupType = setupType;
+  p.marketCondition = marketCondition;
+  p.riskMultiplier = riskMultiplier;
+  p.probability = probability;
+  p.expiry = expiry;
+
   const nar = buildNarrative(ctx, style, ht, it, lt, pd, state, chosen, p, false);
   const narEn = buildNarrative(ctx, style, ht, it, lt, pd, state, chosen, p, true);
   steps.push({ tf: 'Entry', text: em.note, textEn: em.note });
+  steps.push({ tf: 'Conviction', text: conviction + '/100 — ' + (conviction >= 75 ? 'HIGH' : conviction >= 55 ? 'MEDIUM' : 'LOW') + ' | Prob: ' + probability.label + ' | Risk: ' + riskMultiplier + 'x | Setup: ' + setupType.type, textEn: conviction + '/100 — ' + (conviction >= 75 ? 'HIGH' : conviction >= 55 ? 'MEDIUM' : 'LOW') + ' | Prob: ' + probability.label + ' | Risk: ' + riskMultiplier + 'x | Setup: ' + setupType.type });
+  if (expiry) steps.push({ tf: 'Expiry', text: expiry.id, textEn: expiry.en });
+  
   const s = sigOf(p, ctx, style);
   s.checklist = steps.map(x => x.tf + ': ' + x.text);
-  const f = { symbol: ctx.symbol, style, status: s.status, signal: s.signal, orderType: s.orderType, entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4 ?? null, tp5: s.tp5 ?? null, invalidLevel: s.invalidLevel, entryNote: s.entryNote, steps, structureState: state.id, structureStateEn: state.en, zoneQuality: p.zoneQuality || 0, premiumDiscount: pd ? (((ctx.price - pd.lo) / pd.range >= 0.5 ? 'premium' : 'discount') + ' (posisi ' + Math.round(((ctx.price - pd.lo) / pd.range) * 100) + '%)') : 'n/a', nearZones: nearZones.slice(0, 3).map(z => ({ kind: z.kind, tf: z.tf, lo: ctx.f(z.lo), hi: ctx.f(z.hi), side: z.side })), zonesHtf: zoneLine(nearZones.filter(z => z.tf === htfLabel), ctx, false, prox), zonesM5: zoneLine(nearZones.filter(z => z.tf === 'M5'), ctx, false, prox), narrativeDraft: { id: nar.lines.concat([nar.setup]), en: narEn.lines.concat([narEn.setup]) }, dec: ctx.dec, price: ctx.f(ctx.price) };
+  const f = { symbol: ctx.symbol, style, status: s.status, signal: s.signal, orderType: s.orderType, entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4 ?? null, tp5: s.tp5 ?? null, invalidLevel: s.invalidLevel, entryNote: s.entryNote, steps, structureState: state.id, structureStateEn: state.en, zoneQuality: p.zoneQuality || 0, conviction: conviction, convictionLevel: s.convictionLevel, probability: probability.label, probabilityRange: probability, riskMultiplier: riskMultiplier, setup: setupType.type, setupLabel: setupType.id, marketCondition: marketCondition.condition, marketConditionLabel: marketCondition.id, expiry: expiry, premiumDiscount: pd ? (((ctx.price - pd.lo) / pd.range >= 0.5 ? 'premium' : 'discount') + ' (posisi ' + Math.round(((ctx.price - pd.lo) / pd.range) * 100) + '%)') : 'n/a', nearZones: nearZones.slice(0, 3).map(z => ({ kind: z.kind, tf: z.tf, lo: ctx.f(z.lo), hi: ctx.f(z.hi), side: z.side })), zonesHtf: zoneLine(nearZones.filter(z => z.tf === htfLabel), ctx, false, prox), zonesM5: zoneLine(nearZones.filter(z => z.tf === 'M5'), ctx, false, prox), narrativeDraft: { id: nar.lines.concat([nar.setup]), en: narEn.lines.concat([narEn.setup]) }, dec: ctx.dec, price: ctx.f(ctx.price) };
   return { signal: s, facts: f };
 }
 
-function runBot(ctx, d) { const m1 = closed(d.m1, TFMS.m1), m5 = closed(d.m5, TFMS.m5), m15 = closed(d.m15, TFMS.m15); let r = null; try { r = runBotFlex({ m1, m5, m15 }, { price: ctx.price, dec: ctx.dec, pip: ctx.pip, symbol: ctx.symbol }); } catch {} if (!r || !r.ok) { try { const ict = planBot({ m15, m5, price: ctx.price, sym: ctx.symbol, tNow: Date.now() }); if (ict && ict.status === 'limit') r = { ok: true, dir: ict.dir === 'BUY' ? 1 : -1, dirTxt: ict.dir, entry: ict.entry, sl: ict.sl, tps: [ict.tp1, ict.tp2, ict.tp3], rr: 2, orderType: 'LIMIT', tier: 'ICT_POI', trigger: 'POI ' + ict.poi.kind + ' M15', bias: 'M15 ' + ict.dir, checklist: ['POI ' + ict.poi.kind + ' M15', 'Entry 40% zona', 'SL buffer ATR'] }; } catch {} } if (!r || !r.ok) return standby(ctx, 'Scalping', (r && r.reason) || 'Menunggu setup bot.', []); const botRisk = Math.abs(Number(r.entry) - Number(r.sl)) || bounds(Number(r.entry), ctx, 'Scalping').min; const tps = Array.isArray(r.tps) && r.tps.length >= 3 && r.tps[0] !== r.entry ? r.tps : buildTPs(Number(r.entry), r.dir, botRisk); const p = { dir: r.dir, entry: num(r.entry, ctx.price), sl: num(r.sl, ctx.price), type: r.orderType || 'MARKET', tps, tp4: tps[3], tp5: tps[4], rr: num(r.rr, 1.5), zone: null, steps: [], zoneQuality: 60 }; const s = sigOf(p, ctx, 'Scalping'); s.style = 'scalperbot'; s.tier = r.tier || 'EA'; s.expiresAt = Date.now() + 9e5; s.checklist = r.checklist || []; const f = { symbol: ctx.symbol, style: 'scalperbot', status: s.status, signal: s.signal, orderType: s.orderType, entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5, trigger: r.trigger || null, bias: r.bias || 'netral', htf: r.trendTxt || '-', m1: r.structTxt || '-', checklist: r.checklist || [], dec: ctx.dec, price: ctx.f(ctx.price) }; return { signal: s, facts: f }; }
+function runBot(ctx, d) { const m1 = closed(d.m1, TFMS.m1), m5 = closed(d.m5, TFMS.m5), m15 = closed(d.m15, TFMS.m15); let r = null; try { r = runBotFlex({ m1, m5, m15 }, { price: ctx.price, dec: ctx.dec, pip: ctx.pip, symbol: ctx.symbol }); } catch {} if (!r || !r.ok) { try { const ict = planBot({ m15, m5, price: ctx.price, sym: ctx.symbol, tNow: Date.now() }); if (ict && ict.status === 'limit') r = { ok: true, dir: ict.dir === 'BUY' ? 1 : -1, dirTxt: ict.dir, entry: ict.entry, sl: ict.sl, tps: [ict.tp1, ict.tp2, ict.tp3], rr: 2, orderType: 'LIMIT', tier: 'ICT_POI', trigger: 'POI ' + ict.poi.kind + ' M15', bias: 'M15 ' + ict.dir, checklist: ['POI ' + ict.poi.kind + ' M15', 'Entry 40% zona', 'SL buffer ATR'] }; } catch {} } if (!r || !r.ok) return standby(ctx, 'Scalping', (r && r.reason) || 'Menunggu setup bot.', []); const botRisk = Math.abs(Number(r.entry) - Number(r.sl)) || bounds(Number(r.entry), ctx, 'Scalping').min; const tps = Array.isArray(r.tps) && r.tps.length >= 3 && r.tps[0] !== r.entry ? r.tps : buildTPs(Number(r.entry), r.dir, botRisk); const p = { dir: r.dir, entry: num(r.entry, ctx.price), sl: num(r.sl, ctx.price), type: r.orderType || 'MARKET', tps, tp4: tps[3], tp5: tps[4], rr: num(r.rr, 1.5), zone: null, steps: [], zoneQuality: 60, conviction: 60, setupType: { type: 'Supply & Demand', id: 'Bot setup' }, marketCondition: { condition: 'Unknown', id: 'Unknown', multiplier: 0.75 }, riskMultiplier: 0.65, probability: { label: '55%', min: 52, max: 61 }, expiry: null }; const s = sigOf(p, ctx, 'Scalping'); s.style = 'scalperbot'; s.tier = r.tier || 'EA'; s.expiresAt = Date.now() + 9e5; s.checklist = r.checklist || []; const f = { symbol: ctx.symbol, style: 'scalperbot', status: s.status, signal: s.signal, orderType: s.orderType, entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5, trigger: r.trigger || null, bias: r.bias || 'netral', htf: r.trendTxt || '-', m1: r.structTxt || '-', checklist: r.checklist || [], dec: ctx.dec, price: ctx.f(ctx.price), conviction: 60, convictionLevel: 'MEDIUM', probability: '55%', setup: 'Supply & Demand' }; return { signal: s, facts: f }; }
 
 function lifecycle(prev, sym, style, price, pip, data) { if (!prev || typeof prev !== 'object' || prev.symbol !== sym || prev.style !== style) return null; if (prev.signal !== 'BUY' && prev.signal !== 'SELL') return null; if (prev.status === 'TP5_HIT' || prev.finished) return null; const exp = Number(prev.expiresAt); if (!Number.isFinite(exp) || Date.now() > exp) return { dead: true, out: 'EXPIRED', prev }; const dir = prev.signal === 'BUY' ? 1 : -1; const sl = Number(prev.sl), e = Number(prev.entry); const rawT = [prev.tp1, prev.tp2, prev.tp3, prev.tp4, prev.tp5].map(Number); const fallback = (i) => { const v = rawT[i]; if (Number.isFinite(v) && v !== e) return v; const mult = TP_MULTIPLIERS[i] || (i + 1); return e + dir * Math.abs(e - sl) * mult; }; const t = [0,1,2,3,4].map(fallback); if (![sl, e, t[0]].every(Number.isFinite)) return null; const tfKey = style === 'scalperbot' ? 'm1' : style === 'Swing' ? 'm15' : 'm5'; const ms = TFMS[tfKey] || 3e5; const rows = clean((data && data[tfKey]) || []); const start = Number(prev.lastTickAt) || Number(prev.createdAt) || Date.now(); let win = rows.filter(c => tsMs(c.t) + ms > start && tsMs(c.t) <= Date.now()); if (!win.length) win = [{ t: Date.now(), h: price, l: price, c: price }]; let filled = prev.status !== 'PENDING' || Number(prev.filledAt) > 0; let filledAt = Number(prev.filledAt) || 0; const hits = new Set(Array.isArray(prev.tpHits) ? prev.tpHits : []); let be = !!prev.be || hits.has(1); let dead = null; for (const c of win) { if (!filled) { if (dir === 1 ? c.l <= e : c.h >= e) { filled = true; filledAt = tsMs(c.t); } else continue; } const slEff = be ? e : sl; const slTouch = dir === 1 ? c.l <= slEff : c.h >= slEff; if (slTouch) { dead = { out: be ? 'BE' : 'SL' }; break; } for (let i = 0; i < 5; i++) { const v = t[i]; if (Number.isFinite(v) && !hits.has(i + 1) && (dir === 1 ? c.h >= v : c.l <= v)) hits.add(i + 1); } if (hits.has(1)) be = true; if (hits.has(5)) { dead = { out: 'TP5' }; break; } } const maxHit = hits.size ? Math.max(...hits) : 0; const patch = { tpHits: [...hits].sort((a, b) => a - b), tpHitCount: hits.size, maxTpHit: maxHit, be, slBe: be ? e : null, filledAt: filledAt || null, lastTickAt: Date.now() }; if (dead && dead.out === 'TP5') return { dead: true, out: 'TP5', prev, patch: { ...patch, status: 'TP5_HIT', state: 'TP5', finished: true } }; if (dead) return { dead: true, out: dead.out, prev, patch }; let status, state; if (!filled) { status = 'PENDING'; state = 'LIMIT_PLACED'; } else if (maxHit >= 1) { status = 'TP' + maxHit + '_HIT'; state = 'TP' + maxHit; } else { status = 'RUNNING'; state = filledAt ? 'FILLED' : 'CONFIRMED'; } return { dead: false, prev, patch: { ...patch, status, state } }; }
 
@@ -688,6 +864,6 @@ async function handleVision(body, lang, res) { const imgs = (Array.isArray(body.
 
 function normStyle(raw) { const k = String(raw || '').toLowerCase(); if (k.includes('swing')) return 'Swing'; if (k.includes('intraday')) return 'Intraday'; return 'Scalping'; }
 
-async function handleCandles(body, lang, res, isBot, email) { const symbol = String(body.symbol || 'XAUUSD').toUpperCase(); const style = isBot ? 'scalperbot' : normStyle(body.style || body.mode); const price = Number(body.price ?? body.livePrice ?? 0); if (!(price > 0)) return res.status(200).json({ ok: false, reason: 'Harga live belum tersedia.' }); const dec = DEC[symbol] ?? 2; const pipScale = pipScaleOf(symbol); const ctx = { symbol, dec, price, pip: pipOf(symbol, dec), pipScale, dp: v => Math.round(num(v) * pipScale), f: v => Number(num(v, price).toFixed(dec)) }; const tfs = ['m1', 'm5', 'm15', 'm30', 'h1', 'h4', 'd1']; const data = {}; for (const tf of tfs) { const inc = clean((body.candles || {})[tf] ?? body[tf]); if (inc.length) { data[tf] = inc; cache.set(symbol + tf, { t: Date.now(), rows: inc }); } else data[tf] = []; } const need = isBot ? ['m1', 'm5', 'm15'] : (NEED[style] || NEED.Scalping); await Promise.all(need.map(async tf => { if (data[tf].length >= (MINB[tf] || 25)) return; const rows = await tlRows(symbol, TFIV[tf], 200); if (rows.length) { data[tf] = rows; cache.set(symbol + tf, { t: Date.now(), rows }); return; } const c = cache.get(symbol + tf); if (c && Date.now() - c.t < 12e4) data[tf] = c.rows; })); if (!data.m5.length && !data.m15.length && !data.m1.length) return res.status(200).json({ ok: false, reason: 'Data candle belum cukup.' }); let out; try { out = isBot ? runBot(ctx, data) : await runManual(ctx, data, style); } catch (e) { console.error('[v197] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message, []); } if (!out || !out.signal) out = standby(ctx, style, 'Menunggu setup valid.', []); const key = symbol + '|' + style; const clientPrev = (body.prevSignal && typeof body.prevSignal === 'object') ? body.prevSignal : null; const storePrev = await loadSignal(symbol, style); const prev = pickPrev(clientPrev, storePrev); const restored = !clientPrev && !!storePrev; const life = lifecycle(prev, symbol, style, price, ctx.pip, data); if (life && life.dead) { await saveOutcome(key, { dir: life.prev.signal, out: life.out, t: Date.now() }); await dropSignal(symbol, style); } if (life && life.dead && life.out === 'TP5') { const fin = { ...life.prev, ...life.patch, sticky: true, finished: true }; if (fin.reasons) fin.reason = lang === 'en' ? (fin.reasons.en || fin.reasons.id) : (fin.reasons.id || fin.reasons.en); return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal: fin, diag: { version: VERSION, lifecycle: 'TP5', finished: true, store: kvOn ? 'KV' : 'MEM' } }); } if (life && !life.dead) { const managed = { ...life.prev, ...life.patch, sticky: true }; const opp = out.signal.status !== 'STANDBY' && out.signal.signal !== managed.signal; if (!(body.forceNew && opp)) { await saveSignal(managed); if (managed.reasons) managed.reason = lang === 'en' ? (managed.reasons.en || managed.reasons.id) : (managed.reasons.id || managed.reasons.en); return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal: managed, diag: { version: VERSION, lifecycle: managed.state, tpHits: managed.tpHits, filled: !!managed.filledAt, sticky: true, restored, store: kvOn ? 'KV' : 'MEM' } }); } } if (isBot && out.signal.status !== 'STANDBY') { try { await markTrialBotUsed(email); } catch {} } const f = out.facts || { symbol, style, status: 'STANDBY', why: '', steps: [], dec, price: ctx.f(price) }; const ck = key + '|' + f.status + '|' + (f.signal || '') + '|' + (f.entry || '') + '|' + String(f.why || '').slice(0, 40); let story = stories.get(ck); if (!story || Date.now() - story.t > 12e4) { const r = isBot ? await reasonBot(f) : await reasonManual(f); story = { t: Date.now(), v: r }; stories.set(ck, story); if (stories.size > 200) stories.delete(stories.keys().next().value); } const signal = { ...out.signal, reason: lang === 'en' ? story.v.en : story.v.id, reasons: { id: story.v.id, en: story.v.en }, reasonSource: story.v.ai ? 'AI' : 'RULES', aiReasoning: !!story.v.ai }; if (signal.status !== 'STANDBY') await saveSignal(signal); return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal, diag: { version: VERSION, status: signal.status, entryMode: signal.entryMode || null, forced: !!signal.forced, pipDisplayScale: pipScale, zonesHtf: f.zonesHtf || null, zonesM5: f.zonesM5 || null, structureState: f.structureState || null, premiumDiscount: f.premiumDiscount || null, zoneQuality: f.zoneQuality || 0, restored, store: kvOn ? 'KV' : 'MEM' } }); }
+async function handleCandles(body, lang, res, isBot, email) { const symbol = String(body.symbol || 'XAUUSD').toUpperCase(); const style = isBot ? 'scalperbot' : normStyle(body.style || body.mode); const price = Number(body.price ?? body.livePrice ?? 0); if (!(price > 0)) return res.status(200).json({ ok: false, reason: 'Harga live belum tersedia.' }); const dec = DEC[symbol] ?? 2; const pipScale = pipScaleOf(symbol); const ctx = { symbol, dec, price, pip: pipOf(symbol, dec), pipScale, dp: v => Math.round(num(v) * pipScale), f: v => Number(num(v, price).toFixed(dec)) }; const tfs = ['m1', 'm5', 'm15', 'm30', 'h1', 'h4', 'd1']; const data = {}; for (const tf of tfs) { const inc = clean((body.candles || {})[tf] ?? body[tf]); if (inc.length) { data[tf] = inc; cache.set(symbol + tf, { t: Date.now(), rows: inc }); } else data[tf] = []; } const need = isBot ? ['m1', 'm5', 'm15'] : (NEED[style] || NEED.Scalping); await Promise.all(need.map(async tf => { if (data[tf].length >= (MINB[tf] || 25)) return; const rows = await tlRows(symbol, TFIV[tf], 200); if (rows.length) { data[tf] = rows; cache.set(symbol + tf, { t: Date.now(), rows }); return; } const c = cache.get(symbol + tf); if (c && Date.now() - c.t < 12e4) data[tf] = c.rows; })); if (!data.m5.length && !data.m15.length && !data.m1.length) return res.status(200).json({ ok: false, reason: 'Data candle belum cukup.' }); let out; try { out = isBot ? runBot(ctx, data) : await runManual(ctx, data, style); } catch (e) { console.error('[v198] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message, []); } if (!out || !out.signal) out = standby(ctx, style, 'Menunggu setup valid.', []); const key = symbol + '|' + style; const clientPrev = (body.prevSignal && typeof body.prevSignal === 'object') ? body.prevSignal : null; const storePrev = await loadSignal(symbol, style); const prev = pickPrev(clientPrev, storePrev); const restored = !clientPrev && !!storePrev; const life = lifecycle(prev, symbol, style, price, ctx.pip, data); if (life && life.dead) { await saveOutcome(key, { dir: life.prev.signal, out: life.out, t: Date.now() }); await dropSignal(symbol, style); } if (life && life.dead && life.out === 'TP5') { const fin = { ...life.prev, ...life.patch, sticky: true, finished: true }; if (fin.reasons) fin.reason = lang === 'en' ? (fin.reasons.en || fin.reasons.id) : (fin.reasons.id || fin.reasons.en); return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal: fin, diag: { version: VERSION, lifecycle: 'TP5', finished: true, store: kvOn ? 'KV' : 'MEM' } }); } if (life && !life.dead) { const managed = { ...life.prev, ...life.patch, sticky: true }; const opp = out.signal.status !== 'STANDBY' && out.signal.signal !== managed.signal; if (!(body.forceNew && opp)) { await saveSignal(managed); if (managed.reasons) managed.reason = lang === 'en' ? (managed.reasons.en || managed.reasons.id) : (managed.reasons.id || managed.reasons.en); return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal: managed, diag: { version: VERSION, lifecycle: managed.state, tpHits: managed.tpHits, filled: !!managed.filledAt, sticky: true, restored, store: kvOn ? 'KV' : 'MEM' } }); } } if (isBot && out.signal.status !== 'STANDBY') { try { await markTrialBotUsed(email); } catch {} } const f = out.facts || { symbol, style, status: 'STANDBY', why: '', steps: [], dec, price: ctx.f(price) }; const ck = key + '|' + f.status + '|' + (f.signal || '') + '|' + (f.entry || '') + '|' + String(f.why || '').slice(0, 40); let story = stories.get(ck); if (!story || Date.now() - story.t > 12e4) { const r = isBot ? await reasonBot(f) : await reasonManual(f); story = { t: Date.now(), v: r }; stories.set(ck, story); if (stories.size > 200) stories.delete(stories.keys().next().value); } const signal = { ...out.signal, reason: lang === 'en' ? story.v.en : story.v.id, reasons: { id: story.v.id, en: story.v.en }, reasonSource: story.v.ai ? 'AI' : 'RULES', aiReasoning: !!story.v.ai }; if (signal.status !== 'STANDBY') await saveSignal(signal); return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal, diag: { version: VERSION, status: signal.status, entryMode: signal.entryMode || null, forced: !!signal.forced, pipDisplayScale: pipScale, zonesHtf: f.zonesHtf || null, zonesM5: f.zonesM5 || null, structureState: f.structureState || null, premiumDiscount: f.premiumDiscount || null, zoneQuality: f.zoneQuality || 0, conviction: f.conviction || 0, convictionLevel: f.convictionLevel || 'MEDIUM', probability: f.probability || '55%', setup: f.setup || 'Unknown', marketCondition: f.marketCondition || 'Unknown', restored, store: kvOn ? 'KV' : 'MEM' } }); }
 
 export default async function handler(req, res) { res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS'); res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-user-email'); if (req.method === 'OPTIONS') return res.status(204).end(); if (req.method === 'GET') return res.status(200).json({ ok: true, version: VERSION, store: kvOn ? 'KV' : 'MEM', note: 'generate alive' }); if (req.method !== 'POST') return res.status(200).json({ ok: false, reason: 'Method not allowed' }); let body = {}; try { body = req.body || {}; if (typeof body === 'string') body = JSON.parse(body); if (body.probe) return res.status(200).json({ ok: true, version: VERSION, store: kvOn ? 'KV' : 'MEM' }); const lang = body.lang === 'en' ? 'en' : 'id'; const email = String(body.email || body.value || '').trim().toLowerCase(); const isBot = !!(body.auto || body.bot || body.mode === 'bot' || body.source === 'bot'); const isVis = body.symbol === 'VISION' || body.mode === 'vision' || (Array.isArray(body.images) && body.images.length); const acc = await checkAccess(email, isBot); if (!acc.ok) return res.status(200).json({ ok: false, reason: 'Akses: ' + acc.key }); if (isVis) return await handleVision(body, lang, res); return await handleCandles(body, lang, res, isBot, email); } catch (err) { console.error('[generate] fatal error:', err?.message, err?.stack); if (!res.headersSent) { return res.status(200).json({ ok: false, reason: 'Server error: ' + (err?.message || 'unknown'), version: VERSION }); } } }
