@@ -1,20 +1,20 @@
-// api/generate.js — v202
-// [v202] SYS_MTF = narator framework-aligned (dilarang ubah angka engine)
-// [v202] SYS_BOT = narator ringkas
-// [v202] Facts object diperkaya: tfLabels, asset, convictionBreakdown, pool, slReason, dll
-// [v202] VISION TIDAK DIUBAH — SYS_VIS & handleVision identik dengan v201
-// Engine: Session + Liquidity + LTF Dinamis + A1 displacement + A2 SL adaptif ATR + A4 SL di luar pool
+// api/generate.js — v203
+// TP: Scalping 5R · Intraday 3R (1.5/2.5/4) · Swing 3 pip (500/800/1000), TP4-5 null
+// SL: referensi TF per gaya (Scalp M5 / Intra M15 / Swing H4), ATR x sesi, di luar kolam
+// Chart: s.chart.tf otomatis (m1/m5/m15) + levels + range
+// Vision: TIDAK DIUBAH
 
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { planBot } from '../lib/bot-ict.js';
 import { runBotSma as runBotFlex } from '../lib/bot_3candle.js';
 import { sessionOf, asianRange, asianSweep, sessionScore, volatilityRegime } from '../lib/session.js';
 import { findPools, sweepVsBreak, doubleSweep, nearestDraw, slBeyondPool } from '../lib/liquidity.js';
-import { resolveBias, counterGuard, capTPs, adjustConviction, counterExpiry } from '../lib/framework-manual.js';
+import { resolveBias, counterGuard, adjustConviction, counterExpiry } from '../lib/framework-manual.js';
 import { atrSanity, calcSL, rrCheck } from '../lib/risk-atr.js';
+import { TP_PLAN, planTPs, repairTPs, coupleZone, fixSide, buildChart } from '../lib/tp-final.js';
 
 export const config = { maxDuration: 60 };
-const VERSION = 'v202';
+const VERSION = 'v203';
 const TL_BASE = 'https://api.tickerlayer.com';
 const AI_BASE = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/+$/, '');
 const AI_KEYS = [process.env.QWEN_MANUAL_API_KEY, process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
@@ -39,6 +39,11 @@ const TF_ROLE = {
   Intraday: { htf: 'h4', mtf: 'm15', ltf: 'm5', exec: null },
   Swing: { htf: 'd1', mtf: 'h4', ltf: 'h1', exec: null },
 };
+const SL_REF = {
+  Scalping: { atrTf: 'm5', swingTf: 'm5', win: 8 },
+  Intraday: { atrTf: 'm15', swingTf: 'm15', win: 8 },
+  Swing: { atrTf: 'h4', swingTf: 'h4', win: 8 },
+};
 const NEED = { Scalping: ['m1', 'm5', 'm15', 'h1'], Intraday: ['m5', 'm15', 'h1', 'h4'], Swing: ['m15', 'h1', 'h4', 'd1'] };
 const MINB = { m1: 60, m5: 40, m15: 40, m30: 35, h1: 35, h4: 25, d1: 20 };
 const EXPMS = { Scalping: 60 * 6e4, Intraday: 480 * 6e4, Swing: 5760 * 6e4 };
@@ -49,7 +54,7 @@ const RULES = {
   Intraday: { gMin: 50, gMax: 120, bMin: 0.005, bMax: 0.014 },
   Swing: { gMin: 100, gMax: 300, bMin: 0.01, bMax: 0.025 },
 };
-const TP_MULTIPLIERS = [1, 1.5, 2, 3, 5];
+const TP_MULT = [1, 1.5, 2, 3, 5];
 const COOLDOWN = 3e5;
 
 const cache = new Map();
@@ -61,7 +66,7 @@ const closed = (c, ms) => (Array.isArray(c) && c.length && Date.now() < tsMs(c[c
 const iso = d => d.toISOString().slice(0, 10);
 const dw = d => (d === 1 ? 'bullish' : d === -1 ? 'bearish' : 'netral');
 const dwEn = d => (d === 1 ? 'bullish' : d === -1 ? 'bearish' : 'neutral');
-const buildTPs = (entry, dir, risk) => (!(risk > 0) || !Number.isFinite(entry)) ? [entry, entry, entry, entry, entry] : TP_MULTIPLIERS.map(m => entry + dir * risk * m);
+const buildTPs = (e, dir, r) => (!(r > 0) || !Number.isFinite(e)) ? [e, e, e, e, e] : TP_MULT.map(m => e + dir * r * m);
 
 async function httpJson(url, opt = {}, ms = 8000) {
   const ac = new AbortController();
@@ -140,8 +145,6 @@ function atr(rows, n = 14) {
   for (let i = n + 1; i < rows.length; i++) a = (a * (n - 1) + tr(i)) / n;
   return a;
 }
-
-// [A1] displacement flag — BOS tanpa body besar tidak dapat bonus conviction
 function internal(rows, lb = 60) {
   const o = { dir: 0, ev: '', fresh: false, displaced: false };
   if (!Array.isArray(rows) || rows.length < 25) return o;
@@ -171,7 +174,6 @@ function internal(rows, lb = 60) {
   o.displaced = disp;
   return o;
 }
-
 function ranging(rows, lb = 30, tf = 'M15') {
   if (!Array.isArray(rows) || rows.length < lb) return null;
   const a = rows.slice(-lb);
@@ -179,9 +181,9 @@ function ranging(rows, lb = 30, tf = 'M15') {
   const h = hi - lo;
   if (!(h > 0)) return null;
   if (internal(a, lb).fresh) return null;
-  const nearHi = a.filter(c => c.h >= hi - 0.15 * h).length;
-  const nearLo = a.filter(c => c.l <= lo + 0.15 * h).length;
-  if (nearHi >= 2 && nearLo >= 2) return { hi, lo, h, pos: (a[a.length - 1].c - lo) / h, tf };
+  const nH = a.filter(c => c.h >= hi - 0.15 * h).length;
+  const nL = a.filter(c => c.l <= lo + 0.15 * h).length;
+  if (nH >= 2 && nL >= 2) return { hi, lo, h, pos: (a[a.length - 1].c - lo) / h, tf };
   return null;
 }
 function getPDZone(rows, lb = 60) {
@@ -248,16 +250,16 @@ function zoneLine(list, ctx, en, maxPip) {
     const inside = ctx.price >= z.lo && ctx.price <= z.hi;
     const d = ctx.dp((z.lo >= ctx.price ? z.lo - ctx.price : ctx.price - z.hi) / ctx.pip);
     const pos = inside ? (en ? 'inside' : 'di dalam') : (z.lo >= ctx.price ? (en ? 'above' : 'di atas') : (en ? 'below' : 'di bawah'));
-    return z.kind + ' ' + ctx.f(z.lo) + '–' + ctx.f(z.hi) + ' (' + (inside ? pos : d + ' pip ' + pos) + ')';
+    return z.kind + ' ' + ctx.f(z.lo) + '-' + ctx.f(z.hi) + ' (' + (inside ? pos : d + ' pip ' + pos) + ')';
   }).join('; ');
 }
 function bounds(entry, ctx, style) {
   const r = RULES[style] || RULES.Scalping;
   return isGold(ctx.symbol) ? { min: r.gMin * ctx.pip, max: r.gMax * ctx.pip } : { min: entry * r.bMin, max: entry * r.bMax };
 }
-function swingLevel(rows, dir) {
-  if (!Array.isArray(rows) || rows.length < 10) return NaN;
-  const n = rows.slice(-15);
+function swingLevel(rows, dir, win = 8) {
+  if (!Array.isArray(rows) || rows.length < 5) return NaN;
+  const n = rows.slice(-Math.min(win, rows.length));
   return dir === 1 ? Math.min(...n.map(c => c.l)) : Math.max(...n.map(c => c.h));
 }
 function scoreZone(z, ht, it, lt, ctx, style) {
@@ -323,25 +325,21 @@ function entryMode(ctx, p, it, lt, ex, style, pool, ltfRows) {
   if (synth) {
     const off = Math.max(2 * ctx.pip, Math.min(synth.d * ctx.pip, 10 * ctx.pip));
     const entry = ctx.price - p.dir * off;
-    return { type: 'LIMIT', entry, zone: synth.z, forced: true, note: 'LIMIT @ ' + ctx.f(entry) + ' (' + ctx.dp(off / ctx.pip) + ' pip): zona sintetis swing terdekat, tidak ada zona struktur dalam proksimitas.' };
+    return { type: 'LIMIT', entry, zone: synth.z, forced: true, note: 'LIMIT @ ' + ctx.f(entry) + ' (' + ctx.dp(off / ctx.pip) + ' pip): zona sintetis swing terdekat.' };
   }
-  const off = 6 * ctx.pip;
-  const entry = ctx.price - p.dir * off;
-  const w2 = 10 * ctx.pip;
+  const off = 6 * ctx.pip, entry = ctx.price - p.dir * off, w2 = 10 * ctx.pip;
   const z = { lo: p.dir === 1 ? entry - w2 : entry, hi: p.dir === 1 ? entry : entry + w2, side: p.dir === 1 ? 'demand' : 'supply', kind: 'Fallback', tf: TF_ROLE[style].ltf.toUpperCase(), isSynthetic: true };
-  return { type: 'LIMIT', entry, zone: z, forced: true, note: 'LIMIT fallback @ ' + ctx.f(entry) + ' — data zona minim.' };
+  return { type: 'LIMIT', entry, zone: z, forced: true, note: 'LIMIT fallback @ ' + ctx.f(entry) + '.' };
 }
-
-function classifySetup(ht, it, lt, chosen, pd, verdict, sweepSess) {
+function classifySetup(ht, it, lt, chosen, verdict, sweepSess) {
   if (sweepSess) return { type: 'Fakeout/Trap', id: sweepSess.id, en: sweepSess.en };
-  if (verdict === 'SWEEP') return { type: 'Fakeout/Trap', id: 'Liquidity sweep lalu reclaim — stop hunt.', en: 'Liquidity sweep then reclaim.' };
-  if (verdict === 'BREAK') return { type: 'Kontinuitas', id: 'Break displacement + hold — continuation.', en: 'Displacement break held.' };
+  if (verdict === 'SWEEP') return { type: 'Fakeout/Trap', id: 'Liquidity sweep lalu reclaim.', en: 'Sweep then reclaim.' };
+  if (verdict === 'BREAK') return { type: 'Kontinuitas', id: 'Break displacement + hold.', en: 'Displacement break held.' };
   if (!chosen || !chosen.z) return { type: 'Unknown', id: 'Setup tidak terklasifikasi.', en: 'Unclassified.' };
   const dir = chosen.z.side === 'demand' ? 1 : -1;
-  const H = TF_ROLE.Scalping.htf.toUpperCase();
-  if (chosen.z.tf === H || chosen.z.tf === 'H4' || chosen.z.tf === 'D1') return { type: 'Supply & Demand', id: 'Zona ' + chosen.z.kind + ' TF tinggi.', en: 'HTF zone.' };
+  if (chosen.z.tf === 'H1' || chosen.z.tf === 'H4' || chosen.z.tf === 'D1') return { type: 'Supply & Demand', id: 'Zona ' + chosen.z.kind + ' TF tinggi.', en: 'HTF zone.' };
   if (ht.dir === dir && it.dir === dir) return { type: 'Kontinuitas', id: 'Pullback searah tren.', en: 'Trend pullback.' };
-  if (it.fresh && it.displaced && it.dir === dir) return { type: 'Retest BOS', id: 'Retest setelah BOS valid.', en: 'Retest after valid BOS.' };
+  if (it.fresh && it.displaced && it.dir === dir) return { type: 'Retest BOS', id: 'Retest setelah BOS valid.', en: 'Retest after BOS.' };
   if (ht.dir !== 0 && dir !== ht.dir) return { type: 'Reversal', id: 'Reversal di area ekstrem.', en: 'Reversal at extreme.' };
   return { type: 'Supply & Demand', id: 'Zona ' + chosen.z.kind + '.', en: 'Zone setup.' };
 }
@@ -363,27 +361,28 @@ function baseExpiry(style) {
 
 function sigOf(p, ctx, style) {
   const f = ctx.f;
+  const nf = v => (Number.isFinite(Number(v)) ? f(v) : null);
   const risk = Math.abs(p.entry - p.sl) || bounds(p.entry, ctx, style).min;
   const tps = Array.isArray(p.tps) && p.tps.length === 5 ? p.tps : buildTPs(p.entry, p.dir, risk);
   const c = p.conviction || 0;
   const prob = estimateProbability(c);
   const lvl = c >= 75 ? 'HIGH' : c >= 55 ? 'MEDIUM' : 'LOW';
-  return {
+  const s = {
     signal: p.dir === 1 ? 'BUY' : 'SELL',
     orderType: p.type, fill: p.type === 'MARKET' ? 'NOW' : 'LIMIT',
     status: p.type === 'MARKET' ? 'RUNNING' : 'PENDING',
     state: p.type === 'MARKET' ? 'CONFIRMED' : 'LIMIT_PLACED',
     entry: f(p.entry), sl: f(p.sl),
-    tp1: f(tps[0]), tp2: f(tps[1]), tp3: f(tps[2]), tp4: f(tps[3]), tp5: f(tps[4]),
+    tp1: nf(tps[0]), tp2: nf(tps[1]), tp3: nf(tps[2]), tp4: nf(tps[3]), tp5: nf(tps[4]),
+    tpCount: p.tpCount || 5, tpMode: p.tpMode || 'RISK_R',
     invalidLevel: Number.isFinite(Number(p.invalidLevel)) ? f(p.invalidLevel) : null,
     zone: p.zone ? { min: f(p.zone.lo), max: f(p.zone.hi), label: p.zone.kind } : null,
     zoneLabel: p.zone ? p.zone.kind : '',
     rr: 1, riskPips: p.riskPips ?? ctx.dp(risk / ctx.pip), pipDisplayScale: ctx.pipScale ?? 1,
-    tpMode: p.tpCapped ? 'LIQUIDITY_CAP' : 'RISK_R',
     setup: p.setupType ? p.setupType.type : 'Unknown',
     setupLabel: p.setupType ? p.setupType.id : '',
-    conviction: c, convictionLevel: lvl,
-    confidence: lvl, risk: c >= 75 ? 'LOW' : c >= 55 ? 'MEDIUM' : 'HIGH',
+    conviction: c, convictionLevel: lvl, confidence: lvl,
+    risk: c >= 75 ? 'LOW' : c >= 55 ? 'MEDIUM' : 'HIGH',
     probability: prob.label, probabilityRange: prob, riskMultiplier: riskMult(c),
     session: p.sess ? p.sess.key : null, sessionLiq: p.sess ? p.sess.liq : null,
     biasMode: p.biasMode || 'HTF_LEAD', expiry: p.expiry || null,
@@ -395,10 +394,12 @@ function sigOf(p, ctx, style) {
     tpHits: [], tpHitCount: 0, maxTpHit: 0, be: false, slBe: null,
     checklist: p.steps || [], reason: '', reasons: { id: '', en: '' },
   };
+  s.chart = buildChart(s, ctx.pip, ctx.dp, f, style);
+  return s;
 }
 function standby(ctx, style, why, steps) {
   return {
-    signal: { signal: 'NONE', status: 'STANDBY', state: 'STANDBY', orderType: 'NONE', symbol: ctx.symbol, style, entry: null, sl: null, tp1: null, tp2: null, tp3: null, checklist: (steps || []).map(s => s.tf + ': ' + s.text), reason: '', reasons: { id: '', en: '' } },
+    signal: { signal: 'NONE', status: 'STANDBY', state: 'STANDBY', orderType: 'NONE', symbol: ctx.symbol, style, entry: null, sl: null, tp1: null, tp2: null, tp3: null, tp4: null, tp5: null, checklist: (steps || []).map(s => s.tf + ': ' + s.text), reason: '', reasons: { id: '', en: '' } },
     facts: { symbol: ctx.symbol, style, status: 'STANDBY', why, steps: steps || [], dec: ctx.dec, price: ctx.f(ctx.price) },
   };
 }
@@ -435,58 +436,48 @@ async function aiJson(sys, obj, ms) {
   return null;
 }
 
-// ============================================================
-// [v202] SYS_MTF — NARATOR (engine sudah putuskan, AI menjelaskan)
-// ============================================================
 const SYS_MTF = `Anda analis trading profesional XAUUSD & BTCUSD. PERAN: NARATOR, bukan pengambil keputusan.
 Engine sudah menetapkan arah, entry, SL, TP, dan conviction. Tugas Anda menjelaskan KEPUTUSAN ITU secara top-down dan profesional.
 
 BATASAN KERAS:
 1. Salin angka PERSIS dari JSON: entry, sl, tp1-tp5, riskPips, conviction, probability, riskMultiplier. DILARANG menghitung ulang atau mengubah.
 2. DILARANG mengubah signal (BUY/SELL), orderType, atau menyebut zona yang tidak ada di field zones/steps.
-3. Jika conviction LOW, jelaskan sebagai "setup agresif, risiko 0.25x" — JANGAN menyarankan skip atau wait.
-4. Sebut angka hanya yang tersedia. Jika sebuah field null, lewati, jangan mengarang.
+3. TP bernilai null berarti TIDAK DIPAKAI untuk gaya itu (Intraday/Swing hanya 3 TP). Jangan menyebut atau mengarang TP4/TP5.
+4. Jika conviction LOW, jelaskan sebagai "setup agresif, risiko 0.25x" — JANGAN menyarankan skip atau wait.
+5. Jika sebuah field null, lewati, jangan mengarang.
 
 KARAKTER ASET:
 - XAUUSD: 24/5, sensitif makro USD, sering sweep high/low sesi, likuiditas puncak London & NY. 1.00 poin = 10 pip.
-- BTCUSD: 24/7, impulsif, stop-hunt di equal highs/lows, weekend tipis. Jarak dalam poin USD.
+- BTCUSD: 24/7, impulsif, stop-hunt di equal highs/lows, weekend tipis.
 
-PENGETAHUAN SETUP (untuk MENGENALI apa yang engine pilih, bukan memilih sendiri):
+PENGETAHUAN SETUP (untuk MENGENALI, bukan memilih):
 - Supply & Demand: zona fresh sebelum displacement/BOS.
-- Kontinuitas: HTF+MTF searah, pullback terukur ke zona demand/supply.
-- Retest BOS: BOS valid searah bias, harga kembali menguji area pemicu.
-- Reversal: sweep likuiditas + pergeseran struktur MTF/LTF di zona HTF signifikan.
-- Fakeout/Trap: tembus tipis atau wick panjang lalu reclaim ke struktur lama.
+- Kontinuitas: HTF+MTF searah, pullback terukur ke zona.
+- Retest BOS: BOS valid searah bias, harga menguji area pemicu.
+- Reversal: sweep likuiditas + pergeseran struktur di zona HTF signifikan.
+- Fakeout/Trap: tembus tipis atau wick panjang lalu reclaim.
 
-SESI & LIKUIDITAS (gunakan field session, sessionWib, pool, verdict):
-- ASIA 07-14 WIB: range sempit, BOS sering palsu, setup range-edge lebih valid.
-- LONDON_KZ 14-17 WIB: sweep Asian range lalu judas swing, gerak real dimulai.
-- NY_AM_KZ 19-22 WIB: overlap London/NY, likuiditas puncak, displacement terbesar.
+SESI & LIKUIDITAS (gunakan session, sessionWib, pool, verdict):
+- ASIA 07-14 WIB: range sempit, BOS sering palsu.
+- LONDON_KZ 14-17 WIB: sweep Asian range lalu judas swing.
+- NY_AM_KZ 19-22 WIB: overlap, likuiditas puncak, displacement terbesar.
 - DEAD 04-07 WIB: rollover, spread melebar, risiko minimum.
-- Kolam BSL/SSL: verdict SWEEP = stop hunt lalu balik; BREAK = displacement hold lalu lanjut; AMBIGUOUS = belum terkonfirmasi.
-- SL selalu di LUAR kolam likuiditas, bukan di swing obvious. Sebut slReason sebagai alasan penempatan SL.
-- TP dipotong di kolam virgin terdekat jika tpCapped true — sebut alasannya.
+- verdict SWEEP = stop hunt lalu balik; BREAK = displacement hold lalu lanjut; AMBIGUOUS = belum konfirmasi.
+- SL di LUAR kolam likuiditas. Sebut slReason sebagai alasan penempatan SL.
+- tpMode WALL_SCALED / PARTIAL_CAP berarti TP dipotong di kolam virgin terdekat — sebut alasannya.
 
 STRUKTUR:
-- htfDisplacement/mtfDisplacement true = BOS valid (body >= 1.2 ATR). false = BOS lemah, sebut sebagai peringatan.
-- biasMode LTF_COUNTER = LTF memimpin melawan HTF dengan runway bersih, conviction dipenalti.
+- htfDisplacement/mtfDisplacement true = BOS valid. false = BOS lemah, sebut sebagai peringatan.
+- biasMode LTF_COUNTER = LTF memimpin melawan HTF, conviction dipenalti.
 - whipsaw true = double sweep, kemungkinan news, risiko minimum.
 
-FORMAT KELUARAN:
-perTfId / perTfEn: 3-4 baris sesuai tfLabels, SATU kalimat mengalir per TF:
-  HTF: bias + posisi premium/discount + kualitas struktur (displacement atau tidak)
-  MTF: struktur swing + status berjalan (continuation / retracement / reversal)
-  LTF: trigger + zona atau kolam yang dipakai untuk entry
-  EXEC (hanya jika tfLabels.exec ada): timing konfirmasi
+FORMAT:
+perTfId / perTfEn: 3-4 baris sesuai tfLabels, SATU kalimat mengalir per TF (HTF bias+premium/discount+kualitas struktur; MTF struktur+status; LTF trigger+zona/kolam entry; EXEC hanya jika ada).
+id / en: ringkasan 2-3 kalimat memuat arah + tipe order + entry (entryDistPips) + SL (riskPips + slReason) + TP yang aktif + dasar conviction (convictionBreakdown) + expiry bila LIMIT.
 
-id / en: ringkasan setup 2-3 kalimat, wajib memuat:
-  arah + tipe order + entry (dengan entryDistPips) + SL (riskPips + slReason) + TP bertahap + dasar conviction (sebut convictionBreakdown bila ada) + expiry bila LIMIT.
-
-Gaya: trader profesional, padat, tanpa basa-basi. Maksimal 4 kalimat untuk ringkasan. Jangan mengulang angka yang sudah disebut di baris per-TF secara berlebihan.
-
+Gaya: trader profesional, padat, tanpa basa-basi. Maksimal 4 kalimat ringkasan.
 Balas HANYA JSON: {"perTfId":["H1: ...","M15: ...","M5: ...","M1: ..."],"perTfEn":["..."],"id":"...","en":"..."}`;
 
-// [v202] SYS_BOT — narator ringkas
 const SYS_BOT = `Anda mentor bot scalper. Engine sudah memutuskan setup — Anda hanya menjelaskan.
 Salin angka PERSIS dari JSON (entry, sl, tp1-tp3, conviction, probability). Dilarang mengubah arah atau angka.
 Tulis 2-3 kalimat santai namun profesional: apa yang bot lakukan, di mana entry & SL, dan mengapa (trigger + conviction).
@@ -512,16 +503,20 @@ async function reasonBot(f) {
 
 async function runManual(ctx, d, style) {
   const role = TF_ROLE[style] || TF_ROLE.Scalping;
+  const slRef = SL_REF[style] || SL_REF.Scalping;
   const cl = {};
   for (const tf of ['m1', 'm5', 'm15', 'h1', 'h4', 'd1']) cl[tf] = closed(d[tf], TFMS[tf]);
 
   const sess = sessionOf(Date.now(), ctx.symbol);
   const mtfRows = cl[role.mtf];
   const ltfRows = cl[role.ltf];
-  const atrNow = atr(mtfRows) || ctx.pip * 10;
-  const atrBase = atr(mtfRows.slice(0, 40)) || atrNow;
-  const vol = volatilityRegime(atrNow, atrBase, sess);
-  const atrUse = atrSanity(atrNow, atrBase);
+  const slRows = cl[slRef.atrTf] || ltfRows;
+
+  const atrStruct = atr(mtfRows) || ctx.pip * 10;
+  const atrSlNow = atr(slRows) || ctx.pip * 10;
+  const atrSlBase = atr(slRows.slice(0, Math.max(15, slRows.length - 10))) || atrSlNow;
+  const atrUse = atrSanity(atrSlNow, atrSlBase);
+  const vol = volatilityRegime(atrSlNow, atrSlBase, sess);
 
   const ht = internal(cl[role.htf]);
   const it = internal(cl[role.mtf]);
@@ -546,9 +541,9 @@ async function runManual(ctx, d, style) {
   const verdict = aheadPool ? sweepVsBreak(aheadPool.price, aheadPool.side, ltfRows, ctx) : { verdict: 'NONE' };
 
   const b = bounds(ctx.price, ctx, style);
-  let bias = resolveBias({ ht, it, lt, zones: allZones, ctx, style, atrM15: atrUse, slPips: b.min / ctx.pip });
+  let bias = resolveBias({ ht, it, lt, zones: allZones, ctx, style, atrM15: atrStruct, slPips: b.min / ctx.pip });
   const guard = counterGuard(bias, b.min / ctx.pip);
-  if (!guard.ok) bias = resolveBias({ ht, it, lt, zones: allZones, ctx, style, atrM15: atrUse, slPips: b.min / ctx.pip, allowCounter: false });
+  if (!guard.ok) bias = resolveBias({ ht, it, lt, zones: allZones, ctx, style, atrM15: atrStruct, slPips: b.min / ctx.pip, allowCounter: false });
 
   const aRange = asianRange(ltfRows, ctx.symbol);
   const sessSweep = (sess.key === 'LONDON_KZ' || sess.key === 'NY_AM_KZ') ? asianSweep(ltfRows, aRange, ctx) : null;
@@ -576,9 +571,9 @@ async function runManual(ctx, d, style) {
   steps.push({ tf: L, text: dw(lt.dir) + ' ' + (lt.ev || '-') + (lt.fresh ? ' fresh' : ' stale'), textEn: dwEn(lt.dir) + ' ' + (lt.ev || '-') });
   if (ex) steps.push({ tf: role.exec.toUpperCase(), text: 'Timing ' + dw(ex.dir) + (ex.dir === dir ? ' — konfirmasi eksekusi' : ' — belum searah, pakai LIMIT'), textEn: 'Timing ' + dwEn(ex.dir) });
   steps.push({ tf: 'Likuiditas', text: aheadPool ? aheadPool.type + ' ' + ctx.f(aheadPool.price) + ' (' + ctx.dp(aheadPool.distPip) + ' pip, ' + aheadPool.state + ') → ' + verdict.verdict + (verdict.id ? ': ' + verdict.id : '') : 'tidak ada kolam terdepan', textEn: aheadPool ? aheadPool.type + ' → ' + verdict.verdict : 'no pool ahead' });
-  if (whipsaw) steps.push({ tf: 'Whipsaw', text: 'Double sweep ≤3 candle — kemungkinan news. Risk 0.25x, target dekat.', textEn: 'Double sweep — news whipsaw.' });
+  if (whipsaw) steps.push({ tf: 'Whipsaw', text: 'Double sweep ≤3 candle — kemungkinan news. Risk 0.25x.', textEn: 'Double sweep — news whipsaw.' });
   if (sessSweep) steps.push({ tf: 'Setup Sesi', text: sessSweep.id, textEn: sessSweep.en });
-  if (bias.mode === 'LTF_COUNTER') steps.push({ tf: 'LTF Dinamis', text: 'LTF memimpin counter-HTF, penalti -' + bias.penalty + (bias.mtfAgrees ? ' (MTF setuju)' : ' (MTF lawan, forced LOW)'), textEn: 'LTF leads counter-HTF, penalty -' + bias.penalty });
+  if (bias.mode === 'LTF_COUNTER') steps.push({ tf: 'LTF Dinamis', text: 'LTF memimpin counter-HTF, penalti -' + bias.penalty + (bias.mtfAgrees ? ' (MTF setuju)' : ' (MTF lawan, forced LOW)'), textEn: 'LTF leads counter-HTF.' });
   if (!guard.ok) steps.push({ tf: 'LTF Dinamis', text: guard.reason, textEn: guard.reason });
   steps.push({ tf: 'Zona', text: zoneLine(nearZones, ctx, false, prox), textEn: zoneLine(nearZones, ctx, true, prox) });
 
@@ -591,43 +586,61 @@ async function runManual(ctx, d, style) {
   p.type = em.type; p.entry = em.entry; p.note = em.note; p.forced = !!em.forced;
   if (em.zone) p.zone = em.zone;
 
-  const struct = swingLevel(mtfRows, p.dir);
+  const sideFix = fixSide(p.type, p.entry, p.dir, ctx.price, ctx.pip);
+  if (sideFix.flipped) {
+    p.type = sideFix.type; p.entry = sideFix.entry;
+    p.note = 'NOW @ ' + ctx.f(p.entry) + ': LIMIT semula di sisi salah harga, dikonversi ke market.';
+    steps.push({ tf: 'Koreksi', text: p.note, textEn: 'LIMIT side invalid, converted to market.' });
+  }
+  p.zone = coupleZone(p.zone, p.entry, p.dir, ctx.pip, atrUse);
+
+  const struct = swingLevel(cl[slRef.swingTf] || ltfRows, p.dir, slRef.win);
   const slp = slBeyondPool(pools, p.dir, p.entry, ctx, atrUse);
-  const rr = calcSL({ entry: p.entry, dir: p.dir, ctx, b, sess, atrUse, structLevel: sessSweep ? sessSweep.extreme : struct, poolLevel: slp ? slp.pool.price : NaN, rangeBound });
+  let rr = calcSL({ entry: p.entry, dir: p.dir, ctx, b, sess, atrUse, structLevel: sessSweep ? sessSweep.extreme : struct, poolLevel: slp ? slp.pool.price : NaN, rangeBound });
   p.sl = rr.sl; p.riskPips = rr.riskPips; p.slCapped = rr.capped;
   p.invalidLevel = slp ? slp.level : (sessSweep ? sessSweep.extreme : struct);
   const slReason = slp ? 'di luar kolam ' + slp.pool.type + ' + buffer' : (sessSweep ? 'di balik titik sweep' : 'di luar swing struktur');
-  steps.push({ tf: 'SL', text: rr.diag + ' · ' + slReason + (rr.capped ? ' · dicap' : ''), textEn: rr.diag });
+  steps.push({ tf: 'SL', text: '[' + slRef.atrTf.toUpperCase() + '] ' + rr.diag + ' · ' + slReason, textEn: rr.diag });
 
-  p.tps = buildTPs(p.entry, p.dir, rr.need);
-  const cap = capTPs({ tps: p.tps, entry: p.entry, dir: p.dir, wall: bias.wall, ctx, mode: bias.mode });
-  if (cap.capped) { p.tps = cap.tps; p.tpCapped = true; }
   const draw = nearestDraw(pools, p.dir, ctx);
-  let rrPenalty = 0;
+  let fin = planTPs({ style, entry: p.entry, dir: p.dir, risk: rr.need, pip: ctx.pip, wall: bias.wall, draw, dp: ctx.dp });
+
+  if (!fin.tps) {
+    p.dir = -p.dir;
+    const alt = chooseBestZone(ctx, ht, it, lt, allZones.filter(z => z.side === (p.dir === 1 ? 'demand' : 'supply')), style);
+    if (alt) p.zone = alt.z;
+    p.zone = coupleZone(p.zone, p.entry, p.dir, ctx.pip, atrUse);
+    rr = calcSL({ entry: p.entry, dir: p.dir, ctx, b, sess, atrUse, structLevel: swingLevel(cl[slRef.swingTf] || ltfRows, p.dir, slRef.win), poolLevel: NaN, rangeBound: NaN });
+    p.sl = rr.sl; p.riskPips = rr.riskPips;
+    fin = planTPs({ style, entry: p.entry, dir: p.dir, risk: rr.need, pip: ctx.pip, wall: null, draw: null, dp: ctx.dp });
+    if (!fin.tps) fin = { tps: buildTPs(p.entry, p.dir, rr.need), count: 5, mode: 'RISK_R', pips: [], rr1: 1, poorRR: false };
+    steps.push({ tf: 'TP', text: 'Runway buntu — arah dibalik, TP pola penuh.', textEn: 'Runway blocked — flipped.' });
+  } else {
+    steps.push({ tf: 'TP', text: fin.count + ' target · ' + fin.mode + ' · ' + (fin.pips || []).join(' / ') + ' pip' + (fin.scaled ? ' (diskala ke runway ' + fin.runwayPip + ' pip)' : '') + ' · TP1 ' + fin.rr1 + 'R', textEn: fin.count + ' targets · ' + fin.mode });
+  }
+  p.tps = fin.tps; p.tpCount = fin.count; p.tpMode = fin.mode;
+  p.tpCapped = fin.mode !== 'RISK_R' && fin.mode !== 'FIXED_PIP';
+
+  let rrPenalty = fin.poorRR ? 12 : (fin.mode === 'WALL_SCALED' ? 6 : 0);
+  if (rr.structMismatch) {
+    rrPenalty += 8;
+    steps.push({ tf: 'SL', text: 'Invalidasi struktur di luar skala ATR — SL pakai ATR murni, conviction -8.', textEn: 'Structural invalidation out of ATR scale.' });
+  }
   if (draw) {
-    const lim = draw.price - p.dir * 2 * ctx.pip;
-    const runway = (lim - p.entry) * p.dir;
-    const chk = rrCheck(rr.need, runway);
-    rrPenalty = chk.penalty;
+    const chk = rrCheck(rr.need, Math.abs(draw.price - p.entry));
     if (chk.note) steps.push({ tf: 'R:R', text: chk.note, textEn: chk.note });
-    p.tps = p.tps.map(t => ((t - p.entry) * p.dir > runway ? lim : t));
-    if (p.tps[0] === lim) {
-      const fr = [0.4, 0.6, 0.8, 0.95, 1.0];
-      p.tps = fr.map(x => p.entry + p.dir * runway * x);
-    }
-    p.tpCapped = true;
-    steps.push({ tf: 'Draw', text: 'Target ' + draw.type + ' ' + ctx.f(draw.price) + ' (' + ctx.dp(draw.distPip) + ' pip, ' + draw.state + ') — TP dipotong di sini.', textEn: 'Draw ' + draw.type });
+    steps.push({ tf: 'Draw', text: 'Target ' + draw.type + ' ' + ctx.f(draw.price) + ' (' + ctx.dp(draw.distPip) + ' pip, ' + draw.state + ').', textEn: 'Draw ' + draw.type });
   }
 
-  const setupType = classifySetup(ht, it, lt, chosen, pd, verdict.verdict, sessSweep);
+  const setupType = classifySetup(ht, it, lt, chosen, verdict.verdict, sessSweep);
   let c1 = 0;
-  if (ht.dir === dir) c1 += 20; else if (ht.dir === 0) c1 += 10; else c1 += 5;
+  if (ht.dir === p.dir) c1 += 20; else if (ht.dir === 0) c1 += 10; else c1 += 5;
   if (chosen) { const w = chosen.width; if (w >= 20 && w <= 80) c1 += 10; else if (w >= 15) c1 += 5; }
   c1 = Math.min(30, c1);
   let c2 = 0;
   const stMap = { 'Supply & Demand': 18, 'Kontinuitas': 16, 'Retest BOS': 15, 'Reversal': 12, 'Fakeout/Trap': 14 };
   c2 += stMap[setupType.type] || 5;
-  if (it.fresh && it.displaced && it.dir === dir) c2 += 5;
+  if (it.fresh && it.displaced && it.dir === p.dir) c2 += 5;
   if (verdict.verdict === 'SWEEP' && (sess.key === 'LONDON_KZ' || sess.key === 'NY_AM_KZ')) c2 += 7;
   else if (verdict.verdict === 'BREAK') c2 += 6;
   else if (verdict.verdict === 'AMBIGUOUS') c2 += 1;
@@ -635,9 +648,9 @@ async function runManual(ctx, d, style) {
   if (pools.some(x => x.strength >= 5 && x.state === 'VIRGIN' && x.ahead)) c2 += 2;
   c2 = Math.min(30, c2);
   let c3 = 0;
-  if (lt.dir === dir) c3 += 12;
+  if (lt.dir === p.dir) c3 += 12;
   if (lt.fresh) c3 += 6;
-  if (ex && ex.dir === dir) c3 += 4;
+  if (ex && ex.dir === p.dir) c3 += 4;
   if (!rr.capped) c3 += 3;
   c3 = Math.min(25, c3);
   let c4 = sessionScore(sess, setupType.type === 'Fakeout/Trap' ? 'SWEEP' : (rg ? 'RANGE' : 'TREND'));
@@ -645,7 +658,7 @@ async function runManual(ctx, d, style) {
   c4 = Math.max(0, Math.min(15, c4));
 
   let conv = c1 + c2 + c3 + c4 - rrPenalty;
-  const adj = adjustConviction(conv, bias, p.tps, p.entry, p.dir);
+  const adj = adjustConviction(conv, bias, p.tps.filter(v => v != null), p.entry, p.dir);
   conv = adj.conviction;
   if (whipsaw || sess.mode === 'AVOID' || vol.regime === 'SPIKE') conv = Math.min(conv, 54);
 
@@ -660,25 +673,23 @@ async function runManual(ctx, d, style) {
     p.expiry.id += ' Atau ganti sesi (' + sess.minsToBoundary + ' menit lagi).';
   }
 
-  steps.push({ tf: 'Entry', text: em.note, textEn: em.note });
+  steps.push({ tf: 'Entry', text: p.note, textEn: p.note });
   steps.push({ tf: 'Conviction', text: p.conviction + '/100 (HTF ' + c1 + '/30 · Setup ' + c2 + '/30 · Trigger ' + c3 + '/25 · Sesi ' + c4 + '/15) → ' + (p.conviction >= 75 ? 'HIGH' : p.conviction >= 55 ? 'MEDIUM' : 'LOW') + ' · Risk ' + riskMult(p.conviction) + 'x · Prob ' + estimateProbability(p.conviction).label, textEn: p.conviction + '/100' });
   if (p.type === 'LIMIT') steps.push({ tf: 'Expiry', text: p.expiry.id, textEn: p.expiry.en });
 
   const s = sigOf(p, ctx, style);
   s.checklist = steps.map(x => x.tf + ': ' + x.text);
 
-  // [v202] FACTS DIPERKAYA untuk narator
   const f = {
     symbol: ctx.symbol, style, status: s.status, signal: s.signal, orderType: s.orderType,
     entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5,
+    tpCount: s.tpCount, tpMode: s.tpMode,
     riskPips: s.riskPips, invalidLevel: s.invalidLevel, entryNote: s.entryNote, steps,
     setup: setupType.type, setupLabel: setupType.id,
     conviction: p.conviction, convictionLevel: s.convictionLevel,
     probability: s.probability, riskMultiplier: s.riskMultiplier,
     tfLabels: { htf: H, mtf: M, ltf: L, exec: role.exec ? role.exec.toUpperCase() : null },
-    asset: ctx.symbol === 'BTCUSD'
-      ? 'BTCUSD — 24/7, impulsif, stop-hunt equal highs/lows, weekend tipis'
-      : 'XAUUSD — 24/5, sensitif makro USD, sweep high/low sesi',
+    asset: ctx.symbol === 'BTCUSD' ? 'BTCUSD — 24/7, impulsif, stop-hunt equal highs/lows, weekend tipis' : 'XAUUSD — 24/5, sensitif makro USD, sweep high/low sesi',
     priceNow: ctx.f(ctx.price),
     entryDistPips: ctx.dp(Math.abs(ctx.price - p.entry) / ctx.pip),
     convictionBreakdown: { htf: c1 + '/30', setup: c2 + '/30', trigger: c3 + '/25', session: c4 + '/15' },
@@ -687,13 +698,11 @@ async function runManual(ctx, d, style) {
     premiumDiscount: pd ? ((ctx.price - pd.lo) / pd.range >= 0.5 ? 'premium' : 'discount') : null,
     htfDisplacement: ht.displaced, mtfDisplacement: it.displaced,
     pool: aheadPool ? { type: aheadPool.type, price: ctx.f(aheadPool.price), distPips: ctx.dp(aheadPool.distPip), state: aheadPool.state } : null,
-    verdict: verdict.verdict,
-    slReason, slDiag: rr.diag,
-    tpCapped: !!p.tpCapped,
-    biasMode: bias.mode, whipsaw: !!whipsaw,
+    verdict: verdict.verdict, slReason, slDiag: rr.diag, slRefTf: slRef.atrTf.toUpperCase(),
+    tpCapped: !!p.tpCapped, biasMode: bias.mode, whipsaw: !!whipsaw,
     liquidity: aheadPool ? aheadPool.type + ' ' + verdict.verdict : 'none',
     zones: nearZones.slice(0, 3).map(z => ({ kind: z.kind, tf: z.tf, lo: ctx.f(z.lo), hi: ctx.f(z.hi), side: z.side })),
-    expiry: p.expiry, dec: ctx.dec, price: ctx.f(ctx.price),
+    chart: s.chart, expiry: p.expiry, dec: ctx.dec, price: ctx.f(ctx.price),
   };
   return { signal: s, facts: f };
 }
@@ -705,13 +714,12 @@ function runBot(ctx, d) {
   if (!r || !r.ok) {
     try {
       const ict = planBot({ m15, m5, price: ctx.price, sym: ctx.symbol, tNow: Date.now() });
-      if (ict && ict.status === 'limit') r = { ok: true, dir: ict.dir === 'BUY' ? 1 : -1, entry: ict.entry, sl: ict.sl, tps: [ict.tp1, ict.tp2, ict.tp3], orderType: 'LIMIT', tier: 'ICT_POI', trigger: 'POI M15', bias: 'M15 ' + ict.dir, checklist: ['POI M15'] };
+      if (ict && ict.status === 'limit') r = { ok: true, dir: ict.dir === 'BUY' ? 1 : -1, entry: ict.entry, sl: ict.sl, orderType: 'LIMIT', tier: 'ICT_POI', trigger: 'POI M15', bias: 'M15 ' + ict.dir, checklist: ['POI M15'] };
     } catch {}
   }
   if (!r || !r.ok) return standby(ctx, 'Scalping', (r && r.reason) || 'Menunggu setup bot.', []);
   const risk = Math.abs(Number(r.entry) - Number(r.sl)) || bounds(Number(r.entry), ctx, 'Scalping').min;
-  const tps = buildTPs(Number(r.entry), r.dir, risk);
-  const p = { dir: r.dir, entry: num(r.entry, ctx.price), sl: num(r.sl, ctx.price), type: r.orderType || 'MARKET', tps, riskPips: ctx.dp(risk / ctx.pip), conviction: 60, setupType: { type: 'Supply & Demand', id: 'Bot ICT POI' }, steps: [], zone: null };
+  const p = { dir: r.dir, entry: num(r.entry, ctx.price), sl: num(r.sl, ctx.price), type: r.orderType || 'MARKET', tps: buildTPs(Number(r.entry), r.dir, risk), tpCount: 5, riskPips: ctx.dp(risk / ctx.pip), conviction: 60, setupType: { type: 'Supply & Demand', id: 'Bot ICT POI' }, steps: [], zone: null };
   const s = sigOf(p, ctx, 'Scalping');
   s.style = 'scalperbot'; s.tier = r.tier || 'EA'; s.expiresAt = Date.now() + 9e5;
   s.checklist = r.checklist || [];
@@ -727,13 +735,18 @@ function lifecycle(prev, sym, style, price, pip, data) {
   if (!Number.isFinite(exp) || Date.now() > exp) return { dead: true, out: 'EXPIRED', prev };
   const dir = prev.signal === 'BUY' ? 1 : -1;
   const sl = Number(prev.sl), e = Number(prev.entry);
+  if (![sl, e].every(Number.isFinite) || sl === e) return null;
+  const risk0 = Math.abs(e - sl);
+  const plan = TP_PLAN[prev.style] || TP_PLAN.Scalping;
   const rawT = [prev.tp1, prev.tp2, prev.tp3, prev.tp4, prev.tp5].map(Number);
   const t = [0, 1, 2, 3, 4].map(i => {
+    if (i >= plan.count) return NaN;
     const v = rawT[i];
     if (Number.isFinite(v) && v !== e) return v;
-    return e + dir * Math.abs(e - sl) * TP_MULTIPLIERS[i];
+    const base = plan.mode === 'PIP' ? plan.targets[i] * pip : risk0 * plan.targets[i];
+    return e + dir * base;
   });
-  if (![sl, e, t[0]].every(Number.isFinite)) return null;
+  if (!Number.isFinite(t[0])) return null;
   const tfKey = style === 'scalperbot' ? 'm1' : style === 'Swing' ? 'm15' : 'm5';
   const ms = TFMS[tfKey] || 3e5;
   const rows = clean((data && data[tfKey]) || []);
@@ -745,22 +758,23 @@ function lifecycle(prev, sym, style, price, pip, data) {
   const hits = new Set(Array.isArray(prev.tpHits) ? prev.tpHits : []);
   let be = !!prev.be || hits.has(1);
   let dead = null;
+  const lastIdx = plan.count;
   for (const c of win) {
     if (!filled) {
       if (dir === 1 ? c.l <= e : c.h >= e) { filled = true; filledAt = tsMs(c.t); } else continue;
     }
     const slEff = be ? e : sl;
     if (dir === 1 ? c.l <= slEff : c.h >= slEff) { dead = { out: be ? 'BE' : 'SL' }; break; }
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < lastIdx; i++) {
       const v = t[i];
       if (Number.isFinite(v) && !hits.has(i + 1) && (dir === 1 ? c.h >= v : c.l <= v)) hits.add(i + 1);
     }
     if (hits.has(1)) be = true;
-    if (hits.has(5)) { dead = { out: 'TP5' }; break; }
+    if (hits.has(lastIdx)) { dead = { out: 'TPMAX' }; break; }
   }
   const maxHit = hits.size ? Math.max(...hits) : 0;
   const patch = { tpHits: [...hits].sort((a, b) => a - b), tpHitCount: hits.size, maxTpHit: maxHit, be, slBe: be ? e : null, filledAt: filledAt || null, lastTickAt: Date.now() };
-  if (dead && dead.out === 'TP5') return { dead: true, out: 'TP5', prev, patch: { ...patch, status: 'TP5_HIT', state: 'TP5', finished: true } };
+  if (dead && dead.out === 'TPMAX') return { dead: true, out: 'TP' + lastIdx, prev, patch: { ...patch, status: 'TP' + lastIdx + '_HIT', state: 'TP' + lastIdx, finished: true } };
   if (dead) return { dead: true, out: dead.out, prev, patch };
   let status, state;
   if (!filled) { status = 'PENDING'; state = 'LIMIT_PLACED'; }
@@ -769,9 +783,7 @@ function lifecycle(prev, sym, style, price, pip, data) {
   return { dead: false, prev, patch: { ...patch, status, state } };
 }
 
-// ============================================================
-// VISION — TIDAK DIUBAH SAMA SEKALI (identik v201)
-// ============================================================
+// ===== VISION — TIDAK DIUBAH =====
 const SYS_VIS = 'Kamu analis S&D/OB dari gambar chart. Baca level PERSIS dari skala harga. Wajib BUY atau SELL kecuali gambar bukan chart. Prioritaskan LIMIT pullback; MARKET hanya bila harga sudah di zona dan ada penolakan. Sebutkan zona TF tinggi dan rendah pada perImageAnalyses. SL di luar distal zona/swing. Balas HANYA JSON: {"signal":"BUY","orderType":"LIMIT","entry":0,"sl":0,"tp1":0,"tp2":0,"tp3":0,"tp4":0,"tp5":0,"zoneLow":0,"zoneHigh":0,"zone":"Demand","pair":"","decimals":2,"perImageAnalyses":[],"perImageAnalysesEn":[],"reason":"","reasonEn":""}';
 
 async function handleVision(body, lang, res) {
@@ -812,7 +824,7 @@ async function handleVision(body, lang, res) {
     signal: sg, orderType: isLimit ? 'LIMIT' : 'MARKET', fill: isLimit ? 'LIMIT' : 'NOW',
     status: isLimit ? 'PENDING' : 'RUNNING', entryMode: isLimit ? 'PULLBACK' : 'NOW',
     symbol: sym, pair: sym, dec, pip, style, entry, sl,
-    tp1: tps[0], tp2: tps[1], tp3: tps[2], tp4: tps[3], tp5: tps[4],
+    tp1: tps[0], tp2: tps[1], tp3: tps[2], tp4: tps[3], tp5: tps[4], tpCount: 5,
     riskPips: Math.round((risk / pip) * pipScaleOf(sym)), pipDisplayScale: pipScaleOf(sym),
     tpHits: [], tpHitCount: 0, maxTpHit: 0, be: false, slBe: null,
     zone: { min: zl, max: zh, label: (j.zone || 'Zona') + ' ' + zl + '–' + zh },
@@ -858,7 +870,7 @@ async function handleCandles(body, lang, res, isBot, email) {
 
   let out;
   try { out = isBot ? runBot(ctx, data) : await runManual(ctx, data, style); }
-  catch (e) { console.error('[v202] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message, []); }
+  catch (e) { console.error('[v203] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message, []); }
   if (!out || !out.signal) out = standby(ctx, style, 'Menunggu setup valid.', []);
 
   const key = symbol + '|' + style;
@@ -867,17 +879,18 @@ async function handleCandles(body, lang, res, isBot, email) {
   const prev = pickPrev(clientPrev, storePrev);
   const restored = !clientPrev && !!storePrev;
   const life = lifecycle(prev, symbol, style, price, ctx.pip, data);
+  if (life && life.prev) life.prev = repairTPs(life.prev, ctx.f, ctx.pip);
   if (life && life.dead) {
     await saveOutcome(key, { dir: life.prev.signal, out: life.out, t: Date.now() });
     await dropSignal(symbol, style);
   }
-  if (life && life.dead && life.out === 'TP5') {
-    const fin = { ...life.prev, ...life.patch, sticky: true, finished: true };
+  if (life && life.dead && String(life.out).startsWith('TP') && life.patch && life.patch.finished) {
+    const fin = repairTPs({ ...life.prev, ...life.patch, sticky: true, finished: true }, ctx.f, ctx.pip);
     if (fin.reasons) fin.reason = lang === 'en' ? (fin.reasons.en || fin.reasons.id) : (fin.reasons.id || fin.reasons.en);
-    return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal: fin, diag: { version: VERSION, lifecycle: 'TP5', store: kvOn ? 'KV' : 'MEM' } });
+    return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal: fin, diag: { version: VERSION, lifecycle: life.out, store: kvOn ? 'KV' : 'MEM' } });
   }
   if (life && !life.dead) {
-    const managed = { ...life.prev, ...life.patch, sticky: true };
+    const managed = repairTPs({ ...life.prev, ...life.patch, sticky: true }, ctx.f, ctx.pip);
     const opp = out.signal.status !== 'STANDBY' && out.signal.signal !== managed.signal;
     if (!(body.forceNew && opp)) {
       await saveSignal(managed);
@@ -887,7 +900,7 @@ async function handleCandles(body, lang, res, isBot, email) {
   }
   if (isBot && out.signal.status !== 'STANDBY') { try { await markTrialBotUsed(email); } catch {} }
   const f = out.facts || { symbol, style, status: 'STANDBY', why: '', steps: [], dec, price: ctx.f(price) };
-  const ck = key + '|' + f.status + '|' + (f.signal || '') + '|' + (f.entry || '') + '|' + String(f.why || '').slice(0, 40);
+  const ck = key + '|' + f.status + '|' + (f.signal || '') + '|' + (f.entry || '') + '|' + (f.tp1 || '') + '|' + (f.tp3 || '');
   let story = stories.get(ck);
   if (!story || Date.now() - story.t > 12e4) {
     const r = isBot ? await reasonBot(f) : await reasonManual(f);
@@ -897,7 +910,7 @@ async function handleCandles(body, lang, res, isBot, email) {
   }
   const signal = { ...out.signal, reason: lang === 'en' ? story.v.en : story.v.id, reasons: { id: story.v.id, en: story.v.en }, reasonSource: story.v.ai ? 'AI' : 'RULES', aiReasoning: !!story.v.ai };
   if (signal.status !== 'STANDBY') await saveSignal(signal);
-  return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal, diag: { version: VERSION, status: signal.status, session: f.session || null, liquidity: f.liquidity || null, biasMode: f.biasMode || null, conviction: f.conviction || 0, setup: f.setup || null, store: kvOn ? 'KV' : 'MEM' } });
+  return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal, diag: { version: VERSION, status: signal.status, session: f.session || null, liquidity: f.liquidity || null, biasMode: f.biasMode || null, conviction: f.conviction || 0, setup: f.setup || null, tpCount: signal.tpCount || 5, chartTf: signal.chart ? signal.chart.tf : null, spanPips: signal.chart ? signal.chart.range.spanPips : null, store: kvOn ? 'KV' : 'MEM' } });
 }
 
 export default async function handler(req, res) {
