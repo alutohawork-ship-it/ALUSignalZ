@@ -1,9 +1,10 @@
-// api/generate.js — v204
-// FIX: null-safe (null tidak jadi 0) · repairTPs paksa kosong TP4/5 · flip bila runway < SL · SL guard ATR overflow
-// TP: Scalping 5R · Intraday 3R (1.5/2.5/4) · Swing 3 pip (500/800/1000)
-// SL: referensi TF per gaya (Scalp M5 / Intra M15 / Swing H4), ATR x sesi, di luar kolam
-// Chart: s.chart.tf otomatis (m1/m5/m15) + levels + range
-// Vision: TIDAK DIUBAH
+// api/generate.js — v205
+// Integrasi Framework AI Signal Tunggal XAUUSD & BTCUSD
+// - SL Scalping pakai M5, Intraday M15, Swing H4
+// - TP: Scalping 5R, Intraday 3R, Swing 3 pip (TP4/5 null)
+// - Tidak ada flip arah (kompresi TP jika runway sempit)
+// - Null-safe (null tidak berubah jadi 0)
+// - System Prompt sesuai Framework yang diberikan
 
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { planBot } from '../lib/bot-ict.js';
@@ -15,7 +16,7 @@ import { atrSanity, calcSL } from '../lib/risk-atr.js';
 import { TP_PLAN, planTPs, repairTPs, coupleZone, fixSide, buildChart } from '../lib/tp-final.js';
 
 export const config = { maxDuration: 60 };
-const VERSION = 'v204';
+const VERSION = 'v205';
 const TL_BASE = 'https://api.tickerlayer.com';
 const AI_BASE = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/+$/, '');
 const AI_KEYS = [process.env.QWEN_MANUAL_API_KEY, process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
@@ -425,8 +426,8 @@ async function aiJson(sys, obj, ms) {
         const r = await httpJson(AI_BASE + '/chat/completions', {
           method: 'POST',
           headers: { Authorization: 'Bearer ' + k, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: m, max_tokens: 900, temperature: 0.1, messages: [{ role: 'system', content: sys }, { role: 'user', content: JSON.stringify(obj) }] }),
-        }, Math.min(15000, left));
+          body: JSON.stringify({ model: m, max_tokens: 1200, temperature: 0.1, messages: [{ role: 'system', content: sys }, { role: 'user', content: JSON.stringify(obj) }] }),
+        }, Math.min(20000, left));
         if (!r.ok) continue;
         let txt = String(r.data?.choices?.[0]?.message?.content || '');
         txt = txt.replace(/```(?:json)?/gi, '').replace(/```/g, '');
@@ -438,48 +439,51 @@ async function aiJson(sys, obj, ms) {
   return null;
 }
 
-const SYS_MTF = `Anda analis trading profesional XAUUSD & BTCUSD. PERAN: NARATOR, bukan pengambil keputusan.
-Engine sudah menetapkan arah, entry, SL, TP, dan conviction. Tugas Anda menjelaskan KEPUTUSAN ITU secara top-down dan profesional.
-
-BATASAN KERAS:
-1. Salin angka PERSIS dari JSON: entry, sl, tp1-tp5, riskPips, conviction, probability, riskMultiplier. DILARANG menghitung ulang atau mengubah.
-2. DILARANG mengubah signal (BUY/SELL), orderType, atau menyebut zona yang tidak ada di field zones/steps.
-3. TP bernilai null berarti TIDAK DIPAKAI untuk gaya itu (Intraday/Swing hanya 3 TP). Jangan menyebut, mengarang, atau menulis 0 untuk TP4/TP5.
-4. Jika conviction LOW, jelaskan sebagai "setup agresif, risiko 0.25x" — JANGAN menyarankan skip atau wait.
-5. Jika sebuah field null, lewati, jangan mengarang.
-
-KARAKTER ASET:
-- XAUUSD: 24/5, sensitif makro USD, sering sweep high/low sesi, likuiditas puncak London & NY. 1.00 poin = 10 pip.
-- BTCUSD: 24/7, impulsif, stop-hunt di equal highs/lows, weekend tipis.
-
-PENGETAHUAN SETUP (untuk MENGENALI, bukan memilih):
-- Supply & Demand: zona fresh sebelum displacement/BOS.
-- Kontinuitas: HTF+MTF searah, pullback terukur ke zona.
-- Retest BOS: BOS valid searah bias, harga menguji area pemicu.
-- Reversal: sweep likuiditas + pergeseran struktur di zona HTF signifikan.
-- Fakeout/Trap: tembus tipis atau wick panjang lalu reclaim.
-
-SESI & LIKUIDITAS (gunakan session, sessionWib, pool, verdict):
-- ASIA 07-14 WIB: range sempit, BOS sering palsu.
-- LONDON_KZ 14-17 WIB: sweep Asian range lalu judas swing.
-- NY_AM_KZ 19-22 WIB: overlap, likuiditas puncak, displacement terbesar.
-- LONDON_CLOSE 22-00 WIB: window reversal / profit taking.
-- DEAD 04-07 WIB: rollover, spread melebar, risiko minimum.
-- verdict SWEEP = stop hunt lalu balik; BREAK = displacement hold lalu lanjut; AMBIGUOUS = belum konfirmasi.
-- SL di LUAR kolam likuiditas. Sebut slReason sebagai alasan penempatan SL.
-- tpMode WALL_SCALED / PARTIAL_CAP berarti TP dipotong di kolam virgin terdekat — sebut alasannya.
-
-STRUKTUR:
-- htfDisplacement/mtfDisplacement true = BOS valid. false = BOS lemah, sebut sebagai peringatan.
-- biasMode LTF_COUNTER = LTF memimpin melawan HTF, conviction dipenalti.
-- whipsaw true = double sweep, kemungkinan news, risiko minimum.
-
-FORMAT:
-perTfId / perTfEn: 3-4 baris sesuai tfLabels, SATU kalimat mengalir per TF (HTF bias+premium/discount+kualitas struktur; MTF struktur+status; LTF trigger+zona/kolam entry; EXEC hanya jika ada).
-id / en: ringkasan 2-3 kalimat memuat arah + tipe order + entry (entryDistPips) + SL (riskPips + slReason) + TP yang aktif saja + dasar conviction (convictionBreakdown) + expiry bila LIMIT.
-
-Gaya: trader profesional, padat, tanpa basa-basi. Maksimal 4 kalimat ringkasan.
-Balas HANYA JSON: {"perTfId":["H1: ...","M15: ...","M5: ...","M1: ..."],"perTfEn":["..."],"id":"...","en":"..."}`;
+// [v205] SYSTEM PROMPT SESUAI FRAMEWORK YANG DIBERIKAN
+const SYS_MTF = `Anda adalah analis trading XAUUSD dan BTCUSD yang bertugas mengeluarkan SATU sinyal tunggal per analisis untuk dibaca langsung oleh trader.
+ATURAN WAJIB:
+1. IDENTIFIKASI ASET & KARAKTERNYA:
+- Sesuaikan analisis dengan aset yang diminta: XAUUSD atau BTCUSD.
+- Untuk XAUUSD: perhatikan sesi London/NY, likuiditas sesi, dan rilis berita makro USD.
+- Untuk BTCUSD: perhatikan struktur likuiditas 24/7, volatilitas/ATR tinggi, potensi stop-hunt pada equal highs/lows, serta likuiditas akhir pekan (weekend).
+2. FORCED BINARY DIRECTION (WAJIB PILIH SATU):
+- Selalu pilih TEPAT SATU arah: BUY atau SELL. Dilarang mengeluarkan HOLD, WAIT, atau NO TRADE.
+- Jika pasar choppy, sideways sempit, atau likuiditas tipis, tetap pilih BUY atau SELL dengan probabilitas relatif terbaik, beri label LOW CONVICTION, dan gunakan risiko minimum (0.25x).
+3. ORDER TYPE TUNGGAL (WAJIB PILIH SATU):
+- Pilih TEPAT SATU tipe order: BUY NOW, SELL NOW, BUY LIMIT, atau SELL LIMIT.
+- Gunakan NOW jika harga sudah berada pada titik konfirmasi/reaksi aktif atau momentum LTF sedang berjalan.
+- Gunakan LIMIT jika harga belum menyentuh zona Supply/Demand atau area retest yang terukur agar posisi/SL/R:R lebih efisien.
+4. TOP-DOWN & KLASIFIKASI SETUP:
+- Analisis berurutan dari HTF (bias & zona/likuiditas), MTF (struktur & koreksi/transisi), hingga LTF (trigger eksekusi).
+- Klasifikasikan setup ke: Supply & Demand, Reversal, Kontinuitas, Fakeout / Trap Breakout, atau Retest Setelah BOS.
+5. ATURAN SKENARIO KHUSUS:
+- CHOPPY / SIDEWAYS SEMPIT / WEEKEND TIPIS (BTCUSD): tetap keluarkan 1 sinyal, label LOW CONVICTION, risiko 0.25x, target realistis/dekat.
+- RANGING JELAS: utamakan LIMIT di batas bawah (BUY LIMIT) atau batas atas (SELL LIMIT) range dengan SL di luar batas range.
+- TREND KUAT + PULLBACK: utamakan LIMIT di zona demand/supply atau retest searah tren dengan conviction lebih tinggi.
+- BREAKOUT / IMPULSE TERKONFIRMASI: gunakan NOW searah dorongan selama jarak SL masih terukur.
+- FAKEOUT / TRAP BREAKOUT: evaluasi pembalikan setelah masuk kembali ke struktur; pakai NOW jika reaksi LTF terkonfirmasi atau LIMIT di area reclaim terdekat dengan SL di balik titik trap.
+- RETEST SETELAH BOS: pakai LIMIT jika harga belum menyentuh zona retest/demand/supply pemicu BOS, atau NOW jika sudah menyentuh zona dan LTF bereaksi searah BOS.
+- MENJELANG / SAAT NEWS USD BERDAMPAK TINGGI: turunkan conviction/risiko ke level hati-hati (0.25x) dan hindari limit tipis yang rawan tersapu wick.
+6. ESTIMASI PROBABILITAS, CONVICTION SCORE (0-100) & RISK:
+- Hitung Conviction Score (0-100) dari: HTF & zona (0-30), struktur/likuiditas & setup (0-30), trigger & R:R (0-25), serta sesi/volatilitas/likuiditas (0-15).
+- Petakan ke level risiko dan estimasi probabilitas realistis:
+* 75-100 = HIGH (Risk: 1.0x | Probabilitas umumnya 62%-75%)
+* 55-74 = MEDIUM (Risk: 0.5x-0.75x | Probabilitas umumnya 52%-61%)
+* 0-54 = LOW (Risk: 0.25x | Probabilitas umumnya 45%-51%)
+- Jangan melebih-lebihkan probabilitas secara tidak realistis.
+7. EXPIRY & AUTO-CANCEL (KHUSUS LIMIT):
+- Untuk BUY/SELL LIMIT, wajib sertakan batas jumlah candle/waktu auto-cancel dan pembatalan otomatis jika level invalidasi SL tertembus lebih dulu atau volatilitas/berita merusak struktur.
+FORMAT KELUARAN:
+SIGNAL: [BUY NOW | SELL NOW | BUY LIMIT | SELL LIMIT] | [XAUUSD | BTCUSD]
+Gaya & TF: [Scalping/Intraday/Swing] | HTF [..] / MTF [..] / LTF [..]
+Setup: [Supply & Demand | Reversal | Kontinuitas | Fakeout Trap | Retest BOS]
+Entry / Zona: [Harga pasar atau rentang zona limit]
+SL: [Level invalidasi + estimasi jarak poin/pip]
+TP1 / TP2: [Target 1] | [Target 2]
+Probability: [estimasi %] | Conviction: [skor]/100 - [HIGH | MEDIUM | LOW] (Risk: [porsi risiko])
+Expiry (jika LIMIT): [Aturan auto-cancel & invalidasi]
+Catatan Analisa: [2-3 kalimat ringkas top-down, zona/likuiditas, dasar probabilitas & skor, serta alasan pemilihan order]
+Balas HANYA JSON: {"perTfId":["HTF: ...","MTF: ...","LTF: ..."],"perTfEn":["..."],"id":"...","en":"..."}`;
 
 const SYS_BOT = `Anda mentor bot scalper. Engine sudah memutuskan setup — Anda hanya menjelaskan.
 Salin angka PERSIS dari JSON (entry, sl, tp1-tp3, conviction, probability). Dilarang mengubah arah atau angka.
@@ -608,29 +612,21 @@ async function runManual(ctx, d, style) {
 
   const draw = nearestDraw(pools, p.dir, ctx);
   let fin = planTPs({ style, entry: p.entry, dir: p.dir, risk: rr.need, pip: ctx.pip, wall: bias.wall, draw, dp: ctx.dp });
+  let rrPenalty = 0;
 
   const runwayTooTight = Number.isFinite(fin.runwayPip) && fin.runwayPip < rr.riskPips;
-  let flipped = false;
-  if (!fin.tps || runwayTooTight) {
-    const oldRunway = fin.runwayPip;
-    p.dir = -p.dir;
-    flipped = true;
-    const alt = chooseBestZone(ctx, ht, it, lt, allZones.filter(z => z.side === (p.dir === 1 ? 'demand' : 'supply')), style);
-    if (alt) p.zone = alt.z;
-    p.zone = coupleZone(p.zone, p.entry, p.dir, ctx.pip, atrUse);
-    rr = calcSL({ entry: p.entry, dir: p.dir, ctx, b, sess, atrUse, structLevel: swingLevel(cl[slRef.swingTf] || ltfRows, p.dir, slRef.win), poolLevel: NaN, rangeBound: NaN });
-    p.sl = rr.sl; p.riskPips = rr.riskPips; p.slCapped = rr.capped;
-    p.invalidLevel = swingLevel(cl[slRef.swingTf] || ltfRows, p.dir, slRef.win);
-    fin = planTPs({ style, entry: p.entry, dir: p.dir, risk: rr.need, pip: ctx.pip, wall: null, draw: null, dp: ctx.dp });
-    if (!fin.tps) fin = { tps: buildTPs(p.entry, p.dir, rr.need), count: plan.count, mode: 'RISK_R', pips: [], rr1: 1, poorRR: false, runwayPip: null };
-    steps.push({ tf: 'TP', text: runwayTooTight ? 'Runway ' + oldRunway + ' pip < SL ' + rr.riskPips + ' pip — arah dibalik agar R:R layak.' : 'Runway buntu — arah dibalik.', textEn: 'Runway too tight — direction flipped.' });
+  if (!fin.tps) {
+    fin = { tps: buildTPs(p.entry, p.dir, rr.need), count: plan.count, mode: 'RISK_R', pips: [], rr1: 1, poorRR: false, runwayPip: null };
+    steps.push({ tf: 'TP', text: 'Runway buntu — TP pola R murni tanpa cap likuiditas.', textEn: 'Runway blocked — pure R-multiple TP.' });
+  } else if (runwayTooTight) {
+    steps.push({ tf: 'TP', text: 'Runway ' + fin.runwayPip + ' pip < SL ' + rr.riskPips + ' pip — TP dikompresi, conviction -6.', textEn: 'Runway tight — TP compressed, conviction -6.' });
+    rrPenalty += 6;
   } else {
     steps.push({ tf: 'TP', text: fin.count + ' target · ' + fin.mode + ' · ' + (fin.pips || []).join(' / ') + ' pip' + (fin.scaled ? ' (diskala ke runway ' + fin.runwayPip + ' pip)' : '') + ' · TP1 ' + fin.rr1 + 'R', textEn: fin.count + ' targets · ' + fin.mode });
   }
   p.tps = fin.tps; p.tpCount = fin.count; p.tpMode = fin.mode;
   p.tpCapped = fin.mode !== 'RISK_R' && fin.mode !== 'FIXED_PIP';
 
-  let rrPenalty = fin.poorRR ? 12 : (fin.mode === 'WALL_SCALED' ? 6 : 0);
   if (rr.structMismatch) {
     rrPenalty += 8;
     steps.push({ tf: 'SL', text: 'Invalidasi struktur di luar skala ATR — SL pakai ATR murni, conviction -8.', textEn: 'Structural invalidation out of ATR scale.' });
@@ -639,7 +635,7 @@ async function runManual(ctx, d, style) {
     rrPenalty += 10;
     steps.push({ tf: 'SL', text: 'ATR ' + ctx.dp(atrUse / ctx.pip) + ' pip melebihi cap gaya — SL dilebarkan ke ' + rr.riskPips + ' pip agar di luar noise, conviction -10.', textEn: 'ATR exceeds style cap — SL widened.' });
   }
-  if (draw && !flipped) steps.push({ tf: 'Draw', text: 'Target ' + draw.type + ' ' + ctx.f(draw.price) + ' (' + ctx.dp(draw.distPip) + ' pip, ' + draw.state + ').', textEn: 'Draw ' + draw.type });
+  if (draw) steps.push({ tf: 'Draw', text: 'Target ' + draw.type + ' ' + ctx.f(draw.price) + ' (' + ctx.dp(draw.distPip) + ' pip, ' + draw.state + ').', textEn: 'Draw ' + draw.type });
 
   const setupType = classifySetup(ht, it, lt, chosen, verdict.verdict, sessSweep);
   let c1 = 0;
@@ -674,8 +670,8 @@ async function runManual(ctx, d, style) {
   p.conviction = Math.max(0, Math.min(100, Math.round(conv)));
   p.setupType = setupType;
   p.sess = sess;
-  p.biasMode = flipped ? 'RUNWAY_FLIP' : bias.mode;
-  p.expiry = bias.mode === 'LTF_COUNTER' && !flipped ? counterExpiry(style) : baseExpiry(style);
+  p.biasMode = bias.mode;
+  p.expiry = bias.mode === 'LTF_COUNTER' ? counterExpiry(style) : baseExpiry(style);
   if (p.type === 'LIMIT') {
     const byTime = Date.now() + p.expiry.minutes * 60000;
     p.expiresAt = Math.min(byTime, sess.nextBoundaryMs);
@@ -708,7 +704,7 @@ async function runManual(ctx, d, style) {
     htfDisplacement: ht.displaced, mtfDisplacement: it.displaced,
     pool: aheadPool ? { type: aheadPool.type, price: ctx.f(aheadPool.price), distPips: ctx.dp(aheadPool.distPip), state: aheadPool.state } : null,
     verdict: verdict.verdict, slReason, slDiag: rr.diag, slRefTf: slRef.atrTf.toUpperCase(),
-    tpCapped: !!p.tpCapped, biasMode: p.biasMode, whipsaw: !!whipsaw, flipped,
+    tpCapped: !!p.tpCapped, biasMode: p.biasMode, whipsaw: !!whipsaw,
     liquidity: aheadPool ? aheadPool.type + ' ' + verdict.verdict : 'none',
     zones: nearZones.slice(0, 3).map(z => ({ kind: z.kind, tf: z.tf, lo: ctx.f(z.lo), hi: ctx.f(z.hi), side: z.side })),
     chart: s.chart, expiry: p.expiry, dec: ctx.dec, price: ctx.f(ctx.price),
@@ -879,7 +875,7 @@ async function handleCandles(body, lang, res, isBot, email) {
 
   let out;
   try { out = isBot ? runBot(ctx, data) : await runManual(ctx, data, style); }
-  catch (e) { console.error('[v204] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message, []); }
+  catch (e) { console.error('[v205] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message, []); }
   if (!out || !out.signal) out = standby(ctx, style, 'Menunggu setup valid.', []);
 
   const key = symbol + '|' + style;
