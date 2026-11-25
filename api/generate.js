@@ -1,5 +1,6 @@
-// api/generate.js — v203
-// TP: Scalping 5R · Intraday 3R (1.5/2.5/4) · Swing 3 pip (500/800/1000), TP4-5 null
+// api/generate.js — v204
+// FIX: null-safe (null tidak jadi 0) · repairTPs paksa kosong TP4/5 · flip bila runway < SL · SL guard ATR overflow
+// TP: Scalping 5R · Intraday 3R (1.5/2.5/4) · Swing 3 pip (500/800/1000)
 // SL: referensi TF per gaya (Scalp M5 / Intra M15 / Swing H4), ATR x sesi, di luar kolam
 // Chart: s.chart.tf otomatis (m1/m5/m15) + levels + range
 // Vision: TIDAK DIUBAH
@@ -10,11 +11,11 @@ import { runBotSma as runBotFlex } from '../lib/bot_3candle.js';
 import { sessionOf, asianRange, asianSweep, sessionScore, volatilityRegime } from '../lib/session.js';
 import { findPools, sweepVsBreak, doubleSweep, nearestDraw, slBeyondPool } from '../lib/liquidity.js';
 import { resolveBias, counterGuard, adjustConviction, counterExpiry } from '../lib/framework-manual.js';
-import { atrSanity, calcSL, rrCheck } from '../lib/risk-atr.js';
+import { atrSanity, calcSL } from '../lib/risk-atr.js';
 import { TP_PLAN, planTPs, repairTPs, coupleZone, fixSide, buildChart } from '../lib/tp-final.js';
 
 export const config = { maxDuration: 60 };
-const VERSION = 'v203';
+const VERSION = 'v204';
 const TL_BASE = 'https://api.tickerlayer.com';
 const AI_BASE = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/+$/, '');
 const AI_KEYS = [process.env.QWEN_MANUAL_API_KEY, process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
@@ -60,7 +61,8 @@ const COOLDOWN = 3e5;
 const cache = new Map();
 const outcomes = new Map();
 const stories = new Map();
-const num = (v, f = 0) => (Number.isFinite(Number(v)) ? Number(v) : f);
+const isNum = v => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
+const num = (v, f = 0) => (isNum(v) ? Number(v) : f);
 const tsMs = t => (t < 1e12 ? t * 1000 : t);
 const closed = (c, ms) => (Array.isArray(c) && c.length && Date.now() < tsMs(c[c.length - 1].t) + ms ? c.slice(0, -1) : (c || []));
 const iso = d => d.toISOString().slice(0, 10);
@@ -361,7 +363,7 @@ function baseExpiry(style) {
 
 function sigOf(p, ctx, style) {
   const f = ctx.f;
-  const nf = v => (Number.isFinite(Number(v)) ? f(v) : null);
+  const nf = v => (isNum(v) ? f(v) : null);
   const risk = Math.abs(p.entry - p.sl) || bounds(p.entry, ctx, style).min;
   const tps = Array.isArray(p.tps) && p.tps.length === 5 ? p.tps : buildTPs(p.entry, p.dir, risk);
   const c = p.conviction || 0;
@@ -375,7 +377,7 @@ function sigOf(p, ctx, style) {
     entry: f(p.entry), sl: f(p.sl),
     tp1: nf(tps[0]), tp2: nf(tps[1]), tp3: nf(tps[2]), tp4: nf(tps[3]), tp5: nf(tps[4]),
     tpCount: p.tpCount || 5, tpMode: p.tpMode || 'RISK_R',
-    invalidLevel: Number.isFinite(Number(p.invalidLevel)) ? f(p.invalidLevel) : null,
+    invalidLevel: isNum(p.invalidLevel) ? f(p.invalidLevel) : null,
     zone: p.zone ? { min: f(p.zone.lo), max: f(p.zone.hi), label: p.zone.kind } : null,
     zoneLabel: p.zone ? p.zone.kind : '',
     rr: 1, riskPips: p.riskPips ?? ctx.dp(risk / ctx.pip), pipDisplayScale: ctx.pipScale ?? 1,
@@ -399,7 +401,7 @@ function sigOf(p, ctx, style) {
 }
 function standby(ctx, style, why, steps) {
   return {
-    signal: { signal: 'NONE', status: 'STANDBY', state: 'STANDBY', orderType: 'NONE', symbol: ctx.symbol, style, entry: null, sl: null, tp1: null, tp2: null, tp3: null, tp4: null, tp5: null, checklist: (steps || []).map(s => s.tf + ': ' + s.text), reason: '', reasons: { id: '', en: '' } },
+    signal: { signal: 'NONE', status: 'STANDBY', state: 'STANDBY', orderType: 'NONE', symbol: ctx.symbol, style, entry: null, sl: null, tp1: null, tp2: null, tp3: null, tp4: null, tp5: null, tpCount: 0, checklist: (steps || []).map(s => s.tf + ': ' + s.text), reason: '', reasons: { id: '', en: '' } },
     facts: { symbol: ctx.symbol, style, status: 'STANDBY', why, steps: steps || [], dec: ctx.dec, price: ctx.f(ctx.price) },
   };
 }
@@ -408,7 +410,7 @@ const layout = (f, en, lines, setup) => '[' + f.symbol + ' · ' + (en ? 'Multi-T
 function manualReason(f, en) {
   const lines = (f.steps || []).map(s => s.tf + ': ' + (en ? (s.textEn || s.text) : s.text));
   if (f.status === 'STANDBY') return layout(f, en, lines, f.symbol + ': ' + (f.why || 'menunggu setup.'));
-  const tp = [f.tp1, f.tp2, f.tp3, f.tp4, f.tp5].filter(v => Number.isFinite(Number(v))).join(', ');
+  const tp = [f.tp1, f.tp2, f.tp3, f.tp4, f.tp5].filter(isNum).map(Number).join(', ');
   const ow = f.orderType === 'MARKET' ? 'NOW' : 'LIMIT';
   return layout(f, en, lines, f.symbol + ': ' + f.signal + ' ' + ow + ' @ ' + f.entry + ', SL ' + f.sl + ' (' + f.riskPips + ' pip), TP ' + tp + ' | ' + (f.setup || '') + ' | Conviction ' + (f.convictionLevel || '') + ' (' + (f.conviction || 0) + '/100) | Prob ' + (f.probability || '-') + ' | Risk ' + (f.riskMultiplier || 0.25) + 'x');
 }
@@ -442,7 +444,7 @@ Engine sudah menetapkan arah, entry, SL, TP, dan conviction. Tugas Anda menjelas
 BATASAN KERAS:
 1. Salin angka PERSIS dari JSON: entry, sl, tp1-tp5, riskPips, conviction, probability, riskMultiplier. DILARANG menghitung ulang atau mengubah.
 2. DILARANG mengubah signal (BUY/SELL), orderType, atau menyebut zona yang tidak ada di field zones/steps.
-3. TP bernilai null berarti TIDAK DIPAKAI untuk gaya itu (Intraday/Swing hanya 3 TP). Jangan menyebut atau mengarang TP4/TP5.
+3. TP bernilai null berarti TIDAK DIPAKAI untuk gaya itu (Intraday/Swing hanya 3 TP). Jangan menyebut, mengarang, atau menulis 0 untuk TP4/TP5.
 4. Jika conviction LOW, jelaskan sebagai "setup agresif, risiko 0.25x" — JANGAN menyarankan skip atau wait.
 5. Jika sebuah field null, lewati, jangan mengarang.
 
@@ -461,6 +463,7 @@ SESI & LIKUIDITAS (gunakan session, sessionWib, pool, verdict):
 - ASIA 07-14 WIB: range sempit, BOS sering palsu.
 - LONDON_KZ 14-17 WIB: sweep Asian range lalu judas swing.
 - NY_AM_KZ 19-22 WIB: overlap, likuiditas puncak, displacement terbesar.
+- LONDON_CLOSE 22-00 WIB: window reversal / profit taking.
 - DEAD 04-07 WIB: rollover, spread melebar, risiko minimum.
 - verdict SWEEP = stop hunt lalu balik; BREAK = displacement hold lalu lanjut; AMBIGUOUS = belum konfirmasi.
 - SL di LUAR kolam likuiditas. Sebut slReason sebagai alasan penempatan SL.
@@ -473,7 +476,7 @@ STRUKTUR:
 
 FORMAT:
 perTfId / perTfEn: 3-4 baris sesuai tfLabels, SATU kalimat mengalir per TF (HTF bias+premium/discount+kualitas struktur; MTF struktur+status; LTF trigger+zona/kolam entry; EXEC hanya jika ada).
-id / en: ringkasan 2-3 kalimat memuat arah + tipe order + entry (entryDistPips) + SL (riskPips + slReason) + TP yang aktif + dasar conviction (convictionBreakdown) + expiry bila LIMIT.
+id / en: ringkasan 2-3 kalimat memuat arah + tipe order + entry (entryDistPips) + SL (riskPips + slReason) + TP yang aktif saja + dasar conviction (convictionBreakdown) + expiry bila LIMIT.
 
 Gaya: trader profesional, padat, tanpa basa-basi. Maksimal 4 kalimat ringkasan.
 Balas HANYA JSON: {"perTfId":["H1: ...","M15: ...","M5: ...","M1: ..."],"perTfEn":["..."],"id":"...","en":"..."}`;
@@ -493,7 +496,7 @@ async function reasonManual(f) {
   return { id: layout(f, false, li, j.id), en: layout(f, true, le, j.en), ai: true };
 }
 async function reasonBot(f) {
-  const tp = [f.tp1, f.tp2, f.tp3].filter(v => v != null).join(', ');
+  const tp = [f.tp1, f.tp2, f.tp3].filter(isNum).map(Number).join(', ');
   const id = f.status === 'STANDBY' ? 'Bot memantau ' + f.symbol + '. ' + (f.why || '') : 'Bot ' + f.signal + ' @ ' + f.entry + ', SL ' + f.sl + ', TP ' + tp + '.';
   const en = f.status === 'STANDBY' ? 'Bot scanning ' + f.symbol + '.' : 'Bot ' + f.signal + ' at ' + f.entry + ', SL ' + f.sl + ', TP ' + tp + '.';
   const j = await aiJson(SYS_BOT, f, 8000);
@@ -504,6 +507,7 @@ async function reasonBot(f) {
 async function runManual(ctx, d, style) {
   const role = TF_ROLE[style] || TF_ROLE.Scalping;
   const slRef = SL_REF[style] || SL_REF.Scalping;
+  const plan = TP_PLAN[style] || TP_PLAN.Scalping;
   const cl = {};
   for (const tf of ['m1', 'm5', 'm15', 'h1', 'h4', 'd1']) cl[tf] = closed(d[tf], TFMS[tf]);
 
@@ -605,16 +609,21 @@ async function runManual(ctx, d, style) {
   const draw = nearestDraw(pools, p.dir, ctx);
   let fin = planTPs({ style, entry: p.entry, dir: p.dir, risk: rr.need, pip: ctx.pip, wall: bias.wall, draw, dp: ctx.dp });
 
-  if (!fin.tps) {
+  const runwayTooTight = Number.isFinite(fin.runwayPip) && fin.runwayPip < rr.riskPips;
+  let flipped = false;
+  if (!fin.tps || runwayTooTight) {
+    const oldRunway = fin.runwayPip;
     p.dir = -p.dir;
+    flipped = true;
     const alt = chooseBestZone(ctx, ht, it, lt, allZones.filter(z => z.side === (p.dir === 1 ? 'demand' : 'supply')), style);
     if (alt) p.zone = alt.z;
     p.zone = coupleZone(p.zone, p.entry, p.dir, ctx.pip, atrUse);
     rr = calcSL({ entry: p.entry, dir: p.dir, ctx, b, sess, atrUse, structLevel: swingLevel(cl[slRef.swingTf] || ltfRows, p.dir, slRef.win), poolLevel: NaN, rangeBound: NaN });
-    p.sl = rr.sl; p.riskPips = rr.riskPips;
+    p.sl = rr.sl; p.riskPips = rr.riskPips; p.slCapped = rr.capped;
+    p.invalidLevel = swingLevel(cl[slRef.swingTf] || ltfRows, p.dir, slRef.win);
     fin = planTPs({ style, entry: p.entry, dir: p.dir, risk: rr.need, pip: ctx.pip, wall: null, draw: null, dp: ctx.dp });
-    if (!fin.tps) fin = { tps: buildTPs(p.entry, p.dir, rr.need), count: 5, mode: 'RISK_R', pips: [], rr1: 1, poorRR: false };
-    steps.push({ tf: 'TP', text: 'Runway buntu — arah dibalik, TP pola penuh.', textEn: 'Runway blocked — flipped.' });
+    if (!fin.tps) fin = { tps: buildTPs(p.entry, p.dir, rr.need), count: plan.count, mode: 'RISK_R', pips: [], rr1: 1, poorRR: false, runwayPip: null };
+    steps.push({ tf: 'TP', text: runwayTooTight ? 'Runway ' + oldRunway + ' pip < SL ' + rr.riskPips + ' pip — arah dibalik agar R:R layak.' : 'Runway buntu — arah dibalik.', textEn: 'Runway too tight — direction flipped.' });
   } else {
     steps.push({ tf: 'TP', text: fin.count + ' target · ' + fin.mode + ' · ' + (fin.pips || []).join(' / ') + ' pip' + (fin.scaled ? ' (diskala ke runway ' + fin.runwayPip + ' pip)' : '') + ' · TP1 ' + fin.rr1 + 'R', textEn: fin.count + ' targets · ' + fin.mode });
   }
@@ -626,11 +635,11 @@ async function runManual(ctx, d, style) {
     rrPenalty += 8;
     steps.push({ tf: 'SL', text: 'Invalidasi struktur di luar skala ATR — SL pakai ATR murni, conviction -8.', textEn: 'Structural invalidation out of ATR scale.' });
   }
-  if (draw) {
-    const chk = rrCheck(rr.need, Math.abs(draw.price - p.entry));
-    if (chk.note) steps.push({ tf: 'R:R', text: chk.note, textEn: chk.note });
-    steps.push({ tf: 'Draw', text: 'Target ' + draw.type + ' ' + ctx.f(draw.price) + ' (' + ctx.dp(draw.distPip) + ' pip, ' + draw.state + ').', textEn: 'Draw ' + draw.type });
+  if (rr.atrOverflow) {
+    rrPenalty += 10;
+    steps.push({ tf: 'SL', text: 'ATR ' + ctx.dp(atrUse / ctx.pip) + ' pip melebihi cap gaya — SL dilebarkan ke ' + rr.riskPips + ' pip agar di luar noise, conviction -10.', textEn: 'ATR exceeds style cap — SL widened.' });
   }
+  if (draw && !flipped) steps.push({ tf: 'Draw', text: 'Target ' + draw.type + ' ' + ctx.f(draw.price) + ' (' + ctx.dp(draw.distPip) + ' pip, ' + draw.state + ').', textEn: 'Draw ' + draw.type });
 
   const setupType = classifySetup(ht, it, lt, chosen, verdict.verdict, sessSweep);
   let c1 = 0;
@@ -658,15 +667,15 @@ async function runManual(ctx, d, style) {
   c4 = Math.max(0, Math.min(15, c4));
 
   let conv = c1 + c2 + c3 + c4 - rrPenalty;
-  const adj = adjustConviction(conv, bias, p.tps.filter(v => v != null), p.entry, p.dir);
+  const adj = adjustConviction(conv, bias, p.tps.filter(isNum), p.entry, p.dir);
   conv = adj.conviction;
   if (whipsaw || sess.mode === 'AVOID' || vol.regime === 'SPIKE') conv = Math.min(conv, 54);
 
   p.conviction = Math.max(0, Math.min(100, Math.round(conv)));
   p.setupType = setupType;
   p.sess = sess;
-  p.biasMode = bias.mode;
-  p.expiry = bias.mode === 'LTF_COUNTER' ? counterExpiry(style) : baseExpiry(style);
+  p.biasMode = flipped ? 'RUNWAY_FLIP' : bias.mode;
+  p.expiry = bias.mode === 'LTF_COUNTER' && !flipped ? counterExpiry(style) : baseExpiry(style);
   if (p.type === 'LIMIT') {
     const byTime = Date.now() + p.expiry.minutes * 60000;
     p.expiresAt = Math.min(byTime, sess.nextBoundaryMs);
@@ -699,7 +708,7 @@ async function runManual(ctx, d, style) {
     htfDisplacement: ht.displaced, mtfDisplacement: it.displaced,
     pool: aheadPool ? { type: aheadPool.type, price: ctx.f(aheadPool.price), distPips: ctx.dp(aheadPool.distPip), state: aheadPool.state } : null,
     verdict: verdict.verdict, slReason, slDiag: rr.diag, slRefTf: slRef.atrTf.toUpperCase(),
-    tpCapped: !!p.tpCapped, biasMode: bias.mode, whipsaw: !!whipsaw,
+    tpCapped: !!p.tpCapped, biasMode: p.biasMode, whipsaw: !!whipsaw, flipped,
     liquidity: aheadPool ? aheadPool.type + ' ' + verdict.verdict : 'none',
     zones: nearZones.slice(0, 3).map(z => ({ kind: z.kind, tf: z.tf, lo: ctx.f(z.lo), hi: ctx.f(z.hi), side: z.side })),
     chart: s.chart, expiry: p.expiry, dec: ctx.dec, price: ctx.f(ctx.price),
@@ -738,11 +747,11 @@ function lifecycle(prev, sym, style, price, pip, data) {
   if (![sl, e].every(Number.isFinite) || sl === e) return null;
   const risk0 = Math.abs(e - sl);
   const plan = TP_PLAN[prev.style] || TP_PLAN.Scalping;
-  const rawT = [prev.tp1, prev.tp2, prev.tp3, prev.tp4, prev.tp5].map(Number);
+  const rawT = [prev.tp1, prev.tp2, prev.tp3, prev.tp4, prev.tp5].map(v => (isNum(v) ? Number(v) : NaN));
   const t = [0, 1, 2, 3, 4].map(i => {
     if (i >= plan.count) return NaN;
     const v = rawT[i];
-    if (Number.isFinite(v) && v !== e) return v;
+    if (Number.isFinite(v) && v !== e && v !== 0) return v;
     const base = plan.mode === 'PIP' ? plan.targets[i] * pip : risk0 * plan.targets[i];
     return e + dir * base;
   });
@@ -755,7 +764,7 @@ function lifecycle(prev, sym, style, price, pip, data) {
   if (!win.length) win = [{ t: Date.now(), h: price, l: price, c: price }];
   let filled = prev.status !== 'PENDING' || Number(prev.filledAt) > 0;
   let filledAt = Number(prev.filledAt) || 0;
-  const hits = new Set(Array.isArray(prev.tpHits) ? prev.tpHits : []);
+  const hits = new Set(Array.isArray(prev.tpHits) ? prev.tpHits.filter(n => n <= plan.count) : []);
   let be = !!prev.be || hits.has(1);
   let dead = null;
   const lastIdx = plan.count;
@@ -870,7 +879,7 @@ async function handleCandles(body, lang, res, isBot, email) {
 
   let out;
   try { out = isBot ? runBot(ctx, data) : await runManual(ctx, data, style); }
-  catch (e) { console.error('[v203] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message, []); }
+  catch (e) { console.error('[v204] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message, []); }
   if (!out || !out.signal) out = standby(ctx, style, 'Menunggu setup valid.', []);
 
   const key = symbol + '|' + style;
@@ -910,7 +919,7 @@ async function handleCandles(body, lang, res, isBot, email) {
   }
   const signal = { ...out.signal, reason: lang === 'en' ? story.v.en : story.v.id, reasons: { id: story.v.id, en: story.v.en }, reasonSource: story.v.ai ? 'AI' : 'RULES', aiReasoning: !!story.v.ai };
   if (signal.status !== 'STANDBY') await saveSignal(signal);
-  return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal, diag: { version: VERSION, status: signal.status, session: f.session || null, liquidity: f.liquidity || null, biasMode: f.biasMode || null, conviction: f.conviction || 0, setup: f.setup || null, tpCount: signal.tpCount || 5, chartTf: signal.chart ? signal.chart.tf : null, spanPips: signal.chart ? signal.chart.range.spanPips : null, store: kvOn ? 'KV' : 'MEM' } });
+  return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal, diag: { version: VERSION, status: signal.status, session: f.session || null, liquidity: f.liquidity || null, biasMode: f.biasMode || null, conviction: f.conviction || 0, setup: f.setup || null, tpCount: signal.tpCount || 0, chartTf: signal.chart ? signal.chart.tf : null, spanPips: signal.chart ? signal.chart.range.spanPips : null, store: kvOn ? 'KV' : 'MEM' } });
 }
 
 export default async function handler(req, res) {
