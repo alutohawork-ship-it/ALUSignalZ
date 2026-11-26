@@ -1,10 +1,9 @@
 // api/candles.js — v10
-// Perubahan dari v9:
-// - Tahan 429/quota/cooldown: serve last-known-good cache (stale:true) agar chart tidak pernah kosong.
-// - Sanitasi candle: dedupe timestamp kembar + validasi OHLC (fix anomali M1 saat reconnect).
-// - Memory guard: cache expired di-evict otomatis saat map membesar.
-// - Cek cooldown proaktif: jika semua key TickerLayer cooldown, langsung serve stale (hemat latensi).
-// - Kontrak request/response sama dengan v9; frontend tidak perlu diubah.
+// - Tahan 429/quota/cooldown: serve last-known-good cache (stale:true) agar chart tidak kosong.
+// - Sanitasi candle: dedupe timestamp kembar + validasi OHLC (fix anomali M1 reconnect).
+// - Memory guard: cache expired di-evict otomatis.
+// - Cek cooldown proaktif: semua key cooldown → langsung stale (hemat latensi).
+// - Kontrak request/response sama dengan v9; frontend tidak wajib diubah.
 //
 // Env: TICKERLAYER_API_KEY, TICKERLAYER_API_KEY_1 .. _19, DATABASE_URL
 // Opsional: TICKERLAYER_MAX_TRY (default 6), TICKERLAYER_DISABLED=1
@@ -15,7 +14,6 @@ export const config = { maxDuration: 60 };
 
 const TICKERLAYER_BASE_URL = 'https://api.tickerlayer.com';
 
-// Slot tetap: key kosong di tengah tidak menggeser cooldown
 const TL_KEY_NAMES = [
   'TICKERLAYER_API_KEY',
   ...Array.from({ length: 19 }, (_, i) => `TICKERLAYER_API_KEY_${i + 1}`),
@@ -40,17 +38,16 @@ const MAX_PAGES = 4;
 const WINDOW_DAYS = 10;
 const FALLBACK_DAYS = 3;
 
-const DERIVED = { '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240 }; // menit
+const DERIVED = { '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240 };
 const NATIVE = { '1m': { span: 'minute' }, '1d': { span: 'day' } };
 const TTL = { '1m': 60, '5m': 120, '15m': 180, '30m': 240, '1h': 300, '4h': 600, '1d': 3600 };
 const VALID = new Set(Object.keys(TTL));
 
 const CD = { quota: 600, rate: 5, invalid: 6 * 3600 };
 
-// ── Cache & cooldown di memori (per instance, tanpa Upstash) ──
-const memCache = new Map();    // key -> { exp, value }
-const memCooldown = new Map(); // slot name -> expiry ms
-const lastGood = new Map();    // key -> rows terakhir yang valid (untuk fallback 429)
+const memCache = new Map();
+const memCooldown = new Map();
+const lastGood = new Map(); // [v10] rows terakhir yang valid untuk fallback 429
 
 function cacheGet(key) {
   const hit = memCache.get(key);
@@ -60,28 +57,18 @@ function cacheGet(key) {
 }
 
 function cacheSet(key, value, ttlSec) {
-  // [v10] memory guard: evict expired saat map membesar
   if (memCache.size > 400) {
     const now = Date.now();
     for (const [k, v] of memCache) if (now > v.exp) memCache.delete(k);
   }
   memCache.set(key, { exp: Date.now() + ttlSec * 1000, value });
-  // [v10] simpan salinan permanen per-instance untuk fallback stale
   if (Array.isArray(value) && value.length) lastGood.set(key, value);
 }
 
-// [v10] Response stale dari last-known-good
 function staleResponse(cacheKey, lim, reason, retryInSec = 30) {
   const good = lastGood.get(cacheKey);
   if (Array.isArray(good) && good.length) {
-    return {
-      ok: true,
-      candles: good.slice(-lim),
-      source: 'stale-cache',
-      stale: true,
-      retryInSec,
-      note: reason,
-    };
+    return { ok: true, candles: good.slice(-lim), source: 'stale-cache', stale: true, retryInSec, note: reason };
   }
   return null;
 }
@@ -120,13 +107,12 @@ function sanitizeRows(rows) {
   );
   const out = [];
   for (const c of valid) {
-    if (out.length && out[out.length - 1].t === c.t) out[out.length - 1] = c; // duplikat: terbaru menang
+    if (out.length && out[out.length - 1].t === c.t) out[out.length - 1] = c;
     else out.push(c);
   }
   return out;
 }
 
-// ── Satu panggilan ke TickerLayer, dengan timeout ──
 async function requestBars(apiKey, target, p) {
   const url = `${TICKERLAYER_BASE_URL}/${target.asset}/agg/${target.sym}/${p.mult}/${p.span}/${p.from}/${p.to}?sort=desc&limit=${p.limit}`;
   const controller = new AbortController();
@@ -168,7 +154,6 @@ function httpError(status, message, detail = '') {
   return e;
 }
 
-// Rotasi key: 429/401 -> cooldown lalu coba key berikutnya; 403 lanjut; lainnya berhenti
 async function fetchBars(target, p) {
   if (TL_DISABLED) throw httpError(503, 'TickerLayer dinonaktifkan (TICKERLAYER_DISABLED=1).');
   if (!API_KEYS.some(Boolean)) throw httpError(500, 'Tidak ada TICKERLAYER_API_KEY di env');
@@ -187,12 +172,11 @@ async function fetchBars(target, p) {
       continue;
     }
     if (r.status === 403) continue;
-    break; // 400, 404, 5xx, timeout: key lain tidak akan membantu
+    break;
   }
   throw httpError(last.status, `TickerLayer HTTP ${last.status}`, last.detail);
 }
 
-// ── Tarikan M1 mundur (paging), satu kali per miss ──
 async function fetchM1Window(target) {
   const now = new Date();
   let spanDays = WINDOW_DAYS;
@@ -248,7 +232,6 @@ function aggregate(rows, bucketMs) {
   return [...map.values()].sort((a, b) => a.t - b.t);
 }
 
-// Dari satu tarikan M1, bangun semua interval turunan dan simpan cache masing-masing
 function cacheDerived(sym, m1) {
   const out = {};
   for (const [tf, mins] of Object.entries(DERIVED)) {
@@ -269,7 +252,6 @@ async function fetchNative(target, interval, lim) {
   return { rows: r.rows.slice(-lim), keyNo: r.keyNo };
 }
 
-// Pesan akses dibuat sama dengan sebelumnya supaya frontend tetap menampilkannya dengan benar
 const ACCESS_MSG = {
   noEmail: { status: 401, msg: 'Email tidak ditemukan. Silakan login ulang.' },
   notRegistered: { status: 403, msg: 'Email ini belum terdaftar sebagai klien.' },
@@ -284,7 +266,6 @@ export default async function handler(req, res) {
   let body = req.body || {};
   if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
 
-  // Frontend mengirim "value" (email), bukan "email"
   const email = String(body.email || body.value || '').trim().toLowerCase();
   const access = await checkAccess(email, false);
   if (!access.ok) {
@@ -304,16 +285,12 @@ export default async function handler(req, res) {
   const cacheKey = `candles_v10_${target.sym}_${interval}`;
   const minOk = Math.min(lim, 60);
 
-  // 1. Cache memori (fresh)
   const hit = cacheGet(cacheKey);
   if (Array.isArray(hit) && hit.length >= minOk) {
     return res.status(200).json({ ok: true, candles: hit.slice(-lim), source: 'cache', stale: false });
   }
-
-  // [v10] 1b. Cache memori tipis tapi ada last-good -> pakai last-good dulu daripada hit upstream
   const thin = Array.isArray(hit) && hit.length ? hit : null;
 
-  // 2. [v10] Cek cooldown proaktif: semua key cooldown -> langsung stale (hemat waktu)
   if (!TL_DISABLED && API_KEYS.some(Boolean) && !usableSlots().length) {
     const st = staleResponse(cacheKey, lim, 'Semua key TickerLayer sedang cooldown. Menampilkan data terakhir yang valid.', 30);
     if (st) return res.status(200).json(st);
@@ -321,7 +298,6 @@ export default async function handler(req, res) {
     return res.status(429).json({ error: 'Semua key TickerLayer sedang cooldown', detail: '' });
   }
 
-  // 3. TickerLayer
   try {
     if (NATIVE[interval]) {
       const n = await fetchNative(target, interval, lim);
@@ -329,7 +305,6 @@ export default async function handler(req, res) {
         cacheSet(cacheKey, n.rows, TTL[interval]);
         return res.status(200).json({ ok: true, candles: n.rows, source: 'tickerlayer', keyNo: n.keyNo, stale: false });
       }
-      // [v10] upstream OK tapi kosong -> stale fallback
       const st = staleResponse(cacheKey, lim, 'Upstream mengembalikan data kosong. Menampilkan data terakhir yang valid.', 20);
       if (st) return res.status(200).json(st);
       return res.status(200).json({ ok: true, candles: [], source: 'tickerlayer-empty', stale: true });
@@ -350,7 +325,6 @@ export default async function handler(req, res) {
     if (st2) return res.status(200).json(st2);
     return res.status(200).json({ ok: true, candles: [], source: 'tickerlayer-empty', stale: true });
   } catch (err) {
-    // [v10] 429/quota/cooldown/error upstream -> serve last-known-good, chart tidak kosong
     const isRate = err.status === 429 || /quota|cooldown|429/i.test(err.message || '');
     const reason = isRate
       ? 'Upstream rate-limit (429). Menampilkan data terakhir yang valid.'
