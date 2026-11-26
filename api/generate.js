@@ -20,7 +20,7 @@ import { buildReason } from '../lib/reason.js';
 import { monitorLTFStructure, validateEntryZone, calculatePreciseSL, LTF_TF } from '../lib/ltf-dynamic.js';
 
 export const config = { maxDuration: 60 };
-const VERSION = 'v214';
+const VERSION = 'v215';
 const TL_BASE = 'https://api.tickerlayer.com';
 const AI_BASE = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/+$/, '');
 const AI_KEYS = [process.env.QWEN_MANUAL_API_KEY, process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
@@ -347,6 +347,28 @@ function synthesizeZone(ctx, dir, style, rows) {
   return { z, score: 30, width: w / ctx.pip, d: Math.abs(ctx.price - (dir === 1 ? z.hi : z.lo)) / ctx.pip, inside: false, dir };
 }
 
+// v215: nilai satu sisi (dirX). Trigger LTF (sapuan->shift->return) menentukan kekuatan sisi itu.
+function sideScore(ctx, dirX, zonesAll, ht, it, ltfRows, style) {
+  const want = dirX === 1 ? 'demand' : 'supply';
+  const prox = PROX[style] || 50;
+  const zs = zonesAll.filter(z => z.side === want).map(z => {
+    const inside = ctx.price >= z.lo && ctx.price <= z.hi;
+    const d = inside ? 0 : (dirX === 1 ? ctx.price - z.hi : z.lo - ctx.price) / ctx.pip;
+    return { z, inside, d };
+  }).filter(x => x.inside || (x.d >= -prox && x.d <= prox * 2)).sort((a, b) => Math.abs(a.d) - Math.abs(b.d));
+  const zone = zs[0] ? zs[0].z : null;
+  let score = 30;
+  if (zone) score += 15;
+  if (ht.dir === dirX) score += 15; else if (ht.dir === -dirX) score -= 15;
+  if (it.dir === dirX) score += 8;
+  const trig = zone ? monitorLTFStructure(ltfRows, dirX, { lo: zone.lo, hi: zone.hi }) : null;
+  const phase = trig ? trig.phase : 'NONE';
+  if (phase === 'RETURN') score += 20; else if (phase === 'SHIFT') score += 10; else if (phase === 'INDUCEMENT') score += 4;
+  if (trig && trig.chase) score -= 8;
+  if (phase === 'NONE' || phase === 'IDLE' || phase === 'INDUCEMENT') score = Math.min(score, 54);
+  return { score: Math.max(0, Math.min(100, Math.round(score))), zone, phase };
+}
+
 function findEntryZone(ctx, p, pool, ltfRows) {
   const prox = PROX[p._style] || 50;
   const validPool = pool.filter(z => (p.dir === 1 ? z.side === 'demand' : z.side === 'supply'));
@@ -360,15 +382,7 @@ function findEntryZone(ctx, p, pool, ltfRows) {
     const distPip = Math.abs(ctx.price - lim) / ctx.pip;
     if (sideOk && distPip <= prox) return { z, lim, inside, distPip };
   }
-  const synth = synthesizeZone(ctx, p.dir, p._style, ltfRows);
-  if (synth) {
-    const off = Math.max(5 * ctx.pip, Math.min(synth.d * ctx.pip, 15 * ctx.pip));
-    const entry = ctx.price - p.dir * off;
-    return { z: synth.z, lim: entry, inside: false, distPip: off / ctx.pip };
-  }
-  const off = 10 * ctx.pip, entry = ctx.price - p.dir * off, w2 = 15 * ctx.pip;
-  const z = { lo: p.dir === 1 ? entry - w2 : entry, hi: p.dir === 1 ? entry : entry + w2, side: p.dir === 1 ? 'demand' : 'supply', kind: 'Fallback', tf: TF_ROLE[p._style].ltf.toUpperCase(), isSynthetic: true };
-  return { z, lim: entry, inside: false, distPip: off / ctx.pip };
+  return null; // v215: tanpa zona struktur valid -> STANDBY (tidak ada entry sintetis)
 }
 
 function rejectionAt(ctx, rows, dir) {
@@ -601,10 +615,19 @@ async function runManual(ctx, d, style) {
   let rangeBound = NaN;
   if (rg && sess.mode === 'RANGE') { dir = rg.pos >= 0.5 ? -1 : 1; rangeBound = dir === 1 ? rg.lo : rg.hi; }
 
+  let sideFlip = null;
+  {
+    const pri = sideScore(ctx, dir, allZones, ht, it, ltfRows, style);
+    const opp = sideScore(ctx, -dir, allZones, ht, it, ltfRows, style);
+    if (pri.score < 55 && opp.score > pri.score && (opp.phase === 'RETURN' || opp.phase === 'SHIFT')) {
+      sideFlip = { from: dir === 1 ? 'BUY' : 'SELL', to: dir === 1 ? 'SELL' : 'BUY', scoreFrom: pri.score, scoreTo: opp.score, phase: opp.phase };
+      dir = -dir;
+    }
+  }
   let chosen = chooseBestZone(ctx, ht, it, lt, allZones.filter(z => z.side === (dir === 1 ? 'demand' : 'supply')), style);
-  if (!chosen) chosen = synthesizeZone(ctx, dir, style, ltfRows);
 
   const steps = [];
+  if (sideFlip) steps.push({ tf: 'Dua Sisi', text: sideFlip.from + ' lemah, ' + sideFlip.to + ' punya trigger LTF (' + sideFlip.phase + '): skor ' + sideFlip.scoreTo + ' > ' + sideFlip.scoreFrom + '.', textEn: sideFlip.to + ' has its own LTF trigger (' + sideFlip.phase + ').' });
   steps.push({ tf: 'Sesi', text: sess.key + ' (' + sess.wib + ') liq ' + sess.liq + 'x', textEn: sess.key + ' (' + sess.wib + ') liq ' + sess.liq + 'x' });
   steps.push({ tf: 'Volatilitas', text: vol.id, textEn: vol.en });
   steps.push({ tf: H, text: dw(ht.dir) + ' ' + (ht.ev || '-') + (ht.fresh ? ' fresh' : ' stale') + (ht.displaced ? ' +displacement' : ' TANPA displacement'), textEn: dwEn(ht.dir) + ' ' + (ht.ev || '-') });
@@ -620,6 +643,7 @@ async function runManual(ctx, d, style) {
   for (const z of allZones) if (z.side === (dir === 1 ? 'demand' : 'supply') && !pool.some(k => k.lo === z.lo && k.hi === z.hi)) pool.push(z);
 
   const ez = findEntryZone(ctx, p, pool, ltfRows);
+  if (!ez) return standby(ctx, style, 'Belum ada zona struktur valid searah ' + (dir === 1 ? 'BUY' : 'SELL') + ' di dekat harga. Menunggu.', steps);
   p.entry = ez.lim; p.zone = ez.z;
   if (p.type !== 'MARKET') {
     const okSide = dir === 1 ? p.entry <= ctx.price : p.entry >= ctx.price;
@@ -687,6 +711,14 @@ async function runManual(ctx, d, style) {
   if (whipsaw || sess.mode === 'AVOID' || vol.regime === 'SPIKE') conv = Math.min(conv, 54);
   if (ht.dir === 0 && sess.key === 'ASIA') conv = Math.min(conv, 35);
 
+  {
+    const ltfState = monitorLTFStructure(ltfRows, p.dir, p.zone ? { lo: p.zone.lo, hi: p.zone.hi } : null);
+    if (ltfState.chase) conv -= 10;
+    if (ltfState.phase === 'RETURN') conv += 5;
+    if (ltfState.phase === 'NONE' || ltfState.phase === 'IDLE') conv -= 5;
+    steps.push({ tf: 'LTF', text: 'Fase ' + ltfState.phase + ' — ' + ltfState.note, textEn: 'Phase ' + ltfState.phase + ' — ' + ltfState.note });
+    p.ltfPhase = ltfState.phase;
+  }
   p.conviction = Math.max(0, Math.min(100, Math.round(conv)));
   p.setupType = setupType;
   p.sess = sess;
