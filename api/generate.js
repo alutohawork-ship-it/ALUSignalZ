@@ -1,8 +1,8 @@
-// api/generate.js — v208
-// Full Framework + M1 Sanitization + Scalping ATR M1 Smoothed (n=20) + TF Scaling
-// - Scalping: ATR diukur di M1 (smoothed), invalidasi swing di M5.
-// - Intraday/Swing: ATR di M15/H4 seperti biasa.
-// - System Prompt sesuai Framework XAUUSD/BTCUSD.
+// api/generate.js — v210 (FINAL)
+// - LTF Dinamis: Full integration (resolveBias + counterGuard + adjustConviction).
+// - Skenario: Menambahkan Ranging Edge & Session Sweep detection.
+// - System Prompt: Sesuai persis dengan Framework Document.
+// - Bug Fixes: Syntax errors & typos from v209.
 
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { planBot } from '../lib/bot-ict.js';
@@ -14,7 +14,7 @@ import { atrSanity, calcSL } from '../lib/risk-atr.js';
 import { TP_PLAN, planTPs, repairTPs, coupleZone, fixSide, buildChart } from '../lib/tp-final.js';
 
 export const config = { maxDuration: 60 };
-const VERSION = 'v208';
+const VERSION = 'v210';
 const TL_BASE = 'https://api.tickerlayer.com';
 const AI_BASE = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/+$/, '');
 const AI_KEYS = [process.env.QWEN_MANUAL_API_KEY, process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
@@ -39,7 +39,6 @@ const TF_ROLE = {
   Intraday: { htf: 'h4', mtf: 'm15', ltf: 'm5', exec: null },
   Swing: { htf: 'd1', mtf: 'h4', ltf: 'h1', exec: null },
 };
-// [v208] Scalping pakai M1 untuk ATR (smoothed), M5 untuk swing invalidasi
 const SL_REF = {
   Scalping: { atrTf: 'm1', swingTf: 'm5', win: 8, smooth: true },
   Intraday: { atrTf: 'm15', swingTf: 'm15', win: 8, smooth: false },
@@ -70,7 +69,6 @@ const dw = d => (d === 1 ? 'bullish' : d === -1 ? 'bearish' : 'netral');
 const dwEn = d => (d === 1 ? 'bullish' : d === -1 ? 'bearish' : 'neutral');
 const buildTPs = (e, dir, r) => (!(r > 0) || !Number.isFinite(e)) ? [e, e, e, e, e] : TP_MULT.map(m => e + dir * r * m);
 
-// [v207] Sanitasi Candle Anomali (M1 Reconnect Fix)
 function sanitizeCandles(rows, atrRef, maxRangeMultiplier = 5) {
   if (!Array.isArray(rows) || rows.length < 2) return rows;
   const maxRange = atrRef * maxRangeMultiplier;
@@ -159,7 +157,6 @@ async function tlRows(sym, tf, need) {
   return [];
 }
 
-// ATR standar (n=14)
 function atr(rows, n = 14) {
   if (!Array.isArray(rows) || rows.length < n + 1) return 0;
   const tr = i => Math.max(rows[i].h - rows[i].l, Math.abs(rows[i].h - rows[i - 1].c), Math.abs(rows[i].l - rows[i - 1].c));
@@ -170,7 +167,6 @@ function atr(rows, n = 14) {
   return a;
 }
 
-// [v208] ATR Smoothed untuk M1 (n=20) — lebih stabil dari noise candle tunggal
 function atrSmooth(rows, n = 20) {
   if (!Array.isArray(rows) || rows.length < n + 1) return 0;
   const tr = i => Math.max(rows[i].h - rows[i].l, Math.abs(rows[i].h - rows[i - 1].c), Math.abs(rows[i].l - rows[i - 1].c));
@@ -210,6 +206,7 @@ function internal(rows, lb = 60) {
   o.displaced = disp;
   return o;
 }
+
 function ranging(rows, lb = 30, tf = 'M15') {
   if (!Array.isArray(rows) || rows.length < lb) return null;
   const a = rows.slice(-lb);
@@ -222,6 +219,7 @@ function ranging(rows, lb = 30, tf = 'M15') {
   if (nH >= 2 && nL >= 2) return { hi, lo, h, pos: (a[a.length - 1].c - lo) / h, tf };
   return null;
 }
+
 function getPDZone(rows, lb = 60) {
   if (!Array.isArray(rows) || rows.length < 10) return null;
   const a = rows.slice(-lb);
@@ -230,6 +228,7 @@ function getPDZone(rows, lb = 60) {
   if (range <= 0) return null;
   return { hi, lo, eq: lo + range * 0.5, ote: lo + range * 0.618, range };
 }
+
 function gaps(rows, lb = 40) {
   const out = [];
   if (!Array.isArray(rows) || rows.length < 3) return out;
@@ -240,6 +239,7 @@ function gaps(rows, lb = 40) {
   }
   return out;
 }
+
 function zonesFromRows(rows, tfLabel, ctx, style, lb = 90) {
   if (!Array.isArray(rows) || rows.length < 12) return [];
   const a = rows.slice(-lb);
@@ -265,6 +265,7 @@ function zonesFromRows(rows, tfLabel, ctx, style, lb = 90) {
   }
   return kept;
 }
+
 function dedupeZones(list) {
   const out = [];
   for (const z of [...list].sort((a, b) => (a.hi - a.lo) - (b.hi - b.lo))) {
@@ -274,6 +275,7 @@ function dedupeZones(list) {
   }
   return out;
 }
+
 function zoneLine(list, ctx, en, maxPip) {
   if (!list || !list.length) return en ? 'no zone readable.' : 'belum ada zona terbaca.';
   const near = list.filter(z => {
@@ -289,15 +291,18 @@ function zoneLine(list, ctx, en, maxPip) {
     return z.kind + ' ' + ctx.f(z.lo) + '-' + ctx.f(z.hi) + ' (' + (inside ? pos : d + ' pip ' + pos) + ')';
   }).join('; ');
 }
+
 function bounds(entry, ctx, style) {
   const r = RULES[style] || RULES.Scalping;
   return isGold(ctx.symbol) ? { min: r.gMin * ctx.pip, max: r.gMax * ctx.pip } : { min: entry * r.bMin, max: entry * r.bMax };
 }
+
 function swingLevel(rows, dir, win = 8) {
   if (!Array.isArray(rows) || rows.length < 5) return NaN;
   const n = rows.slice(-Math.min(win, rows.length));
   return dir === 1 ? Math.min(...n.map(c => c.l)) : Math.max(...n.map(c => c.h));
 }
+
 function scoreZone(z, ht, it, lt, ctx, style) {
   let score = 0;
   const width = (z.hi - z.lo) / ctx.pip;
@@ -316,6 +321,7 @@ function scoreZone(z, ht, it, lt, ctx, style) {
   if (inside) score += 15; else if (d <= 10) score += 12; else if (d <= 20) score += 8; else if (d <= 50) score += 4;
   return { score, width, d, inside };
 }
+
 function chooseBestZone(ctx, ht, it, lt, zones, style) {
   const prox = PROX[style] || 50;
   const structDir = ht.dir !== 0 ? ht.dir : (it.dir !== 0 ? it.dir : lt.dir);
@@ -333,6 +339,7 @@ function chooseBestZone(ctx, ht, it, lt, zones, style) {
   }).sort((a, b) => b.score - a.score);
   return scored[0];
 }
+
 function synthesizeZone(ctx, dir, style, rows) {
   const a = atr(rows) || ctx.pip * 10;
   const n = Array.isArray(rows) && rows.length >= 6 ? rows.slice(-15) : [];
@@ -344,6 +351,7 @@ function synthesizeZone(ctx, dir, style, rows) {
     : { lo: sw - w, hi: sw, side: 'supply', kind: 'Swing High', tf: TF_ROLE[style].ltf.toUpperCase(), isSynthetic: true };
   return { z, score: 30, width: w / ctx.pip, d: Math.abs(ctx.price - (dir === 1 ? z.hi : z.lo)) / ctx.pip, inside: false, dir };
 }
+
 function entryMode(ctx, p, it, lt, ex, style, pool, ltfRows) {
   const prox = PROX[style] || 50;
   const align = it.dir === p.dir && lt.dir === p.dir;
@@ -378,10 +386,20 @@ function entryMode(ctx, p, it, lt, ex, style, pool, ltfRows) {
   const z = { lo: p.dir === 1 ? entry - w2 : entry, hi: p.dir === 1 ? entry : entry + w2, side: p.dir === 1 ? 'demand' : 'supply', kind: 'Fallback', tf: TF_ROLE[style].ltf.toUpperCase(), isSynthetic: true };
   return { type: 'LIMIT', entry, zone: z, forced: true, note: 'LIMIT fallback @ ' + ctx.f(entry) + '.' };
 }
-function classifySetup(ht, it, lt, chosen, verdict, sweepSess) {
-  if (sweepSess) return { type: 'Fakeout/Trap', id: sweepSess.id, en: sweepSess.en };
-  if (verdict === 'SWEEP') return { type: 'Fakeout/Trap', id: 'Liquidity sweep lalu reclaim.', en: 'Sweep then reclaim.' };
+
+// [v210] Skenario Classification yang Lebih Tajam
+function classifySetup(ht, it, lt, chosen, verdict, sweepSess, rg, biasMode) {
+  // 1. Session Sweep (Judas Swing)
+  if (sweepSess) return { type: 'Fakeout/Trap', id: 'Sweep Sesi (' + sweepSess.swept + ') lalu reclaim.', en: 'Session Sweep then reclaim.' };
+  // 2. Liquidity Sweep (General)
+  if (verdict === 'SWEEP') return { type: 'Fakeout/Trap', id: 'Liquidity sweep lalu reclaim.', en: 'Liquidity sweep then reclaim.' };
+  // 3. Breakout
   if (verdict === 'BREAK') return { type: 'Kontinuitas', id: 'Break displacement + hold.', en: 'Displacement break held.' };
+  // 4. Ranging Edge (SC-06)
+  if (rg && biasMode !== 'LTF_COUNTER') {
+    return { type: 'Ranging Edge', id: 'Setup di batas range (' + (rg.pos >= 0.5 ? 'atas/SELL' : 'bawah/BUY') + ').', en: 'Range edge setup.' };
+  }
+  // 5. Standard Classifications
   if (!chosen || !chosen.z) return { type: 'Unknown', id: 'Setup tidak terklasifikasi.', en: 'Unclassified.' };
   const dir = chosen.z.side === 'demand' ? 1 : -1;
   if (chosen.z.tf === 'H1' || chosen.z.tf === 'H4' || chosen.z.tf === 'D1') return { type: 'Supply & Demand', id: 'Zona ' + chosen.z.kind + ' TF tinggi.', en: 'HTF zone.' };
@@ -390,12 +408,15 @@ function classifySetup(ht, it, lt, chosen, verdict, sweepSess) {
   if (ht.dir !== 0 && dir !== ht.dir) return { type: 'Reversal', id: 'Reversal di area ekstrem.', en: 'Reversal at extreme.' };
   return { type: 'Supply & Demand', id: 'Zona ' + chosen.z.kind + '.', en: 'Zone setup.' };
 }
+
 function estimateProbability(c) {
   if (c >= 75) return { min: 62, max: 75, label: Math.round(62 + (c - 75) / 25 * 13) + '%' };
   if (c >= 55) return { min: 52, max: 61, label: Math.round(52 + (c - 55) / 20 * 9) + '%' };
   return { min: 45, max: 51, label: Math.round(45 + c / 55 * 6) + '%' };
 }
+
 const riskMult = c => (c >= 75 ? 1.0 : c >= 55 ? 0.65 : 0.25);
+
 function baseExpiry(style) {
   const m = {
     Scalping: { candles: 12, tf: 'M5', minutes: 60 },
@@ -444,12 +465,14 @@ function sigOf(p, ctx, style) {
   s.chart = buildChart(s, ctx.pip, ctx.dp, f, style);
   return s;
 }
+
 function standby(ctx, style, why, steps) {
   return {
     signal: { signal: 'NONE', status: 'STANDBY', state: 'STANDBY', orderType: 'NONE', symbol: ctx.symbol, style, entry: null, sl: null, tp1: null, tp2: null, tp3: null, tp4: null, tp5: null, tpCount: 0, checklist: (steps || []).map(s => s.tf + ': ' + s.text), reason: '', reasons: { id: '', en: '' } },
     facts: { symbol: ctx.symbol, style, status: 'STANDBY', why, steps: steps || [], dec: ctx.dec, price: ctx.f(ctx.price) },
   };
 }
+
 const layout = (f, en, lines, setup) => '[' + f.symbol + ' · ' + (en ? 'Multi-TF Analysis' : 'Analisa Multi-TF') + ' · ' + f.style + ']\n' + (lines || []).map(t => '• ' + t).join('\n') + '\n\n[Setup]\n' + setup;
 
 function manualReason(f, en) {
@@ -459,6 +482,7 @@ function manualReason(f, en) {
   const ow = f.orderType === 'MARKET' ? 'NOW' : 'LIMIT';
   return layout(f, en, lines, f.symbol + ': ' + f.signal + ' ' + ow + ' @ ' + f.entry + ', SL ' + f.sl + ' (' + f.riskPips + ' pip), TP ' + tp + ' | ' + (f.setup || '') + ' | Conviction ' + (f.convictionLevel || '') + ' (' + (f.conviction || 0) + '/100) | Prob ' + (f.probability || '-') + ' | Risk ' + (f.riskMultiplier || 0.25) + 'x');
 }
+
 async function aiJson(sys, obj, ms) {
   if (!AI_KEYS.length) return null;
   const end = Date.now() + ms;
@@ -483,7 +507,7 @@ async function aiJson(sys, obj, ms) {
   return null;
 }
 
-// [v208] SYSTEM PROMPT FRAMEWORK (Sesuai Dokumen)
+// [v210] SYSTEM PROMPT: SESUAI DOKUMEN FRAMEWORK 100%
 const SYS_MTF = `Anda adalah analis trading XAUUSD dan BTCUSD yang bertugas mengeluarkan SATU sinyal tunggal per analisis untuk dibaca langsung oleh trader.
 ATURAN WAJIB:
 1. IDENTIFIKASI ASET & KARAKTERNYA:
@@ -530,9 +554,8 @@ Catatan Analisa: [2-3 kalimat ringkas top-down, zona/likuiditas, dasar probabili
 Balas HANYA JSON: {"perTfId":["HTF: ...","MTF: ...","LTF: ..."],"perTfEn":["..."],"id":"...","en":"..."}`;
 
 const SYS_BOT = `Anda mentor bot scalper. Engine sudah memutuskan setup — Anda hanya menjelaskan.
-Salin angka PERSIS dari JSON (entry, sl, tp1-tp3, conviction, probability). Dilarang mengubah arah atau angka.
-Tulis 2-3 kalimat santai namun profesional: apa yang bot lakukan, di mana entry & SL, dan mengapa (trigger + conviction).
-Sebut conviction level dan porsi risiko. Tanpa bullet, tanpa basa-basi.
+Fokus pada struktur: sebutkan bias HTF, setup (misal: Retest BOS), dan trigger LTF. 
+Salin angka PERSIS dari JSON. Tulis 2-3 kalimat santai namun profesional. Tanpa bullet.
 Balas HANYA JSON: {"id":"...","en":"..."}`;
 
 async function reasonManual(f) {
@@ -543,6 +566,7 @@ async function reasonManual(f) {
   const le = Array.isArray(j.perTfEn) ? j.perTfEn.map(String) : (f.steps || []).map(s => s.tf + ': ' + (s.textEn || s.text));
   return { id: layout(f, false, li, j.id), en: layout(f, true, le, j.en), ai: true };
 }
+
 async function reasonBot(f) {
   const tp = [f.tp1, f.tp2, f.tp3].filter(isNum).map(Number).join(', ');
   const id = f.status === 'STANDBY' ? 'Bot memantau ' + f.symbol + '. ' + (f.why || '') : 'Bot ' + f.signal + ' @ ' + f.entry + ', SL ' + f.sl + ', TP ' + tp + '.';
@@ -572,13 +596,9 @@ async function runManual(ctx, d, style) {
   const slRows = cl[slRef.atrTf] || ltfRows;
 
   const atrStruct = atr(mtfRows) || ctx.pip * 10;
-  
-  // [v208] Scalping pakai M1 smoothed (n=20), Intraday/Swing pakai atr biasa
   const useSmooth = slRef.smooth && slRows.length >= 30;
   const atrSlNow = useSmooth ? atrSmooth(slRows, 20) : atr(slRows);
-  const atrSlBase = useSmooth
-    ? atrSmooth(slRows.slice(0, Math.max(20, slRows.length - 15)), 20)
-    : atr(slRows.slice(0, Math.max(15, slRows.length - 10)));
+  const atrSlBase = useSmooth ? atrSmooth(slRows.slice(0, Math.max(20, slRows.length - 15)), 20) : atr(slRows.slice(0, Math.max(15, slRows.length - 10)));
   const atrUse = atrSanity(atrSlNow || ctx.pip * 10, atrSlBase || atrSlNow || ctx.pip * 10);
   const vol = volatilityRegime(atrSlNow || ctx.pip * 10, atrSlBase || atrSlNow || ctx.pip * 10, sess);
 
@@ -605,6 +625,8 @@ async function runManual(ctx, d, style) {
   const verdict = aheadPool ? sweepVsBreak(aheadPool.price, aheadPool.side, ltfRows, ctx) : { verdict: 'NONE' };
 
   const b = bounds(ctx.price, ctx, style);
+  
+  // [v210] LTF DINAMIS: Resolve Bias
   let bias = resolveBias({ ht, it, lt, zones: allZones, ctx, style, atrM15: atrStruct, slPips: b.min / ctx.pip });
   const guard = counterGuard(bias, b.min / ctx.pip);
   if (!guard.ok) bias = resolveBias({ ht, it, lt, zones: allZones, ctx, style, atrM15: atrStruct, slPips: b.min / ctx.pip, allowCounter: false });
@@ -641,8 +663,13 @@ async function runManual(ctx, d, style) {
   steps.push({ tf: 'Likuiditas', text: aheadPool ? aheadPool.type + ' ' + ctx.f(aheadPool.price) + ' (' + ctx.dp(aheadPool.distPip) + ' pip, ' + aheadPool.state + ') → ' + verdict.verdict + (verdict.id ? ': ' + verdict.id : '') : 'tidak ada kolam terdepan', textEn: aheadPool ? aheadPool.type + ' → ' + verdict.verdict : 'no pool ahead' });
   if (whipsaw) steps.push({ tf: 'Whipsaw', text: 'Double sweep ≤3 candle — kemungkinan news. Risk 0.25x.', textEn: 'Double sweep — news whipsaw.' });
   if (sessSweep) steps.push({ tf: 'Setup Sesi', text: sessSweep.id, textEn: sessSweep.en });
-  if (bias.mode === 'LTF_COUNTER') steps.push({ tf: 'LTF Dinamis', text: 'LTF memimpin counter-HTF, penalti -' + bias.penalty + (bias.mtfAgrees ? ' (MTF setuju)' : ' (MTF lawan, forced LOW)'), textEn: 'LTF leads counter-HTF.' });
+  
+  // [v210] LTF Dinamis Logging
+  if (bias.mode === 'LTF_COUNTER') {
+    steps.push({ tf: 'LTF Dinamis', text: 'LTF memimpin counter-HTF, penalti -' + bias.penalty + (bias.mtfAgrees ? ' (MTF setuju)' : ' (MTF lawan, forced LOW)'), textEn: 'LTF leads counter-HTF.' });
+  }
   if (!guard.ok) steps.push({ tf: 'LTF Dinamis', text: guard.reason, textEn: guard.reason });
+  
   steps.push({ tf: 'Zona', text: zoneLine(nearZones, ctx, false, prox), textEn: zoneLine(nearZones, ctx, true, prox) });
 
   const p = { dir, entry: ctx.price, sl: ctx.price, type: 'LIMIT', zone: chosen ? chosen.z : null, steps };
@@ -665,7 +692,6 @@ async function runManual(ctx, d, style) {
   const struct = swingLevel(cl[slRef.swingTf] || ltfRows, p.dir, slRef.win);
   const slp = slBeyondPool(pools, p.dir, p.entry, ctx, atrUse);
   
-  // [v208] Kirim tfKey ke calcSL untuk scaling k
   let rr = calcSL({ entry: p.entry, dir: p.dir, ctx, b, sess, atrUse, structLevel: sessSweep ? sessSweep.extreme : struct, poolLevel: slp ? slp.pool.price : NaN, rangeBound, tfKey: slRef.atrTf });
   p.sl = rr.sl; p.riskPips = rr.riskPips; p.slCapped = rr.capped;
   p.invalidLevel = slp ? slp.level : (sessSweep ? sessSweep.extreme : struct);
@@ -699,40 +725,55 @@ async function runManual(ctx, d, style) {
   }
   if (draw) steps.push({ tf: 'Draw', text: 'Target ' + draw.type + ' ' + ctx.f(draw.price) + ' (' + ctx.dp(draw.distPip) + ' pip, ' + draw.state + ').', textEn: 'Draw ' + draw.type });
 
-  const setupType = classifySetup(ht, it, lt, chosen, verdict.verdict, sessSweep);
-  let c1 = 0;
-  if (ht.dir === p.dir) c1 += 20; else if (ht.dir === 0) c1 += 10; else c1 += 5;
-  if (chosen) { const w = chosen.width; if (w >= 20 && w <= 80) c1 += 10; else if (w >= 15) c1 += 5; }
-  c1 = Math.min(30, c1);
-  let c2 = 0;
-  const stMap = { 'Supply & Demand': 18, 'Kontinuitas': 16, 'Retest BOS': 15, 'Reversal': 12, 'Fakeout/Trap': 14 };
+  // [v210] Skenario Classification dengan parameter lengkap
+  const setupType = classifySetup(ht, it, lt, chosen, verdict.verdict, sessSweep, rg, bias.mode);
+  
+  // [v210] Conviction Scoring (Structure First)
+  let c1 = 0; // HTF & Zona (Max 30)
+  if (ht.dir === p.dir) c1 += 20;
+  else if (ht.dir === 0) c1 += 10;
+  else c1 += 5;
+  
+  if (chosen) {
+    const w = chosen.width;
+    if (w >= 20 && w <= 80) c1 += 10;
+    else if (w >= 15) c1 += 5;
+  }
+
+  let c2 = 0; // Struktur, Likuiditas & Setup (Max 30)
+  const stMap = { 'Kontinuitas': 25, 'Retest BOS': 25, 'Fakeout/Trap': 20, 'Reversal': 20, 'Ranging Edge': 18, 'Supply & Demand': 18 };
   c2 += stMap[setupType.type] || 5;
-  if (it.fresh && it.displaced && it.dir === p.dir) c2 += 5;
-  if (verdict.verdict === 'SWEEP' && (sess.key === 'LONDON_KZ' || sess.key === 'NY_AM_KZ')) c2 += 7;
-  else if (verdict.verdict === 'BREAK') c2 += 6;
-  else if (verdict.verdict === 'AMBIGUOUS') c2 += 1;
-  else c2 += 3;
-  if (pools.some(x => x.strength >= 5 && x.state === 'VIRGIN' && x.ahead)) c2 += 2;
-  c2 = Math.min(30, c2);
-  let c3 = 0;
+  
+  if (setupType.type === 'Kontinuitas' && ht.dir === it.dir) c2 += 5;
+  if (setupType.type === 'Retest BOS' && it.fresh && it.displaced) c2 += 5;
+  if (setupType.type === 'Fakeout/Trap' && verdict === 'SWEEP') c2 += 5;
+  if (pools.some(x => x.strength >= 5 && x.state === 'VIRGIN' && x.ahead)) c2 += 5;
+
+  let c3 = 0; // Trigger LTF & R:R (Max 25)
   if (lt.dir === p.dir) c3 += 12;
   if (lt.fresh) c3 += 6;
   if (ex && ex.dir === p.dir) c3 += 4;
   if (!rr.capped) c3 += 3;
-  c3 = Math.min(25, c3);
-  let c4 = sessionScore(sess, setupType.type === 'Fakeout/Trap' ? 'SWEEP' : (rg ? 'RANGE' : 'TREND'));
+
+  let c4 = 0; // Sesi & Volatilitas (Max 15)
+  c4 = sessionScore(sess, setupType.type === 'Fakeout/Trap' ? 'SWEEP' : (rg ? 'RANGE' : 'TREND'));
   c4 -= vol.penalty;
   c4 = Math.max(0, Math.min(15, c4));
 
   let conv = c1 + c2 + c3 + c4 - rrPenalty;
+  
+  // [v210] LTF Dinamis Adjustment
   const adj = adjustConviction(conv, bias, p.tps.filter(isNum), p.entry, p.dir);
   conv = adj.conviction;
+  
   if (whipsaw || sess.mode === 'AVOID' || vol.regime === 'SPIKE') conv = Math.min(conv, 54);
 
   p.conviction = Math.max(0, Math.min(100, Math.round(conv)));
   p.setupType = setupType;
   p.sess = sess;
   p.biasMode = bias.mode;
+  
+  // [v210] Expiry Dinamis
   p.expiry = bias.mode === 'LTF_COUNTER' ? counterExpiry(style) : baseExpiry(style);
   if (p.type === 'LIMIT') {
     const byTime = Date.now() + p.expiry.minutes * 60000;
@@ -741,7 +782,7 @@ async function runManual(ctx, d, style) {
   }
 
   steps.push({ tf: 'Entry', text: p.note, textEn: p.note });
-  steps.push({ tf: 'Conviction', text: p.conviction + '/100 (HTF ' + c1 + '/30 · Setup ' + c2 + '/30 · Trigger ' + c3 + '/25 · Sesi ' + c4 + '/15) → ' + (p.conviction >= 75 ? 'HIGH' : p.conviction >= 55 ? 'MEDIUM' : 'LOW') + ' · Risk ' + riskMult(p.conviction) + 'x · Prob ' + estimateProbability(p.conviction).label, textEn: p.conviction + '/100' });
+  steps.push({ tf: 'Conviction', text: p.conviction + '/100 (Struktur/HTF: ' + (c1+c2) + '/60 · Trigger/R:R: ' + c3 + '/25 · Sesi: ' + c4 + '/15) → ' + (p.conviction >= 75 ? 'HIGH' : p.conviction >= 55 ? 'MEDIUM' : 'LOW') + ' · Risk ' + riskMult(p.conviction) + 'x · Prob ' + estimateProbability(p.conviction).label, textEn: p.conviction + '/100' });
   if (p.type === 'LIMIT') steps.push({ tf: 'Expiry', text: p.expiry.id, textEn: p.expiry.en });
 
   const s = sigOf(p, ctx, style);
@@ -759,7 +800,7 @@ async function runManual(ctx, d, style) {
     asset: ctx.symbol === 'BTCUSD' ? 'BTCUSD — 24/7, impulsif, stop-hunt equal highs/lows, weekend tipis' : 'XAUUSD — 24/5, sensitif makro USD, sweep high/low sesi',
     priceNow: ctx.f(ctx.price),
     entryDistPips: ctx.dp(Math.abs(ctx.price - p.entry) / ctx.pip),
-    convictionBreakdown: { htf: c1 + '/30', setup: c2 + '/30', trigger: c3 + '/25', session: c4 + '/15' },
+    convictionBreakdown: { structureHtf: (c1+c2) + '/60', triggerRr: c3 + '/25', session: c4 + '/15' },
     session: sess.key, sessionWib: sess.wib, sessionNote: sess.note, sessionLiq: sess.liq,
     volRegime: vol.regime, volNote: vol.id,
     premiumDiscount: pd ? ((ctx.price - pd.lo) / pd.range >= 0.5 ? 'premium' : 'discount') : null,
@@ -845,12 +886,11 @@ function lifecycle(prev, sym, style, price, pip, data) {
   if (dead) return { dead: true, out: dead.out, prev, patch };
   let status, state;
   if (!filled) { status = 'PENDING'; state = 'LIMIT_PLACED'; }
-  else if (maxHit >= 1) { status = 'TP' + maxHit + '_HIT'; state: 'TP' + maxHit; }
-  else { status = 'RUNNING'; state: filledAt ? 'FILLED' : 'CONFIRMED'; }
+  else if (maxHit >= 1) { status = 'TP' + maxHit + '_HIT'; state = 'TP' + maxHit; }
+  else { status = 'RUNNING'; state = filledAt ? 'FILLED' : 'CONFIRMED'; }
   return { dead: false, prev, patch: { ...patch, status, state } };
 }
 
-// ===== VISION — TIDAK DIUBAH =====
 const SYS_VIS = 'Kamu analis S&D/OB dari gambar chart. Baca level PERSIS dari skala harga. Wajib BUY atau SELL kecuali gambar bukan chart. Prioritaskan LIMIT pullback; MARKET hanya bila harga sudah di zona dan ada penolakan. Sebutkan zona TF tinggi dan rendah pada perImageAnalyses. SL di luar distal zona/swing. Balas HANYA JSON: {"signal":"BUY","orderType":"LIMIT","entry":0,"sl":0,"tp1":0,"tp2":0,"tp3":0,"tp4":0,"tp5":0,"zoneLow":0,"zoneHigh":0,"zone":"Demand","pair":"","decimals":2,"perImageAnalyses":[],"perImageAnalysesEn":[],"reason":"","reasonEn":""}';
 
 async function handleVision(body, lang, res) {
@@ -941,7 +981,7 @@ async function handleCandles(body, lang, res, isBot, email) {
 
   let out;
   try { out = isBot ? runBot(ctx, data) : await runManual(ctx, data, style); }
-  catch (e) { console.error('[v208] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message, []); }
+  catch (e) { console.error('[v210] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message, []); }
   if (!out || !out.signal) out = standby(ctx, style, 'Menunggu setup valid.', []);
 
   const key = symbol + '|' + style;
