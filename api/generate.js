@@ -1,9 +1,12 @@
-// api/generate.js — v216 (FORCED BINARY + HYBRID VISION)
-// - WAJIB BUY/SELL setiap analisis (Framework §2 & §9.2): struktur rusak → flip arah sehat;
-//   kedua arah lemah → sinyal dipaksa LOW (≤45, 0.25x, 2 TP). STANDBY hanya untuk error/no-data.
-// - Hybrid: engine struktur → render PNG 3 panel → vision model → guardrail → fallback rule.
-// - LTF monitor real-time, SL presisi swing LTF, session-aware ATR, caps konsistensi.
-// - Env opsional: HYBRID_VISION=0 (pure rule-engine).
+// api/generate.js — v218
+// TF PAIRS FINAL (rekomendasi terkunci):
+//   Scalping : HTF M15 | MTF M5  | LTF M1   (hold 5-15 mnt)
+//   Intraday : HTF H4  | MTF M30 | LTF M5   (hold 1-8 jam)
+//   Swing    : HTF D1  | MTF H4  | LTF H1   (hold 1-5 hari)
+// Termasuk: forced binary (wajib BUY/SELL), hybrid vision (render→vision→guardrail→fallback),
+// 3 TP semua mode, entry single untuk manual (zone untuk vision), STANDBY-safe reasoning,
+// LTF monitor + cancel, SL presisi swing LTF, session-aware ATR, sanitize M1.
+// Env opsional: HYBRID_VISION=0 (pure rule-engine).
 
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { planBot } from '../lib/bot-ict.js';
@@ -19,7 +22,7 @@ import { monitorLTFStructure, calculatePreciseSL, LTF_TF } from '../lib/ltf-dyna
 import { renderSignalChart } from '../lib/chart-render.js';
 
 export const config = { maxDuration: 60 };
-const VERSION = 'v216';
+const VERSION = 'v218';
 const HYBRID = process.env.HYBRID_VISION !== '0';
 const TL_BASE = 'https://api.tickerlayer.com';
 const AI_BASE = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/+$/, '');
@@ -35,30 +38,37 @@ const PIP_DISPLAY = { BTCUSD: 0.1 };
 const pipOf = (s, d) => PIP[s] ?? Math.pow(10, -(d - 1));
 const pipScaleOf = s => PIP_DISPLAY[s] ?? 1;
 const isGold = s => s === 'XAUUSD' || s === 'XAUUSDX';
+
 const TFMS = { m1: 6e4, m5: 3e5, m15: 9e5, m30: 18e5, h1: 36e5, h4: 144e5, d1: 864e5 };
 const TFIV = { m1: '1m', m5: '5m', m15: '15m', m30: '30m', h1: '1h', h4: '4h', d1: '1d' };
 const TFSPAN = { m1: [1, 'minute', 1], m5: [5, 'minute', 5], m15: [15, 'minute', 15], m30: [30, 'minute', 30], h1: [1, 'hour', 60], h4: [4, 'hour', 240], d1: [1, 'day', 1440] };
+
+// [v218] Pasangan timeframe final
 const TF_ROLE = {
-  Scalping: { htf: 'h1', mtf: 'm15', ltf: 'm5', exec: 'm1' },
-  Intraday: { htf: 'h4', mtf: 'm15', ltf: 'm5', exec: null },
+  Scalping: { htf: 'm15', mtf: 'm5', ltf: 'm1', exec: null },
+  Intraday: { htf: 'h4', mtf: 'm30', ltf: 'm5', exec: null },
   Swing: { htf: 'd1', mtf: 'h4', ltf: 'h1', exec: null },
 };
 const SL_REF = {
-  Scalping: { atrTf: 'm1', swingTf: 'm5', win: 8, smooth: true },
-  Intraday: { atrTf: 'm15', swingTf: 'm15', win: 8, smooth: false },
+  Scalping: { atrTf: 'm1', swingTf: 'm5', win: 10, smooth: true },
+  Intraday: { atrTf: 'm30', swingTf: 'm30', win: 8, smooth: false },
   Swing: { atrTf: 'h4', swingTf: 'h4', win: 8, smooth: false },
 };
-const NEED = { Scalping: ['m1', 'm5', 'm15', 'h1'], Intraday: ['m5', 'm15', 'h1', 'h4'], Swing: ['m15', 'h1', 'h4', 'd1'] };
-const MINB = { m1: 60, m5: 40, m15: 40, m30: 35, h1: 35, h4: 25, d1: 20 };
-const EXPMS = { Scalping: 60 * 6e4, Intraday: 480 * 6e4, Swing: 5760 * 6e4 };
+const NEED = {
+  Scalping: ['m1', 'm5', 'm15'],
+  Intraday: ['m5', 'm30', 'h4'],
+  Swing: ['h1', 'h4', 'd1'],
+};
+const MINB = { m1: 80, m5: 50, m15: 40, m30: 35, h1: 35, h4: 25, d1: 20 };
+const EXPMS = { Scalping: 30 * 6e4, Intraday: 480 * 6e4, Swing: 5760 * 6e4 };
 const PROX = { Scalping: 50, Intraday: 80, Swing: 200 };
 const MIN_ZONE_WIDTH = { Scalping: 20, Intraday: 20, Swing: 30 };
 const RULES = {
-  Scalping: { gMin: 50, gMax: 100, bMin: 0.005, bMax: 0.012 },
-  Intraday: { gMin: 50, gMax: 120, bMin: 0.005, bMax: 0.014 },
-  Swing: { gMin: 100, gMax: 300, bMin: 0.01, bMax: 0.025 },
+  Scalping: { gMin: 30, gMax: 80, bMin: 0.004, bMax: 0.010 },
+  Intraday: { gMin: 50, gMax: 150, bMin: 0.005, bMax: 0.014 },
+  Swing: { gMin: 100, gMax: 350, bMin: 0.01, bMax: 0.025 },
 };
-const TP_MULT = [1, 1.5, 2, 3, 5];
+const TP_MULT = [1, 1.5, 2.5];
 const COOLDOWN = 3e5;
 
 const cache = new Map();
@@ -71,7 +81,7 @@ const tsMs = t => (t < 1e12 ? t * 1000 : t);
 const closed = (c, ms) => (Array.isArray(c) && c.length && Date.now() < tsMs(c[c.length - 1].t) + ms ? c.slice(0, -1) : (c || []));
 const iso = d => d.toISOString().slice(0, 10);
 const dw = d => (d === 1 ? 'bullish' : d === -1 ? 'bearish' : 'netral');
-const buildTPs = (e, dir, r) => (!(r > 0) || !Number.isFinite(e)) ? [e, e, e, e, e] : TP_MULT.map(m => e + dir * r * m);
+const buildTPs = (e, dir, r) => (!(r > 0) || !Number.isFinite(e)) ? [e, e, e] : TP_MULT.map(m => e + dir * r * m);
 
 function sanitizeCandles(rows, atrRef, mult = 5) {
   if (!Array.isArray(rows) || rows.length < 2) return rows;
@@ -209,7 +219,7 @@ function internal(rows, lb = 60) {
   o.ev = ev; o.dir = tr; o.fresh = tr !== 0 && bi >= n - 12; o.displaced = disp;
   return o;
 }
-function ranging(rows, lb = 30, tf = 'M15') {
+function ranging(rows, lb = 30, tf = 'M30') {
   if (!Array.isArray(rows) || rows.length < lb) return null;
   const a = rows.slice(-lb);
   const hi = Math.max(...a.map(c => c.h)), lo = Math.min(...a.map(c => c.l));
@@ -366,14 +376,16 @@ function estimateProbability(c) {
   return { min: 45, max: 51, label: Math.round(45 + c / 55 * 6) + '%' };
 }
 const riskMult = c => (c >= 75 ? 1.0 : c >= 55 ? 0.65 : 0.25);
+
+// [v218] Expiry sesuai TF pair baru (Framework §6)
 function baseExpiry(style) {
   const m = {
-    Scalping: { candles: 12, tf: 'M5', minutes: 60 },
-    Intraday: { candles: 10, tf: 'M15', minutes: 150 },
+    Scalping: { candles: 15, tf: 'M1', minutes: 15 },
+    Intraday: { candles: 8, tf: 'M30', minutes: 240 },
     Swing: { candles: 12, tf: 'H1', minutes: 720 },
   };
   const e = m[style] || m.Scalping;
-  return { ...e, id: 'Auto-cancel ' + e.candles + ' candle ' + e.tf + ' (' + e.minutes + ' mnt) atau SL tertembus lebih dulu.', en: 'Auto-cancel ' + e.candles + ' ' + e.tf + ' candles or SL hit first.' };
+  return { ...e, id: 'Auto-cancel ' + e.candles + ' candle ' + e.tf + ' (' + e.minutes + ' mnt) atau SL tertembus lebih dulu.', en: 'Auto-cancel ' + e.candles + ' ' + e.tf + ' candles (' + e.minutes + ' min) or SL hit first.' };
 }
 function setupToScenario(name) {
   const n = String(name || '').toLowerCase();
@@ -391,7 +403,7 @@ function sigOf(p, ctx, style) {
   const f = ctx.f;
   const nf = v => (isNum(v) ? f(v) : null);
   const risk = Math.abs(p.entry - p.sl) || bounds(p.entry, ctx, style).min;
-  const tps = Array.isArray(p.tps) && p.tps.length === 5 ? p.tps : buildTPs(p.entry, p.dir, risk);
+  const tps = Array.isArray(p.tps) && p.tps.length >= 3 ? p.tps.slice(0, 3) : buildTPs(p.entry, p.dir, risk);
   const c = p.conviction || 0;
   const prob = estimateProbability(c);
   const lvl = c >= 75 ? 'HIGH' : c >= 55 ? 'MEDIUM' : 'LOW';
@@ -401,10 +413,13 @@ function sigOf(p, ctx, style) {
     status: p.type === 'MARKET' ? 'RUNNING' : 'PENDING',
     state: p.type === 'MARKET' ? 'CONFIRMED' : 'LIMIT_PLACED',
     entry: f(p.entry), sl: f(p.sl),
-    tp1: nf(tps[0]), tp2: nf(tps[1]), tp3: nf(tps[2]), tp4: nf(tps[3]), tp5: nf(tps[4]),
-    tpCount: p.tpCount || 5, tpMode: p.tpMode || 'RISK_R',
+    tp1: nf(tps[0]), tp2: nf(tps[1]), tp3: nf(tps[2]), tp4: null, tp5: null,
+    tpCount: 3, tpMode: p.tpMode || 'RISK_R',
     invalidLevel: isNum(p.invalidLevel) ? f(p.invalidLevel) : null,
-    zone: p.zone ? { min: f(p.zone.lo), max: f(p.zone.hi), label: p.zone.kind } : null,
+    // [v217] Manual = 1 harga (card = live). Vision/hybrid tetap zona range.
+    zone: p.zone ? (p.hybrid ? { min: f(p.zone.lo), max: f(p.zone.hi), label: p.zone.kind } : { min: f(p.entry), max: f(p.entry), label: p.zone.kind }) : null,
+    zoneMode: p.hybrid ? 'range' : 'single',
+    entryPrice: f(p.entry),
     zoneLabel: p.zone ? p.zone.kind : '',
     rr: 1, riskPips: p.riskPips ?? ctx.dp(risk / ctx.pip), pipDisplayScale: ctx.pipScale ?? 1,
     setup: p.setupType ? p.setupType.type : 'Unknown',
@@ -485,7 +500,6 @@ async function aiVisionImg(sys, text, dataUrl, ms) {
   return null;
 }
 
-// System prompt hybrid (Framework §9 disesuaikan untuk chart render + JSON)
 const SYS_HYB = `Anda analis trading XAUUSD/BTCUSD membaca gambar chart 3 panel bertumpuk (HTF/MTF/LTF) dengan gridline harga ber-label, zona transparan, dan garis kolam likuiditas ber-label. Keluarkan SATU sinyal.
 ATURAN:
 1. Wajib pilih BUY atau SELL (dilarang HOLD/WAIT). Choppy/tipis → tetap pilih, conviction LOW.
@@ -494,7 +508,7 @@ ATURAN:
 4. Klasifikasi setup: Supply & Demand | Reversal | Kontinuitas | Fakeout/Trap | Retest BOS | Ranging Edge | Struktur Belum Jelas.
 5. Conviction 0-100: HTF&zona 0-30, struktur&likuiditas&setup 0-30, trigger&R:R 0-25, sesi&volatilitas 0-15. Jangan berlebihan.
 6. Jika HTF dan MTF berlawanan → conviction kecil (counter-trend). Jika HTF stale/tanpa displacement → jangan klaim Kontinuitas.
-7. TIDAK perlu mengeluarkan TP (sistem yang mengatur TP).
+7. TIDAK perlu mengeluarkan TP (sistem yang mengatur TP, maksimal TP1/TP2/TP3).
 Balas HANYA JSON: {"signal":"BUY|SELL","orderType":"NOW|LIMIT","entry":0,"sl":0,"zoneLow":0,"zoneHigh":0,"setup":"...","conviction":0,"perPanel":["HTF: ...","MTF: ...","LTF: ..."],"reason":"2-3 kalimat ID","reasonEn":"2-3 kalimat EN"}`;
 
 function guardVision(v, ctx, style, b, live) {
@@ -558,7 +572,7 @@ async function runManual(ctx, d, style) {
   const plan = TP_PLAN[style] || TP_PLAN.Scalping;
   const prox = PROX[style] || 50;
   const cl = {};
-  for (const tf of ['m1', 'm5', 'm15', 'h1', 'h4', 'd1']) {
+  for (const tf of ['m1', 'm5', 'm15', 'm30', 'h1', 'h4', 'd1']) {
     let rows = closed(d[tf], TFMS[tf]);
     if (tf === 'm1' && rows.length >= 10) {
       const atrM5Ref = atr(d.m5 && d.m5.length >= 14 ? d.m5 : rows) || ctx.pip * 10;
@@ -581,7 +595,6 @@ async function runManual(ctx, d, style) {
   const ht = internal(cl[role.htf]);
   const it = internal(cl[role.mtf]);
   const lt = internal(cl[role.ltf]);
-  const ex = role.exec ? internal(cl[role.exec], 40) : null;
 
   const H = role.htf.toUpperCase(), M = role.mtf.toUpperCase(), L = role.ltf.toUpperCase();
   const allZones = dedupeZones([
@@ -630,7 +643,7 @@ async function runManual(ctx, d, style) {
   if (whipsaw) steps.push({ tf: 'Whipsaw', text: 'Double sweep — kemungkinan news. Risk 0.25x.', textEn: 'Double sweep — news whipsaw.' });
   if (bias.mode === 'LTF_COUNTER') steps.push({ tf: 'LTF Dinamis', text: 'LTF memimpin counter-HTF, penalti -' + bias.penalty, textEn: 'LTF leads counter-HTF.' });
 
-  // [v216] FORCED BINARY DIRECTION (Framework §2 & §9.2): WAJIB BUY/SELL, dilarang standby karena struktur.
+  // [v216] FORCED BINARY: WAJIB BUY/SELL, dilarang standby karena struktur.
   const ltfMonRows0 = cl[LTF_TF[style] || role.ltf] || ltfRows;
   const healthOf = ddir => {
     const mon = monitorLTFStructure(ltfMonRows0, ddir, ctx, style);
@@ -650,7 +663,7 @@ async function runManual(ctx, d, style) {
     steps.push({ tf: 'Arah', text: 'Arah dibalik ke ' + (dir === 1 ? 'BUY' : 'SELL') + ': struktur LTF arah semula rusak (' + hCur.mon.reason + ').', textEn: 'Direction flipped: original LTF structure broken (' + hCur.mon.reason + ').' });
   } else if (!hCur.mon.valid) {
     forcedWeak = true;
-    steps.push({ tf: 'Arah', text: 'Struktur LTF kedua arah lemah — sinyal tetap dipaksa (FORCED BINARY) dengan conviction dikunci LOW, risk 0.25x, target dekat.', textEn: 'Both directions weak — forced binary signal locked LOW, 0.25x, near targets.' });
+    steps.push({ tf: 'Arah', text: 'Struktur LTF kedua arah lemah — sinyal tetap dipaksa (FORCED BINARY) dengan conviction dikunci LOW, risk 0.25x.', textEn: 'Both directions weak — forced binary signal locked LOW, 0.25x.' });
   }
   const mon0 = healthOf(dir).mon;
 
@@ -674,7 +687,6 @@ async function runManual(ctx, d, style) {
   p.invalidLevel = slp ? slp.level : (sessSweep ? sessSweep.extreme : struct);
   let slReason = slp ? 'di luar kolam ' + slp.pool.type + ' + buffer' : (sessSweep ? 'di balik titik sweep' : 'di luar swing ' + slRef.swingTf.toUpperCase());
 
-  // SL presisi dari swing LTF bila lebih ketat dan masih masuk akal
   const ltfMonRows = cl[LTF_TF[style] || role.ltf] || ltfRows;
   const psl = calculatePreciseSL(p.entry, p.dir, ltfMonRows, ctx, 1.5);
   if (psl && psl.distancePips >= 20 && psl.distancePips < rr.riskPips) {
@@ -682,7 +694,7 @@ async function runManual(ctx, d, style) {
   }
 
   const reject = rejectionAt(ctx, ltfRows, p.dir);
-  const momentum = !!(lt.fresh && lt.dir === p.dir) || !!(ex && ex.dir === p.dir);
+  const momentum = !!(lt.fresh && lt.dir === p.dir);
   const preNews = vol.regime === 'SPIKE';
   let scenario = detectScenario({ ht, it, lt, chosen, verdict: verdict.verdict, sweepSess: sessSweep, rg, biasMode: bias.mode, dir: p.dir, inside: ez.inside, distPip: ez.distPip, momentum, preNews, sess });
   const ord = decideOrderType(scenario, { inside: ez.inside, distPip: ez.distPip, reject, momentum, preNews, sess, ltfConfidence: mon0.confidence });
@@ -697,10 +709,10 @@ async function runManual(ctx, d, style) {
   let rrPenalty = 0;
   const runwayTooTight = Number.isFinite(fin.runwayPip) && fin.runwayPip < rr.riskPips;
   if (!fin.tps || runwayTooTight) {
-    if (!fin.tps) fin = { tps: buildTPs(p.entry, p.dir, rr.need), count: plan.count, mode: 'RISK_R', pips: [], rr1: 1, poorRR: true, runwayPip: null };
+    if (!fin.tps) fin = { tps: buildTPs(p.entry, p.dir, rr.need), count: 3, mode: 'RISK_R', pips: [], rr1: 1, poorRR: true, runwayPip: null };
     else rrPenalty += 6;
   }
-  p.tps = fin.tps; p.tpCount = fin.count; p.tpMode = fin.mode;
+  p.tps = fin.tps; p.tpCount = 3; p.tpMode = fin.mode;
   p.tpCapped = fin.mode !== 'RISK_R' && fin.mode !== 'FIXED_PIP';
   if (fin.poorRR) rrPenalty += 8;
   if (rr.structMismatch) rrPenalty += 6;
@@ -722,7 +734,7 @@ async function runManual(ctx, d, style) {
   let c3 = 0;
   if (lt.dir === p.dir) c3 += 12;
   if (lt.fresh) c3 += 6;
-  if (ex && ex.dir === p.dir) c3 += 4;
+  if (reject) c3 += 4;
   if (!rr.capped) c3 += 3;
   c3 = Math.min(25, c3);
   let c4 = sessionScore(sess, scenario.name === 'Fakeout / Trap' ? 'SWEEP' : (rg ? 'RANGE' : 'TREND'));
@@ -738,16 +750,12 @@ async function runManual(ctx, d, style) {
   const mixedStructure = htfWeak && it.dir !== 0 && lt.dir !== 0 && it.dir !== lt.dir;
   if (mixedStructure || scenario.name === 'Struktur Belum Jelas') {
     conv = Math.min(conv, 54);
-    if (p.tpCount > 2) { p.tpCount = 2; p.tps = p.tps.map((v, i) => (i < 2 ? v : null)); }
-    steps.push({ tf: 'Struktur', text: 'Struktur bercampur = choppy: conviction dibatasi LOW, risk 0.25x, target dekat.', textEn: 'Mixed structure = choppy: capped LOW, 0.25x, near targets.' });
+    steps.push({ tf: 'Struktur', text: 'Struktur bercampur = choppy: conviction dibatasi LOW, risk 0.25x.', textEn: 'Mixed structure = choppy: capped LOW, 0.25x.' });
   } else if (it.dir !== 0 && it.dir !== p.dir) {
     conv -= 10;
     steps.push({ tf: 'Struktur', text: 'MTF (' + (it.ev || '-') + ') berlawanan arah sinyal = counter-trend: conviction -10.', textEn: 'MTF opposes = counter-trend: -10.' });
   }
-  if (forcedWeak) {
-    conv = Math.min(conv, 45);
-    if (p.tpCount > 2) { p.tpCount = 2; p.tps = p.tps.map((v, i) => (i < 2 ? v : null)); }
-  }
+  if (forcedWeak) conv = Math.min(conv, 45);
   p.conviction = Math.max(0, Math.min(100, Math.round(conv)));
   p.setupType = setupType;
   p.sess = sess;
@@ -795,16 +803,13 @@ async function runManual(ctx, d, style) {
     const wall = nearestWall(ctx, p.dir, allZones, role.htf, role.mtf);
     const draw2 = nearestDraw(pools, p.dir, ctx);
     let fin2 = planTPs({ style, entry: p.entry, dir: p.dir, risk: Math.abs(p.entry - p.sl), pip: ctx.pip, wall, draw: draw2, dp: ctx.dp });
-    if (!fin2.tps) fin2 = { tps: buildTPs(p.entry, p.dir, Math.abs(p.entry - p.sl)), count: plan.count, mode: 'RISK_R', pips: [], rr1: 1, poorRR: false, runwayPip: null };
-    p.tps = fin2.tps; p.tpCount = fin2.count; p.tpMode = fin2.mode;
+    if (!fin2.tps) fin2 = { tps: buildTPs(p.entry, p.dir, Math.abs(p.entry - p.sl)), count: 3, mode: 'RISK_R', pips: [], rr1: 1, poorRR: false, runwayPip: null };
+    p.tps = fin2.tps; p.tpCount = 3; p.tpMode = fin2.mode;
     p.tpCapped = fin2.mode !== 'RISK_R' && fin2.mode !== 'FIXED_PIP';
     let conv2 = hybrid.conv;
     const htfWeak2 = !(ht.fresh || ht.displaced);
     const mixed2 = htfWeak2 && it.dir !== 0 && lt.dir !== 0 && it.dir !== lt.dir;
-    if (mixed2 || /struktur belum jelas/i.test(hybrid.setup)) {
-      conv2 = Math.min(conv2, 54);
-      if (p.tpCount > 2) { p.tpCount = 2; p.tps = p.tps.map((v, i) => (i < 2 ? v : null)); }
-    }
+    if (mixed2 || /struktur belum jelas/i.test(hybrid.setup)) conv2 = Math.min(conv2, 54);
     if (it.dir !== 0 && it.dir !== p.dir) conv2 -= 10;
     if (whipsaw || sess.mode === 'AVOID' || vol.regime === 'SPIKE') conv2 = Math.min(conv2, 54);
     if (ht.dir === 0 && sess.key === 'ASIA') conv2 = Math.min(conv2, 35);
@@ -840,8 +845,8 @@ async function runManual(ctx, d, style) {
   const s = sigOf(p, ctx, style);
   const f = {
     symbol: ctx.symbol, style, status: s.status, signal: s.signal, orderType: s.orderType,
-    entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5,
-    tpCount: s.tpCount, tpMode: s.tpMode, riskPips: s.riskPips, invalidLevel: s.invalidLevel,
+    entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: null, tp5: null,
+    tpCount: 3, tpMode: s.tpMode, riskPips: s.riskPips, invalidLevel: s.invalidLevel,
     setup: setupType.type, scenarioName: scenario.name, scenarioWhy: scenario.why, scenarioId: scenario.id,
     orderReason: p.orderReason, tfSummary,
     conviction: p.conviction, convictionLevel: s.convictionLevel, probability: s.probability, riskMultiplier: s.riskMultiplier,
@@ -867,17 +872,17 @@ function runBot(ctx, d) {
   }
   if (!r || !r.ok) return standby(ctx, 'Scalping', (r && r.reason) || 'Menunggu setup bot.');
   const risk = Math.abs(Number(r.entry) - Number(r.sl)) || bounds(Number(r.entry), ctx, 'Scalping').min;
-  const p = { dir: r.dir, entry: num(r.entry, ctx.price), sl: num(r.sl, ctx.price), type: r.orderType || 'MARKET', tps: buildTPs(Number(r.entry), r.dir, risk), tpCount: 5, riskPips: ctx.dp(risk / ctx.pip), conviction: 60, setupType: { type: 'Supply & Demand', id: 'Bot ICT POI' }, scenario: SCENARIOS.RETEST_BOS, orderReason: 'LIMIT di POI M15.', cancelDistPips: 60, steps: [], zone: null };
+  const p = { dir: r.dir, entry: num(r.entry, ctx.price), sl: num(r.sl, ctx.price), type: r.orderType || 'MARKET', tps: buildTPs(Number(r.entry), r.dir, risk), tpCount: 3, riskPips: ctx.dp(risk / ctx.pip), conviction: 60, setupType: { type: 'Supply & Demand', id: 'Bot ICT POI' }, scenario: SCENARIOS.RETEST_BOS, orderReason: 'LIMIT di POI M15.', cancelDistPips: 60, steps: [], zone: null };
   const s = sigOf(p, ctx, 'Scalping');
   s.style = 'scalperbot'; s.tier = r.tier || 'EA'; s.expiresAt = Date.now() + 9e5;
-  const f = { symbol: ctx.symbol, style: 'scalperbot', status: s.status, signal: s.signal, orderType: s.orderType, entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5, trigger: r.trigger || null, bias: r.bias || 'netral', dec: ctx.dec, price: ctx.f(ctx.price), conviction: 60, convictionLevel: 'MEDIUM', probability: '55%', riskMultiplier: 0.65, setup: 'Supply & Demand', scenarioName: 'Retest BOS', orderReason: 'LIMIT di POI M15.', cancelDistPips: 60, tfSummary: ['H1/M15/M5 searah POI'] };
+  const f = { symbol: ctx.symbol, style: 'scalperbot', status: s.status, signal: s.signal, orderType: s.orderType, entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: null, tp5: null, trigger: r.trigger || null, bias: r.bias || 'netral', dec: ctx.dec, price: ctx.f(ctx.price), conviction: 60, convictionLevel: 'MEDIUM', probability: '55%', riskMultiplier: 0.65, setup: 'Supply & Demand', scenarioName: 'Retest BOS', orderReason: 'LIMIT di POI M15.', cancelDistPips: 60, tfSummary: ['M15/M5/M1 searah POI'] };
   return { signal: s, facts: f };
 }
 
 function lifecycle(prev, sym, style, price, pip, data) {
   if (!prev || typeof prev !== 'object' || prev.symbol !== sym || prev.style !== style) return null;
   if (prev.signal !== 'BUY' && prev.signal !== 'SELL') return null;
-  if (prev.status === 'TP5_HIT' || prev.finished) return null;
+  if (prev.status === 'TP3_HIT' || prev.finished) return null;
   const exp = Number(prev.expiresAt);
   if (!Number.isFinite(exp) || Date.now() > exp) return { dead: true, out: 'EXPIRED', prev };
   const dir = prev.signal === 'BUY' ? 1 : -1;
@@ -885,8 +890,8 @@ function lifecycle(prev, sym, style, price, pip, data) {
   if (![sl, e].every(Number.isFinite) || sl === e) return null;
   const risk0 = Math.abs(e - sl);
   const plan = TP_PLAN[prev.style] || TP_PLAN.Scalping;
-  const rawT = [prev.tp1, prev.tp2, prev.tp3, prev.tp4, prev.tp5].map(v => (isNum(v) ? Number(v) : NaN));
-  const t = [0, 1, 2, 3, 4].map(i => {
+  const rawT = [prev.tp1, prev.tp2, prev.tp3].map(v => (isNum(v) ? Number(v) : NaN));
+  const t = [0, 1, 2].map(i => {
     if (i >= plan.count) return NaN;
     const v = rawT[i];
     if (Number.isFinite(v) && v !== e && v !== 0) return v;
@@ -895,7 +900,6 @@ function lifecycle(prev, sym, style, price, pip, data) {
   });
   if (!Number.isFinite(t[0])) return null;
 
-  // LTF monitor: batalkan LIMIT yang belum fill bila struktur LTF berbalik
   if (prev.status === 'PENDING') {
     const ltfRowsM = clean((data && data[LTF_TF[prev.style] || 'm5']) || []);
     const mon = monitorLTFStructure(ltfRowsM, dir, { pip, f: v => v }, prev.style);
@@ -904,7 +908,7 @@ function lifecycle(prev, sym, style, price, pip, data) {
     }
   }
 
-  const tfKey = style === 'scalperbot' ? 'm1' : style === 'Swing' ? 'm15' : 'm5';
+  const tfKey = style === 'scalperbot' ? 'm1' : (TF_ROLE[prev.style] || TF_ROLE.Scalping).ltf;
   const ms = TFMS[tfKey] || 3e5;
   const rows = clean((data && data[tfKey]) || []);
   const start = Number(prev.lastTickAt) || Number(prev.createdAt) || Date.now();
@@ -912,10 +916,10 @@ function lifecycle(prev, sym, style, price, pip, data) {
   if (!win.length) win = [{ t: Date.now(), h: price, l: price, c: price }];
   let filled = prev.status !== 'PENDING' || Number(prev.filledAt) > 0;
   let filledAt = Number(prev.filledAt) || 0;
-  const hits = new Set(Array.isArray(prev.tpHits) ? prev.tpHits.filter(n => n <= plan.count) : []);
+  const hits = new Set(Array.isArray(prev.tpHits) ? prev.tpHits.filter(n => n <= 3) : []);
   let be = !!prev.be || hits.has(1);
   let dead = null;
-  const lastIdx = plan.count;
+  const lastIdx = 3;
   const cancelDist = Number(prev.cancelDistPips) || 50;
   for (const c of win) {
     if (!filled) {
@@ -934,7 +938,7 @@ function lifecycle(prev, sym, style, price, pip, data) {
   }
   const maxHit = hits.size ? Math.max(...hits) : 0;
   const patch = { tpHits: [...hits].sort((a, b) => a - b), tpHitCount: hits.size, maxTpHit: maxHit, be, slBe: be ? e : null, filledAt: filledAt || null, lastTickAt: Date.now() };
-  if (dead && dead.out === 'TPMAX') return { dead: true, out: 'TP' + lastIdx, prev, patch: { ...patch, status: 'TP' + lastIdx + '_HIT', state: 'TP' + lastIdx, finished: true } };
+  if (dead && dead.out === 'TPMAX') return { dead: true, out: 'TP3', prev, patch: { ...patch, status: 'TP3_HIT', state: 'TP3', finished: true } };
   if (dead) return { dead: true, out: dead.out, prev, patch };
   let status, state;
   if (!filled) { status = 'PENDING'; state = 'LIMIT_PLACED'; }
@@ -943,7 +947,7 @@ function lifecycle(prev, sym, style, price, pip, data) {
   return { dead: false, prev, patch: { ...patch, status, state } };
 }
 
-const SYS_VIS = 'Kamu analis S&D/OB dari gambar chart. Baca level PERSIS dari skala harga. Wajib BUY atau SELL kecuali gambar bukan chart. Prioritaskan LIMIT pullback; MARKET hanya bila harga sudah di zona dan ada penolakan. Sebutkan zona TF tinggi dan rendah pada perImageAnalyses. SL di luar distal zona/swing. Balas HANYA JSON: {"signal":"BUY","orderType":"LIMIT","entry":0,"sl":0,"tp1":0,"tp2":0,"tp3":0,"tp4":0,"tp5":0,"zoneLow":0,"zoneHigh":0,"zone":"Demand","pair":"","decimals":2,"perImageAnalyses":[],"perImageAnalysesEn":[],"reason":"","reasonEn":""}';
+const SYS_VIS = 'Kamu analis S&D/OB dari gambar chart. Baca level PERSIS dari skala harga. Wajib BUY atau SELL kecuali gambar bukan chart. Prioritaskan LIMIT pullback; MARKET hanya bila harga sudah di zona dan ada penolakan. Sebutkan zona TF tinggi dan rendah pada perImageAnalyses. SL di luar distal zona/swing. Balas HANYA JSON: {"signal":"BUY","orderType":"LIMIT","entry":0,"sl":0,"tp1":0,"tp2":0,"tp3":0,"zoneLow":0,"zoneHigh":0,"zone":"Demand","pair":"","decimals":2,"perImageAnalyses":[],"perImageAnalysesEn":[],"reason":"","reasonEn":""}';
 
 async function handleVision(body, lang, res) {
   const imgs = (Array.isArray(body.images) ? body.images : []).filter(s => typeof s === 'string' && s.startsWith('data:image/')).slice(0, 3);
@@ -983,7 +987,8 @@ async function handleVision(body, lang, res) {
     signal: sg, orderType: isLimit ? 'LIMIT' : 'MARKET', fill: isLimit ? 'LIMIT' : 'NOW',
     status: isLimit ? 'PENDING' : 'RUNNING', entryMode: isLimit ? 'PULLBACK' : 'NOW',
     symbol: sym, pair: sym, dec, pip, style, entry, sl,
-    tp1: tps[0], tp2: tps[1], tp3: tps[2], tp4: tps[3], tp5: tps[4], tpCount: 5,
+    tp1: tps[0], tp2: tps[1], tp3: tps[2], tp4: null, tp5: null, tpCount: 3,
+    zoneMode: 'range', entryPrice: entry,
     riskPips: Math.round((risk / pip) * pipScaleOf(sym)), pipDisplayScale: pipScaleOf(sym),
     tpHits: [], tpHitCount: 0, maxTpHit: 0, be: false, slBe: null,
     zone: { min: zl, max: zh, label: (j.zone || 'Zona') + ' ' + zl + '–' + zh },
@@ -1029,11 +1034,13 @@ async function handleCandles(body, lang, res, isBot, email) {
     const c = cache.get(symbol + tf);
     if (c && Date.now() - c.t < 12e4) data[tf] = c.rows;
   }));
-  if (!data.m5.length && !data.m15.length && !data.m1.length) return res.status(200).json({ ok: false, reason: 'Data candle belum cukup.' });
+  // [v218] Cek kecukupan berdasarkan TF inti gaya (fix: Swing tidak lagi menuntut M1/M5/M15)
+  const enough = need.some(tf => (data[tf] || []).length >= Math.min(MINB[tf] || 25, 30));
+  if (!enough) return res.status(200).json({ ok: false, reason: 'Data candle belum cukup.' });
 
   let out;
   try { out = isBot ? runBot(ctx, data) : await runManual(ctx, data, style); }
-  catch (e) { console.error('[v216] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message); }
+  catch (e) { console.error('[v218] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message); }
   if (!out || !out.signal) out = standby(ctx, style, 'Menunggu setup valid.');
 
   const key = symbol + '|' + style;
