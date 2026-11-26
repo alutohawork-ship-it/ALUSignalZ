@@ -1,10 +1,9 @@
-// api/generate.js — v206
-// Full Integration: Framework AI Signal + SL Adaptif + TP Dinamis + Entry Zone Validation
-// - SL Scalping M5, Intraday M15, Swing H4
-// - TP: Scalping 5R, Intraday 3R (1.5/2.5/4), Swing 3 pip (500/800/1000)
-// - Entry di zona (bukan harga running), minimum SL ketat
-// - Null-safe, tidak ada flip arah
-// - System Prompt sesuai Framework
+// api/generate.js — v207
+// Full Framework Integration + M1 Sanitization Fix (HTTP 500 & Anomaly Fix)
+// - Sanitasi candle M1 anomali saat reconnect
+// - System Prompt sesuai Framework XAUUSD/BTCUSD
+// - TP: Scalping 5R, Intraday 3R, Swing 3 pip
+// - SL Adaptif ATR per TF (M5/M15/H4)
 
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { planBot } from '../lib/bot-ict.js';
@@ -16,7 +15,7 @@ import { atrSanity, calcSL } from '../lib/risk-atr.js';
 import { TP_PLAN, planTPs, repairTPs, coupleZone, fixSide, buildChart } from '../lib/tp-final.js';
 
 export const config = { maxDuration: 60 };
-const VERSION = 'v206';
+const VERSION = 'v207';
 const TL_BASE = 'https://api.tickerlayer.com';
 const AI_BASE = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/+$/, '');
 const AI_KEYS = [process.env.QWEN_MANUAL_API_KEY, process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
@@ -70,6 +69,28 @@ const iso = d => d.toISOString().slice(0, 10);
 const dw = d => (d === 1 ? 'bullish' : d === -1 ? 'bearish' : 'netral');
 const dwEn = d => (d === 1 ? 'bullish' : d === -1 ? 'bearish' : 'neutral');
 const buildTPs = (e, dir, r) => (!(r > 0) || !Number.isFinite(e)) ? [e, e, e, e, e] : TP_MULT.map(m => e + dir * r * m);
+
+// [v207] Sanitasi Candle Anomali (M1 Reconnect Fix)
+function sanitizeCandles(rows, atrRef, maxRangeMultiplier = 5) {
+  if (!Array.isArray(rows) || rows.length < 2) return rows;
+  const maxRange = atrRef * maxRangeMultiplier;
+  if (!(maxRange > 0)) return rows;
+  const out = [];
+  for (let i = 0; i < rows.length; i++) {
+    const c = rows[i];
+    const range = c.h - c.l;
+    // Skip/Interpolasi candle dengan range tidak masuk akal (> 5x ATR)
+    if (range > maxRange && i < rows.length - 1) {
+      const prev = out[out.length - 1] || c;
+      out.push({ t: c.t, o: prev.c, h: Math.max(prev.c, c.c), l: Math.min(prev.c, c.c), c: c.c });
+      continue;
+    }
+    // Skip duplikat timestamp
+    if (out.length && c.t <= out[out.length - 1].t) continue;
+    out.push(c);
+  }
+  return out;
+}
 
 async function httpJson(url, opt = {}, ms = 8000) {
   const ac = new AbortController();
@@ -450,6 +471,7 @@ async function aiJson(sys, obj, ms) {
   return null;
 }
 
+// [v207] SYSTEM PROMPT FRAMEWORK (Sesuai Dokumen)
 const SYS_MTF = `Anda adalah analis trading XAUUSD dan BTCUSD yang bertugas mengeluarkan SATU sinyal tunggal per analisis untuk dibaca langsung oleh trader.
 ATURAN WAJIB:
 1. IDENTIFIKASI ASET & KARAKTERNYA:
@@ -523,7 +545,15 @@ async function runManual(ctx, d, style) {
   const slRef = SL_REF[style] || SL_REF.Scalping;
   const plan = TP_PLAN[style] || TP_PLAN.Scalping;
   const cl = {};
-  for (const tf of ['m1', 'm5', 'm15', 'h1', 'h4', 'd1']) cl[tf] = closed(d[tf], TFMS[tf]);
+  for (const tf of ['m1', 'm5', 'm15', 'h1', 'h4', 'd1']) {
+    let rows = closed(d[tf], TFMS[tf]);
+    // [v207] Sanitasi M1 di engine level juga
+    if (tf === 'm1' && rows.length >= 10) {
+      const atrM5Ref = atr(d.m5 && d.m5.length >= 14 ? d.m5 : rows) || ctx.pip * 10;
+      rows = sanitizeCandles(rows, atrM5Ref, 4);
+    }
+    cl[tf] = rows;
+  }
 
   const sess = sessionOf(Date.now(), ctx.symbol);
   const mtfRows = cl[role.mtf];
@@ -802,6 +832,7 @@ function lifecycle(prev, sym, style, price, pip, data) {
   return { dead: false, prev, patch: { ...patch, status, state } };
 }
 
+// ===== VISION — TIDAK DIUBAH =====
 const SYS_VIS = 'Kamu analis S&D/OB dari gambar chart. Baca level PERSIS dari skala harga. Wajib BUY atau SELL kecuali gambar bukan chart. Prioritaskan LIMIT pullback; MARKET hanya bila harga sudah di zona dan ada penolakan. Sebutkan zona TF tinggi dan rendah pada perImageAnalyses. SL di luar distal zona/swing. Balas HANYA JSON: {"signal":"BUY","orderType":"LIMIT","entry":0,"sl":0,"tp1":0,"tp2":0,"tp3":0,"tp4":0,"tp5":0,"zoneLow":0,"zoneHigh":0,"zone":"Demand","pair":"","decimals":2,"perImageAnalyses":[],"perImageAnalysesEn":[],"reason":"","reasonEn":""}';
 
 async function handleVision(body, lang, res) {
@@ -872,7 +903,12 @@ async function handleCandles(body, lang, res, isBot, email) {
   const ctx = { symbol, dec, price, pip: pipOf(symbol, dec), pipScale, dp: v => Math.round(num(v) * pipScale), f: v => Number(num(v, price).toFixed(dec)) };
   const data = {};
   for (const tf of ['m1', 'm5', 'm15', 'm30', 'h1', 'h4', 'd1']) {
-    const inc = clean((body.candles || {})[tf] ?? body[tf]);
+    let inc = clean((body.candles || {})[tf] ?? body[tf]);
+    // [v207] Sanitasi M1 di level data masuk
+    if (tf === 'm1' && inc.length >= 10) {
+      const atrRef = atr(inc) || ctx.pip * 10;
+      inc = sanitizeCandles(inc, atrRef, 4);
+    }
     if (inc.length) { data[tf] = inc; cache.set(symbol + tf, { t: Date.now(), rows: inc }); }
     else data[tf] = [];
   }
@@ -888,7 +924,7 @@ async function handleCandles(body, lang, res, isBot, email) {
 
   let out;
   try { out = isBot ? runBot(ctx, data) : await runManual(ctx, data, style); }
-  catch (e) { console.error('[v206] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message, []); }
+  catch (e) { console.error('[v207] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message, []); }
   if (!out || !out.signal) out = standby(ctx, style, 'Menunggu setup valid.', []);
 
   const key = symbol + '|' + style;
