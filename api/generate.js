@@ -1,11 +1,8 @@
-// api/generate.js — v218
-// TF PAIRS FINAL (rekomendasi terkunci):
-//   Scalping : HTF M15 | MTF M5  | LTF M1   (hold 5-15 mnt)
-//   Intraday : HTF H4  | MTF M30 | LTF M5   (hold 1-8 jam)
-//   Swing    : HTF D1  | MTF H4  | LTF H1   (hold 1-5 hari)
-// Termasuk: forced binary (wajib BUY/SELL), hybrid vision (render→vision→guardrail→fallback),
-// 3 TP semua mode, entry single untuk manual (zone untuk vision), STANDBY-safe reasoning,
-// LTF monitor + cancel, SL presisi swing LTF, session-aware ATR, sanitize M1.
+// api/generate.js — v219
+// TF PAIRS: Scalping M15/M5/M1 · Intraday H4/M30/M5 · Swing D1/H4/H1
+// 3 TP semua mode · entry single (manual) / zone (vision) · forced binary · hybrid vision
+// v219 fix: norm3TP (signal sticky lama dipaksa 3 TP) + sticky memakai reason bawaannya
+// (teks reasoning selalu cocok dengan angka di card).
 // Env opsional: HYBRID_VISION=0 (pure rule-engine).
 
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
@@ -22,7 +19,7 @@ import { monitorLTFStructure, calculatePreciseSL, LTF_TF } from '../lib/ltf-dyna
 import { renderSignalChart } from '../lib/chart-render.js';
 
 export const config = { maxDuration: 60 };
-const VERSION = 'v218';
+const VERSION = 'v219';
 const HYBRID = process.env.HYBRID_VISION !== '0';
 const TL_BASE = 'https://api.tickerlayer.com';
 const AI_BASE = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/+$/, '');
@@ -43,7 +40,6 @@ const TFMS = { m1: 6e4, m5: 3e5, m15: 9e5, m30: 18e5, h1: 36e5, h4: 144e5, d1: 8
 const TFIV = { m1: '1m', m5: '5m', m15: '15m', m30: '30m', h1: '1h', h4: '4h', d1: '1d' };
 const TFSPAN = { m1: [1, 'minute', 1], m5: [5, 'minute', 5], m15: [15, 'minute', 15], m30: [30, 'minute', 30], h1: [1, 'hour', 60], h4: [4, 'hour', 240], d1: [1, 'day', 1440] };
 
-// [v218] Pasangan timeframe final
 const TF_ROLE = {
   Scalping: { htf: 'm15', mtf: 'm5', ltf: 'm1', exec: null },
   Intraday: { htf: 'h4', mtf: 'm30', ltf: 'm5', exec: null },
@@ -82,6 +78,15 @@ const closed = (c, ms) => (Array.isArray(c) && c.length && Date.now() < tsMs(c[c
 const iso = d => d.toISOString().slice(0, 10);
 const dw = d => (d === 1 ? 'bullish' : d === -1 ? 'bearish' : 'netral');
 const buildTPs = (e, dir, r) => (!(r > 0) || !Number.isFinite(e)) ? [e, e, e] : TP_MULT.map(m => e + dir * r * m);
+
+// [v219] Paksa format 3 TP pada signal APA PUN (termasuk sticky lama dari versi sebelumnya)
+function norm3TP(s) {
+  if (!s || typeof s !== 'object') return s;
+  s.tp4 = null; s.tp5 = null; s.tpCount = 3;
+  if (Array.isArray(s.tpHits)) s.tpHits = s.tpHits.filter(n => n <= 3);
+  if (s.maxTpHit > 3) s.maxTpHit = 3;
+  return s;
+}
 
 function sanitizeCandles(rows, atrRef, mult = 5) {
   if (!Array.isArray(rows) || rows.length < 2) return rows;
@@ -376,8 +381,6 @@ function estimateProbability(c) {
   return { min: 45, max: 51, label: Math.round(45 + c / 55 * 6) + '%' };
 }
 const riskMult = c => (c >= 75 ? 1.0 : c >= 55 ? 0.65 : 0.25);
-
-// [v218] Expiry sesuai TF pair baru (Framework §6)
 function baseExpiry(style) {
   const m = {
     Scalping: { candles: 15, tf: 'M1', minutes: 15 },
@@ -416,7 +419,6 @@ function sigOf(p, ctx, style) {
     tp1: nf(tps[0]), tp2: nf(tps[1]), tp3: nf(tps[2]), tp4: null, tp5: null,
     tpCount: 3, tpMode: p.tpMode || 'RISK_R',
     invalidLevel: isNum(p.invalidLevel) ? f(p.invalidLevel) : null,
-    // [v217] Manual = 1 harga (card = live). Vision/hybrid tetap zona range.
     zone: p.zone ? (p.hybrid ? { min: f(p.zone.lo), max: f(p.zone.hi), label: p.zone.kind } : { min: f(p.entry), max: f(p.entry), label: p.zone.kind }) : null,
     zoneMode: p.hybrid ? 'range' : 'single',
     entryPrice: f(p.entry),
@@ -643,7 +645,7 @@ async function runManual(ctx, d, style) {
   if (whipsaw) steps.push({ tf: 'Whipsaw', text: 'Double sweep — kemungkinan news. Risk 0.25x.', textEn: 'Double sweep — news whipsaw.' });
   if (bias.mode === 'LTF_COUNTER') steps.push({ tf: 'LTF Dinamis', text: 'LTF memimpin counter-HTF, penalti -' + bias.penalty, textEn: 'LTF leads counter-HTF.' });
 
-  // [v216] FORCED BINARY: WAJIB BUY/SELL, dilarang standby karena struktur.
+  // FORCED BINARY: WAJIB BUY/SELL, dilarang standby karena struktur
   const ltfMonRows0 = cl[LTF_TF[style] || role.ltf] || ltfRows;
   const healthOf = ddir => {
     const mon = monitorLTFStructure(ltfMonRows0, ddir, ctx, style);
@@ -761,7 +763,7 @@ async function runManual(ctx, d, style) {
   p.sess = sess;
   p.biasMode = bias.mode;
 
-  // ── HYBRID VISION: render → vision → guardrail → override ──
+  // HYBRID VISION: render → vision → guardrail → override
   let hybrid = null;
   if (HYBRID && VIS_KEY) {
     const lastMt = mtfRows.length ? mtfRows[mtfRows.length - 1].t : 0;
@@ -983,7 +985,7 @@ async function handleVision(body, lang, res) {
   const rid = '[' + sym + ' · Analisa ' + imgs.length + ' Gambar]\n' + pi.map(t => '• ' + t).join('\n') + '\n\n[Setup]\n' + (j.reason || '');
   const ren = '[' + sym + ' · ' + imgs.length + '-Image Analysis]\n' + pe.map(t => '• ' + t).join('\n') + '\n\n[Setup]\n' + (j.reasonEn || j.reason || '');
   const isLimit = String(j.orderType || '').toUpperCase() === 'LIMIT';
-  const out = {
+  const out = norm3TP({
     signal: sg, orderType: isLimit ? 'LIMIT' : 'MARKET', fill: isLimit ? 'LIMIT' : 'NOW',
     status: isLimit ? 'PENDING' : 'RUNNING', entryMode: isLimit ? 'PULLBACK' : 'NOW',
     symbol: sym, pair: sym, dec, pip, style, entry, sl,
@@ -996,7 +998,7 @@ async function handleVision(body, lang, res) {
     reasonSource: 'AI', aiReasoning: true,
     createdAt: Date.now(), lastTickAt: Date.now(), filledAt: isLimit ? null : Date.now(),
     expiresAt: Date.now() + (EXPMS[style] || 18e5), source: 'VISION_AI',
-  };
+  });
   await saveSignal(out);
   return res.status(200).json({ ok: true, mode: 'vision', symbol: sym, pair: sym, dec, pip, price: entry, style, signal: out });
 }
@@ -1034,13 +1036,12 @@ async function handleCandles(body, lang, res, isBot, email) {
     const c = cache.get(symbol + tf);
     if (c && Date.now() - c.t < 12e4) data[tf] = c.rows;
   }));
-  // [v218] Cek kecukupan berdasarkan TF inti gaya (fix: Swing tidak lagi menuntut M1/M5/M15)
   const enough = need.some(tf => (data[tf] || []).length >= Math.min(MINB[tf] || 25, 30));
   if (!enough) return res.status(200).json({ ok: false, reason: 'Data candle belum cukup.' });
 
   let out;
   try { out = isBot ? runBot(ctx, data) : await runManual(ctx, data, style); }
-  catch (e) { console.error('[v218] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message); }
+  catch (e) { console.error('[v219] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message); }
   if (!out || !out.signal) out = standby(ctx, style, 'Menunggu setup valid.');
 
   const key = symbol + '|' + style;
@@ -1049,22 +1050,23 @@ async function handleCandles(body, lang, res, isBot, email) {
   const prev = pickPrev(clientPrev, storePrev);
   const restored = !clientPrev && !!storePrev;
   const life = lifecycle(prev, symbol, style, price, ctx.pip, data);
-  if (life && life.prev) life.prev = repairTPs(life.prev, ctx.f, ctx.pip);
+  if (life && life.prev) life.prev = norm3TP(repairTPs(life.prev, ctx.f, ctx.pip));
   if (life && life.dead) {
     await saveOutcome(key, { dir: life.prev.signal, out: life.out, t: Date.now() });
     await dropSignal(symbol, style);
   }
   if (life && life.dead && String(life.out).startsWith('TP') && life.patch && life.patch.finished) {
-    const fin = repairTPs({ ...life.prev, ...life.patch, sticky: true, finished: true }, ctx.f, ctx.pip);
-    if (fin.reasons) fin.reason = lang === 'en' ? (fin.reasons.en || fin.reasons.id) : (fin.reasons.id || fin.reasons.en);
+    const fin = norm3TP(repairTPs({ ...life.prev, ...life.patch, sticky: true, finished: true }, ctx.f, ctx.pip));
+    if (!fin.reason && fin.reasons) fin.reason = lang === 'en' ? (fin.reasons.en || fin.reasons.id) : (fin.reasons.id || fin.reasons.en);
     return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal: fin, diag: { version: VERSION, lifecycle: life.out, store: kvOn ? 'KV' : 'MEM' } });
   }
   if (life && !life.dead) {
-    const managed = repairTPs({ ...life.prev, ...life.patch, sticky: true }, ctx.f, ctx.pip);
+    const managed = norm3TP(repairTPs({ ...life.prev, ...life.patch, sticky: true }, ctx.f, ctx.pip));
     const opp = out.signal.status !== 'STANDBY' && out.signal.signal !== managed.signal;
     if (!(body.forceNew && opp)) {
       await saveSignal(managed);
-      if (managed.reasons) managed.reason = lang === 'en' ? (managed.reasons.en || managed.reasons.id) : (managed.reasons.id || managed.reasons.en);
+      // [v219] STICKY: pakai reason bawaan signal lama agar TEKS cocok dengan ANGKA di card
+      if (!managed.reason && managed.reasons) managed.reason = lang === 'en' ? (managed.reasons.en || managed.reasons.id) : (managed.reasons.id || managed.reasons.en);
       return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal: managed, diag: { version: VERSION, lifecycle: managed.state, tpHits: managed.tpHits, sticky: true, restored, store: kvOn ? 'KV' : 'MEM' } });
     }
   }
@@ -1078,7 +1080,7 @@ async function handleCandles(body, lang, res, isBot, email) {
     stories.set(ck, story);
     if (stories.size > 200) stories.delete(stories.keys().next().value);
   }
-  const signal = { ...out.signal, reason: lang === 'en' ? story.v.en : story.v.id, reasons: { id: story.v.id, en: story.v.en }, reasonSource: f.vReason ? 'VISION_HYBRID' : (story.v.ai ? 'AI' : 'RULES'), aiReasoning: !!story.v.ai || !!f.vReason };
+  const signal = norm3TP({ ...out.signal, reason: lang === 'en' ? story.v.en : story.v.id, reasons: { id: story.v.id, en: story.v.en }, reasonSource: f.vReason ? 'VISION_HYBRID' : (story.v.ai ? 'AI' : 'RULES'), aiReasoning: !!story.v.ai || !!f.vReason });
   if (signal.status !== 'STANDBY') await saveSignal(signal);
   return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal, diag: { version: VERSION, status: signal.status, hybrid: !!signal.hybrid, session: f.session || null, liquidity: f.liquidity || null, biasMode: f.biasMode || null, conviction: f.conviction || 0, setup: f.setup || null, scenario: f.scenarioName || null, tpCount: signal.tpCount || 0, chartTf: signal.chart ? signal.chart.tf : null, spanPips: signal.chart ? signal.chart.range.spanPips : null, store: kvOn ? 'KV' : 'MEM' } });
 }
