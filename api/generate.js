@@ -1,8 +1,9 @@
-// api/generate.js — v210 (FINAL)
-// - LTF Dinamis: Full integration (resolveBias + counterGuard + adjustConviction).
-// - Skenario: Menambahkan Ranging Edge & Session Sweep detection.
-// - System Prompt: Sesuai persis dengan Framework Document.
-// - Bug Fixes: Syntax errors & typos from v209.
+// api/generate.js — v211
+// FOKUS: Market Structure + LTF Dinamis + Skenario Entry yang Jelas
+// - Classification benar (HTF netral ≠ Retest BOS)
+// - Filter kondisi pasar (Asia + HTF netral = conviction sangat rendah)
+// - LTF dinamis aktif (resolveBias override default direction)
+// - Skenario entry eksplisit (decision tree)
 
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { planBot } from '../lib/bot-ict.js';
@@ -14,7 +15,7 @@ import { atrSanity, calcSL } from '../lib/risk-atr.js';
 import { TP_PLAN, planTPs, repairTPs, coupleZone, fixSide, buildChart } from '../lib/tp-final.js';
 
 export const config = { maxDuration: 60 };
-const VERSION = 'v210';
+const VERSION = 'v211';
 const TL_BASE = 'https://api.tickerlayer.com';
 const AI_BASE = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/+$/, '');
 const AI_KEYS = [process.env.QWEN_MANUAL_API_KEY, process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
@@ -387,19 +388,33 @@ function entryMode(ctx, p, it, lt, ex, style, pool, ltfRows) {
   return { type: 'LIMIT', entry, zone: z, forced: true, note: 'LIMIT fallback @ ' + ctx.f(entry) + '.' };
 }
 
-// [v210] Skenario Classification yang Lebih Tajam
+// [v211] Classification yang Benar: HTF netral ≠ Retest BOS
 function classifySetup(ht, it, lt, chosen, verdict, sweepSess, rg, biasMode) {
-  // 1. Session Sweep (Judas Swing)
+  // 1. Session Sweep (Judas Swing) - prioritas tertinggi
   if (sweepSess) return { type: 'Fakeout/Trap', id: 'Sweep Sesi (' + sweepSess.swept + ') lalu reclaim.', en: 'Session Sweep then reclaim.' };
+  
   // 2. Liquidity Sweep (General)
   if (verdict === 'SWEEP') return { type: 'Fakeout/Trap', id: 'Liquidity sweep lalu reclaim.', en: 'Liquidity sweep then reclaim.' };
+  
   // 3. Breakout
   if (verdict === 'BREAK') return { type: 'Kontinuitas', id: 'Break displacement + hold.', en: 'Displacement break held.' };
-  // 4. Ranging Edge (SC-06)
+  
+  // [v211] 4. HTF Netral Check - jangan klasifikasi sebagai "Retest BOS" kalau HTF tidak jelas
+  const htfClear = ht.dir !== 0 && (ht.fresh || ht.displaced);
+  if (!htfClear) {
+    // Kalau ada range, pakai Ranging Edge
+    if (rg) return { type: 'Ranging Edge', id: 'Setup di batas range (' + (rg.pos >= 0.5 ? 'atas/SELL' : 'bawah/BUY') + '). HTF netral.', en: 'Range edge setup. HTF neutral.' };
+    // Kalau tidak ada range, pakai Supply & Demand biasa dengan label HTF netral
+    if (chosen && chosen.z) return { type: 'Supply & Demand', id: 'Zona ' + chosen.z.kind + ' (HTF netral, tidak ada tren jelas).', en: 'Zone setup (HTF neutral, no clear trend).' };
+    return { type: 'Unknown', id: 'HTF netral, tidak ada setup jelas.', en: 'HTF neutral, no clear setup.' };
+  }
+  
+  // 5. Ranging Edge (SC-06) - hanya kalau HTF jelas
   if (rg && biasMode !== 'LTF_COUNTER') {
     return { type: 'Ranging Edge', id: 'Setup di batas range (' + (rg.pos >= 0.5 ? 'atas/SELL' : 'bawah/BUY') + ').', en: 'Range edge setup.' };
   }
-  // 5. Standard Classifications
+  
+  // 6. Standard Classifications (hanya kalau HTF jelas)
   if (!chosen || !chosen.z) return { type: 'Unknown', id: 'Setup tidak terklasifikasi.', en: 'Unclassified.' };
   const dir = chosen.z.side === 'demand' ? 1 : -1;
   if (chosen.z.tf === 'H1' || chosen.z.tf === 'H4' || chosen.z.tf === 'D1') return { type: 'Supply & Demand', id: 'Zona ' + chosen.z.kind + ' TF tinggi.', en: 'HTF zone.' };
@@ -507,7 +522,6 @@ async function aiJson(sys, obj, ms) {
   return null;
 }
 
-// [v210] SYSTEM PROMPT: SESUAI DOKUMEN FRAMEWORK 100%
 const SYS_MTF = `Anda adalah analis trading XAUUSD dan BTCUSD yang bertugas mengeluarkan SATU sinyal tunggal per analisis untuk dibaca langsung oleh trader.
 ATURAN WAJIB:
 1. IDENTIFIKASI ASET & KARAKTERNYA:
@@ -626,7 +640,7 @@ async function runManual(ctx, d, style) {
 
   const b = bounds(ctx.price, ctx, style);
   
-  // [v210] LTF DINAMIS: Resolve Bias
+  // [v211] LTF DINAMIS: Resolve Bias (ini yang menentukan arah)
   let bias = resolveBias({ ht, it, lt, zones: allZones, ctx, style, atrM15: atrStruct, slPips: b.min / ctx.pip });
   const guard = counterGuard(bias, b.min / ctx.pip);
   if (!guard.ok) bias = resolveBias({ ht, it, lt, zones: allZones, ctx, style, atrM15: atrStruct, slPips: b.min / ctx.pip, allowCounter: false });
@@ -634,6 +648,7 @@ async function runManual(ctx, d, style) {
   const aRange = asianRange(ltfRows, ctx.symbol);
   const sessSweep = (sess.key === 'LONDON_KZ' || sess.key === 'NY_AM_KZ') ? asianSweep(ltfRows, aRange, ctx) : null;
 
+  // [v211] Arah dari LTF dinamis, BUKAN dari default
   let dir = bias.dir;
   if (sessSweep) dir = sessSweep.dir;
   else if (verdict.verdict === 'SWEEP' || verdict.verdict === 'BREAK') dir = verdict.dir;
@@ -664,7 +679,7 @@ async function runManual(ctx, d, style) {
   if (whipsaw) steps.push({ tf: 'Whipsaw', text: 'Double sweep ≤3 candle — kemungkinan news. Risk 0.25x.', textEn: 'Double sweep — news whipsaw.' });
   if (sessSweep) steps.push({ tf: 'Setup Sesi', text: sessSweep.id, textEn: sessSweep.en });
   
-  // [v210] LTF Dinamis Logging
+  // [v211] LTF Dinamis Logging
   if (bias.mode === 'LTF_COUNTER') {
     steps.push({ tf: 'LTF Dinamis', text: 'LTF memimpin counter-HTF, penalti -' + bias.penalty + (bias.mtfAgrees ? ' (MTF setuju)' : ' (MTF lawan, forced LOW)'), textEn: 'LTF leads counter-HTF.' });
   }
@@ -725,10 +740,10 @@ async function runManual(ctx, d, style) {
   }
   if (draw) steps.push({ tf: 'Draw', text: 'Target ' + draw.type + ' ' + ctx.f(draw.price) + ' (' + ctx.dp(draw.distPip) + ' pip, ' + draw.state + ').', textEn: 'Draw ' + draw.type });
 
-  // [v210] Skenario Classification dengan parameter lengkap
+  // [v211] Classification yang Benar
   const setupType = classifySetup(ht, it, lt, chosen, verdict.verdict, sessSweep, rg, bias.mode);
   
-  // [v210] Conviction Scoring (Structure First)
+  // [v211] Conviction Scoring (Structure First)
   let c1 = 0; // HTF & Zona (Max 30)
   if (ht.dir === p.dir) c1 += 20;
   else if (ht.dir === 0) c1 += 10;
@@ -762,18 +777,24 @@ async function runManual(ctx, d, style) {
 
   let conv = c1 + c2 + c3 + c4 - rrPenalty;
   
-  // [v210] LTF Dinamis Adjustment
+  // [v211] LTF Dinamis Adjustment
   const adj = adjustConviction(conv, bias, p.tps.filter(isNum), p.entry, p.dir);
   conv = adj.conviction;
   
   if (whipsaw || sess.mode === 'AVOID' || vol.regime === 'SPIKE') conv = Math.min(conv, 54);
+
+  // [v211] Filter Kondisi Pasar: HTF netral + sesi Asia = conviction sangat rendah
+  if (ht.dir === 0 && sess.key === 'ASIA') {
+    conv = Math.min(conv, 35); // Max 35 kalau HTF netral di Asia
+    steps.push({ tf: 'Filter', text: 'HTF netral + sesi Asia → conviction dibatasi max 35 (setup lemah).', textEn: 'HTF neutral + Asia session → conviction capped at 35 (weak setup).' });
+  }
 
   p.conviction = Math.max(0, Math.min(100, Math.round(conv)));
   p.setupType = setupType;
   p.sess = sess;
   p.biasMode = bias.mode;
   
-  // [v210] Expiry Dinamis
+  // [v211] Expiry Dinamis
   p.expiry = bias.mode === 'LTF_COUNTER' ? counterExpiry(style) : baseExpiry(style);
   if (p.type === 'LIMIT') {
     const byTime = Date.now() + p.expiry.minutes * 60000;
@@ -981,7 +1002,7 @@ async function handleCandles(body, lang, res, isBot, email) {
 
   let out;
   try { out = isBot ? runBot(ctx, data) : await runManual(ctx, data, style); }
-  catch (e) { console.error('[v210] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message, []); }
+  catch (e) { console.error('[v211] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message, []); }
   if (!out || !out.signal) out = standby(ctx, style, 'Menunggu setup valid.', []);
 
   const key = symbol + '|' + style;
