@@ -1,8 +1,9 @@
-// api/generate.js — v215 (HYBRID VISION)
-// Pipeline: engine struktur → render chart PNG → vision model memutuskan → guardrail angka → fallback rule-engine.
-// Termasuk: LTF monitor real-time, SL presisi LTF, caps konsistensi (mixed-structure/MTF-oppose),
-// TP per gaya, dynamic cancel, reasoning ringkas, cache vision 90 dtk.
-// Env opsional: HYBRID_VISION=0 untuk matikan hybrid (pure rule-engine).
+// api/generate.js — v216 (FORCED BINARY + HYBRID VISION)
+// - WAJIB BUY/SELL setiap analisis (Framework §2 & §9.2): struktur rusak → flip arah sehat;
+//   kedua arah lemah → sinyal dipaksa LOW (≤45, 0.25x, 2 TP). STANDBY hanya untuk error/no-data.
+// - Hybrid: engine struktur → render PNG 3 panel → vision model → guardrail → fallback rule.
+// - LTF monitor real-time, SL presisi swing LTF, session-aware ATR, caps konsistensi.
+// - Env opsional: HYBRID_VISION=0 (pure rule-engine).
 
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { planBot } from '../lib/bot-ict.js';
@@ -18,7 +19,7 @@ import { monitorLTFStructure, calculatePreciseSL, LTF_TF } from '../lib/ltf-dyna
 import { renderSignalChart } from '../lib/chart-render.js';
 
 export const config = { maxDuration: 60 };
-const VERSION = 'v215';
+const VERSION = 'v216';
 const HYBRID = process.env.HYBRID_VISION !== '0';
 const TL_BASE = 'https://api.tickerlayer.com';
 const AI_BASE = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/+$/, '');
@@ -484,7 +485,7 @@ async function aiVisionImg(sys, text, dataUrl, ms) {
   return null;
 }
 
-// System prompt hybrid: Framework §9 disesuaikan untuk pembacaan chart render + output JSON
+// System prompt hybrid (Framework §9 disesuaikan untuk chart render + JSON)
 const SYS_HYB = `Anda analis trading XAUUSD/BTCUSD membaca gambar chart 3 panel bertumpuk (HTF/MTF/LTF) dengan gridline harga ber-label, zona transparan, dan garis kolam likuiditas ber-label. Keluarkan SATU sinyal.
 ATURAN:
 1. Wajib pilih BUY atau SELL (dilarang HOLD/WAIT). Choppy/tipis → tetap pilih, conviction LOW.
@@ -496,7 +497,6 @@ ATURAN:
 7. TIDAK perlu mengeluarkan TP (sistem yang mengatur TP).
 Balas HANYA JSON: {"signal":"BUY|SELL","orderType":"NOW|LIMIT","entry":0,"sl":0,"zoneLow":0,"zoneHigh":0,"setup":"...","conviction":0,"perPanel":["HTF: ...","MTF: ...","LTF: ..."],"reason":"2-3 kalimat ID","reasonEn":"2-3 kalimat EN"}`;
 
-// Guardrail: validasi & reparasi angka keluaran vision
 function guardVision(v, ctx, style, b, live) {
   if (!v || (v.signal !== 'BUY' && v.signal !== 'SELL')) return null;
   const dir = v.signal === 'BUY' ? 1 : -1;
@@ -533,15 +533,15 @@ const SYS_BOT = `Anda mentor bot scalper. Engine sudah memutuskan setup. Salin a
 Balas HANYA JSON: {"id":"...","en":"..."}`;
 
 async function reasonManual(f) {
+  if (f.status === 'STANDBY') return { id: buildReason(f, false), en: buildReason(f, true), ai: false };
   if (f.vReason) {
-    const base = buildReason(f, false);
-    const baseEn = buildReason(f, true);
-    return { id: base + '\n• Catatan: ' + f.vReason, en: baseEn + '\n• Note: ' + (f.vReasonEn || f.vReason), ai: true };
+    return {
+      id: buildReason(f, false) + '\n• Catatan: ' + f.vReason,
+      en: buildReason(f, true) + '\n• Note: ' + (f.vReasonEn || f.vReason),
+      ai: true,
+    };
   }
-  const fb = { id: buildReason(f, false), en: buildReason(f, true), ai: false };
-  const j = await aiJson(SYS_BOT, f, 8000);
-  if (j && typeof j.id === 'string' && typeof j.en === 'string') return { id: j.id, en: j.en, ai: true };
-  return fb;
+  return { id: buildReason(f, false), en: buildReason(f, true), ai: false };
 }
 async function reasonBot(f) {
   const tp = [f.tp1, f.tp2, f.tp3].filter(isNum).map(Number).join(', ');
@@ -630,6 +630,30 @@ async function runManual(ctx, d, style) {
   if (whipsaw) steps.push({ tf: 'Whipsaw', text: 'Double sweep — kemungkinan news. Risk 0.25x.', textEn: 'Double sweep — news whipsaw.' });
   if (bias.mode === 'LTF_COUNTER') steps.push({ tf: 'LTF Dinamis', text: 'LTF memimpin counter-HTF, penalti -' + bias.penalty, textEn: 'LTF leads counter-HTF.' });
 
+  // [v216] FORCED BINARY DIRECTION (Framework §2 & §9.2): WAJIB BUY/SELL, dilarang standby karena struktur.
+  const ltfMonRows0 = cl[LTF_TF[style] || role.ltf] || ltfRows;
+  const healthOf = ddir => {
+    const mon = monitorLTFStructure(ltfMonRows0, ddir, ctx, style);
+    let h = mon.confidence;
+    if (lt.dir === ddir) h += 15;
+    if (it.dir === ddir) h += 10;
+    if (ht.dir === ddir) h += 8;
+    return { mon, h };
+  };
+  const hCur = healthOf(dir);
+  const hOpp = healthOf(-dir);
+  let forcedWeak = false;
+  if (!hCur.mon.valid && hOpp.h > hCur.h) {
+    dir = -dir;
+    if (rg) rangeBound = dir === 1 ? rg.lo : rg.hi;
+    chosen = chooseBestZone(ctx, ht, it, lt, allZones.filter(z => z.side === (dir === 1 ? 'demand' : 'supply')), style) || synthesizeZone(ctx, dir, style, ltfRows);
+    steps.push({ tf: 'Arah', text: 'Arah dibalik ke ' + (dir === 1 ? 'BUY' : 'SELL') + ': struktur LTF arah semula rusak (' + hCur.mon.reason + ').', textEn: 'Direction flipped: original LTF structure broken (' + hCur.mon.reason + ').' });
+  } else if (!hCur.mon.valid) {
+    forcedWeak = true;
+    steps.push({ tf: 'Arah', text: 'Struktur LTF kedua arah lemah — sinyal tetap dipaksa (FORCED BINARY) dengan conviction dikunci LOW, risk 0.25x, target dekat.', textEn: 'Both directions weak — forced binary signal locked LOW, 0.25x, near targets.' });
+  }
+  const mon0 = healthOf(dir).mon;
+
   const p = { dir, _style: style, entry: ctx.price, sl: ctx.price, type: 'LIMIT', zone: chosen ? chosen.z : null };
   const pool = [];
   if (chosen) pool.push(chosen.z);
@@ -650,10 +674,8 @@ async function runManual(ctx, d, style) {
   p.invalidLevel = slp ? slp.level : (sessSweep ? sessSweep.extreme : struct);
   let slReason = slp ? 'di luar kolam ' + slp.pool.type + ' + buffer' : (sessSweep ? 'di balik titik sweep' : 'di luar swing ' + slRef.swingTf.toUpperCase());
 
-  // [v215] SL presisi dari swing LTF bila lebih ketat dan masih masuk akal
+  // SL presisi dari swing LTF bila lebih ketat dan masih masuk akal
   const ltfMonRows = cl[LTF_TF[style] || role.ltf] || ltfRows;
-  const mon0 = monitorLTFStructure(ltfMonRows, p.dir, ctx, style);
-  if (!mon0.valid) return standby(ctx, style, 'LTF berbalik arah saat analisis: ' + mon0.reason, steps);
   const psl = calculatePreciseSL(p.entry, p.dir, ltfMonRows, ctx, 1.5);
   if (psl && psl.distancePips >= 20 && psl.distancePips < rr.riskPips) {
     p.sl = psl.sl; p.riskPips = ctx.dp(psl.distancePips); p.slCapped = false; slReason = psl.reason;
@@ -722,6 +744,10 @@ async function runManual(ctx, d, style) {
     conv -= 10;
     steps.push({ tf: 'Struktur', text: 'MTF (' + (it.ev || '-') + ') berlawanan arah sinyal = counter-trend: conviction -10.', textEn: 'MTF opposes = counter-trend: -10.' });
   }
+  if (forcedWeak) {
+    conv = Math.min(conv, 45);
+    if (p.tpCount > 2) { p.tpCount = 2; p.tps = p.tps.map((v, i) => (i < 2 ? v : null)); }
+  }
   p.conviction = Math.max(0, Math.min(100, Math.round(conv)));
   p.setupType = setupType;
   p.sess = sess;
@@ -782,6 +808,7 @@ async function runManual(ctx, d, style) {
     if (it.dir !== 0 && it.dir !== p.dir) conv2 -= 10;
     if (whipsaw || sess.mode === 'AVOID' || vol.regime === 'SPIKE') conv2 = Math.min(conv2, 54);
     if (ht.dir === 0 && sess.key === 'ASIA') conv2 = Math.min(conv2, 35);
+    if (forcedWeak) conv2 = Math.min(conv2, 45);
     if (Number.isFinite(fin2.runwayPip) && fin2.runwayPip < p.riskPips) conv2 -= 6;
     p.conviction = Math.max(0, Math.min(100, Math.round(conv2)));
     scenario = setupToScenario(hybrid.setup);
@@ -868,7 +895,7 @@ function lifecycle(prev, sym, style, price, pip, data) {
   });
   if (!Number.isFinite(t[0])) return null;
 
-  // [v215] LTF monitor: batalkan LIMIT yang belum fill bila struktur LTF berbalik
+  // LTF monitor: batalkan LIMIT yang belum fill bila struktur LTF berbalik
   if (prev.status === 'PENDING') {
     const ltfRowsM = clean((data && data[LTF_TF[prev.style] || 'm5']) || []);
     const mon = monitorLTFStructure(ltfRowsM, dir, { pip, f: v => v }, prev.style);
@@ -1006,7 +1033,7 @@ async function handleCandles(body, lang, res, isBot, email) {
 
   let out;
   try { out = isBot ? runBot(ctx, data) : await runManual(ctx, data, style); }
-  catch (e) { console.error('[v215] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message); }
+  catch (e) { console.error('[v216] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message); }
   if (!out || !out.signal) out = standby(ctx, style, 'Menunggu setup valid.');
 
   const key = symbol + '|' + style;
