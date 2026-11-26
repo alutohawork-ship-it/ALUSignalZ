@@ -1,9 +1,8 @@
-// api/generate.js — v207
-// Full Framework Integration + M1 Sanitization Fix (HTTP 500 & Anomaly Fix)
-// - Sanitasi candle M1 anomali saat reconnect
-// - System Prompt sesuai Framework XAUUSD/BTCUSD
-// - TP: Scalping 5R, Intraday 3R, Swing 3 pip
-// - SL Adaptif ATR per TF (M5/M15/H4)
+// api/generate.js — v208
+// Full Framework + M1 Sanitization + Scalping ATR M1 Smoothed (n=20) + TF Scaling
+// - Scalping: ATR diukur di M1 (smoothed), invalidasi swing di M5.
+// - Intraday/Swing: ATR di M15/H4 seperti biasa.
+// - System Prompt sesuai Framework XAUUSD/BTCUSD.
 
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { planBot } from '../lib/bot-ict.js';
@@ -15,7 +14,7 @@ import { atrSanity, calcSL } from '../lib/risk-atr.js';
 import { TP_PLAN, planTPs, repairTPs, coupleZone, fixSide, buildChart } from '../lib/tp-final.js';
 
 export const config = { maxDuration: 60 };
-const VERSION = 'v207';
+const VERSION = 'v208';
 const TL_BASE = 'https://api.tickerlayer.com';
 const AI_BASE = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/+$/, '');
 const AI_KEYS = [process.env.QWEN_MANUAL_API_KEY, process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
@@ -40,10 +39,11 @@ const TF_ROLE = {
   Intraday: { htf: 'h4', mtf: 'm15', ltf: 'm5', exec: null },
   Swing: { htf: 'd1', mtf: 'h4', ltf: 'h1', exec: null },
 };
+// [v208] Scalping pakai M1 untuk ATR (smoothed), M5 untuk swing invalidasi
 const SL_REF = {
-  Scalping: { atrTf: 'm5', swingTf: 'm5', win: 8 },
-  Intraday: { atrTf: 'm15', swingTf: 'm15', win: 8 },
-  Swing: { atrTf: 'h4', swingTf: 'h4', win: 8 },
+  Scalping: { atrTf: 'm1', swingTf: 'm5', win: 8, smooth: true },
+  Intraday: { atrTf: 'm15', swingTf: 'm15', win: 8, smooth: false },
+  Swing: { atrTf: 'h4', swingTf: 'h4', win: 8, smooth: false },
 };
 const NEED = { Scalping: ['m1', 'm5', 'm15', 'h1'], Intraday: ['m5', 'm15', 'h1', 'h4'], Swing: ['m15', 'h1', 'h4', 'd1'] };
 const MINB = { m1: 60, m5: 40, m15: 40, m30: 35, h1: 35, h4: 25, d1: 20 };
@@ -79,13 +79,11 @@ function sanitizeCandles(rows, atrRef, maxRangeMultiplier = 5) {
   for (let i = 0; i < rows.length; i++) {
     const c = rows[i];
     const range = c.h - c.l;
-    // Skip/Interpolasi candle dengan range tidak masuk akal (> 5x ATR)
     if (range > maxRange && i < rows.length - 1) {
       const prev = out[out.length - 1] || c;
       out.push({ t: c.t, o: prev.c, h: Math.max(prev.c, c.c), l: Math.min(prev.c, c.c), c: c.c });
       continue;
     }
-    // Skip duplikat timestamp
     if (out.length && c.t <= out[out.length - 1].t) continue;
     out.push(c);
   }
@@ -160,6 +158,8 @@ async function tlRows(sym, tf, need) {
   }
   return [];
 }
+
+// ATR standar (n=14)
 function atr(rows, n = 14) {
   if (!Array.isArray(rows) || rows.length < n + 1) return 0;
   const tr = i => Math.max(rows[i].h - rows[i].l, Math.abs(rows[i].h - rows[i - 1].c), Math.abs(rows[i].l - rows[i - 1].c));
@@ -169,6 +169,18 @@ function atr(rows, n = 14) {
   for (let i = n + 1; i < rows.length; i++) a = (a * (n - 1) + tr(i)) / n;
   return a;
 }
+
+// [v208] ATR Smoothed untuk M1 (n=20) — lebih stabil dari noise candle tunggal
+function atrSmooth(rows, n = 20) {
+  if (!Array.isArray(rows) || rows.length < n + 1) return 0;
+  const tr = i => Math.max(rows[i].h - rows[i].l, Math.abs(rows[i].h - rows[i - 1].c), Math.abs(rows[i].l - rows[i - 1].c));
+  let a = 0;
+  for (let i = 1; i <= n; i++) a += tr(i);
+  a /= n;
+  for (let i = n + 1; i < rows.length; i++) a = (a * (n - 1) + tr(i)) / n;
+  return a;
+}
+
 function internal(rows, lb = 60) {
   const o = { dir: 0, ev: '', fresh: false, displaced: false };
   if (!Array.isArray(rows) || rows.length < 25) return o;
@@ -471,7 +483,7 @@ async function aiJson(sys, obj, ms) {
   return null;
 }
 
-// [v207] SYSTEM PROMPT FRAMEWORK (Sesuai Dokumen)
+// [v208] SYSTEM PROMPT FRAMEWORK (Sesuai Dokumen)
 const SYS_MTF = `Anda adalah analis trading XAUUSD dan BTCUSD yang bertugas mengeluarkan SATU sinyal tunggal per analisis untuk dibaca langsung oleh trader.
 ATURAN WAJIB:
 1. IDENTIFIKASI ASET & KARAKTERNYA:
@@ -547,7 +559,6 @@ async function runManual(ctx, d, style) {
   const cl = {};
   for (const tf of ['m1', 'm5', 'm15', 'h1', 'h4', 'd1']) {
     let rows = closed(d[tf], TFMS[tf]);
-    // [v207] Sanitasi M1 di engine level juga
     if (tf === 'm1' && rows.length >= 10) {
       const atrM5Ref = atr(d.m5 && d.m5.length >= 14 ? d.m5 : rows) || ctx.pip * 10;
       rows = sanitizeCandles(rows, atrM5Ref, 4);
@@ -561,10 +572,15 @@ async function runManual(ctx, d, style) {
   const slRows = cl[slRef.atrTf] || ltfRows;
 
   const atrStruct = atr(mtfRows) || ctx.pip * 10;
-  const atrSlNow = atr(slRows) || ctx.pip * 10;
-  const atrSlBase = atr(slRows.slice(0, Math.max(15, slRows.length - 10))) || atrSlNow;
-  const atrUse = atrSanity(atrSlNow, atrSlBase);
-  const vol = volatilityRegime(atrSlNow, atrSlBase, sess);
+  
+  // [v208] Scalping pakai M1 smoothed (n=20), Intraday/Swing pakai atr biasa
+  const useSmooth = slRef.smooth && slRows.length >= 30;
+  const atrSlNow = useSmooth ? atrSmooth(slRows, 20) : atr(slRows);
+  const atrSlBase = useSmooth
+    ? atrSmooth(slRows.slice(0, Math.max(20, slRows.length - 15)), 20)
+    : atr(slRows.slice(0, Math.max(15, slRows.length - 10)));
+  const atrUse = atrSanity(atrSlNow || ctx.pip * 10, atrSlBase || atrSlNow || ctx.pip * 10);
+  const vol = volatilityRegime(atrSlNow || ctx.pip * 10, atrSlBase || atrSlNow || ctx.pip * 10, sess);
 
   const ht = internal(cl[role.htf]);
   const it = internal(cl[role.mtf]);
@@ -648,11 +664,13 @@ async function runManual(ctx, d, style) {
 
   const struct = swingLevel(cl[slRef.swingTf] || ltfRows, p.dir, slRef.win);
   const slp = slBeyondPool(pools, p.dir, p.entry, ctx, atrUse);
-  let rr = calcSL({ entry: p.entry, dir: p.dir, ctx, b, sess, atrUse, structLevel: sessSweep ? sessSweep.extreme : struct, poolLevel: slp ? slp.pool.price : NaN, rangeBound });
+  
+  // [v208] Kirim tfKey ke calcSL untuk scaling k
+  let rr = calcSL({ entry: p.entry, dir: p.dir, ctx, b, sess, atrUse, structLevel: sessSweep ? sessSweep.extreme : struct, poolLevel: slp ? slp.pool.price : NaN, rangeBound, tfKey: slRef.atrTf });
   p.sl = rr.sl; p.riskPips = rr.riskPips; p.slCapped = rr.capped;
   p.invalidLevel = slp ? slp.level : (sessSweep ? sessSweep.extreme : struct);
   const slReason = slp ? 'di luar kolam ' + slp.pool.type + ' + buffer' : (sessSweep ? 'di balik titik sweep' : 'di luar swing struktur');
-  steps.push({ tf: 'SL', text: '[' + slRef.atrTf.toUpperCase() + '] ' + rr.diag + ' · ' + slReason, textEn: rr.diag });
+  steps.push({ tf: 'SL', text: '[' + slRef.atrTf.toUpperCase() + (slRef.smooth ? ' smooth' : '') + '] ' + rr.diag + ' · ' + slReason, textEn: rr.diag });
 
   const draw = nearestDraw(pools, p.dir, ctx);
   let fin = planTPs({ style, entry: p.entry, dir: p.dir, risk: rr.need, pip: ctx.pip, wall: bias.wall, draw, dp: ctx.dp });
@@ -747,7 +765,7 @@ async function runManual(ctx, d, style) {
     premiumDiscount: pd ? ((ctx.price - pd.lo) / pd.range >= 0.5 ? 'premium' : 'discount') : null,
     htfDisplacement: ht.displaced, mtfDisplacement: it.displaced,
     pool: aheadPool ? { type: aheadPool.type, price: ctx.f(aheadPool.price), distPips: ctx.dp(aheadPool.distPip), state: aheadPool.state } : null,
-    verdict: verdict.verdict, slReason, slDiag: rr.diag, slRefTf: slRef.atrTf.toUpperCase(),
+    verdict: verdict.verdict, slReason, slDiag: rr.diag, slRefTf: slRef.atrTf.toUpperCase() + (slRef.smooth ? ' (smooth)' : ''),
     tpCapped: !!p.tpCapped, biasMode: p.biasMode, whipsaw: !!whipsaw,
     liquidity: aheadPool ? aheadPool.type + ' ' + verdict.verdict : 'none',
     zones: nearZones.slice(0, 3).map(z => ({ kind: z.kind, tf: z.tf, lo: ctx.f(z.lo), hi: ctx.f(z.hi), side: z.side })),
@@ -827,8 +845,8 @@ function lifecycle(prev, sym, style, price, pip, data) {
   if (dead) return { dead: true, out: dead.out, prev, patch };
   let status, state;
   if (!filled) { status = 'PENDING'; state = 'LIMIT_PLACED'; }
-  else if (maxHit >= 1) { status = 'TP' + maxHit + '_HIT'; state = 'TP' + maxHit; }
-  else { status = 'RUNNING'; state = filledAt ? 'FILLED' : 'CONFIRMED'; }
+  else if (maxHit >= 1) { status = 'TP' + maxHit + '_HIT'; state: 'TP' + maxHit; }
+  else { status = 'RUNNING'; state: filledAt ? 'FILLED' : 'CONFIRMED'; }
   return { dead: false, prev, patch: { ...patch, status, state } };
 }
 
@@ -904,7 +922,6 @@ async function handleCandles(body, lang, res, isBot, email) {
   const data = {};
   for (const tf of ['m1', 'm5', 'm15', 'm30', 'h1', 'h4', 'd1']) {
     let inc = clean((body.candles || {})[tf] ?? body[tf]);
-    // [v207] Sanitasi M1 di level data masuk
     if (tf === 'm1' && inc.length >= 10) {
       const atrRef = atr(inc) || ctx.pip * 10;
       inc = sanitizeCandles(inc, atrRef, 4);
@@ -924,7 +941,7 @@ async function handleCandles(body, lang, res, isBot, email) {
 
   let out;
   try { out = isBot ? runBot(ctx, data) : await runManual(ctx, data, style); }
-  catch (e) { console.error('[v207] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message, []); }
+  catch (e) { console.error('[v208] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message, []); }
   if (!out || !out.signal) out = standby(ctx, style, 'Menunggu setup valid.', []);
 
   const key = symbol + '|' + style;
