@@ -1,10 +1,10 @@
-// api/generate.js — v205
-// Integrasi Framework AI Signal Tunggal XAUUSD & BTCUSD
-// - SL Scalping pakai M5, Intraday M15, Swing H4
-// - TP: Scalping 5R, Intraday 3R, Swing 3 pip (TP4/5 null)
-// - Tidak ada flip arah (kompresi TP jika runway sempit)
-// - Null-safe (null tidak berubah jadi 0)
-// - System Prompt sesuai Framework yang diberikan
+// api/generate.js — v206
+// Full Integration: Framework AI Signal + SL Adaptif + TP Dinamis + Entry Zone Validation
+// - SL Scalping M5, Intraday M15, Swing H4
+// - TP: Scalping 5R, Intraday 3R (1.5/2.5/4), Swing 3 pip (500/800/1000)
+// - Entry di zona (bukan harga running), minimum SL ketat
+// - Null-safe, tidak ada flip arah
+// - System Prompt sesuai Framework
 
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { planBot } from '../lib/bot-ict.js';
@@ -16,7 +16,7 @@ import { atrSanity, calcSL } from '../lib/risk-atr.js';
 import { TP_PLAN, planTPs, repairTPs, coupleZone, fixSide, buildChart } from '../lib/tp-final.js';
 
 export const config = { maxDuration: 60 };
-const VERSION = 'v205';
+const VERSION = 'v206';
 const TL_BASE = 'https://api.tickerlayer.com';
 const AI_BASE = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/+$/, '');
 const AI_KEYS = [process.env.QWEN_MANUAL_API_KEY, process.env.QWEN_API_KEY, process.env.QWEN_API_KEY_2, process.env.OPENAI_API_KEY].filter(Boolean);
@@ -285,13 +285,20 @@ function scoreZone(z, ht, it, lt, ctx, style) {
 }
 function chooseBestZone(ctx, ht, it, lt, zones, style) {
   const prox = PROX[style] || 50;
+  const structDir = ht.dir !== 0 ? ht.dir : (it.dir !== 0 ? it.dir : lt.dir);
   const cand = zones.filter(z => {
     const inside = ctx.price >= z.lo && ctx.price <= z.hi;
     const d = (z.lo >= ctx.price ? z.lo - ctx.price : ctx.price - z.hi) / ctx.pip;
     return inside || d <= prox * 2;
   });
   if (!cand.length) return null;
-  return cand.map(z => ({ z, ...scoreZone(z, ht, it, lt, ctx, style) })).sort((a, b) => b.score - a.score)[0];
+  const scored = cand.map(z => {
+    const s = scoreZone(z, ht, it, lt, ctx, style);
+    const zoneDir = z.side === 'demand' ? 1 : -1;
+    const alignBonus = zoneDir === structDir ? 15 : 0;
+    return { z, score: s.score + alignBonus, width: s.width, d: s.d, inside: s.inside };
+  }).sort((a, b) => b.score - a.score);
+  return scored[0];
 }
 function synthesizeZone(ctx, dir, style, rows) {
   const a = atr(rows) || ctx.pip * 10;
@@ -308,7 +315,12 @@ function entryMode(ctx, p, it, lt, ex, style, pool, ltfRows) {
   const prox = PROX[style] || 50;
   const align = it.dir === p.dir && lt.dir === p.dir;
   const execOk = !ex || ex.dir === p.dir || ex.dir === 0;
-  for (const z of pool) {
+  const validPool = pool.filter(z => {
+    if (p.dir === 1) return z.side === 'demand';
+    if (p.dir === -1) return z.side === 'supply';
+    return true;
+  });
+  for (const z of validPool) {
     const zl = z.lo, zh = z.hi, w = zh - zl;
     const inside = ctx.price >= zl && ctx.price <= zh;
     const beyond = p.dir === 1 ? ctx.price < zl : ctx.price > zh;
@@ -316,21 +328,20 @@ function entryMode(ctx, p, it, lt, ex, style, pool, ltfRows) {
     const lim = inside ? ctx.price : (p.dir === 1 ? zh + Math.min(2 * ctx.pip, 0.1 * w) : zl - Math.min(2 * ctx.pip, 0.1 * w));
     const sideOk = p.dir === 1 ? lim <= ctx.price : lim >= ctx.price;
     const distPip = Math.abs(ctx.price - lim) / ctx.pip;
-    if (inside && align && (it.fresh || lt.fresh) && execOk) {
-      return { type: 'MARKET', entry: ctx.price, zone: z, note: 'NOW: harga di dalam zona ' + z.tf + ' ' + z.kind + ', struktur searah' + (ex ? ' + ' + TF_ROLE[style].exec.toUpperCase() + ' konfirmasi' : '') + '.' };
+    if (inside && align && (it.fresh || lt.fresh) && execOk && distPip < 5) {
+      return { type: 'MARKET', entry: ctx.price, zone: z, note: 'NOW: harga di dalam zona ' + z.tf + ' ' + z.kind + ', struktur searah.' };
     }
-    if (sideOk && distPip <= prox) {
-      const t = distPip < 2 ? 'MARKET' : 'LIMIT';
-      return { type: t, entry: t === 'MARKET' ? ctx.price : lim, zone: z, note: t + ' di tepi zona ' + z.tf + ' ' + z.kind + ' @ ' + ctx.f(t === 'MARKET' ? ctx.price : lim) + ' (' + ctx.dp(distPip) + ' pip dari harga).' };
+    if (sideOk && distPip <= prox && distPip >= 2) {
+      return { type: 'LIMIT', entry: lim, zone: z, note: 'LIMIT di tepi zona ' + z.tf + ' ' + z.kind + ' @ ' + ctx.f(lim) + ' (' + ctx.dp(distPip) + ' pip dari harga).' };
     }
   }
   const synth = synthesizeZone(ctx, p.dir, style, ltfRows);
   if (synth) {
-    const off = Math.max(2 * ctx.pip, Math.min(synth.d * ctx.pip, 10 * ctx.pip));
+    const off = Math.max(5 * ctx.pip, Math.min(synth.d * ctx.pip, 15 * ctx.pip));
     const entry = ctx.price - p.dir * off;
     return { type: 'LIMIT', entry, zone: synth.z, forced: true, note: 'LIMIT @ ' + ctx.f(entry) + ' (' + ctx.dp(off / ctx.pip) + ' pip): zona sintetis swing terdekat.' };
   }
-  const off = 6 * ctx.pip, entry = ctx.price - p.dir * off, w2 = 10 * ctx.pip;
+  const off = 10 * ctx.pip, entry = ctx.price - p.dir * off, w2 = 15 * ctx.pip;
   const z = { lo: p.dir === 1 ? entry - w2 : entry, hi: p.dir === 1 ? entry : entry + w2, side: p.dir === 1 ? 'demand' : 'supply', kind: 'Fallback', tf: TF_ROLE[style].ltf.toUpperCase(), isSynthetic: true };
   return { type: 'LIMIT', entry, zone: z, forced: true, note: 'LIMIT fallback @ ' + ctx.f(entry) + '.' };
 }
@@ -439,7 +450,6 @@ async function aiJson(sys, obj, ms) {
   return null;
 }
 
-// [v205] SYSTEM PROMPT SESUAI FRAMEWORK YANG DIBERIKAN
 const SYS_MTF = `Anda adalah analis trading XAUUSD dan BTCUSD yang bertugas mengeluarkan SATU sinyal tunggal per analisis untuk dibaca langsung oleh trader.
 ATURAN WAJIB:
 1. IDENTIFIKASI ASET & KARAKTERNYA:
@@ -569,6 +579,10 @@ async function runManual(ctx, d, style) {
   }
 
   let chosen = chooseBestZone(ctx, ht, it, lt, allZones.filter(z => z.side === (dir === 1 ? 'demand' : 'supply')), style);
+  if (chosen && chosen.z.side !== (dir === 1 ? 'demand' : 'supply')) {
+    const alt = allZones.filter(z => z.side === (dir === 1 ? 'demand' : 'supply'));
+    chosen = chooseBestZone(ctx, ht, it, lt, alt, style);
+  }
   if (!chosen) chosen = synthesizeZone(ctx, dir, style, ltfRows);
 
   const steps = [];
@@ -788,7 +802,6 @@ function lifecycle(prev, sym, style, price, pip, data) {
   return { dead: false, prev, patch: { ...patch, status, state } };
 }
 
-// ===== VISION — TIDAK DIUBAH =====
 const SYS_VIS = 'Kamu analis S&D/OB dari gambar chart. Baca level PERSIS dari skala harga. Wajib BUY atau SELL kecuali gambar bukan chart. Prioritaskan LIMIT pullback; MARKET hanya bila harga sudah di zona dan ada penolakan. Sebutkan zona TF tinggi dan rendah pada perImageAnalyses. SL di luar distal zona/swing. Balas HANYA JSON: {"signal":"BUY","orderType":"LIMIT","entry":0,"sl":0,"tp1":0,"tp2":0,"tp3":0,"tp4":0,"tp5":0,"zoneLow":0,"zoneHigh":0,"zone":"Demand","pair":"","decimals":2,"perImageAnalyses":[],"perImageAnalysesEn":[],"reason":"","reasonEn":""}';
 
 async function handleVision(body, lang, res) {
@@ -875,7 +888,7 @@ async function handleCandles(body, lang, res, isBot, email) {
 
   let out;
   try { out = isBot ? runBot(ctx, data) : await runManual(ctx, data, style); }
-  catch (e) { console.error('[v205] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message, []); }
+  catch (e) { console.error('[v206] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message, []); }
   if (!out || !out.signal) out = standby(ctx, style, 'Menunggu setup valid.', []);
 
   const key = symbol + '|' + style;
