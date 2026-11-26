@@ -3,7 +3,7 @@
 (function () {
   const TPK = ['tp1', 'tp2', 'tp3', 'tp4', 'tp5'];
   const MULTS = [1, 1.5, 2, 3, 5];
-  const is5 = t => !!t && t.style === 'Scalping' && (t.key === 'XAUUSD' || t.key === 'BTCUSD') && t.src !== 'bot' && !/CRT/.test(String(t.setup || ''));
+  const is5 = t => !!t && t.style === 'Scalping' && t.key === 'XAUUSD' && t.src !== 'bot' && !/CRT/.test(String(t.setup || ''));
 
   // Pastikan TP4/TP5 ada untuk trade Scalping XAUUSD (dihitung dari entry dan SL)
   function ensure5(t) {
