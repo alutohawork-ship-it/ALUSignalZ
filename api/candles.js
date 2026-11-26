@@ -1,9 +1,10 @@
-// api/candles.js — v9
-// Perubahan dari v8:
-// - Cek akses lewat lib/access.js (Postgres), bukan KV lama. Klien baru yang didaftarkan
-//   lewat dashboard sekarang langsung bisa mengakses chart.
-// - Cache candle dan cooldown key TickerLayer disimpan di memori server (tanpa Upstash).
-// - Kontrak request dan response sama dengan v8, jadi frontend tidak perlu diubah.
+// api/candles.js — v10
+// Perubahan dari v9:
+// - Tahan 429/quota/cooldown: serve last-known-good cache (stale:true) agar chart tidak pernah kosong.
+// - Sanitasi candle: dedupe timestamp kembar + validasi OHLC (fix anomali M1 saat reconnect).
+// - Memory guard: cache expired di-evict otomatis saat map membesar.
+// - Cek cooldown proaktif: jika semua key TickerLayer cooldown, langsung serve stale (hemat latensi).
+// - Kontrak request/response sama dengan v9; frontend tidak perlu diubah.
 //
 // Env: TICKERLAYER_API_KEY, TICKERLAYER_API_KEY_1 .. _19, DATABASE_URL
 // Opsional: TICKERLAYER_MAX_TRY (default 6), TICKERLAYER_DISABLED=1
@@ -49,6 +50,7 @@ const CD = { quota: 600, rate: 5, invalid: 6 * 3600 };
 // ── Cache & cooldown di memori (per instance, tanpa Upstash) ──
 const memCache = new Map();    // key -> { exp, value }
 const memCooldown = new Map(); // slot name -> expiry ms
+const lastGood = new Map();    // key -> rows terakhir yang valid (untuk fallback 429)
 
 function cacheGet(key) {
   const hit = memCache.get(key);
@@ -56,8 +58,32 @@ function cacheGet(key) {
   if (Date.now() > hit.exp) { memCache.delete(key); return null; }
   return hit.value;
 }
+
 function cacheSet(key, value, ttlSec) {
+  // [v10] memory guard: evict expired saat map membesar
+  if (memCache.size > 400) {
+    const now = Date.now();
+    for (const [k, v] of memCache) if (now > v.exp) memCache.delete(k);
+  }
   memCache.set(key, { exp: Date.now() + ttlSec * 1000, value });
+  // [v10] simpan salinan permanen per-instance untuk fallback stale
+  if (Array.isArray(value) && value.length) lastGood.set(key, value);
+}
+
+// [v10] Response stale dari last-known-good
+function staleResponse(cacheKey, lim, reason, retryInSec = 30) {
+  const good = lastGood.get(cacheKey);
+  if (Array.isArray(good) && good.length) {
+    return {
+      ok: true,
+      candles: good.slice(-lim),
+      source: 'stale-cache',
+      stale: true,
+      retryInSec,
+      note: reason,
+    };
+  }
+  return null;
 }
 
 const fmtDate = d => d.toISOString().slice(0, 10);
@@ -82,6 +108,22 @@ function usableSlots() {
   return API_KEYS
     .map((_, i) => i)
     .filter(i => API_KEYS[i] && (memCooldown.get(`tl_cd_${i}`) || 0) <= now);
+}
+
+// [v10] Sanitasi: validasi OHLC + dedupe timestamp kembar (latest wins)
+function sanitizeRows(rows) {
+  if (!Array.isArray(rows) || !rows.length) return rows;
+  const valid = rows.filter(c =>
+    [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite) &&
+    c.h >= Math.max(c.o, c.c, c.l) &&
+    c.l <= Math.min(c.o, c.c, c.h)
+  );
+  const out = [];
+  for (const c of valid) {
+    if (out.length && out[out.length - 1].t === c.t) out[out.length - 1] = c; // duplikat: terbaru menang
+    else out.push(c);
+  }
+  return out;
 }
 
 // ── Satu panggilan ke TickerLayer, dengan timeout ──
@@ -110,9 +152,8 @@ async function requestBars(apiKey, target, p) {
           c: Number(bar.c ?? bar.close),
         };
       })
-      .filter(c => [c.t, c.o, c.h, c.l, c.c].every(Number.isFinite))
       .sort((a, b) => a.t - b.t);
-    return { ok: true, rows };
+    return { ok: true, rows: sanitizeRows(rows) };
   } catch (e) {
     return { ok: false, status: 500, body: {}, detail: e.name === 'AbortError' ? 'timeout' : e.message, retryAfter: null };
   } finally {
@@ -213,7 +254,7 @@ function cacheDerived(sym, m1) {
   for (const [tf, mins] of Object.entries(DERIVED)) {
     const bars = aggregate(m1, mins * MIN_MS).slice(-1000);
     out[tf] = bars;
-    if (bars.length) cacheSet(`candles_v9_${sym}_${tf}`, bars, TTL[tf]);
+    if (bars.length) cacheSet(`candles_v10_${sym}_${tf}`, bars, TTL[tf]);
   }
   return out;
 }
@@ -260,28 +301,63 @@ export default async function handler(req, res) {
   if (!target) return res.status(400).json({ error: `Simbol tidak dikenal: ${symbol}` });
 
   const lim = Math.min(Math.max(parseInt(limit, 10) || 200, 10), 1000);
-  const cacheKey = `candles_v9_${target.sym}_${interval}`;
+  const cacheKey = `candles_v10_${target.sym}_${interval}`;
   const minOk = Math.min(lim, 60);
 
-  // 1. Cache memori
+  // 1. Cache memori (fresh)
   const hit = cacheGet(cacheKey);
   if (Array.isArray(hit) && hit.length >= minOk) {
-    return res.status(200).json({ ok: true, candles: hit.slice(-lim), source: 'cache' });
+    return res.status(200).json({ ok: true, candles: hit.slice(-lim), source: 'cache', stale: false });
   }
 
-  // 2. TickerLayer
+  // [v10] 1b. Cache memori tipis tapi ada last-good -> pakai last-good dulu daripada hit upstream
+  const thin = Array.isArray(hit) && hit.length ? hit : null;
+
+  // 2. [v10] Cek cooldown proaktif: semua key cooldown -> langsung stale (hemat waktu)
+  if (!TL_DISABLED && API_KEYS.some(Boolean) && !usableSlots().length) {
+    const st = staleResponse(cacheKey, lim, 'Semua key TickerLayer sedang cooldown. Menampilkan data terakhir yang valid.', 30);
+    if (st) return res.status(200).json(st);
+    if (thin && thin.length) return res.status(200).json({ ok: true, candles: thin.slice(-lim), source: 'cache-thin', stale: true });
+    return res.status(429).json({ error: 'Semua key TickerLayer sedang cooldown', detail: '' });
+  }
+
+  // 3. TickerLayer
   try {
     if (NATIVE[interval]) {
       const n = await fetchNative(target, interval, lim);
-      if (n.rows.length) cacheSet(cacheKey, n.rows, TTL[interval]);
-      return res.status(200).json({ ok: true, candles: n.rows, source: 'tickerlayer', keyNo: n.keyNo });
+      if (n.rows.length) {
+        cacheSet(cacheKey, n.rows, TTL[interval]);
+        return res.status(200).json({ ok: true, candles: n.rows, source: 'tickerlayer', keyNo: n.keyNo, stale: false });
+      }
+      // [v10] upstream OK tapi kosong -> stale fallback
+      const st = staleResponse(cacheKey, lim, 'Upstream mengembalikan data kosong. Menampilkan data terakhir yang valid.', 20);
+      if (st) return res.status(200).json(st);
+      return res.status(200).json({ ok: true, candles: [], source: 'tickerlayer-empty', stale: true });
     }
 
     const w = await fetchM1Window(target);
+    if (!w.rows.length) {
+      const st = staleResponse(cacheKey, lim, 'Upstream mengembalikan data kosong. Menampilkan data terakhir yang valid.', 20);
+      if (st) return res.status(200).json(st);
+      return res.status(200).json({ ok: true, candles: [], source: 'tickerlayer-empty', stale: true });
+    }
     const derived = cacheDerived(target.sym, w.rows);
     const bars = (derived[interval] || []).slice(-lim);
-    return res.status(200).json({ ok: true, candles: bars, source: 'tickerlayer-m1', keyNo: w.keyNo });
+    if (bars.length) {
+      return res.status(200).json({ ok: true, candles: bars, source: 'tickerlayer-m1', keyNo: w.keyNo, stale: false });
+    }
+    const st2 = staleResponse(cacheKey, lim, 'Interval turunan kosong. Menampilkan data terakhir yang valid.', 20);
+    if (st2) return res.status(200).json(st2);
+    return res.status(200).json({ ok: true, candles: [], source: 'tickerlayer-empty', stale: true });
   } catch (err) {
+    // [v10] 429/quota/cooldown/error upstream -> serve last-known-good, chart tidak kosong
+    const isRate = err.status === 429 || /quota|cooldown|429/i.test(err.message || '');
+    const reason = isRate
+      ? 'Upstream rate-limit (429). Menampilkan data terakhir yang valid.'
+      : `Upstream error (${err.status || 500}). Menampilkan data terakhir yang valid.`;
+    const st = staleResponse(cacheKey, lim, reason, isRate ? 60 : 20);
+    if (st) return res.status(200).json(st);
+    if (thin && thin.length) return res.status(200).json({ ok: true, candles: thin.slice(-lim), source: 'cache-thin', stale: true });
     return res.status(err.status || 500).json({ error: err.message, detail: err.detail || '' });
   }
 }
