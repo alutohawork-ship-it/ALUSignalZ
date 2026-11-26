@@ -1,8 +1,7 @@
 // middleware.js — menyisipkan script tambahan ke halaman utama tanpa mengubah index.html
-// Berjalan di Vercel Edge. Setiap script hanya disisipkan sekali.
 export const config = { matcher: ['/'] };
 
-const SCRIPTS = ['notif-fix.js', 'vision-fix.js', 'crt-fix.js', 'scalp5-fix.js', 'livemap-fix.js'];
+const SCRIPTS = ['notif-fix.js', 'vision-fix.js', 'crt-fix.js', 'scalp5-fix.js', 'livemap-fix.js', 'view-fix.js', 'analisa-fix.js', 'state-fix.js'];
 
 export default async function middleware(request) {
   const res = await fetch(new URL('/index.html', request.url));
