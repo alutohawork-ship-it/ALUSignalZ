@@ -25,7 +25,10 @@
     const d = fitCv(cv, cx);
     if (!d) return;
     const CW = d.w, CH = d.h;
-    const iv = '1m';
+    // Timeframe chart mengikuti gaya: Scalping M1, Intraday M5, Swing H1
+    const selEl = (typeof document !== 'undefined' && document.getElementById) ? document.getElementById('tradingStyleSelect') : null;
+    const styleNow = (t && t.style) || (selEl && selEl.value) || 'Scalping';
+    const iv = styleNow === 'Intraday' ? '5m' : styleNow === 'Swing' ? '1h' : '1m';
     const tfMs = TF_MIN[iv] * 60000;
     const allRows = displayRows(k, iv);
     const live = prices[k] ? prices[k].price : null;
@@ -70,7 +73,9 @@
 
     // Candle/line: 80 candle terakhir, fokus ke entry bila posisi terisi
     let rows = focus ? liveViewRows(allRows, t).slice(-80) : allRows;
-    const { vis, slot, xOfT } = layoutX(rows, plotL, plotR, tfMs);
+    // Line & tick: area gambar sampai 60% lebar, sisi kanan dibiarkan kosong agar harga terbaru tidak mentok
+    const xR = mode === 'candle' ? plotR : plotL + (plotR - plotL) * 0.6;
+    const { vis, slot, xOfT } = layoutX(rows, plotL, xR, tfMs);
 
     // Skala harga
     let lo = Infinity, hi = -Infinity;
@@ -98,7 +103,10 @@
     }
 
     if (mode === 'tick') {
-      const xOfTime = tm => plotL + (tm - tStart) / Math.max(1, now - tStart) * (plotR - plotL);
+      // Jendela tick: kiri = awal jendela, harga terbaru di 60% lebar (bergerak dari kiri ke kanan)
+      const winStart = focus ? tStart : now - TICK_MS;
+      const winLen = Math.max(60000, now - winStart);
+      const xOfTime = tm => plotL + (tm - winStart) / winLen * (xR - plotL);
       if (tickView.length) {
         cx.save();
         cx.strokeStyle = '#60a5fa';
