@@ -1,10 +1,12 @@
-// api/generate.js — v220
-// v220 fix (SL/TP/entry konsisten):
-// - Entry zona = tepi kuartil (BUY di kuartil bawah demand, SELL di kuartil atas supply), bukan tengah/harga.
-// - Guardrail vision: cap SL per sesi + SL minimal di balik tepi jauh zona + rekonsiliasi entry tepi.
-// - NOW hanya bila momentum LTF searah; counter-trend → LIMIT di tepi zona.
-// - Safety gate: TP1 wajib >= 0.8R terhadap SL final, sonst pola R penuh.
-// TF PAIRS: Scalping M15/M5/M1 · Intraday H4/M30/M5 · Swing D1/H4/H1 · 3 TP · forced binary · hybrid vision.
+// api/generate.js — v221
+// v221: hybrid vision DIDiagnosa & diperbaiki:
+//  - aiVisionImg: fallback max_completion_tokens -> max_tokens + jejak error (lastVision).
+//  - guardVision: REPAIR (sisi LIMIT, SL salah sisi, clamp sesi) alih-alih menolak.
+//  - renderSignalChart dibungkus try/catch (status 'render-error').
+//  - Reasoning hybrid = narasi vision (panel HTF/MTF/LTF + catatan analis).
+//  - diag.vision menampilkan status hybrid: ok / http-xxx / parse / throw / render-error / no-key / disabled.
+// Membawa seluruh fitur v220: entry tepi zona, TP1 >= 0.8R gate, NOW hanya saat momentum LTF searah,
+// 3 TP semua mode, forced binary, TF pairs M15/M5/M1 · H4/M30/M5 · D1/H4/H1.
 
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { planBot } from '../lib/bot-ict.js';
@@ -20,7 +22,7 @@ import { monitorLTFStructure, calculatePreciseSL, LTF_TF } from '../lib/ltf-dyna
 import { renderSignalChart } from '../lib/chart-render.js';
 
 export const config = { maxDuration: 60 };
-const VERSION = 'v220';
+const VERSION = 'v221';
 const HYBRID = process.env.HYBRID_VISION !== '0';
 const TL_BASE = 'https://api.tickerlayer.com';
 const AI_BASE = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/+$/, '');
@@ -72,6 +74,7 @@ const cache = new Map();
 const outcomes = new Map();
 const stories = new Map();
 const visionCache = new Map();
+let lastVision = { status: 'idle', err: '' }; // [v221] jejak diagnostik hybrid
 const isNum = v => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
 const num = (v, f = 0) => (isNum(v) ? Number(v) : f);
 const tsMs = t => (t < 1e12 ? t * 1000 : t);
@@ -341,8 +344,6 @@ function synthesizeZone(ctx, dir, style, rows) {
     : { lo: sw - w, hi: sw, side: 'supply', kind: 'Swing High', tf: TF_ROLE[style].ltf.toUpperCase(), isSynthetic: true };
   return { z, score: 30, width: w / ctx.pip, d: Math.abs(ctx.price - (dir === 1 ? z.hi : z.lo)) / ctx.pip, inside: false, dir };
 }
-
-// [v220] Entry di TEPI zona (kuartil menguntungkan), bukan di tengah/harga saat ini
 function findEntryZone(ctx, p, pool, ltfRows) {
   const prox = PROX[p._style] || 50;
   const validPool = pool.filter(z => (p.dir === 1 ? z.side === 'demand' : z.side === 'supply'));
@@ -372,7 +373,6 @@ function findEntryZone(ctx, p, pool, ltfRows) {
   const z = { lo: p.dir === 1 ? entry - w2 : entry, hi: p.dir === 1 ? entry : entry + w2, side: p.dir === 1 ? 'demand' : 'supply', kind: 'Fallback', tf: TF_ROLE[p._style].ltf.toUpperCase(), isSynthetic: true };
   return { z, lim: entry, inside: false, distPip: off / ctx.pip };
 }
-
 function rejectionAt(ctx, rows, dir) {
   if (!Array.isArray(rows) || rows.length < 3) return false;
   const c = rows[rows.length - 1], p = rows[rows.length - 2];
@@ -446,6 +446,7 @@ function sigOf(p, ctx, style) {
     biasMode: p.biasMode || 'HTF_LEAD', expiry: p.expiry || null,
     cancelDistPips: p.cancelDistPips || 50,
     hybrid: !!p.hybrid,
+    visionStatus: p.visionStatus || 'rule',
     forced: !!p.forced, symbol: ctx.symbol, style, role: 'main',
     createdAt: Date.now(), lastTickAt: Date.now(),
     filledAt: p.type === 'MARKET' ? Date.now() : null,
@@ -488,26 +489,34 @@ async function aiJson(sys, obj, ms) {
   return null;
 }
 
+// [v221] Vision call dengan diagnostik + fallback parameter API
 async function aiVisionImg(sys, text, dataUrl, ms) {
-  if (!VIS_KEY) return null;
-  try {
-    const r = await httpJson(AI_BASE + '/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + VIS_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: VIS_MODEL, max_completion_tokens: 900, temperature: 0,
-        messages: [
-          { role: 'system', content: sys },
-          { role: 'user', content: [{ type: 'text', text }, { type: 'image_url', image_url: { url: dataUrl } }] },
-        ],
-      }),
-    }, ms);
-    if (!r || !r.ok) return null;
-    let txt = String(r.data?.choices?.[0]?.message?.content || '');
-    txt = txt.replace(/```(?:json)?/gi, '').replace(/```/g, '');
-    const a = txt.indexOf('{'), b = txt.lastIndexOf('}');
-    if (a >= 0 && b > a) { try { return JSON.parse(txt.slice(a, b + 1)); } catch {} }
-  } catch {}
+  if (!VIS_KEY) { lastVision = { status: 'no-key', err: 'VIS_KEY kosong' }; return null; }
+  const msgs = [
+    { role: 'system', content: sys },
+    { role: 'user', content: [{ type: 'text', text }, { type: 'image_url', image_url: { url: dataUrl } }] },
+  ];
+  const bodies = [
+    { model: VIS_MODEL, max_completion_tokens: 900, temperature: 0, messages: msgs },
+    { model: VIS_MODEL, max_tokens: 900, temperature: 0, messages: msgs },
+  ];
+  for (const body of bodies) {
+    try {
+      const r = await httpJson(AI_BASE + '/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + VIS_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }, ms);
+      if (!r || !r.ok) { lastVision = { status: 'http-' + (r ? r.status : 'fail'), err: String((r && r.text) || '').slice(0, 200) }; continue; }
+      let txt = String(r.data?.choices?.[0]?.message?.content || '');
+      txt = txt.replace(/```(?:json)?/gi, '').replace(/```/g, '');
+      const a = txt.indexOf('{'), b = txt.lastIndexOf('}');
+      if (a >= 0 && b > a) {
+        try { const j = JSON.parse(txt.slice(a, b + 1)); lastVision = { status: 'ok', err: '' }; return j; } catch {}
+      }
+      lastVision = { status: 'parse', err: txt.slice(0, 200) };
+    } catch (e) { lastVision = { status: 'throw', err: String(e.message || e).slice(0, 200) }; }
+  }
   return null;
 }
 
@@ -522,12 +531,15 @@ ATURAN:
 7. TIDAK perlu mengeluarkan TP (sistem yang mengatur TP1/TP2/TP3).
 Balas HANYA JSON: {"signal":"BUY|SELL","orderType":"NOW|LIMIT","entry":0,"sl":0,"zoneLow":0,"zoneHigh":0,"setup":"...","conviction":0,"perPanel":["HTF: ...","MTF: ...","LTF: ..."],"reason":"2-3 kalimat ID","reasonEn":"2-3 kalimat EN"}`;
 
-// [v220] Guardrail vision: edge-entry, cap SL per sesi, SL minimal di balik tepi jauh zona
+// [v221] Guardrail vision: REPAIR sebanyak mungkin, tolak hanya bila benar-benar tak terbaca
 function guardVision(v, ctx, style, b, live, sess) {
-  if (!v || (v.signal !== 'BUY' && v.signal !== 'SELL')) return null;
-  const dir = v.signal === 'BUY' ? 1 : -1;
+  if (!v || typeof v !== 'object') { lastVision = { status: 'empty', err: 'jawaban vision kosong' }; return null; }
+  const sg = String(v.signal || '').toUpperCase();
+  if (sg !== 'BUY' && sg !== 'SELL') { lastVision = { status: 'guard', err: 'signal=' + sg }; return null; }
+  const dir = sg === 'BUY' ? 1 : -1;
   let entry = Number(v.entry), sl = Number(v.sl);
-  if (!Number.isFinite(entry) || !Number.isFinite(sl) || entry <= 0 || sl <= 0) return null;
+  if (!Number.isFinite(entry) || entry <= 0) { lastVision = { status: 'guard', err: 'entry invalid' }; return null; }
+  if (!Number.isFinite(sl) || sl <= 0) { lastVision = { status: 'guard', err: 'sl invalid' }; return null; }
   let ot = String(v.orderType || '').toUpperCase() === 'LIMIT' ? 'LIMIT' : 'MARKET';
 
   let zone = null;
@@ -536,22 +548,27 @@ function guardVision(v, ctx, style, b, live, sess) {
     const hi = Math.max(Number(v.zoneLow), Number(v.zoneHigh));
     if (hi > lo) zone = { lo, hi };
   }
-
   if (zone && entry > zone.lo && entry < zone.hi) {
     const w = zone.hi - zone.lo;
     let edge = dir === 1 ? zone.lo + w * 0.25 : zone.hi - w * 0.25;
     edge = dir === 1 ? Math.min(edge, live) : Math.max(edge, live);
     if (Math.abs(live - edge) / ctx.pip >= 3) { entry = edge; ot = 'LIMIT'; }
-  } else if (ot === 'LIMIT') {
+  }
+
+  const prox = PROX[style] || 50;
+  if (ot === 'LIMIT') {
     const okSide = dir === 1 ? entry < live : entry > live;
     const dist = Math.abs(live - entry) / ctx.pip;
-    if (!okSide || dist > (PROX[style] || 50) * 2) return null;
+    if (!okSide) {
+      if (dist <= 8) { ot = 'MARKET'; entry = live; }
+      else { const d = Math.max(3, Math.min(dist, prox)); entry = dir === 1 ? live - d * ctx.pip : live + d * ctx.pip; }
+    } else if (dist > prox * 2) {
+      entry = dir === 1 ? live - prox * ctx.pip : live + prox * ctx.pip;
+    }
   } else if (Math.abs(entry - live) / ctx.pip > 8) entry = live;
 
-  const wrongSide = dir === 1 ? sl >= entry : sl <= entry;
-  if (wrongSide) return null;
+  if (dir === 1 ? sl >= entry : sl <= entry) sl = entry - dir * Math.max((b.min / ctx.pip) * 0.8, 25) * ctx.pip;
   let slDist = Math.abs(entry - sl) / ctx.pip;
-
   const sessCap = !sess ? 1 : (sess.liq <= 0.6 ? 0.6 : sess.liq < 1 ? 0.8 : 1.0);
   const minSL = Math.max(20, (b.min / ctx.pip) * 0.6);
   const maxSL = (b.max / ctx.pip) * 1.3 * sessCap;
@@ -567,6 +584,7 @@ function guardVision(v, ctx, style, b, live, sess) {
   let conv = Math.round(Number(v.conviction));
   if (!Number.isFinite(conv)) conv = 50;
   conv = Math.max(0, Math.min(100, conv));
+  lastVision = { status: 'ok', err: '' };
   return {
     dir, entry, sl, ot, conv,
     setup: String(v.setup || ''),
@@ -583,11 +601,18 @@ Balas HANYA JSON: {"id":"...","en":"..."}`;
 async function reasonManual(f) {
   if (f.status === 'STANDBY') return { id: buildReason(f, false), en: buildReason(f, true), ai: false };
   if (f.vReason) {
-    return {
-      id: buildReason(f, false) + '\n• Catatan: ' + f.vReason,
-      en: buildReason(f, true) + '\n• Note: ' + (f.vReasonEn || f.vReason),
-      ai: true,
+    // [v221] Reasoning hybrid = narasi vision (panel per TF + catatan analis)
+    const tpList = [f.tp1, f.tp2, f.tp3].filter(isNum).map(Number).join(' / ');
+    const mk = en => {
+      const L = ['[' + f.symbol + ' · ' + f.style + ' · ' + (f.scenarioName || '') + ']'];
+      (f.tfSummary || []).forEach(s => L.push('• ' + s));
+      L.push('• Entry: ' + f.signal + ' ' + (f.orderType === 'MARKET' ? 'NOW' : 'LIMIT') + ' @ ' + f.entry + ' — ' + (f.orderReason || ''));
+      L.push('• SL: ' + f.sl + ' (' + f.riskPips + ' pip) · TP: ' + tpList);
+      L.push('• Conviction: ' + f.conviction + '/100 ' + f.convictionLevel + ' · Risk ' + f.riskMultiplier + 'x · Prob ' + f.probability);
+      L.push('• ' + (en ? 'Analyst note: ' : 'Catatan analis: ') + (en ? (f.vReasonEn || f.vReason) : f.vReason));
+      return L.join('\n');
     };
+    return { id: mk(false), en: mk(true), ai: true };
   }
   return { id: buildReason(f, false), en: buildReason(f, true), ai: false };
 }
@@ -747,7 +772,6 @@ async function runManual(ctx, d, style) {
   if (rr.structMismatch) rrPenalty += 6;
   if (rr.atrOverflow) rrPenalty += 8;
 
-  // [v220] Safety gate: TP1 wajib >= 0.8R terhadap SL final
   const riskNow0 = Math.abs(p.entry - p.sl);
   const tp1d0 = p.tps && p.tps[0] != null ? Math.abs(p.tps[0] - p.entry) : 0;
   if (riskNow0 > 0 && tp1d0 / riskNow0 < 0.8) {
@@ -801,32 +825,46 @@ async function runManual(ctx, d, style) {
   p.sess = sess;
   p.biasMode = bias.mode;
 
+  // ── HYBRID VISION dengan diagnostik ──
   let hybrid = null;
   if (HYBRID && VIS_KEY) {
     const lastMt = mtfRows.length ? mtfRows[mtfRows.length - 1].t : 0;
     const vKey = ctx.symbol + '|' + style + '|' + lastMt + '|' + Math.round(ctx.price / (ctx.pip * 5));
     const vHit = visionCache.get(vKey);
-    if (vHit && Date.now() - vHit.t < 90000) hybrid = vHit.v;
-    else {
+    if (vHit && Date.now() - vHit.t < 90000) {
+      hybrid = vHit.v;
+      if (hybrid) lastVision = { status: 'ok', err: '' };
+    } else {
       const poolLines = pools.filter(x => x.strength >= 4 || x.ahead).sort((a, b2) => b2.strength - a.strength).slice(0, 4).map(x => ({ price: x.price, label: x.type }));
-      const img = renderSignalChart({
-        dec: ctx.dec, live: ctx.price,
-        panels: [
-          { label: H + ' HTF', rows: cl[role.htf].slice(-90), zones: nearZones.filter(z => z.tf === H), pools: [] },
-          { label: M + ' MTF', rows: cl[role.mtf].slice(-90), zones: nearZones.filter(z => z.tf === M), pools: poolLines },
-          { label: L + ' LTF', rows: cl[role.ltf].slice(-70), zones: nearZones.filter(z => z.tf === L), pools: [] },
-        ],
-      });
-      const text = 'Aset ' + ctx.symbol + ', gaya ' + style + '. Harga live ' + ctx.f(ctx.price) + '. Sesi ' + sess.key + ' (' + sess.wib + ') liq ' + sess.liq + 'x. ATR ' + slRef.atrTf.toUpperCase() + ' ' + ctx.dp(atrUse / ctx.pip) + ' pip. Gambar: 3 panel bertumpuk HTF/MTF/LTF, gridline harga ber-label, zona = kotak transparan, kolam = garis putus ber-label. Tentukan SATU sinyal sesuai aturan.';
-      let raw = await aiVisionImg(SYS_HYB, text, img, 25000);
-      hybrid = guardVision(raw, ctx, style, b, ctx.price, sess);
-      if (!hybrid && raw) {
-        const raw2 = await aiVisionImg(SYS_HYB, text + '\nKOREKSI: jawaban sebelumnya melanggar guardrail (sisi order/SL/jarak). Perbaiki dan balas JSON lagi.', img, 20000);
-        hybrid = guardVision(raw2, ctx, style, b, ctx.price, sess);
+      let img = null;
+      try {
+        img = renderSignalChart({
+          dec: ctx.dec, live: ctx.price,
+          panels: [
+            { label: H + ' HTF', rows: cl[role.htf].slice(-90), zones: nearZones.filter(z => z.tf === H), pools: [] },
+            { label: M + ' MTF', rows: cl[role.mtf].slice(-90), zones: nearZones.filter(z => z.tf === M), pools: poolLines },
+            { label: L + ' LTF', rows: cl[role.ltf].slice(-70), zones: nearZones.filter(z => z.tf === L), pools: [] },
+          ],
+        });
+      } catch (e) { lastVision = { status: 'render-error', err: String(e.message || e).slice(0, 200) }; }
+      if (img) {
+        const text = 'Aset ' + ctx.symbol + ', gaya ' + style + '. Harga live ' + ctx.f(ctx.price) + '. Sesi ' + sess.key + ' (' + sess.wib + ') liq ' + sess.liq + 'x. ATR ' + slRef.atrTf.toUpperCase() + ' ' + ctx.dp(atrUse / ctx.pip) + ' pip. Gambar: 3 panel bertumpuk HTF/MTF/LTF, gridline harga ber-label, zona = kotak transparan, kolam = garis putus ber-label. Tentukan SATU sinyal sesuai aturan.';
+        let raw = await aiVisionImg(SYS_HYB, text, img, 25000);
+        hybrid = guardVision(raw, ctx, style, b, ctx.price, sess);
+        if (!hybrid && raw) {
+          const raw2 = await aiVisionImg(SYS_HYB, text + '\nKOREKSI: jawaban sebelumnya melanggar guardrail (sisi order/SL/jarak). Perbaiki dan balas JSON lagi.', img, 20000);
+          hybrid = guardVision(raw2, ctx, style, b, ctx.price, sess);
+        }
       }
       visionCache.set(vKey, { t: Date.now(), v: hybrid });
       if (visionCache.size > 120) visionCache.delete(visionCache.keys().next().value);
     }
+  } else if (HYBRID && !VIS_KEY) {
+    lastVision = { status: 'no-key', err: 'VIS_KEY kosong' };
+  }
+  p.visionStatus = !HYBRID ? 'disabled' : (hybrid ? 'ok' : lastVision.status);
+  if (HYBRID && !hybrid) {
+    steps.push({ tf: 'Vision', text: 'Hybrid vision tidak aktif (' + lastVision.status + (lastVision.err ? ': ' + lastVision.err : '') + ') — pakai rule-engine.', textEn: 'Hybrid vision inactive (' + lastVision.status + ') — rule-engine used.' });
   }
 
   if (hybrid) {
@@ -835,7 +873,6 @@ async function runManual(ctx, d, style) {
     p.entry = hybrid.ot === 'MARKET' ? ctx.price : hybrid.entry;
     p.sl = hybrid.sl;
     p.type = hybrid.ot;
-    // [v220] NOW hanya bila momentum LTF searah; counter-trend → LIMIT di tepi zona
     if (p.type === 'MARKET' && lt.dir !== 0 && lt.dir !== p.dir && p.zone) {
       const w = p.zone.hi - p.zone.lo;
       let edge = p.dir === 1 ? p.zone.lo + w * 0.25 : p.zone.hi - w * 0.25;
@@ -855,7 +892,6 @@ async function runManual(ctx, d, style) {
     if (!fin2.tps) fin2 = { tps: buildTPs(p.entry, p.dir, Math.abs(p.entry - p.sl)), count: 3, mode: 'RISK_R', pips: [], rr1: 1, poorRR: false, runwayPip: null };
     p.tps = fin2.tps; p.tpCount = 3; p.tpMode = fin2.mode;
     p.tpCapped = fin2.mode !== 'RISK_R' && fin2.mode !== 'FIXED_PIP';
-    // [v220] safety gate juga untuk jalur hybrid
     const rk = Math.abs(p.entry - p.sl);
     const t1 = p.tps && p.tps[0] != null ? Math.abs(p.tps[0] - p.entry) : 0;
     if (rk > 0 && t1 / rk < 0.8) {
@@ -912,6 +948,7 @@ async function runManual(ctx, d, style) {
     slReason, cancelDistPips: p.cancelDistPips, biasMode: p.biasMode, whipsaw: !!whipsaw,
     liquidity: aheadPool ? aheadPool.type + ' ' + verdict.verdict : 'none',
     vReason: p.vReason || '', vReasonEn: p.vReasonEn || '',
+    visionStatus: p.visionStatus,
     chart: s.chart, expiry: p.expiry, dec: ctx.dec, price: ctx.f(ctx.price),
   };
   return { signal: s, facts: f };
@@ -932,7 +969,7 @@ function runBot(ctx, d) {
   const p = { dir: r.dir, entry: num(r.entry, ctx.price), sl: num(r.sl, ctx.price), type: r.orderType || 'MARKET', tps: buildTPs(Number(r.entry), r.dir, risk), tpCount: 3, riskPips: ctx.dp(risk / ctx.pip), conviction: 60, setupType: { type: 'Supply & Demand', id: 'Bot ICT POI' }, scenario: SCENARIOS.RETEST_BOS, orderReason: 'LIMIT di POI M15.', cancelDistPips: 60, steps: [], zone: null };
   const s = sigOf(p, ctx, 'Scalping');
   s.style = 'scalperbot'; s.tier = r.tier || 'EA'; s.expiresAt = Date.now() + 9e5;
-  const f = { symbol: ctx.symbol, style: 'scalperbot', status: s.status, signal: s.signal, orderType: s.orderType, entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: null, tp5: null, trigger: r.trigger || null, bias: r.bias || 'netral', dec: ctx.dec, price: ctx.f(ctx.price), conviction: 60, convictionLevel: 'MEDIUM', probability: '55%', riskMultiplier: 0.65, setup: 'Supply & Demand', scenarioName: 'Retest BOS', orderReason: 'LIMIT di POI M15.', cancelDistPips: 60, tfSummary: ['M15/M5/M1 searah POI'] };
+  const f = { symbol: ctx.symbol, style: 'scalperbot', status: s.status, signal: s.signal, orderType: s.orderType, entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: null, tp5: null, trigger: r.trigger || null, bias: r.bias || 'netral', dec: ctx.dec, price: ctx.f(ctx.price), conviction: 60, convictionLevel: 'MEDIUM', probability: '55%', riskMultiplier: 0.65, setup: 'Supply & Demand', scenarioName: 'Retest BOS', orderReason: 'LIMIT di POI M15.', cancelDistPips: 60, tfSummary: ['M15/M5/M1 searah POI'], visionStatus: 'bot' };
   return { signal: s, facts: f };
 }
 
@@ -1096,7 +1133,7 @@ async function handleCandles(body, lang, res, isBot, email) {
 
   let out;
   try { out = isBot ? runBot(ctx, data) : await runManual(ctx, data, style); }
-  catch (e) { console.error('[v220] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message); }
+  catch (e) { console.error('[v221] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message); }
   if (!out || !out.signal) out = standby(ctx, style, 'Menunggu setup valid.');
 
   const key = symbol + '|' + style;
@@ -1121,7 +1158,7 @@ async function handleCandles(body, lang, res, isBot, email) {
     if (!(body.forceNew && opp)) {
       await saveSignal(managed);
       if (!managed.reason && managed.reasons) managed.reason = lang === 'en' ? (managed.reasons.en || managed.reasons.id) : (managed.reasons.id || managed.reasons.en);
-      return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal: managed, diag: { version: VERSION, lifecycle: managed.state, tpHits: managed.tpHits, sticky: true, restored, store: kvOn ? 'KV' : 'MEM' } });
+      return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal: managed, diag: { version: VERSION, lifecycle: managed.state, tpHits: managed.tpHits, sticky: true, restored, store: kvOn ? 'KV' : 'MEM', vision: managed.visionStatus || 'sticky' } });
     }
   }
   if (isBot && out.signal.status !== 'STANDBY') { try { await markTrialBotUsed(email); } catch {} }
@@ -1136,7 +1173,7 @@ async function handleCandles(body, lang, res, isBot, email) {
   }
   const signal = norm3TP({ ...out.signal, reason: lang === 'en' ? story.v.en : story.v.id, reasons: { id: story.v.id, en: story.v.en }, reasonSource: f.vReason ? 'VISION_HYBRID' : (story.v.ai ? 'AI' : 'RULES'), aiReasoning: !!story.v.ai || !!f.vReason });
   if (signal.status !== 'STANDBY') await saveSignal(signal);
-  return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal, diag: { version: VERSION, status: signal.status, hybrid: !!signal.hybrid, session: f.session || null, liquidity: f.liquidity || null, biasMode: f.biasMode || null, conviction: f.conviction || 0, setup: f.setup || null, scenario: f.scenarioName || null, tpCount: signal.tpCount || 0, chartTf: signal.chart ? signal.chart.tf : null, spanPips: signal.chart ? signal.chart.range.spanPips : null, store: kvOn ? 'KV' : 'MEM' } });
+  return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal, diag: { version: VERSION, status: signal.status, hybrid: !!signal.hybrid, vision: f.visionStatus || (signal.hybrid ? 'ok' : 'rule'), session: f.session || null, liquidity: f.liquidity || null, biasMode: f.biasMode || null, conviction: f.conviction || 0, setup: f.setup || null, scenario: f.scenarioName || null, tpCount: signal.tpCount || 0, chartTf: signal.chart ? signal.chart.tf : null, spanPips: signal.chart ? signal.chart.range.spanPips : null, store: kvOn ? 'KV' : 'MEM' } });
 }
 
 export default async function handler(req, res) {
