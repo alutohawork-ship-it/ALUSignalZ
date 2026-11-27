@@ -1,9 +1,10 @@
-// api/generate.js — v219
-// TF PAIRS: Scalping M15/M5/M1 · Intraday H4/M30/M5 · Swing D1/H4/H1
-// 3 TP semua mode · entry single (manual) / zone (vision) · forced binary · hybrid vision
-// v219 fix: norm3TP (signal sticky lama dipaksa 3 TP) + sticky memakai reason bawaannya
-// (teks reasoning selalu cocok dengan angka di card).
-// Env opsional: HYBRID_VISION=0 (pure rule-engine).
+// api/generate.js — v220
+// v220 fix (SL/TP/entry konsisten):
+// - Entry zona = tepi kuartil (BUY di kuartil bawah demand, SELL di kuartil atas supply), bukan tengah/harga.
+// - Guardrail vision: cap SL per sesi + SL minimal di balik tepi jauh zona + rekonsiliasi entry tepi.
+// - NOW hanya bila momentum LTF searah; counter-trend → LIMIT di tepi zona.
+// - Safety gate: TP1 wajib >= 0.8R terhadap SL final, sonst pola R penuh.
+// TF PAIRS: Scalping M15/M5/M1 · Intraday H4/M30/M5 · Swing D1/H4/H1 · 3 TP · forced binary · hybrid vision.
 
 import { checkAccess, markTrialBotUsed } from '../lib/access.js';
 import { planBot } from '../lib/bot-ict.js';
@@ -19,7 +20,7 @@ import { monitorLTFStructure, calculatePreciseSL, LTF_TF } from '../lib/ltf-dyna
 import { renderSignalChart } from '../lib/chart-render.js';
 
 export const config = { maxDuration: 60 };
-const VERSION = 'v219';
+const VERSION = 'v220';
 const HYBRID = process.env.HYBRID_VISION !== '0';
 const TL_BASE = 'https://api.tickerlayer.com';
 const AI_BASE = (process.env.QWEN_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.gutsai.id/v1').replace(/\/+$/, '');
@@ -79,7 +80,6 @@ const iso = d => d.toISOString().slice(0, 10);
 const dw = d => (d === 1 ? 'bullish' : d === -1 ? 'bearish' : 'netral');
 const buildTPs = (e, dir, r) => (!(r > 0) || !Number.isFinite(e)) ? [e, e, e] : TP_MULT.map(m => e + dir * r * m);
 
-// [v219] Paksa format 3 TP pada signal APA PUN (termasuk sticky lama dari versi sebelumnya)
 function norm3TP(s) {
   if (!s || typeof s !== 'object') return s;
   s.tp4 = null; s.tp5 = null; s.tpCount = 3;
@@ -341,6 +341,8 @@ function synthesizeZone(ctx, dir, style, rows) {
     : { lo: sw - w, hi: sw, side: 'supply', kind: 'Swing High', tf: TF_ROLE[style].ltf.toUpperCase(), isSynthetic: true };
   return { z, score: 30, width: w / ctx.pip, d: Math.abs(ctx.price - (dir === 1 ? z.hi : z.lo)) / ctx.pip, inside: false, dir };
 }
+
+// [v220] Entry di TEPI zona (kuartil menguntungkan), bukan di tengah/harga saat ini
 function findEntryZone(ctx, p, pool, ltfRows) {
   const prox = PROX[p._style] || 50;
   const validPool = pool.filter(z => (p.dir === 1 ? z.side === 'demand' : z.side === 'supply'));
@@ -349,10 +351,16 @@ function findEntryZone(ctx, p, pool, ltfRows) {
     const inside = ctx.price >= zl && ctx.price <= zh;
     const beyond = p.dir === 1 ? ctx.price < zl : ctx.price > zh;
     if (beyond) continue;
-    const lim = inside ? ctx.price : (p.dir === 1 ? zh + Math.min(2 * ctx.pip, 0.1 * w) : zl - Math.min(2 * ctx.pip, 0.1 * w));
-    const sideOk = p.dir === 1 ? lim <= ctx.price : lim >= ctx.price;
-    const distPip = Math.abs(ctx.price - lim) / ctx.pip;
-    if (sideOk && distPip <= prox) return { z, lim, inside, distPip };
+    let edge;
+    if (inside) {
+      edge = p.dir === 1 ? zl + w * 0.25 : zh - w * 0.25;
+      edge = p.dir === 1 ? Math.min(edge, ctx.price) : Math.max(edge, ctx.price);
+    } else {
+      edge = p.dir === 1 ? zh + Math.min(2 * ctx.pip, 0.1 * w) : zl - Math.min(2 * ctx.pip, 0.1 * w);
+    }
+    const sideOk = p.dir === 1 ? edge <= ctx.price : edge >= ctx.price;
+    const distPip = Math.abs(ctx.price - edge) / ctx.pip;
+    if (sideOk && distPip <= prox) return { z, lim: edge, inside, distPip };
   }
   const synth = synthesizeZone(ctx, p.dir, p._style, ltfRows);
   if (synth) {
@@ -364,6 +372,7 @@ function findEntryZone(ctx, p, pool, ltfRows) {
   const z = { lo: p.dir === 1 ? entry - w2 : entry, hi: p.dir === 1 ? entry : entry + w2, side: p.dir === 1 ? 'demand' : 'supply', kind: 'Fallback', tf: TF_ROLE[p._style].ltf.toUpperCase(), isSynthetic: true };
   return { z, lim: entry, inside: false, distPip: off / ctx.pip };
 }
+
 function rejectionAt(ctx, rows, dir) {
   if (!Array.isArray(rows) || rows.length < 3) return false;
   const c = rows[rows.length - 1], p = rows[rows.length - 2];
@@ -505,41 +514,64 @@ async function aiVisionImg(sys, text, dataUrl, ms) {
 const SYS_HYB = `Anda analis trading XAUUSD/BTCUSD membaca gambar chart 3 panel bertumpuk (HTF/MTF/LTF) dengan gridline harga ber-label, zona transparan, dan garis kolam likuiditas ber-label. Keluarkan SATU sinyal.
 ATURAN:
 1. Wajib pilih BUY atau SELL (dilarang HOLD/WAIT). Choppy/tipis → tetap pilih, conviction LOW.
-2. Wajib pilih NOW atau LIMIT: NOW bila harga sudah di titik reaksi/momentum LTF berjalan; LIMIT bila harga belum menyentuh zona terukur agar SL/R:R efisien.
-3. Baca level entry & SL PRESISI dari label gridline/zona pada gambar. SL di balik invalidasi struktur (di luar zona/swing/kolam likuiditas), jangan di tengah noise.
+2. NOW hanya bila momentum LTF SEARAH dan harga di titik reaksi; selain itu LIMIT di tepi zona (kuartil terjauh dari SL) agar SL dekat dan R:R layak.
+3. Baca level entry & SL PRESISI dari label gridline/zona. SL tepat di balik tepi jauh zona/swing (jangan lebar melebihi zona), entry di tepi zona yang menguntungkan.
 4. Klasifikasi setup: Supply & Demand | Reversal | Kontinuitas | Fakeout/Trap | Retest BOS | Ranging Edge | Struktur Belum Jelas.
 5. Conviction 0-100: HTF&zona 0-30, struktur&likuiditas&setup 0-30, trigger&R:R 0-25, sesi&volatilitas 0-15. Jangan berlebihan.
 6. Jika HTF dan MTF berlawanan → conviction kecil (counter-trend). Jika HTF stale/tanpa displacement → jangan klaim Kontinuitas.
-7. TIDAK perlu mengeluarkan TP (sistem yang mengatur TP, maksimal TP1/TP2/TP3).
+7. TIDAK perlu mengeluarkan TP (sistem yang mengatur TP1/TP2/TP3).
 Balas HANYA JSON: {"signal":"BUY|SELL","orderType":"NOW|LIMIT","entry":0,"sl":0,"zoneLow":0,"zoneHigh":0,"setup":"...","conviction":0,"perPanel":["HTF: ...","MTF: ...","LTF: ..."],"reason":"2-3 kalimat ID","reasonEn":"2-3 kalimat EN"}`;
 
-function guardVision(v, ctx, style, b, live) {
+// [v220] Guardrail vision: edge-entry, cap SL per sesi, SL minimal di balik tepi jauh zona
+function guardVision(v, ctx, style, b, live, sess) {
   if (!v || (v.signal !== 'BUY' && v.signal !== 'SELL')) return null;
   const dir = v.signal === 'BUY' ? 1 : -1;
   let entry = Number(v.entry), sl = Number(v.sl);
   if (!Number.isFinite(entry) || !Number.isFinite(sl) || entry <= 0 || sl <= 0) return null;
-  const ot = String(v.orderType || '').toUpperCase() === 'LIMIT' ? 'LIMIT' : 'MARKET';
-  if (ot === 'LIMIT') {
+  let ot = String(v.orderType || '').toUpperCase() === 'LIMIT' ? 'LIMIT' : 'MARKET';
+
+  let zone = null;
+  if (isNum(v.zoneLow) && isNum(v.zoneHigh)) {
+    const lo = Math.min(Number(v.zoneLow), Number(v.zoneHigh));
+    const hi = Math.max(Number(v.zoneLow), Number(v.zoneHigh));
+    if (hi > lo) zone = { lo, hi };
+  }
+
+  if (zone && entry > zone.lo && entry < zone.hi) {
+    const w = zone.hi - zone.lo;
+    let edge = dir === 1 ? zone.lo + w * 0.25 : zone.hi - w * 0.25;
+    edge = dir === 1 ? Math.min(edge, live) : Math.max(edge, live);
+    if (Math.abs(live - edge) / ctx.pip >= 3) { entry = edge; ot = 'LIMIT'; }
+  } else if (ot === 'LIMIT') {
     const okSide = dir === 1 ? entry < live : entry > live;
     const dist = Math.abs(live - entry) / ctx.pip;
-    if (!okSide) return null;
-    if (dist > (PROX[style] || 50) * 2) return null;
+    if (!okSide || dist > (PROX[style] || 50) * 2) return null;
   } else if (Math.abs(entry - live) / ctx.pip > 8) entry = live;
+
   const wrongSide = dir === 1 ? sl >= entry : sl <= entry;
   if (wrongSide) return null;
   let slDist = Math.abs(entry - sl) / ctx.pip;
+
+  const sessCap = !sess ? 1 : (sess.liq <= 0.6 ? 0.6 : sess.liq < 1 ? 0.8 : 1.0);
   const minSL = Math.max(20, (b.min / ctx.pip) * 0.6);
-  const maxSL = (b.max / ctx.pip) * 1.3;
-  if (slDist < minSL) { sl = entry - dir * minSL * ctx.pip; slDist = minSL; }
-  if (slDist > maxSL) { sl = entry - dir * maxSL * ctx.pip; slDist = maxSL; }
+  const maxSL = (b.max / ctx.pip) * 1.3 * sessCap;
+  if (zone) {
+    const farEdge = dir === 1 ? zone.lo : zone.hi;
+    const minStruct = (Math.abs(entry - farEdge) + Math.max(2 * ctx.pip, 0.15 * (zone.hi - zone.lo))) / ctx.pip;
+    if (slDist < minStruct) slDist = minStruct;
+  }
+  if (slDist < minSL) slDist = minSL;
+  if (slDist > maxSL) slDist = maxSL;
+  sl = entry - dir * slDist * ctx.pip;
+
   let conv = Math.round(Number(v.conviction));
   if (!Number.isFinite(conv)) conv = 50;
   conv = Math.max(0, Math.min(100, conv));
   return {
     dir, entry, sl, ot, conv,
     setup: String(v.setup || ''),
-    zoneLow: isNum(v.zoneLow) ? Number(v.zoneLow) : null,
-    zoneHigh: isNum(v.zoneHigh) ? Number(v.zoneHigh) : null,
+    zoneLow: zone ? zone.lo : (isNum(v.zoneLow) ? Number(v.zoneLow) : null),
+    zoneHigh: zone ? zone.hi : (isNum(v.zoneHigh) ? Number(v.zoneHigh) : null),
     perPanel: Array.isArray(v.perPanel) ? v.perPanel.map(String).slice(0, 3) : [],
     reason: String(v.reason || ''), reasonEn: String(v.reasonEn || v.reason || ''),
   };
@@ -645,7 +677,6 @@ async function runManual(ctx, d, style) {
   if (whipsaw) steps.push({ tf: 'Whipsaw', text: 'Double sweep — kemungkinan news. Risk 0.25x.', textEn: 'Double sweep — news whipsaw.' });
   if (bias.mode === 'LTF_COUNTER') steps.push({ tf: 'LTF Dinamis', text: 'LTF memimpin counter-HTF, penalti -' + bias.penalty, textEn: 'LTF leads counter-HTF.' });
 
-  // FORCED BINARY: WAJIB BUY/SELL, dilarang standby karena struktur
   const ltfMonRows0 = cl[LTF_TF[style] || role.ltf] || ltfRows;
   const healthOf = ddir => {
     const mon = monitorLTFStructure(ltfMonRows0, ddir, ctx, style);
@@ -676,10 +707,6 @@ async function runManual(ctx, d, style) {
 
   const ez = findEntryZone(ctx, p, pool, ltfRows);
   p.entry = ez.lim; p.zone = ez.z;
-  if (p.type !== 'MARKET') {
-    const okSide = dir === 1 ? p.entry <= ctx.price : p.entry >= ctx.price;
-    if (!okSide) p.entry = ctx.price;
-  }
   p.zone = coupleZone(p.zone, p.entry, p.dir, ctx.pip, atrUse);
 
   const struct = swingLevel(cl[slRef.swingTf] || ltfRows, p.dir, slRef.win);
@@ -719,6 +746,17 @@ async function runManual(ctx, d, style) {
   if (fin.poorRR) rrPenalty += 8;
   if (rr.structMismatch) rrPenalty += 6;
   if (rr.atrOverflow) rrPenalty += 8;
+
+  // [v220] Safety gate: TP1 wajib >= 0.8R terhadap SL final
+  const riskNow0 = Math.abs(p.entry - p.sl);
+  const tp1d0 = p.tps && p.tps[0] != null ? Math.abs(p.tps[0] - p.entry) : 0;
+  if (riskNow0 > 0 && tp1d0 / riskNow0 < 0.8) {
+    const dd = plan.mode === 'PIP' ? plan.targets.map(t => t * ctx.pip) : plan.targets.map(m => m * riskNow0);
+    p.tps = dd.map(x => p.entry + p.dir * x);
+    p.tpMode = 'RISK_R'; p.tpCapped = false;
+    rrPenalty += 6;
+    steps.push({ tf: 'R:R', text: 'TP dipaksa pola R penuh karena runway < 0.8R — cegah SL/TP bertolak belakang.', textEn: 'TPs forced to full R-multiple: runway < 0.8R.' });
+  }
 
   let setupType = { type: scenario.name, id: scenario.why, en: scenario.why };
 
@@ -763,7 +801,6 @@ async function runManual(ctx, d, style) {
   p.sess = sess;
   p.biasMode = bias.mode;
 
-  // HYBRID VISION: render → vision → guardrail → override
   let hybrid = null;
   if (HYBRID && VIS_KEY) {
     const lastMt = mtfRows.length ? mtfRows[mtfRows.length - 1].t : 0;
@@ -782,10 +819,10 @@ async function runManual(ctx, d, style) {
       });
       const text = 'Aset ' + ctx.symbol + ', gaya ' + style + '. Harga live ' + ctx.f(ctx.price) + '. Sesi ' + sess.key + ' (' + sess.wib + ') liq ' + sess.liq + 'x. ATR ' + slRef.atrTf.toUpperCase() + ' ' + ctx.dp(atrUse / ctx.pip) + ' pip. Gambar: 3 panel bertumpuk HTF/MTF/LTF, gridline harga ber-label, zona = kotak transparan, kolam = garis putus ber-label. Tentukan SATU sinyal sesuai aturan.';
       let raw = await aiVisionImg(SYS_HYB, text, img, 25000);
-      hybrid = guardVision(raw, ctx, style, b, ctx.price);
+      hybrid = guardVision(raw, ctx, style, b, ctx.price, sess);
       if (!hybrid && raw) {
         const raw2 = await aiVisionImg(SYS_HYB, text + '\nKOREKSI: jawaban sebelumnya melanggar guardrail (sisi order/SL/jarak). Perbaiki dan balas JSON lagi.', img, 20000);
-        hybrid = guardVision(raw2, ctx, style, b, ctx.price);
+        hybrid = guardVision(raw2, ctx, style, b, ctx.price, sess);
       }
       visionCache.set(vKey, { t: Date.now(), v: hybrid });
       if (visionCache.size > 120) visionCache.delete(visionCache.keys().next().value);
@@ -794,13 +831,23 @@ async function runManual(ctx, d, style) {
 
   if (hybrid) {
     p.dir = hybrid.dir;
+    p.zone = coupleZone(hybrid.zoneLow != null && hybrid.zoneHigh != null ? { lo: Math.min(hybrid.zoneLow, hybrid.zoneHigh), hi: Math.max(hybrid.zoneLow, hybrid.zoneHigh), kind: 'Zona Vision', tf: M } : p.zone, hybrid.entry, p.dir, ctx.pip, atrUse);
     p.entry = hybrid.ot === 'MARKET' ? ctx.price : hybrid.entry;
     p.sl = hybrid.sl;
     p.type = hybrid.ot;
+    // [v220] NOW hanya bila momentum LTF searah; counter-trend → LIMIT di tepi zona
+    if (p.type === 'MARKET' && lt.dir !== 0 && lt.dir !== p.dir && p.zone) {
+      const w = p.zone.hi - p.zone.lo;
+      let edge = p.dir === 1 ? p.zone.lo + w * 0.25 : p.zone.hi - w * 0.25;
+      edge = p.dir === 1 ? Math.min(edge, ctx.price) : Math.max(edge, ctx.price);
+      if (Math.abs(ctx.price - edge) / ctx.pip >= 3) {
+        p.entry = edge; p.type = 'LIMIT';
+        p.orderReason = 'LIMIT: momentum LTF berlawanan arah — tunggu retest tepi zona.';
+      }
+    }
     p.riskPips = ctx.dp(Math.abs(p.entry - p.sl) / ctx.pip);
     p.invalidLevel = p.sl;
-    p.zone = coupleZone(hybrid.zoneLow != null && hybrid.zoneHigh != null ? { lo: Math.min(hybrid.zoneLow, hybrid.zoneHigh), hi: Math.max(hybrid.zoneLow, hybrid.zoneHigh), kind: 'Zona Vision', tf: M } : p.zone, p.entry, p.dir, ctx.pip, atrUse);
-    p.orderReason = hybrid.ot === 'MARKET' ? 'NOW: reaksi/momentum aktif terkonfirmasi vision.' : 'LIMIT: harga belum di zona terukur (vision).';
+    if (!p.orderReason) p.orderReason = hybrid.ot === 'MARKET' ? 'NOW: reaksi/momentum aktif terkonfirmasi vision.' : 'LIMIT: harga belum di zona terukur (vision).';
     slReason = 'level invalidasi vision di balik struktur';
     const wall = nearestWall(ctx, p.dir, allZones, role.htf, role.mtf);
     const draw2 = nearestDraw(pools, p.dir, ctx);
@@ -808,6 +855,14 @@ async function runManual(ctx, d, style) {
     if (!fin2.tps) fin2 = { tps: buildTPs(p.entry, p.dir, Math.abs(p.entry - p.sl)), count: 3, mode: 'RISK_R', pips: [], rr1: 1, poorRR: false, runwayPip: null };
     p.tps = fin2.tps; p.tpCount = 3; p.tpMode = fin2.mode;
     p.tpCapped = fin2.mode !== 'RISK_R' && fin2.mode !== 'FIXED_PIP';
+    // [v220] safety gate juga untuk jalur hybrid
+    const rk = Math.abs(p.entry - p.sl);
+    const t1 = p.tps && p.tps[0] != null ? Math.abs(p.tps[0] - p.entry) : 0;
+    if (rk > 0 && t1 / rk < 0.8) {
+      const dd = plan.mode === 'PIP' ? plan.targets.map(t => t * ctx.pip) : plan.targets.map(m => m * rk);
+      p.tps = dd.map(x => p.entry + p.dir * x);
+      p.tpMode = 'RISK_R'; p.tpCapped = false;
+    }
     let conv2 = hybrid.conv;
     const htfWeak2 = !(ht.fresh || ht.displaced);
     const mixed2 = htfWeak2 && it.dir !== 0 && lt.dir !== 0 && it.dir !== lt.dir;
@@ -1041,7 +1096,7 @@ async function handleCandles(body, lang, res, isBot, email) {
 
   let out;
   try { out = isBot ? runBot(ctx, data) : await runManual(ctx, data, style); }
-  catch (e) { console.error('[v219] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message); }
+  catch (e) { console.error('[v220] engine error:', e.message, e.stack); out = standby(ctx, style, 'Engine error: ' + e.message); }
   if (!out || !out.signal) out = standby(ctx, style, 'Menunggu setup valid.');
 
   const key = symbol + '|' + style;
@@ -1065,7 +1120,6 @@ async function handleCandles(body, lang, res, isBot, email) {
     const opp = out.signal.status !== 'STANDBY' && out.signal.signal !== managed.signal;
     if (!(body.forceNew && opp)) {
       await saveSignal(managed);
-      // [v219] STICKY: pakai reason bawaan signal lama agar TEKS cocok dengan ANGKA di card
       if (!managed.reason && managed.reasons) managed.reason = lang === 'en' ? (managed.reasons.en || managed.reasons.id) : (managed.reasons.id || managed.reasons.en);
       return res.status(200).json({ ok: true, mode: isBot ? 'bot' : 'candles', symbol, style, price, signal: managed, diag: { version: VERSION, lifecycle: managed.state, tpHits: managed.tpHits, sticky: true, restored, store: kvOn ? 'KV' : 'MEM' } });
     }
