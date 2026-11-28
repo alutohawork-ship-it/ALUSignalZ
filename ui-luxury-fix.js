@@ -1,4 +1,4 @@
-// ui-luxury-fix.js — Transformasi UI Luxury Fintech & Navigasi Tab via Middleware
+// ui-luxury-fix.js — Transformasi UI Luxury Fintech, Navigasi Tab & Live Tick Card
 (function () {
   if (window.__UI_LUXURY_INIT__) return;
   window.__UI_LUXURY_INIT__ = true;
@@ -9,6 +9,7 @@
   ];
 
   let currentTab = 'home';
+  const prevPx = { XAUUSD: null, BTCUSD: null };
 
   function injectStyles() {
     if (document.getElementById('luxury-ui-css')) return;
@@ -164,12 +165,16 @@
       history: createPane('pane-history')
     };
 
-    // --- TAB 1: HOME ---
+    // --- TAB 1: HOME (Tanpa Live Market Stream, 2 Card Sparkline Live WS di atas) ---
+    if (streamPanel) {
+      streamPanel.remove();
+    }
+
     const homeSparkGrid = document.createElement('div');
     homeSparkGrid.id = 'luxHomeSparkGrid';
     homeSparkGrid.className = 'grid grid-cols-2 gap-2.5';
     homeSparkGrid.innerHTML = ['XAUUSD', 'BTCUSD'].map(sym => `
-      <div onclick="window.luxGoSignal('${sym}')" class="lux-card p-3 cursor-pointer active:scale-[0.98] transition relative overflow-hidden">
+      <div id="lux-card-${sym}" onclick="window.luxGoSignal('${sym}')" class="lux-card p-3 cursor-pointer active:scale-[0.98] transition relative overflow-hidden">
         <div class="flex items-center justify-between mb-1">
           <div class="flex items-center gap-1.5">
             <span class="w-5 h-5 rounded-full bg-darkbg border border-panelborder flex items-center justify-center text-[10px] font-black ${sym === 'XAUUSD' ? 'text-yellow-400' : 'text-orange-400'}">
@@ -177,20 +182,22 @@
             </span>
             <div>
               <p class="text-[11px] font-extrabold text-white leading-none">${sym === 'XAUUSD' ? 'Gold Spot' : 'Bitcoin'}</p>
-              <p class="text-[8px] font-mono text-gray-400 mt-0.5">${sym}</p>
+              <p class="text-[8px] font-mono text-gray-400 mt-0.5 flex items-center gap-1">
+                <span>${sym}</span>
+                <span id="lux-dot-${sym}" class="inline-block w-1.5 h-1.5 rounded-full bg-gray-500"></span>
+              </p>
             </div>
           </div>
-          <span id="lux-pct-${sym}" class="text-[9px] font-mono font-bold text-emerald-400">0.00%</span>
+          <span id="lux-pct-${sym}" class="text-[9px] font-mono font-bold text-gray-400">0.00%</span>
         </div>
-        <p id="lux-px-${sym}" class="text-sm font-black font-mono text-white tracking-tight my-1">--.--</p>
-        <div class="w-full h-[46px] mt-1">
+        <p id="lux-px-${sym}" class="text-sm font-black font-mono text-white tracking-tight my-1 transition-colors duration-150">--.--</p>
+        <div class="w-full h-[50px] mt-1">
           <canvas id="lux-spark-${sym}" class="w-full h-full"></canvas>
         </div>
       </div>
     `).join('');
 
     panes.home.appendChild(homeSparkGrid);
-    if (streamPanel) panes.home.appendChild(streamPanel);
     if (highlightList) panes.home.appendChild(highlightList);
     if (sessionPanel) panes.home.appendChild(sessionPanel);
 
@@ -321,6 +328,7 @@
 
     setupSearchablePair();
     hookVisionReDraw();
+    hookLiveTickUpdates();
   }
 
   function switchTab(tab) {
@@ -381,6 +389,8 @@
       if (typeof renderCalendar === 'function') renderCalendar();
       if (typeof renderRecap === 'function') renderRecap();
       if (typeof renderHistory === 'function') renderHistory();
+    } else if (tab === 'home') {
+      updateHomeSparklines();
     }
 
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -529,32 +539,93 @@
     }
   }
 
+  // Hook langsung ke addTick / onQuote agar setiap tick WebSocket langsung menggerakkan card atas
+  function hookLiveTickUpdates() {
+    if (typeof window.addTick === 'function' && !window.__LUX_TICK_HOOKED__) {
+      window.__LUX_TICK_HOOKED__ = true;
+      const origAddTick = window.addTick;
+      window.addTick = function (k, p) {
+        const res = origAddTick.apply(this, arguments);
+        if (currentTab === 'home' && (k === 'XAUUSD' || k === 'BTCUSD')) {
+          updateHomeSparklines();
+        }
+        return res;
+      };
+    }
+  }
+
   function updateHomeSparklines() {
     if (currentTab !== 'home') return;
+    const now = Date.now();
+
     ['XAUUSD', 'BTCUSD'].forEach(sym => {
       const pxEl = document.getElementById('lux-px-' + sym);
       const pctEl = document.getElementById('lux-pct-' + sym);
+      const dotEl = document.getElementById('lux-dot-' + sym);
       const canvas = document.getElementById('lux-spark-' + sym);
       if (!canvas) return;
 
-      const hlCard = [...document.querySelectorAll('#highlightList > div')].find(d => d.textContent.includes(sym));
-      let liveText = '--.--';
-      let pctText = '0.00%';
-      if (hlCard) {
-        const spans = hlCard.querySelectorAll('span');
-        if (spans[1]) liveText = spans[1].textContent.trim();
-        const m15Pct = hlCard.querySelectorAll('p.font-mono')[2] || hlCard.querySelectorAll('p.font-mono')[0];
-        if (m15Pct) pctText = m15Pct.textContent.trim();
-      }
-      if (pxEl) pxEl.textContent = liveText;
-      const isNeg = pctText.startsWith('-') || pctText.startsWith('−');
-      if (pctEl) {
-        pctEl.textContent = (isNeg ? '▼ ' : '▲ ') + pctText.replace(/^[+-−]/, '');
-        pctEl.className = `text-[9px] font-mono font-bold ${isNeg ? 'text-red-400' : 'text-emerald-400'}`;
+      const pObj = (typeof prices !== 'undefined' && prices[sym]) ? prices[sym] : null;
+      const liveVal = pObj && Number.isFinite(Number(pObj.price)) ? Number(pObj.price) : null;
+      const isLive = !!(pObj && (now - (pObj.recv || 0) < 30000));
+
+      if (dotEl) {
+        dotEl.className = 'inline-block w-1.5 h-1.5 rounded-full ' + (isLive ? 'bg-emerald-400 animate-pulse' : 'bg-gray-500');
       }
 
+      // Ambil titik harga live tick (hist -> candles 1m -> seriesRows)
+      let pts = [];
+      if (typeof hist !== 'undefined' && Array.isArray(hist[sym]) && hist[sym].length > 1) {
+        pts = hist[sym].slice(-60).map(h => h.p).filter(Number.isFinite);
+      }
+      if (pts.length < 2 && typeof candles !== 'undefined' && candles[sym] && Array.isArray(candles[sym][1])) {
+        pts = candles[sym][1].slice(-60).map(c => c.close).filter(Number.isFinite);
+      }
+      if (pts.length < 2 && typeof seriesRows === 'function') {
+        const rows = seriesRows(sym, '5m');
+        if (rows && rows.length > 1) pts = rows.slice(-60).map(r => r.c).filter(Number.isFinite);
+      }
+      if (liveVal != null && (!pts.length || pts[pts.length - 1] !== liveVal)) {
+        pts.push(liveVal);
+      }
+
+      const displayPx = liveVal != null ? liveVal : (pts.length ? pts[pts.length - 1] : null);
+      if (pxEl) {
+        pxEl.textContent = (displayPx != null && typeof fmt === 'function')
+          ? fmt(displayPx)
+          : (displayPx != null ? displayPx.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '--.--');
+
+        // Flash warna naik/turun per tick
+        if (prevPx[sym] != null && displayPx != null && displayPx !== prevPx[sym]) {
+          pxEl.classList.remove('text-white', 'text-emerald-400', 'text-red-400');
+          pxEl.classList.add(displayPx > prevPx[sym] ? 'text-emerald-400' : 'text-red-400');
+          setTimeout(() => {
+            pxEl.classList.remove('text-emerald-400', 'text-red-400');
+            pxEl.classList.add('text-white');
+          }, 260);
+        }
+        if (displayPx != null) prevPx[sym] = displayPx;
+      }
+
+      // Hitung persentase perubahan dari titik awal series atau open candle
+      let pct = 0;
+      if (pts.length >= 2 && pts[0] > 0) {
+        pct = ((pts[pts.length - 1] - pts[0]) / pts[0]) * 100;
+      } else if (typeof candles !== 'undefined' && candles[sym] && candles[sym][15] && candles[sym][15].length && displayPx != null) {
+        const o = candles[sym][15][candles[sym][15].length - 1].open;
+        if (o > 0) pct = ((displayPx - o) / o) * 100;
+      }
+
+      const isNeg = pct < 0;
+      if (pctEl) {
+        const sign = pct > 0 ? '+' : '';
+        pctEl.textContent = (isNeg ? '▼ ' : '▲ ') + sign + pct.toFixed(2) + '%';
+        pctEl.className = `text-[9px] font-mono font-bold ${pct > 0 ? 'text-emerald-400' : pct < 0 ? 'text-red-400' : 'text-gray-400'}`;
+      }
+
+      // Gambar grafik garis + gradasi bawah seperti live chart tick berjalan
       const rect = canvas.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
+      if (!rect.width || !rect.height || pts.length < 2) return;
       const dpr = window.devicePixelRatio || 1;
       canvas.width = Math.round(rect.width * dpr);
       canvas.height = Math.round(rect.height * dpr);
@@ -562,29 +633,25 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, rect.width, rect.height);
 
-      let pts = [];
-      if (typeof seriesRows === 'function') {
-        const rows = seriesRows(sym, '5m');
-        if (rows && rows.length > 5) pts = rows.slice(-45).map(r => r.c);
-      }
-      if (pts.length < 2) return;
-
       const min = Math.min(...pts);
       const max = Math.max(...pts);
-      const span = max - min || 1;
+      const span = max - min || (displayPx ? displayPx * 0.0005 : 1);
       const w = rect.width;
       const h = rect.height;
-      const padY = 4;
+      const padY = 5;
 
       const lineColor = isNeg ? '#f87171' : '#38bdf8';
       const grad = ctx.createLinearGradient(0, 0, 0, h);
-      grad.addColorStop(0, isNeg ? 'rgba(248, 113, 113, 0.28)' : 'rgba(56, 189, 248, 0.28)');
+      grad.addColorStop(0, isNeg ? 'rgba(248, 113, 113, 0.30)' : 'rgba(56, 189, 248, 0.30)');
       grad.addColorStop(1, 'rgba(5, 7, 10, 0.0)');
+
+      const xAt = i => (i / (pts.length - 1)) * (w - 8) + 2;
+      const yAt = v => padY + (1 - (v - min) / span) * (h - padY * 2);
 
       ctx.beginPath();
       pts.forEach((v, i) => {
-        const x = (i / (pts.length - 1)) * w;
-        const y = padY + (1 - (v - min) / span) * (h - padY * 2);
+        const x = xAt(i);
+        const y = yAt(v);
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       });
@@ -592,10 +659,18 @@
       ctx.lineWidth = 1.8;
       ctx.stroke();
 
-      ctx.lineTo(w, h);
-      ctx.lineTo(0, h);
+      ctx.lineTo(xAt(pts.length - 1), h);
+      ctx.lineTo(xAt(0), h);
       ctx.closePath();
       ctx.fillStyle = grad;
+      ctx.fill();
+
+      // Titik live di ujung kanan grafik
+      const lastX = xAt(pts.length - 1);
+      const lastY = yAt(pts[pts.length - 1]);
+      ctx.beginPath();
+      ctx.arc(lastX, lastY, 3, 0, Math.PI * 2);
+      ctx.fillStyle = isNeg ? '#f87171' : '#38bdf8';
       ctx.fill();
     });
   }
@@ -731,7 +806,8 @@
     setInterval(() => {
       updateCountdownsAndRecap();
       updateHomeSparklines();
-    }, 1000);
+      hookLiveTickUpdates();
+    }, 500);
   }
 
   if (document.readyState === 'loading') {
