@@ -1,11 +1,11 @@
-// api/candles.js — v11 (FXOpen TickTrader, bid)
+// api/candles.js — v12 (FXOpen TickTrader, bid) + mode 'live' (harga live). Satu file = satu fungsi (batas Hobby 12).
 // Kontrak sama dengan v10: POST {email,value,symbol,interval,limit} -> {ok,candles:[{t,o,h,l,c}],source,stale}
 // - Sumber: FXOpen REST /quotehistory/{symbol}/{tf}/bars/bid (native M1..D1, tanpa agregasi).
 // - Cache memori + KV (bersama antar instance). TTL per timeframe.
 // - 429/401/5xx/timeout -> sajikan candle terakhir yang valid (stale:true).
 // Env: FXOPEN_WEB_API_ID, FXOPEN_WEB_API_KEY, FXOPEN_WEB_API_SECRET, KV_REST_API_URL, KV_REST_API_TOKEN (opsional)
 import { checkAccess } from '../lib/access.js';
-import { getBidCandles, SYMBOL_MAP as FX_SYMBOL, TF_MAP } from '../lib/fxopen.js';
+import { getBidCandles, getBidSnapshot, SYMBOL_MAP as FX_SYMBOL, TF_MAP } from '../lib/fxopen.js';
 
 export const config = { maxDuration: 60 };
 
@@ -79,6 +79,42 @@ const ACCESS_MSG = {
   trialLimit: { status: 403, msg: 'Batas trial habis.' },
 };
 
+// ---- mode 'live': snapshot bid untuk banyak simbol, cache 1 detik (dibagi ke semua browser)
+const LIVE_TTL_MS = 1000;
+const LIVE_SYMS = ['XAUUSD', 'BTCUSD'];
+const LIVE_ALIAS = { XAUUSD: 'XAUUSD', GOLD: 'XAUUSD', BTCUSD: 'BTCUSD', BTCUSDT: 'BTCUSD', BTC: 'BTCUSD' };
+let liveSnap = { exp: 0, rows: [], at: 0 };
+let liveInflight = null;
+
+async function liveFresh() {
+  if (Date.now() < liveSnap.exp) return liveSnap;
+  if (!liveInflight) {
+    liveInflight = getBidSnapshot(LIVE_SYMS)
+      .then(rows => { if (rows.length) liveSnap = { exp: Date.now() + LIVE_TTL_MS, rows, at: Date.now() }; return liveSnap; })
+      .finally(() => { liveInflight = null; });
+  }
+  return liveInflight;
+}
+
+function liveQuotes(rows, keys) {
+  return rows.filter(r => keys.has(r.symbol)).map(r => ({ symbol: r.symbol, bid: r.bid, ask: r.ask, price: r.bid, t: r.t }));
+}
+
+async function handleLive(body, res) {
+  const want = Array.isArray(body.symbols) && body.symbols.length ? body.symbols : LIVE_SYMS;
+  const keys = new Set(want.map(s => LIVE_ALIAS[String(s).toUpperCase().replace(/[^A-Z0-9]/g, '')]).filter(Boolean));
+  try {
+    const s = await liveFresh();
+    return res.status(200).json({ ok: true, quotes: liveQuotes(s.rows, keys), at: s.at, stale: Date.now() - s.at > 5000 });
+  } catch (err) {
+    const rate = /HTTP 429/.test(String(err.message || ''));
+    if (liveSnap.rows.length) {
+      return res.status(200).json({ ok: true, stale: true, retryInSec: rate ? 5 : 2, quotes: liveQuotes(liveSnap.rows, keys), at: liveSnap.at });
+    }
+    return res.status(rate ? 429 : 503).json({ error: rate ? 'Batas request FXOpen tercapai' : 'Upstream FXOpen tidak tersedia' });
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -91,6 +127,8 @@ export default async function handler(req, res) {
     const m = ACCESS_MSG[access.key] || { status: 403, msg: 'Akses ditolak.' };
     return res.status(m.status).json({ error: m.msg });
   }
+
+  if (body.mode === 'live') return handleLive(body, res);
 
   const { symbol, interval, limit } = body;
   if (!symbol || !interval) return res.status(400).json({ error: 'Symbol & interval required' });
