@@ -52,3 +52,29 @@
   window.addEventListener('load', () => setTimeout(start, 800));
   setTimeout(start, 1500);
 })();
+
+// ---- Label sumber di chart: ganti teks XBTFX dengan FXOpen (srcLabel/srcOf di index adalah const, tidak bisa ditimpa)
+(function () {
+  const rep = s => s.replace(/server XBTFX/g, 'server FXOpen').replace(/lokal \(XBTFX WS\)/g, 'lokal (FXOpen)').replace(/XBTFX/g, 'FXOpen');
+  try {
+    const proto = CanvasRenderingContext2D.prototype;
+    const origFill = proto.fillText;
+    proto.fillText = function (t) {
+      const a = Array.prototype.slice.call(arguments);
+      if (typeof t === 'string' && t.indexOf('XBTFX') >= 0) a[0] = rep(t);
+      return origFill.apply(this, a);
+    };
+  } catch (e) {}
+  function fixDom(root) {
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let n;
+    while ((n = w.nextNode())) {
+      if (n.nodeValue && n.nodeValue.indexOf('XBTFX') >= 0) n.nodeValue = rep(n.nodeValue);
+    }
+  }
+  window.addEventListener('load', () => {
+    fixDom(document.body);
+    new MutationObserver(() => fixDom(document.body))
+      .observe(document.body, { childList: true, subtree: true, characterData: true });
+  });
+})();
