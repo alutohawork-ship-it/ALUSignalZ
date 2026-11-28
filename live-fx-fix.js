@@ -20,7 +20,7 @@
     try {
       const email = (typeof K !== 'undefined' && localStorage.getItem(K.email)) || '';
       if (!email) { badge('LOGIN DULU', 'gray'); return schedule(); }
-      const r = await post('/api/live', { value: email, email: email, symbols: ['XAUUSD', 'BTCUSD'] });
+      const r = await post('/api/candles', { value: email, email: email, mode: 'live', symbols: ['XAUUSD', 'BTCUSD'] });
       if (r && r.ok && r.data && Array.isArray(r.data.quotes)) {
         for (const q of r.data.quotes) {
           if (!(q.bid > 0)) continue;
