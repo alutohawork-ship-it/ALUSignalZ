@@ -1,6 +1,6 @@
-// api/stream-token.js — token XBTFX untuk klien yang aksesnya valid.
-// Sekarang langsung cek ke lib/access.js (tidak lagi memanggil /api/login).
-// Env: XBTFX_TOKEN, DATABASE_URL, ADMIN_CODE (opsional)
+// api/stream-token.js — v2 (FXOpen). Stream XBTFX sudah dinonaktifkan; harga live lewat POST /api/candles { mode:'live' }.
+// Endpoint ini dipertahankan sebagai shim: cek akses saja, TIDAK mengirim token apa pun.
+// Env: DATABASE_URL, ADMIN_CODE (opsional). XBTFX_TOKEN tidak lagi diperlukan.
 import { checkAccess } from '../lib/access.js';
 
 export default async function handler(req, res) {
@@ -15,15 +15,11 @@ export default async function handler(req, res) {
   if (!isAdmin) {
     const access = await checkAccess(value.toLowerCase(), false);
     if (!access.ok) {
-      // gangguan database dibalas 503, bukan 401 (agar tidak dianggap sesi invalid)
       if (access.key === 'kvError') return res.status(503).json({ msg: 'Layanan akses sedang gangguan, coba lagi sebentar.' });
       return res.status(401).json({ msg: 'Sesi tidak valid, silakan login ulang.' });
     }
   }
 
-  const token = process.env.XBTFX_TOKEN;
-  if (!token) return res.status(500).json({ msg: 'XBTFX_TOKEN belum diisi di Vercel.' });
-
   res.setHeader('Cache-Control', 'no-store');
-  return res.status(200).json({ token });
+  return res.status(200).json({ ok: true, mode: 'fxopen-poll', live: '/api/candles', note: 'Stream XBTFX dinonaktifkan. Gunakan POST /api/candles dengan mode:"live".' });
 }
